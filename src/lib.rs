@@ -4,7 +4,7 @@
 /// including integers, floating-point numbers, complex numbers, arrays, and special VSF-specific types.
 use num_complex::Complex;
 use bitvec;
-enum VsfType {
+pub enum VsfType {
     // Unsigned Integer Types
     u0(bool), // Boolean, stored 8 bit aligned, recomend filling all 8 bits
     u3(u8),   // Unsigned 8-bit integer, 2^n notation (2^3=8 bits)
@@ -12,6 +12,7 @@ enum VsfType {
     u5(u32),  // Unsigned 32-bit integer, 2^n notation (2^5=32 bits)
     u6(u64),  // Unsigned 64-bit integer, 2^n notation (2^6=64 bits)
     u7(u128), // Unsigned 128-bit integer, 2^n notation (2^7=128 bits)
+    u(usize), // Unsigned integer of automatic size
 
     // Signed Integer Types
     s3(u8),   // Signed 8-bit integer
@@ -19,6 +20,7 @@ enum VsfType {
     s5(u32),  // Signed 32-bit integer
     s6(u64),  // Signed 64-bit integer
     s7(u128), // Signed 128-bit integer
+    s(usize), // Signed integer of automatic size
 
     // IEEE 754 Floating-point Types
     f5(f32), // 32-bit floating point, 2^n notation, n is always bit count
@@ -54,8 +56,8 @@ enum VsfType {
 
     // VSF-specific Types
     d(String), // Data type
-    l(String), // Label
-    s(usize),  // Size in bits
+    x(String), // Label
+    l(usize),  // Length in bits
     o(usize),  // Offset in bits
     z(usize),  // Version
     y(usize),  // Backward version
@@ -64,7 +66,7 @@ enum VsfType {
 }
 
 impl VsfType {
-    fn flatten(&self) -> Result<Vec<u8>, String> {
+   pub fn flatten(&self) -> Result<Vec<u8>, String> {
         match self {
             // Unsigned Integer Types
             VsfType::u0(value)=>Ok(vec![b'u', b'0', if *value {255} else {0}]),
@@ -346,12 +348,12 @@ impl VsfType {
                 }
                 Ok(flat)
             }
-            VsfType::t(value) | VsfType::l(value) | VsfType::d(value) => {
+            VsfType::t(value) | VsfType::d(value) | VsfType::x(value) => {
                 let mut flat = Vec::new();
                 let type_identifier = match self {
                     VsfType::t(_) => b't', // Unicode text
-                    VsfType::l(_) => b'l', // Label
-                    VsfType::d(_) => b'd', // Data type
+                    VsfType::d(_) => b'd', // Label
+                    VsfType::x(_) => b'x', // Data type
                     _ => return Err(String::from("Unsupported text type for flattening")),
                 };
                 flat.push(type_identifier);
@@ -367,7 +369,7 @@ impl VsfType {
 }
 
 /// Encodes the length of a vector into a VSF-style byte vector. Automatically sizes usize, other datatypes are maintained in bit sizes.
-trait EncodeLength {
+pub trait EncodeLength {
     fn encode_length(&self, inclusive: bool) -> Vec<u8>;
 }
 impl EncodeLength for u8 {
@@ -514,7 +516,7 @@ impl EncodeLength for usize {
 /// Represents spectral image data where pixel values range from black (0) to white (1),
 /// with allowance for values beyond this range to accommodate noise and other factors.
 /// The '5' in `VsfSpectralImage5` signifies the use of 32-bit floating-point numbers for storage (2^5 = 32 bits).
-struct VsfSpectralImage5 {
+pub struct VsfSpectralImage5 {
     // Width of the image in pixels.
     width: usize,
 
@@ -553,48 +555,4 @@ struct VsfSpectralImage5 {
 
     // Indicates if the image data is in row scan order (true, English reading order) or column scan order (false).
     row_scan: bool,
-}
-
-fn build_test_image() {
-    //Example VSF header and parent label set. Note to maintain bit alignment, all values are required to be at intervals of and padded to 8 bits for version 1.
-    let mut vsf_header_a: Vec<u8> = "RÅ{<l".as_bytes().to_vec(); // RÅ is the file ID or magic number, 'l' marks the length of the header and magic only.  This entire bitstring must be present in a valid VSF as the length of the header must come first after the magic number.
-    let mut vsf_header_b: Vec<u8> = "z3".as_bytes().to_vec(); // VSF version marker, 2^n notation (2^3=8 bits)
-    vsf_header_b.push(1); // VSF version number
-    vsf_header_b.append(&mut "y3".as_bytes().to_vec()); // VSF backward version marker, 2^n notation
-    vsf_header_b.push(1); // VSF backward version number
-    let type_text = VsfType::d("Image".to_owned()); // File type
-    vsf_header_b.append(&mut type_text.flatten().unwrap()); // Converts the type to a VSF style byte vector and appends it to the header
-    vsf_header_b.append(&mut "c3".as_bytes().to_vec()); // Label count marker, 2^n notation
-    vsf_header_b.push(3); // Label count
-    vsf_header_b.append(&mut "s5".as_bytes().to_vec()); // File size marker, 2^n notation
-    vsf_header_b.extend_from_slice(&(123456 as u32).to_be_bytes()); // File size in bits
-    vsf_header_b.push(b'>'); // End of header
-    let header_length = vsf_header_a.len() + vsf_header_b.len();
-    vsf_header_a.extend_from_slice(&header_length.encode_length(false)); // Encode the length of the header and magic number
-    vsf_header_a.append(&mut vsf_header_b);
-    // RÅ{<l3\0FV0\01v0\01t3\05Imagec0\03s5\12\34\56\78>[(t0#13#RGB thumbnailo1#5474#l1#65536#)(tN0#13#RAW CFA frameo1#72360#l1#65536#)(tN0#8#Metadatao1#123456#l1##)]}
-
-    // RÅ is the file ID or magic number
-    // l# Length of parent label set including brackets {...}
-    // z# VSF version
-    // y# VSF backward version
-    // t# File type
-    // c# Label count
-    // s# File size
-
-    // VSF header and parent label set explanation:
-    // RÅ{<file header/parent label set stats>[(Child label set name, pointer and size one)(Child label set name, pointer and size two)(Child label set name, pointer and size three)]}
-
-    // Child label set:
-    // {<child label set stats>[(Child label 1)(child label 2)]}
-
-    // The parent labels organize and point to multiple child label sets, each containing
-    // related information and pointers to specific data. The parent label set also
-    // includes details about each child set, such as its size, location in the file, and
-    // purpose. This parent-child structure allows readers to access only the data they
-    // need, rather than reading the entire file. For example, if you only want to display
-    // a small thumbnail icon, you can read just a small portion of the file.
-    // Magic must be first and parent label set must immediately follow. Child label
-    // sets can be placed after any data so that changes to the labels can generally be
-    // made without re-writing the entire file.
 }

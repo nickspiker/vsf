@@ -7,4 +7,5 @@ edition = "2021"
 
 [dependencies]
 bitvec = "1.0.1"
+colored = "2.1.0"
 num-complex = "0.4.5"
