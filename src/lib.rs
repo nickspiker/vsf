@@ -6,6 +6,7 @@ pub mod vsf {
     use num_complex::Complex;
 
     #[derive(Debug)]
+    #[allow(non_camel_case_types)]
     pub enum VsfType {
         // Unsigned Integer Types
         u(usize), // Unsigned integer, size is determined by the value
@@ -1028,7 +1029,7 @@ pub mod vsf {
                 }
             }
             b'x' => {
-                let mut length = decode_usize(data, pointer)?;
+                let length = decode_usize(data, pointer)?;
                 let value = String::from_utf8(data[*pointer..*pointer + length].to_vec()).map_err(
                     |_| {
                         std::io::Error::new(
