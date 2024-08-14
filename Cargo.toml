@@ -2,8 +2,13 @@
 name = "vsf"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = ["Nick Spiker <nick@verichrome.cc>"]
+description = "Versatile Storage Format"
+license = "MIT"
+repository = "https://github.com/nickspiker/vsf"
+keywords = ["binary", "serialization", "storage", "data-format"]
+categories = ["encoding", "data-structures"]
 
 [dependencies]
+bitvec = "1.0.1"
 num-complex = "0.4.5"
