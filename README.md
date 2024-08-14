@@ -1,16 +1,16 @@
 # VSF (Versatile Storage Format)
 
-VSF is an open-standard for data storage and representation. Designed for efficiency, security, and adaptability, VSF aims to provide a complete and unified solution for storing and managing any type of data, from simple values to complex structures like images or 3D objects.
+VSF is an open-standard for data storage and representation. Designed for efficiency, security, and adaptability, VSF tries to provide a complete and unified solution for storing and managing any type of data, from simple values to complex structures like images or 3D objects.
 
 ## Key Features
 
 - Optimized for efficiency and compact size
-- Built-in security and integrity measures
+- Built-in security and validity
 - Transparent data exchange
 - Unified metadata framework
 - Spectral accuracy in colour and data representation
 - Proof of authenticity and chain of trust
-- Future-proof design for technological advances
+- Future-proof-ish? design for technological advances
 
 ## Supported Data Types
 
@@ -18,7 +18,7 @@ VSF supports a wide range of basic constructor data types, including unsigned an
 
 ## Usage
 
-Here's a simple example of creating a minimal VSF structure:
+Here's an example of creating a boilerplate VSF structure:
 
 ```rust
 use vsf::{VsfType, parse, EncodeNumber};
@@ -102,17 +102,17 @@ fn create_minimal_vsf() -> Result<Vec<u8>, std::io::Error> {
 
 ## Future Capabilities
 
-We're actively developing VSF to handle more complex data structures. In future releases, you'll be able to:
+We're actively developing VSF to handle more complex data structures! In future releases, you'll be able to:
 
-- Save and load images with all necessary metadata
-- Handle advanced data types and structures
-- Implement more sophisticated constructors and destructors
+- Save and load images with all the spectral goodness
+- Handle delicious data types and structures
+- Implement more better constructors and destructors
 
 Stay tuned for updates!
 
 ## License
 
-VSF is released under a custom open-source license. You're free to use, modify, and distribute VSF for any purpose, including commercial use. However, selling VSF itself or directly derived formats is not permitted. For full terms, see the LICENSE file in the repository.
+VSF is released under a custom open-source license. You're free to use, modify, and distribute VSF for ANY purpose, including commercial use. However, selling VSF itself or directly derived formats is not permitted. For full terms, see the LICENSE file in the repository.
 
 ## Contributing
 
