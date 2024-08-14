@@ -1,11 +1,76 @@
+/// VSF (Versatile Storage Format) Module
+///
+/// This module provides types and functions for working with the Versatile Storage Format (VSF),
+/// a flexible binary format designed for efficient storage and retrieval of various data types.
+/// It is part of the larger TOKEN system (in development).
+///
+/// # Features
+///
+/// - Support for a wide range of data types, including integers, floating-point numbers,
+///   complex numbers, and arrays.
+/// - Compact binary representation with variable-length encoding for efficient storage.
+/// - Extensible format with version tracking for backward compatibility.
+/// - Support for labels, offsets, and other metadata to describe the stored data.
+///
+/// # Main Types
+///
+/// - `VsfType`: An enum representing all supported VSF data types.
+/// - `EncodeNumber`: A trait for encoding numbers into the VSF format.
+///
+/// # Key Functions
+///
+/// - `parse`: Parses VSF-encoded data into Rust types.
+/// - `flatten`: Converts Rust types into VSF-encoded data.
+///
+/// # Usage
+///
+/// Typical usage involves building a vector of VSF types and then flattening them:
+///
+/// 1. Create a vector to hold VSF data.
+/// 2. Push `VsfType` instances onto this vector to represent your data.
+/// 3. Use the `flatten` method on each `VsfType` to convert it into VSF-encoded byte vectors.
+/// 4. Combine these byte vectors to create the final VSF structure.
+///
+/// # Example
+///
+/// ```
+/// use vsf::{VsfType, parse, EncodeNumber};
+///
+/// fn main() -> () {
+///     let mut vsf_vector = Vec::new();
+///     
+///     // Add VSF header
+///     vsf_vector.push(b"R\xC3\x85<".to_vec());
+///     
+///     // Add version information
+///     vsf_vector.push(VsfType::z(1).flatten().unwrap());
+///     vsf_vector.push(VsfType::y(1).flatten().unwrap());
+///     
+///     // Add data type and other metadata
+///     vsf_vector.push(b"(".to_vec());
+///     vsf_vector.push(VsfType::d("example data".to_owned()).flatten().unwrap());
+///     vsf_vector.push(VsfType::o(128).flatten().unwrap());
+///     vsf_vector.push(VsfType::b(64).flatten().unwrap());
+///     vsf_vector.push(VsfType::c(1).flatten().unwrap());
+///     vsf_vector.push(b")>".to_vec());
+///     
+///     // Add actual data
+///     vsf_vector.push(VsfType::u5(42).flatten().unwrap());
+///     
+///     // Combine all parts into a single VSF byte vector
+///     let vsf_data: Vec<u8> = vsf_vector.into_iter().flatten().collect();
+/// }
+/// ```
+///
+/// # Note
+///
+/// This module is part of the TOKEN system, which is currently a work in progress.
+/// The API and usage patterns may evolve as the system develops.
 pub mod vsf {
-    /// A library for working with the Versatile Storage Format (VSF).
-    ///
-    /// Provides a Rust-ey set of types for representing various data formats,
-    /// including integers, floating-point numbers, complex numbers, arrays, and special VSF-specific types.
     use num_complex::Complex;
 
     #[derive(Debug)]
+    #[allow(non_camel_case_types)]
     pub enum VsfType {
         // Unsigned Integer Types
         u(usize), // Unsigned integer, size is determined by the value
@@ -24,8 +89,8 @@ pub mod vsf {
         s7(i128), // Signed 128-bit integer
 
         // IEEE 754 Floating-point Types
-        e5(f32), // 32-bit floating point, 2^n notation, n is always bit count
-        e6(f64), // 64-bit floating point
+        f5(f32), // 32-bit floating point, 2^n notation, n is always bit count
+        f6(f64), // 64-bit floating point
 
         // Unsigned Integer Arrays
         au3(Vec<u8>),   // Array of Unsigned 8-bit integer
@@ -57,10 +122,11 @@ pub mod vsf {
         x(String),      // Unicode text
 
         // VSF-specific Types
-        f(String),  // File type
+        d(String),  // Data type
         l(String),  // Label
         o(usize),   // Offset in bits
         b(usize),   // Length in bits
+        c(usize),   // Label count
         z(usize),   // Version
         y(usize),   // Backward version
         m(usize),   // Marker definition
@@ -75,6 +141,15 @@ pub mod vsf {
         pub fn flatten(&self) -> Result<Vec<u8>, std::io::Error> {
             match self {
                 // Unsigned Integer Types
+                VsfType::u0(value) => {
+                    let mut flat = vec![b'u'];
+                    if *value {
+                        flat.push(255);
+                    } else {
+                        flat.push(0);
+                    }
+                    Ok(flat)
+                }
                 VsfType::u(value) => {
                     let mut flat = vec![b'u'];
                     flat.extend_from_slice(&value.encode_number(false));
@@ -137,11 +212,11 @@ pub mod vsf {
                 }
 
                 // Floating-point Types
-                VsfType::e5(value) => {
+                VsfType::f5(value) => {
                     let bytes = value.to_be_bytes();
                     Ok(vec![b'f', b'5', bytes[0], bytes[1], bytes[2], bytes[3]])
                 }
-                VsfType::e6(value) => {
+                VsfType::f6(value) => {
                     let bytes = value.to_be_bytes();
                     Ok(vec![
                         b'f', b'6', bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5],
@@ -316,6 +391,8 @@ pub mod vsf {
                     flat.extend_from_slice(&bytes);
                     Ok(flat)
                 }
+
+                // Complex Number Vectors
                 VsfType::ai6(values) => {
                     let mut flat = Vec::new();
                     flat.push(b'a');
@@ -344,6 +421,17 @@ pub mod vsf {
                     }
                     Ok(flat)
                 }
+
+                // Unicode text
+                VsfType::x(value) => {
+                    let mut flat = Vec::new();
+                    flat.push(b'x');
+                    flat.extend_from_slice(&value.len().encode_number(false));
+                    flat.extend_from_slice(value.as_bytes());
+                    Ok(flat)
+                }
+
+                // Signature
                 VsfType::g(value) => {
                     let mut flat = Vec::new();
                     flat.push(b'g');
@@ -382,6 +470,19 @@ pub mod vsf {
                     flat.push(b'l');
                     flat.extend_from_slice(&value.len().encode_number(false));
                     flat.extend_from_slice(value.as_bytes());
+                    Ok(flat)
+                }
+                VsfType::d(value) => {
+                    let mut flat = Vec::new();
+                    flat.push(b'd');
+                    flat.extend_from_slice(&value.len().encode_number(false));
+                    flat.extend_from_slice(value.as_bytes());
+                    Ok(flat)
+                }
+                VsfType::c(value) => {
+                    let mut flat = Vec::new();
+                    flat.push(b'c');
+                    flat.extend_from_slice(&value.encode_number(false));
                     Ok(flat)
                 }
                 _ => Err(std::io::Error::new(
@@ -540,7 +641,7 @@ pub mod vsf {
     pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, std::io::Error> {
         if *pointer >= data.len() {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
+                std::io::ErrorKind::Other,
                 "Pointer out of bounds!",
             ));
         }
@@ -552,6 +653,20 @@ pub mod vsf {
                 let size_byte = data[*pointer];
                 *pointer += 1;
                 match size_byte {
+                    0 => Ok(VsfType::u0(false)),
+                    255 => Ok(VsfType::u0(true)),
+                    b'0' => {
+                        let value = data[*pointer];
+                        *pointer += 1;
+                        match value {
+                            0 => Ok(VsfType::u0(false)),
+                            255 => Ok(VsfType::u0(true)),
+                            _ => Err(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                "Invalid boolean value!",
+                            )),
+                        }
+                    }
                     b'1' => {
                         let value = (data[*pointer] & 0b11000000) >> 6;
                         *pointer += 1;
@@ -620,7 +735,7 @@ pub mod vsf {
                     }
                     _ => {
                         return Err(std::io::Error::new(
-                            std::io::ErrorKind::UnexpectedEof,
+                            std::io::ErrorKind::Other,
                             "Invalid unsigned integer type!",
                         ))
                     }
@@ -698,7 +813,7 @@ pub mod vsf {
                     }
                     _ => {
                         return Err(std::io::Error::new(
-                            std::io::ErrorKind::UnexpectedEof,
+                            std::io::ErrorKind::Other,
                             "Invalid signed integer type!",
                         ))
                     }
@@ -716,7 +831,7 @@ pub mod vsf {
                             data[*pointer + 3],
                         ]));
                         *pointer += 4;
-                        Ok(VsfType::e5(value))
+                        Ok(VsfType::f5(value))
                     }
                     b'6' => {
                         let value = f64::from_bits(u64::from_be_bytes([
@@ -730,11 +845,11 @@ pub mod vsf {
                             data[*pointer + 7],
                         ]));
                         *pointer += 8;
-                        Ok(VsfType::e6(value))
+                        Ok(VsfType::f6(value))
                     }
                     _ => {
                         return Err(std::io::Error::new(
-                            std::io::ErrorKind::UnexpectedEof,
+                            std::io::ErrorKind::Other,
                             "Invalid floating point type",
                         ))
                     }
@@ -827,7 +942,7 @@ pub mod vsf {
                             }
                             _ => {
                                 return Err(std::io::Error::new(
-                                    std::io::ErrorKind::UnexpectedEof,
+                                    std::io::ErrorKind::Other,
                                     "Invalid unsigned integer array type!",
                                 ))
                             }
@@ -915,7 +1030,7 @@ pub mod vsf {
                             }
                             _ => {
                                 return Err(std::io::Error::new(
-                                    std::io::ErrorKind::UnexpectedEof,
+                                    std::io::ErrorKind::Other,
                                     "Invalid signed integer type!",
                                 ))
                             }
@@ -959,7 +1074,7 @@ pub mod vsf {
                             }
                             _ => {
                                 return Err(std::io::Error::new(
-                                    std::io::ErrorKind::UnexpectedEof,
+                                    std::io::ErrorKind::Other,
                                     "Invalid floating point array type!",
                                 ))
                             }
@@ -967,7 +1082,7 @@ pub mod vsf {
                     }
                     _ => {
                         return Err(std::io::Error::new(
-                            std::io::ErrorKind::UnexpectedEof,
+                            std::io::ErrorKind::Other,
                             "Invalid array type",
                         ))
                     }
@@ -1021,14 +1136,14 @@ pub mod vsf {
                     }
                     _ => {
                         return Err(std::io::Error::new(
-                            std::io::ErrorKind::UnexpectedEof,
+                            std::io::ErrorKind::Other,
                             "Invalid complex number type!",
                         ))
                     }
                 }
             }
             b'x' => {
-                let mut length = decode_usize(data, pointer)?;
+                let length = decode_usize(data, pointer)?;
                 let value = String::from_utf8(data[*pointer..*pointer + length].to_vec()).map_err(
                     |_| {
                         std::io::Error::new(
@@ -1069,11 +1184,24 @@ pub mod vsf {
                 let length = decode_usize(data, pointer)?;
                 Ok(VsfType::b(length))
             }
+            b'c' => {
+                let count = decode_usize(data, pointer)?;
+                Ok(VsfType::c(count))
+            }
+            b'd' => {
+                let length = decode_usize(data, pointer)?;
+                let value = String::from_utf8(data[*pointer..*pointer + length].to_vec()).map_err(
+                    |_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid data name!"),
+                )?;
+                *pointer += length;
+                Ok(VsfType::d(value))
+            }
+
             b'g' => {
                 let mut signature_length = decode_usize(data, pointer)?;
                 if signature_length % 8 != 0 {
                     return Err(std::io::Error::new(
-                        std::io::ErrorKind::UnexpectedEof,
+                        std::io::ErrorKind::Other,
                         "Signature length does not land on a byte boundary!",
                     ));
                 }
@@ -1086,7 +1214,7 @@ pub mod vsf {
                 let mut hash_length = decode_usize(data, pointer)?;
                 if hash_length % 8 != 0 {
                     return Err(std::io::Error::new(
-                        std::io::ErrorKind::UnexpectedEof,
+                        std::io::ErrorKind::Other,
                         "Hash length does not land on a byte boundary!",
                     ));
                 }
@@ -1098,8 +1226,8 @@ pub mod vsf {
 
             _ => {
                 return Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "Invalid type identifier",
+                    std::io::ErrorKind::Other,
+                    format!("Invalid type identifier '{}'", type_byte as char),
                 ))
             }
         }
