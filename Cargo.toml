@@ -1,0 +1,16 @@
+[package]
+name = "vsf"
+version = "0.1.2"
+edition = "2021"
+authors = ["Nick Spiker <nick@verichrome.cc>"]
+description = "Versatile Storage Format"
+license-file = "LICENSE"
+repository = "https://github.com/nickspiker/vsf"
+keywords = ["binary", "serialization", "storage", "data-format"]
+categories = ["encoding", "data-structures"]
+
+[dependencies]
+bitvec = "1.0.1"
+chrono = "0.4.38"
+num-complex = "0.4.5"
+spirix = { path = "../spirix" }

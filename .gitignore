@@ -1,0 +1,23 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Frequency analyzer tool (used to build huffman_codes.bin)
+/tools/
+
+# Source frequency data (used to generate huffman_codes.bin)
+/frequencies.bin
+/frequencies_global.bin
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
