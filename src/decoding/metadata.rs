@@ -2,21 +2,34 @@
 
 use super::helpers::{decode_isize, decode_usize};
 use crate::types::{EtType, VsfType, WorldCoord};
+use crate::text_encoding::decode_text;
 use std::io::{Error, ErrorKind};
 
 // ==================== METADATA ====================
 
 pub fn parse_string(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
-    let length = decode_usize(data, pointer)?;
-    if *pointer + length > data.len() {
+    // Read character count
+    let char_count = decode_usize(data, pointer)?;
+
+    // Read byte length of Huffman-encoded data
+    let byte_length = decode_usize(data, pointer)?;
+
+    // Verify we have enough data
+    if *pointer + byte_length > data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
-            "Not enough data for string",
+            "Not enough data for Huffman-encoded string",
         ));
     }
-    let value = String::from_utf8(data[*pointer..*pointer + length].to_vec())
-        .map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid UTF-8 string"))?;
-    *pointer += length;
+
+    // Extract Huffman-encoded bytes
+    let encoded_bytes = &data[*pointer..*pointer + byte_length];
+    *pointer += byte_length;
+
+    // Decode using Huffman decoder
+    let value = decode_text(encoded_bytes, char_count)
+        .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Huffman decode error: {}", e)))?;
+
     Ok(VsfType::x(value))
 }
 

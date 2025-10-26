@@ -1,5 +1,6 @@
 use super::traits::{EncodeNumber, EncodeNumberInclusive};
 use crate::types::{EtType, VsfType};
+use crate::text_encoding::encode_text;
 
 impl VsfType {
     /// Flatten this VsfType into its binary representation
@@ -124,8 +125,20 @@ impl VsfType {
             VsfType::x(value) => {
                 let mut flat = Vec::new();
                 flat.push(b'x');
-                flat.extend_from_slice(&value.len().encode_number());
-                flat.extend_from_slice(value.as_bytes());
+
+                // Huffman-encode the text (no internal header)
+                let encoded_text = encode_text(value);
+
+                // Encode character count (for decode_text)
+                let char_count = value.chars().count();
+                flat.extend_from_slice(&char_count.encode_number());
+
+                // Encode byte length (for stream parsing)
+                flat.extend_from_slice(&encoded_text.len().encode_number());
+
+                // Append Huffman-encoded bytes
+                flat.extend_from_slice(&encoded_text);
+
                 flat
             }
 
@@ -3288,9 +3301,16 @@ mod tests {
     fn test_flatten_string() {
         let result = VsfType::x("hello".to_string()).flatten();
         assert_eq!(result[0], b'x');
-        assert_eq!(result[1], b'3'); // length=5, encoded as u8
-        assert_eq!(result[2], 5);
-        assert_eq!(&result[3..8], b"hello");
+        // New format: x [char_count] [byte_length] [huffman_bytes]
+        assert_eq!(result[1], b'3'); // char_count=5, encoded as u8
+        assert_eq!(result[2], 5);    // 5 characters
+        assert_eq!(result[3], b'3'); // byte_length marker for encoded bytes
+        // result[4] is the byte length value
+        // result[5..] is Huffman-encoded data
+
+        // For short strings, Huffman may not compress (overhead dominates)
+        // Just verify the format is correct
+        assert!(result.len() >= 5); // At minimum: x + char_count_marker + char_count + byte_length_marker + byte_length
     }
 
     #[test]
