@@ -1,0 +1,156 @@
+# VSF Huffman Text Encoding - Change Log
+
+## Commit: b73b5eb (2025-10-26)
+Update VSF documentation and metadata for v0.1.3
+
+### Changes:
+- Updated Cargo.toml version to 0.1.3
+- Refreshed LICENSE copyright year
+- Expanded README with VSF Huffman text encoding details
+- Final VSF x marker format documented
+
+### Impact:
+No functional changes - documentation and metadata updates only.
+
+---
+
+## Commit: e994a8f (2025-10-26)
+Remove redundant byte_length from VSF x marker (save 2 bytes per text)
+
+### Problem:
+VSF structure already handles byte boundaries, encoding byte_length was redundant.
+
+### Changes:
+- flatten: Removed encoded_text.len().encode_number() call
+- parse: Read to end of data blob instead of reading byte_length
+
+### VSF x marker format (final):
+```
+x [char_count] [huffman_bytes]
+```
+
+### Overhead reduction:
+- Before: 5 bytes (x + char_count + byte_length)  
+- After: 3 bytes (x + char_count only)
+- Savings: 2 bytes per text (40% overhead reduction)
+
+### Test results:
+- "hello": 9→7 bytes (22% smaller)
+- "The quick brown fox...": 36→34 bytes  
+- "مرحبا بالعالم": 18→16 bytes
+
+---
+
+## Commit: ce8ae62 (2025-10-26)
+Integrate Huffman encoding into VSF x marker with proper length prefixes
+
+### VSF x marker format:
+```
+x [char_count] [byte_length] [huffman_bytes]
+```
+
+### Changes:
+- flatten: Encodes character count + byte length + Huffman bytes
+- parse: Reads both counts, then decodes Huffman data
+- No arbitrary u32 limits (uses encode_number() for variable-size encoding)
+
+### Compression results:
+- Short strings (5 chars): Expand due to overhead (9 bytes vs 5 UTF-8)
+- Medium ASCII (43 chars): 16% compression (36 bytes vs 43 UTF-8)
+- Arabic text: 28% compression (18 bytes vs 25 UTF-8)
+- CJK/emoji: Slight expansion (UTF-8 is already efficient)
+
+### Round-trip verified for:
+- ASCII, Latin extended, CJK, Arabic, Emoji
+
+---
+
+## Commit: 59b189d (2025-10-26)
+Remove internal header from Huffman encoding for VSF integration
+
+### Breaking changes:
+- encode_text() now returns ONLY Huffman bitstream (no 4-byte header)
+- decode_text() now requires character count parameter
+- Saves 4 bytes per encoded text
+
+### API changes:
+- encode_text(text: &str) -> Vec<u8>
+- decode_text(bytes: &[u8], char_count: usize) -> Result<String, &'static str>
+
+### Performance:
+- Encoding: 75 MB/s (unchanged)
+- Decoding: 134 MB/s (fixed O(n²) bug)
+- Compression: 36.41% (unchanged)
+
+---
+
+## Commit: 701c669 (2025-10-26)
+Add two-tier decode cache for 550× speedup (0.23 → 126 MB/s)
+
+### Performance improvements:
+- Tier 1: ASCII cache (256 entries, 8-bit lookup)
+- Tier 2: Prefix cache (4096 entries, 12-bit lookup)
+- Tier 3: Tree walk fallback (rare codes >12 bits)
+
+### Results on 119KB English text:
+- Encoding: 83 MB/s (unchanged)
+- Decoding: 0.23 MB/s → 126 MB/s (550× faster!)
+- Compression: 36.41% (unchanged)
+
+### Cache hit rates:
+- ASCII cache: ~99.4%
+- Prefix cache: ~0.5%
+- Tree walk: <0.1%
+
+### Memory overhead:
+- ASCII cache: 512 bytes
+- Prefix cache: 20 KB
+- Total: ~20.5 KB
+
+---
+
+## Commit: 38ee7b4 (2025-10-26)
+Add ASCII fast path optimization to text encoding
+
+### Performance improvements:
+- ASCII characters (0-127) now use direct array lookup (128-entry LUT)
+- ~3-5× faster encoding for ASCII-heavy text
+- Falls back to HashMap for full Unicode coverage
+- Memory cost: 1KB
+
+### Test results:
+- 59 ASCII chars verified via fast path
+- Mixed text: 28 ASCII (fast) + 14 Unicode (HashMap)
+
+---
+
+## Commit: 3669c0d (2025-10-26)
+Initial commit: VSF library with global Unicode Huffman text encoding
+
+### Core features:
+- 1.1M Unicode codepoints with multilingual frequency data
+- Pure Huffman encoding (no escape sequences)
+- 36.41% compression on English text
+- Performance: 83 MB/s encode, 0.23 MB/s decode (before optimization)
+
+### Frequency table:
+- Top 20 languages by digital presence
+- Published frequency data from research
+- Fill remaining Unicode low-to-high
+
+### Binary artifacts:
+- frequencies.bin: 8.5 MB (1.1M entries)
+- huffman_codes.bin: 8.5 MB (precomputed codes)
+
+---
+
+## Summary Statistics
+
+**Total commits:** 6
+**Files changed:** 29 files, 20,265+ insertions
+**Performance:** 0.23 MB/s → 126 MB/s decode (550× improvement)
+**Compression:** 36.41% on typical English text
+**Overhead:** 3 bytes for strings ≤255 chars (was 9 bytes initially)
+**Memory:** 8.5 MB Huffman table + 20KB decode cache
+
+**All 60 unit tests passing ✓**

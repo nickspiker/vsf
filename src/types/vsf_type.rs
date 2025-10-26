@@ -95,6 +95,7 @@ use super::world_coord::WorldCoord;
 /// - `h`: Hash
 /// - `g`: Signature
 /// - `w`: World coordinate (Dymaxion icosahedral)
+#[derive(Debug, Clone)]
 #[allow(non_camel_case_types)]
 pub enum VsfType {
     // ==================== UNSIGNED INTEGERS ====================

@@ -151,6 +151,13 @@
 //! - **Lumis**: Manual RAW camera app (stores in VSF)
 //! - **Ferros**: Kill-switch ready mobile OS (uses VSF for config)
 
+// VSF format version constants
+/// Current VSF format version
+pub const VSF_VERSION: usize = 2;
+
+/// Backward compatibility version (oldest version this implementation can read)
+pub const VSF_BACKWARD_COMPAT: usize = 2;
+
 // Core type system
 pub mod types;
 
@@ -166,6 +173,12 @@ pub mod builders;
 // Huffman text encoding for `x` marker
 pub mod text_encoding;
 
+// VSF file format with headers and labels
+pub mod file_format;
+
+// VSF file builder
+pub mod vsf_builder;
+
 // Re-export main types
 pub use types::{
     datetime_to_eagle_time, EagleTime, EtType, LayoutOrder, StridedTensor, Tensor, VsfType,
@@ -178,9 +191,12 @@ pub use encoding::{EncodeNumber, EncodeNumberInclusive};
 // Re-export decoding function
 pub use decoding::parse;
 
+// Re-export file format and builder
+pub use file_format::{LabelDefinition, VsfHeader, VsfSection};
+pub use vsf_builder::VsfBuilder;
+
 // Coming soon
 // pub mod registry;  // Metadata key registry
-// pub mod utils;     // VsfBuilder, helpers
 
 #[cfg(test)]
 mod tests {
