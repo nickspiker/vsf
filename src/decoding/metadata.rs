@@ -11,24 +11,23 @@ pub fn parse_string(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
     // Read character count
     let char_count = decode_usize(data, pointer)?;
 
-    // Read byte length of Huffman-encoded data
-    let byte_length = decode_usize(data, pointer)?;
+    // Rest of data is Huffman-encoded bytes
+    // (VSF structure already knows byte boundaries)
+    let huffman_bytes = &data[*pointer..];
 
-    // Verify we have enough data
-    if *pointer + byte_length > data.len() {
+    if huffman_bytes.is_empty() && char_count > 0 {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
-            "Not enough data for Huffman-encoded string",
+            "No Huffman data for non-zero char count",
         ));
     }
 
-    // Extract Huffman-encoded bytes
-    let encoded_bytes = &data[*pointer..*pointer + byte_length];
-    *pointer += byte_length;
-
     // Decode using Huffman decoder
-    let value = decode_text(encoded_bytes, char_count)
-        .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Huffman decode error: {}", e)))?;
+    let value = decode_text(huffman_bytes, char_count)
+        .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Huffman decode: {}", e)))?;
+
+    // Consumed entire blob
+    *pointer = data.len();
 
     Ok(VsfType::x(value))
 }

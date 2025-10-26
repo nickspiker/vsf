@@ -129,14 +129,12 @@ impl VsfType {
                 // Huffman-encode the text (no internal header)
                 let encoded_text = encode_text(value);
 
-                // Encode character count (for decode_text)
+                // Encode ONLY character count (for Huffman decoder)
+                // VSF structure handles byte boundaries
                 let char_count = value.chars().count();
                 flat.extend_from_slice(&char_count.encode_number());
 
-                // Encode byte length (for stream parsing)
-                flat.extend_from_slice(&encoded_text.len().encode_number());
-
-                // Append Huffman-encoded bytes
+                // Append Huffman bytes directly
                 flat.extend_from_slice(&encoded_text);
 
                 flat
@@ -3301,16 +3299,14 @@ mod tests {
     fn test_flatten_string() {
         let result = VsfType::x("hello".to_string()).flatten();
         assert_eq!(result[0], b'x');
-        // New format: x [char_count] [byte_length] [huffman_bytes]
+        // New format: x [char_count] [huffman_bytes]
         assert_eq!(result[1], b'3'); // char_count=5, encoded as u8
         assert_eq!(result[2], 5);    // 5 characters
-        assert_eq!(result[3], b'3'); // byte_length marker for encoded bytes
-        // result[4] is the byte length value
-        // result[5..] is Huffman-encoded data
+        // result[3..] is Huffman-encoded data
 
-        // For short strings, Huffman may not compress (overhead dominates)
-        // Just verify the format is correct
-        assert!(result.len() >= 5); // At minimum: x + char_count_marker + char_count + byte_length_marker + byte_length
+        // Overhead: 3 bytes (x + marker + count)
+        // For short strings, Huffman may not compress
+        assert!(result.len() >= 3); // At minimum: x + char_count_marker + char_count
     }
 
     #[test]
