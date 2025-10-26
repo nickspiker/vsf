@@ -123,13 +123,8 @@ fn get_ascii_lut() -> &'static [BitPattern; 128] {
 
 /// Encode Unicode text to Huffman-compressed bytes
 ///
-/// # Format
-/// ```
-/// [bit_length: 32 bits][Huffman bit stream]
-/// ```
-///
-/// First 32 bits encode the total bit length (excluding this header).
-/// This allows the decoder to know exactly where to stop.
+/// Returns ONLY the Huffman bitstream padded to byte boundary.
+/// No internal headers - VSF x marker handles character count.
 ///
 /// All characters use variable-length Huffman codes (3-24 bits).
 /// The global frequency table covers all ~1.1 million Unicode codepoints.
@@ -138,10 +133,18 @@ fn get_ascii_lut() -> &'static [BitPattern; 128] {
 /// Uses optimized ASCII fast path (direct array access) for characters 0-127,
 /// falling back to HashMap lookup for full Unicode.
 ///
+/// # VSF Integration
+/// The VSF x marker format is:
+/// ```text
+/// x [char_count] [huffman_bytes]
+/// ```
+/// Character count uses encode_number() (3-6+ bytes depending on size).
+/// No arbitrary limits - supports billions of characters.
+///
 /// # Example
 /// ```ignore
-/// let encoded = encode_text("Hello, world!");
-/// // Compressed to ~50% of UTF-8 size for typical text
+/// let encoded = encode_text("Hello");
+/// // Returns: ~3 bytes of Huffman bits (no internal header)
 /// ```
 pub fn encode_text(text: &str) -> Vec<u8> {
     let codes = get_encode_table();
@@ -159,14 +162,9 @@ pub fn encode_text(text: &str) -> Vec<u8> {
         bits.extend_bits(pattern.bits, pattern.length);
     }
 
-    let bit_length = bits.bit_len() as u32;
-    let data_bytes = bits.to_bytes();
-
-    // Prepend bit length header
-    let mut result = Vec::with_capacity(4 + data_bytes.len());
-    result.extend_from_slice(&bit_length.to_be_bytes());
-    result.extend_from_slice(&data_bytes);
-    result
+    // Return ONLY the bitstream padded to bytes
+    // NO internal length header - VSF x marker handles this
+    bits.to_bytes()
 }
 
 /// Fast two-tier decoder with ASCII + prefix caches
@@ -306,6 +304,12 @@ fn get_fast_decoder() -> &'static FastDecoder {
 
 /// Decode Huffman-compressed bytes back to Unicode text
 ///
+/// # Arguments
+/// * `bytes` - Huffman-encoded bitstream (padded to byte boundary)
+/// * `char_count` - Number of characters to decode (from VSF x marker)
+///
+/// Decodes exactly `char_count` characters, ignoring padding bits.
+///
 /// Uses three-tier fast decoder:
 /// - Tier 1: ASCII cache (8-bit lookup, 99.4% hit rate)
 /// - Tier 2: Prefix cache (12-bit lookup, 0.5% hit rate)
@@ -313,31 +317,39 @@ fn get_fast_decoder() -> &'static FastDecoder {
 ///
 /// # Example
 /// ```ignore
-/// let decoded = decode_text(&encoded_bytes);
-/// assert_eq!(decoded, "Hello, world!");
+/// let decoded = decode_text(&encoded_bytes, 5);  // Decode 5 characters
+/// assert_eq!(decoded, "Hello");
 /// ```
-pub fn decode_text(bytes: &[u8]) -> Result<String, &'static str> {
-    if bytes.len() < 4 {
-        return Err("Too short");
+pub fn decode_text(bytes: &[u8], char_count: usize) -> Result<String, &'static str> {
+    if char_count == 0 {
+        return Ok(String::new());
     }
 
-    // Read bit length header
-    let bit_length = u32::from_be_bytes(bytes[0..4].try_into().unwrap()) as usize;
-    let data_bytes = &bytes[4..];
+    if bytes.is_empty() {
+        return Err("No data");
+    }
 
     // Use fast decoder
     let decoder = get_fast_decoder();
-    let mut result = String::new();
+    let mut result = String::with_capacity(char_count);
     let mut bit_idx = 0;
+    let max_bits = bytes.len() * 8;
 
-    while bit_idx < bit_length {
-        let (ch, consumed) = decoder.decode(data_bytes, bit_idx)?;
+    // Decode exactly char_count characters (count efficiently - O(1) per char)
+    let mut decoded_count = 0;
+    while decoded_count < char_count {
+        if bit_idx >= max_bits {
+            return Err("Unexpected end of data");
+        }
+
+        let (ch, consumed) = decoder.decode(bytes, bit_idx)?;
 
         if consumed == 0 {
-            break;
+            return Err("Invalid Huffman code");
         }
 
         result.push(ch);
+        decoded_count += 1;
         bit_idx += consumed;
     }
 
@@ -433,24 +445,27 @@ mod tests {
     #[test]
     fn test_encode_decode_simple() {
         let text = "Hello";
+        let char_count = text.chars().count();
         let encoded = encode_text(text);
-        let decoded = decode_text(&encoded).unwrap();
+        let decoded = decode_text(&encoded, char_count).unwrap();
         assert_eq!(decoded, text);
     }
 
     #[test]
     fn test_encode_decode_with_space() {
         let text = "Hello world";
+        let char_count = text.chars().count();
         let encoded = encode_text(text);
-        let decoded = decode_text(&encoded).unwrap();
+        let decoded = decode_text(&encoded, char_count).unwrap();
         assert_eq!(decoded, text);
     }
 
     #[test]
     fn test_encode_decode_unicode() {
         let text = "café";
+        let char_count = text.chars().count();
         let encoded = encode_text(text);
-        let decoded = decode_text(&encoded).unwrap();
+        let decoded = decode_text(&encoded, char_count).unwrap();
         assert_eq!(decoded, text);
     }
 
@@ -490,8 +505,9 @@ mod tests {
         ];
 
         for text in texts {
+            let char_count = text.chars().count();
             let encoded = encode_text(text);
-            let decoded = decode_text(&encoded).expect("Decode failed");
+            let decoded = decode_text(&encoded, char_count).expect("Decode failed");
             assert_eq!(decoded, text, "Failed for: {}", text);
 
             let utf8_size = text.as_bytes().len();
@@ -518,8 +534,9 @@ mod tests {
 
         for ch in rare_chars {
             let text: String = ch.to_string();
+            let char_count = text.chars().count();
             let encoded = encode_text(&text);
-            let decoded = decode_text(&encoded).expect("Decode failed");
+            let decoded = decode_text(&encoded, char_count).expect("Decode failed");
             assert_eq!(decoded, text, "Failed for U+{:X}", ch as u32);
         }
     }
@@ -528,9 +545,10 @@ mod tests {
     fn test_ascii_fast_path() {
         // Verify ASCII LUT is populated correctly
         let ascii_text = "The quick brown fox jumps over the lazy dog 0123456789!@#$%";
+        let char_count = ascii_text.chars().count();
 
         let encoded = encode_text(ascii_text);
-        let decoded = decode_text(&encoded).expect("Decode failed");
+        let decoded = decode_text(&encoded, char_count).expect("Decode failed");
 
         assert_eq!(decoded, ascii_text);
 
@@ -546,9 +564,10 @@ mod tests {
     fn test_mixed_ascii_unicode() {
         // Test that fast path and slow path work together
         let mixed = "ASCII text with Unicode: 你好 مرحبا Привет 🌍";
+        let char_count = mixed.chars().count();
 
         let encoded = encode_text(mixed);
-        let decoded = decode_text(&encoded).expect("Decode failed");
+        let decoded = decode_text(&encoded, char_count).expect("Decode failed");
 
         assert_eq!(decoded, mixed);
 
@@ -564,9 +583,10 @@ mod tests {
     fn test_decode_performance_benchmark() {
         // Large corpus performance test
         let corpus = include_str!("../tools/english_test.txt");
+        let char_count = corpus.chars().count();
 
         println!("\n=== Decode Performance Benchmark ===");
-        println!("Corpus: {} bytes, {} chars", corpus.len(), corpus.chars().count());
+        println!("Corpus: {} bytes, {} chars", corpus.len(), char_count);
 
         // Encode once
         let start = std::time::Instant::now();
@@ -582,7 +602,7 @@ mod tests {
         let start = std::time::Instant::now();
 
         for _ in 0..iterations {
-            let decoded = decode_text(&encoded).unwrap();
+            let decoded = decode_text(&encoded, char_count).unwrap();
             assert_eq!(decoded.len(), corpus.len());
         }
 

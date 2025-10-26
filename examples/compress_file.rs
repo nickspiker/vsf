@@ -12,11 +12,12 @@ fn main() {
     let utf8_size = text.as_bytes().len();
     println!("UTF-8 size: {} bytes ({:.2} KB)", utf8_size, utf8_size as f64 / 1024.0);
 
-    // Count ASCII vs Unicode
+    // Count ASCII vs Unicode and total chars
     let ascii_count = text.chars().filter(|c| c.is_ascii()).count();
     let unicode_count = text.chars().filter(|c| !c.is_ascii()).count();
+    let char_count = text.chars().count();
     println!("Characters: {} total ({} ASCII, {} Unicode)",
-             ascii_count + unicode_count, ascii_count, unicode_count);
+             char_count, ascii_count, unicode_count);
 
     // Encode (with warm-up and multiple runs for accuracy)
     println!("\n=== Encoding Performance ===");
@@ -56,7 +57,7 @@ fn main() {
     println!("\n=== Decoding Performance ===");
 
     // Warm-up
-    let _ = decode_text(&encoded).expect("Decode failed");
+    let _ = decode_text(&encoded, char_count).expect("Decode failed");
 
     // Benchmark with multiple runs
     let mut total_decode_time = std::time::Duration::ZERO;
@@ -64,7 +65,7 @@ fn main() {
 
     for _ in 0..runs {
         let start = Instant::now();
-        decoded = decode_text(&encoded).expect("Decode failed");
+        decoded = decode_text(&encoded, char_count).expect("Decode failed");
         total_decode_time += start.elapsed();
     }
 
