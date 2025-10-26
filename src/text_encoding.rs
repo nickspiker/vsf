@@ -98,9 +98,27 @@ fn load_huffman_codes() -> HashMap<char, BitPattern> {
 // Lazy-load codes at first use
 use std::sync::OnceLock;
 static ENCODE_TABLE: OnceLock<HashMap<char, BitPattern>> = OnceLock::new();
+static ASCII_LUT: OnceLock<[BitPattern; 128]> = OnceLock::new();
 
 fn get_encode_table() -> &'static HashMap<char, BitPattern> {
     ENCODE_TABLE.get_or_init(load_huffman_codes)
+}
+
+fn get_ascii_lut() -> &'static [BitPattern; 128] {
+    ASCII_LUT.get_or_init(|| {
+        let codes = get_encode_table();
+        let mut lut = [BitPattern { bits: 0, length: 0 }; 128];
+
+        for i in 0..128 {
+            if let Some(ch) = char::from_u32(i) {
+                if let Some(pattern) = codes.get(&ch) {
+                    lut[i as usize] = *pattern;
+                }
+            }
+        }
+
+        lut
+    })
 }
 
 /// Encode Unicode text to Huffman-compressed bytes
@@ -116,6 +134,10 @@ fn get_encode_table() -> &'static HashMap<char, BitPattern> {
 /// All characters use variable-length Huffman codes (3-24 bits).
 /// The global frequency table covers all ~1.1 million Unicode codepoints.
 ///
+/// # Performance
+/// Uses optimized ASCII fast path (direct array access) for characters 0-127,
+/// falling back to HashMap lookup for full Unicode.
+///
 /// # Example
 /// ```ignore
 /// let encoded = encode_text("Hello, world!");
@@ -123,11 +145,17 @@ fn get_encode_table() -> &'static HashMap<char, BitPattern> {
 /// ```
 pub fn encode_text(text: &str) -> Vec<u8> {
     let codes = get_encode_table();
+    let ascii_lut = get_ascii_lut();
     let mut bits = BitVec::new();
 
     for c in text.chars() {
-        // All Unicode codepoints are in the table
-        let pattern = codes.get(&c).expect("All Unicode covered by frequency table");
+        let pattern = if c.is_ascii() {
+            // Fast path: direct array access (~2-3 CPU cycles)
+            &ascii_lut[c as usize]
+        } else {
+            // Slow path: HashMap lookup for Unicode (~10-20 cycles)
+            codes.get(&c).expect("All Unicode covered by frequency table")
+        };
         bits.extend_bits(pattern.bits, pattern.length);
     }
 
@@ -364,5 +392,41 @@ mod tests {
             let decoded = decode_text(&encoded).expect("Decode failed");
             assert_eq!(decoded, text, "Failed for U+{:X}", ch as u32);
         }
+    }
+
+    #[test]
+    fn test_ascii_fast_path() {
+        // Verify ASCII LUT is populated correctly
+        let ascii_text = "The quick brown fox jumps over the lazy dog 0123456789!@#$%";
+
+        let encoded = encode_text(ascii_text);
+        let decoded = decode_text(&encoded).expect("Decode failed");
+
+        assert_eq!(decoded, ascii_text);
+
+        // All chars should be ASCII and use fast path
+        for c in ascii_text.chars() {
+            assert!(c.is_ascii(), "Test should only contain ASCII");
+        }
+
+        println!("ASCII fast path verified for {} characters", ascii_text.len());
+    }
+
+    #[test]
+    fn test_mixed_ascii_unicode() {
+        // Test that fast path and slow path work together
+        let mixed = "ASCII text with Unicode: 你好 مرحبا Привет 🌍";
+
+        let encoded = encode_text(mixed);
+        let decoded = decode_text(&encoded).expect("Decode failed");
+
+        assert_eq!(decoded, mixed);
+
+        // Count ASCII vs Unicode
+        let ascii_count = mixed.chars().filter(|c| c.is_ascii()).count();
+        let unicode_count = mixed.chars().filter(|c| !c.is_ascii()).count();
+
+        println!("Mixed text: {} ASCII chars (fast path), {} Unicode chars (HashMap)",
+                 ascii_count, unicode_count);
     }
 }
