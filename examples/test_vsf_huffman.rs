@@ -21,13 +21,15 @@ fn main() {
 
         // Flatten to bytes
         let flattened = vsf.flatten();
-        println!("  Flattened: {} bytes (UTF-8 would be {} bytes)",
-                 flattened.len(), text.len());
+        println!(
+            "  Flattened: {} bytes (UTF-8 would be {} bytes)",
+            flattened.len(),
+            text.len()
+        );
 
         // Parse back
         let mut pointer = 0;
-        let decoded = vsf::decoding::parse::parse(&flattened, &mut pointer)
-            .expect("Decode failed");
+        let decoded = vsf::decoding::parse::parse(&flattened, &mut pointer).expect("Decode failed");
 
         // Verify round-trip
         match decoded {

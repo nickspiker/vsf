@@ -39,7 +39,11 @@ pub fn parse_bitpacked_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfTyp
 
     // Calculate expected byte count
     let total_elements: usize = shape.iter().product();
-    let bits_per_sample = if bit_depth == 0 { 256 } else { bit_depth as usize };
+    let bits_per_sample = if bit_depth == 0 {
+        256
+    } else {
+        bit_depth as usize
+    };
     let total_bits = total_elements * bits_per_sample;
     let byte_count = (total_bits + 7) / 8;
 

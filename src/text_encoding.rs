@@ -13,8 +13,8 @@ use std::collections::HashMap;
 /// A Huffman code pattern (bits + length)
 #[derive(Debug, Copy, Clone)]
 pub struct BitPattern {
-    pub bits: u32,   // The Huffman code (right-aligned, max 24 bits)
-    pub length: u8,  // Number of bits (1-24)
+    pub bits: u32,  // The Huffman code (right-aligned, max 24 bits)
+    pub length: u8, // Number of bits (1-24)
 }
 
 /// Bit vector for variable-length encoding
@@ -157,7 +157,9 @@ pub fn encode_text(text: &str) -> Vec<u8> {
             &ascii_lut[c as usize]
         } else {
             // Slow path: HashMap lookup for Unicode (~10-20 cycles)
-            codes.get(&c).expect("All Unicode covered by frequency table")
+            codes
+                .get(&c)
+                .expect("All Unicode covered by frequency table")
         };
         bits.extend_bits(pattern.bits, pattern.length);
     }
@@ -304,25 +306,36 @@ fn get_fast_decoder() -> &'static FastDecoder {
 
 /// Decode Huffman-compressed bytes back to Unicode text
 ///
+/// Convenience wrapper around `decode_text_with_size()` that discards byte count.
+///
 /// # Arguments
 /// * `bytes` - Huffman-encoded bitstream (padded to byte boundary)
 /// * `char_count` - Number of characters to decode (from VSF x marker)
 ///
-/// Decodes exactly `char_count` characters, ignoring padding bits.
-///
-/// Uses three-tier fast decoder:
-/// - Tier 1: ASCII cache (8-bit lookup, 99.4% hit rate)
-/// - Tier 2: Prefix cache (12-bit lookup, 0.5% hit rate)
-/// - Tier 3: Tree walk (rare codes, 0.1% hit rate)
+/// # Returns
+/// Tuple of (decoded_string, bytes_consumed)
 ///
 /// # Example
 /// ```ignore
-/// let decoded = decode_text(&encoded_bytes, 5);  // Decode 5 characters
+/// let (decoded, bytes_used) = decode_text(&encoded_bytes, 5)?;
 /// assert_eq!(decoded, "Hello");
+///
+/// // Or ignore bytes_consumed:
+/// let (decoded, _) = decode_text(&encoded_bytes, 5)?;
 /// ```
-pub fn decode_text(bytes: &[u8], char_count: usize) -> Result<String, &'static str> {
+pub fn decode_text(bytes: &[u8], char_count: usize) -> Result<(String, usize), &'static str> {
+    decode_text_with_size(bytes, char_count)
+}
+
+/// Decode Huffman-encoded text with byte count
+///
+/// Returns (decoded_string, bytes_consumed)
+pub fn decode_text_with_size(
+    bytes: &[u8],
+    char_count: usize,
+) -> Result<(String, usize), &'static str> {
     if char_count == 0 {
-        return Ok(String::new());
+        return Ok((String::new(), 0));
     }
 
     if bytes.is_empty() {
@@ -333,9 +346,9 @@ pub fn decode_text(bytes: &[u8], char_count: usize) -> Result<String, &'static s
     let decoder = get_fast_decoder();
     let mut result = String::with_capacity(char_count);
     let mut bit_idx = 0;
-    let max_bits = bytes.len() * 8;
+    let max_bits = bytes.len() << 3; // Convert bytes to bits
 
-    // Decode exactly char_count characters (count efficiently - O(1) per char)
+    // Decode exactly char_count characters
     let mut decoded_count = 0;
     while decoded_count < char_count {
         if bit_idx >= max_bits {
@@ -353,7 +366,9 @@ pub fn decode_text(bytes: &[u8], char_count: usize) -> Result<String, &'static s
         bit_idx += consumed;
     }
 
-    Ok(result)
+    // Return both the string and bytes consumed
+    let bytes_consumed = (bit_idx + 7) >> 3; // Round up to nearest byte
+    Ok((result, bytes_consumed))
 }
 
 /// Huffman decode tree node
@@ -382,7 +397,9 @@ impl DecodeNode {
             if bit == 0 {
                 node = node.left.get_or_insert_with(|| Box::new(DecodeNode::new()));
             } else {
-                node = node.right.get_or_insert_with(|| Box::new(DecodeNode::new()));
+                node = node
+                    .right
+                    .get_or_insert_with(|| Box::new(DecodeNode::new()));
             }
         }
 
@@ -447,7 +464,7 @@ mod tests {
         let text = "Hello";
         let char_count = text.chars().count();
         let encoded = encode_text(text);
-        let decoded = decode_text(&encoded, char_count).unwrap();
+        let (decoded, _) = decode_text(&encoded, char_count).unwrap();
         assert_eq!(decoded, text);
     }
 
@@ -456,7 +473,7 @@ mod tests {
         let text = "Hello world";
         let char_count = text.chars().count();
         let encoded = encode_text(text);
-        let decoded = decode_text(&encoded, char_count).unwrap();
+        let (decoded, _) = decode_text(&encoded, char_count).unwrap();
         assert_eq!(decoded, text);
     }
 
@@ -465,7 +482,7 @@ mod tests {
         let text = "café";
         let char_count = text.chars().count();
         let encoded = encode_text(text);
-        let decoded = decode_text(&encoded, char_count).unwrap();
+        let (decoded, _) = decode_text(&encoded, char_count).unwrap();
         assert_eq!(decoded, text);
     }
 
@@ -478,7 +495,10 @@ mod tests {
 
         println!("UTF-8: {} bytes", utf8_size);
         println!("Huffman: {} bytes", encoded_size);
-        println!("Compression: {:.1}%", 100.0 * (1.0 - encoded_size as f32 / utf8_size as f32));
+        println!(
+            "Compression: {:.1}%",
+            100.0 * (1.0 - encoded_size as f32 / utf8_size as f32)
+        );
 
         // Should achieve at least 30% compression on English text
         assert!(encoded_size < utf8_size);
@@ -488,35 +508,37 @@ mod tests {
     fn test_global_unicode_multilingual() {
         // Test diverse scripts from different languages
         let texts = vec![
-            "Hello, world!",                    // English
-            "¡Hola, mundo!",                    // Spanish
-            "Привет, мир!",                     // Russian
-            "مرحبا بالعالم",                     // Arabic
-            "你好世界",                           // Chinese
-            "こんにちは世界",                      // Japanese
-            "안녕하세요 세계",                     // Korean
-            "नमस्ते दुनिया",                     // Hindi
-            "🌍🌎🌏 Hello 世界! مرحبا Привет",  // Mixed with emoji
-            "\u{1F600}\u{1F601}\u{1F602}",      // Emoji
-            "Ελληνικά",                         // Greek
-            "עברית",                            // Hebrew
-            "ไทย",                              // Thai
-            "Tiếng Việt",                       // Vietnamese
+            "Hello, world!",                   // English
+            "¡Hola, mundo!",                   // Spanish
+            "Привет, мир!",                    // Russian
+            "مرحبا بالعالم",                   // Arabic
+            "你好世界",                        // Chinese
+            "こんにちは世界",                  // Japanese
+            "안녕하세요 세계",                 // Korean
+            "नमस्ते दुनिया",                      // Hindi
+            "🌍🌎🌏 Hello 世界! مرحبا Привет", // Mixed with emoji
+            "\u{1F600}\u{1F601}\u{1F602}",     // Emoji
+            "Ελληνικά",                        // Greek
+            "עברית",                           // Hebrew
+            "ไทย",                             // Thai
+            "Tiếng Việt",                      // Vietnamese
         ];
 
         for text in texts {
             let char_count = text.chars().count();
             let encoded = encode_text(text);
-            let decoded = decode_text(&encoded, char_count).expect("Decode failed");
+            let (decoded, _) = decode_text(&encoded, char_count).expect("Decode failed");
             assert_eq!(decoded, text, "Failed for: {}", text);
 
             let utf8_size = text.as_bytes().len();
             let encoded_size = encoded.len();
-            println!("{:30} UTF-8: {:4} bytes, Huffman: {:4} bytes ({:.1}%)",
-                     text.chars().take(15).collect::<String>(),
-                     utf8_size,
-                     encoded_size,
-                     100.0 * (1.0 - encoded_size as f32 / utf8_size as f32));
+            println!(
+                "{:30} UTF-8: {:4} bytes, Huffman: {:4} bytes ({:.1}%)",
+                text.chars().take(15).collect::<String>(),
+                utf8_size,
+                encoded_size,
+                100.0 * (1.0 - encoded_size as f32 / utf8_size as f32)
+            );
         }
     }
 
@@ -536,7 +558,7 @@ mod tests {
             let text: String = ch.to_string();
             let char_count = text.chars().count();
             let encoded = encode_text(&text);
-            let decoded = decode_text(&encoded, char_count).expect("Decode failed");
+            let (decoded, _) = decode_text(&encoded, char_count).expect("Decode failed");
             assert_eq!(decoded, text, "Failed for U+{:X}", ch as u32);
         }
     }
@@ -548,7 +570,7 @@ mod tests {
         let char_count = ascii_text.chars().count();
 
         let encoded = encode_text(ascii_text);
-        let decoded = decode_text(&encoded, char_count).expect("Decode failed");
+        let (decoded, _) = decode_text(&encoded, char_count).expect("Decode failed");
 
         assert_eq!(decoded, ascii_text);
 
@@ -557,7 +579,10 @@ mod tests {
             assert!(c.is_ascii(), "Test should only contain ASCII");
         }
 
-        println!("ASCII fast path verified for {} characters", ascii_text.len());
+        println!(
+            "ASCII fast path verified for {} characters",
+            ascii_text.len()
+        );
     }
 
     #[test]
@@ -567,7 +592,7 @@ mod tests {
         let char_count = mixed.chars().count();
 
         let encoded = encode_text(mixed);
-        let decoded = decode_text(&encoded, char_count).expect("Decode failed");
+        let (decoded, _) = decode_text(&encoded, char_count).expect("Decode failed");
 
         assert_eq!(decoded, mixed);
 
@@ -575,8 +600,10 @@ mod tests {
         let ascii_count = mixed.chars().filter(|c| c.is_ascii()).count();
         let unicode_count = mixed.chars().filter(|c| !c.is_ascii()).count();
 
-        println!("Mixed text: {} ASCII chars (fast path), {} Unicode chars (HashMap)",
-                 ascii_count, unicode_count);
+        println!(
+            "Mixed text: {} ASCII chars (fast path), {} Unicode chars (HashMap)",
+            ascii_count, unicode_count
+        );
     }
 
     #[test]
@@ -593,16 +620,18 @@ mod tests {
         let encoded = encode_text(corpus);
         let encode_time = start.elapsed();
 
-        println!("Encode time: {:?} ({:.2} MB/s)",
-                 encode_time,
-                 corpus.len() as f64 / encode_time.as_secs_f64() / 1_000_000.0);
+        println!(
+            "Encode time: {:?} ({:.2} MB/s)",
+            encode_time,
+            corpus.len() as f64 / encode_time.as_secs_f64() / 1_000_000.0
+        );
 
         // Decode multiple times for stable measurement
         let iterations = 100;
         let start = std::time::Instant::now();
 
         for _ in 0..iterations {
-            let decoded = decode_text(&encoded, char_count).unwrap();
+            let (decoded, _) = decode_text(&encoded, char_count).unwrap();
             assert_eq!(decoded.len(), corpus.len());
         }
 
@@ -610,9 +639,15 @@ mod tests {
         let avg_time = total_time / iterations;
         let throughput = (corpus.len() as f64 / avg_time.as_secs_f64()) / 1_000_000.0;
 
-        println!("Decode time: {:?} avg ({} iterations)", avg_time, iterations);
+        println!(
+            "Decode time: {:?} avg ({} iterations)",
+            avg_time, iterations
+        );
         println!("Decode throughput: {:.2} MB/s", throughput);
-        println!("Speedup vs tree-only: ~{:.0}× (was 0.23 MB/s)", throughput / 0.23);
+        println!(
+            "Speedup vs tree-only: ~{:.0}× (was 0.23 MB/s)",
+            throughput / 0.23
+        );
 
         // Should be at least 10× faster than tree-only (2.3+ MB/s)
         // In practice, achieves 30-130 MB/s depending on build optimization

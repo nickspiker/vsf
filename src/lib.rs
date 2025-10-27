@@ -179,6 +179,9 @@ pub mod file_format;
 // VSF file builder
 pub mod vsf_builder;
 
+// Cryptographic algorithm identifiers (h, g, k types)
+pub mod crypto_algorithms;
+
 // Re-export main types
 pub use types::{
     datetime_to_eagle_time, EagleTime, EtType, LayoutOrder, StridedTensor, Tensor, VsfType,
@@ -194,6 +197,12 @@ pub use decoding::parse;
 // Re-export file format and builder
 pub use file_format::{LabelDefinition, VsfHeader, VsfSection};
 pub use vsf_builder::VsfBuilder;
+
+// RAW image builders and parser
+pub use builders::{
+    complete_raw_image, lumis_raw_capture, parse_raw_image, CameraSettings, LensInfo,
+    ParsedRawImage, RawMetadata, TokenAuth,
+};
 
 // Coming soon
 // pub mod registry;  // Metadata key registry
@@ -649,7 +658,7 @@ mod tests {
         use crate::types::WorldCoord;
 
         // Test XYZ round-trip (simpler, no lat/lon conversion)
-        let coord = WorldCoord::from_xyz(0.5, 0.5, 0.7071);  // Normalized point
+        let coord = WorldCoord::from_xyz(0.5, 0.5, 0.7071); // Normalized point
         let (x, y, z) = coord.to_xyz();
 
         // Should be very close (Dymaxion has ~2mm error on Earth radius ~6371km)

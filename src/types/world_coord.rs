@@ -35,8 +35,6 @@
 
 use std::f64::consts::PI;
 
-const PHI: f64 = 1.618033988749895; // Golden ratio
-
 /// Base for icosahedral coordinate system
 const BASE: u64 = 960_383_883; // floor(sqrt(2^64 / 20))
 
@@ -323,10 +321,7 @@ fn decode_to_u64(encoded: &str) -> Option<u64> {
     }
 
     // Try with error correction
-    let corrected: Vec<&str> = words
-        .iter()
-        .map(|w| find_closest_word(w))
-        .collect();
+    let corrected: Vec<&str> = words.iter().map(|w| find_closest_word(w)).collect();
 
     try_decode_exact(&corrected)
 }
@@ -393,7 +388,11 @@ fn metaphone(word: &str) -> String {
     for i in 0..len {
         let c = chars[i];
         let prev = if i > 0 { Some(chars[i - 1]) } else { None };
-        let next = if i < len - 1 { Some(chars[i + 1]) } else { None };
+        let next = if i < len - 1 {
+            Some(chars[i + 1])
+        } else {
+            None
+        };
 
         match c {
             'A' | 'E' | 'I' | 'O' | 'U' => {
@@ -513,7 +512,11 @@ fn levenshtein(a: &str, b: &str) -> i32 {
 
     for i in 1..=a_len {
         for j in 1..=b_len {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
             matrix[i][j] = (matrix[i - 1][j] + 1)
                 .min(matrix[i][j - 1] + 1)
                 .min(matrix[i - 1][j - 1] + cost);

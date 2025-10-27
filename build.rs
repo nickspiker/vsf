@@ -88,7 +88,7 @@ fn generate_codes(tree: &Node) -> HashMap<char, (u32, u8)> {
             let len = path.len();
             for (i, &bit) in path.iter().enumerate() {
                 if bit {
-                    bits |= 1 << (len - 1 - i);  // MSB-first
+                    bits |= 1 << (len - 1 - i); // MSB-first
                 }
             }
             codes.insert(ch, (bits, path.len() as u8));
@@ -151,7 +151,9 @@ fn main() {
     // Header
     output.write_all(b"HUFF").unwrap(); // Magic
     output.write_all(&1u32.to_le_bytes()).unwrap(); // Version
-    output.write_all(&(codes.len() as u32).to_le_bytes()).unwrap();
+    output
+        .write_all(&(codes.len() as u32).to_le_bytes())
+        .unwrap();
 
     // Entries (sorted by codepoint)
     let mut sorted_codes: Vec<_> = codes.iter().collect();

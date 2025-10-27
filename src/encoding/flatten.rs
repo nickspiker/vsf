@@ -1,6 +1,6 @@
 use super::traits::{EncodeNumber, EncodeNumberInclusive};
-use crate::types::{EtType, VsfType};
 use crate::text_encoding::encode_text;
+use crate::types::{EtType, VsfType};
 
 impl VsfType {
     /// Flatten this VsfType into its binary representation
@@ -269,18 +269,38 @@ impl VsfType {
                 flat
             }
 
-            VsfType::h(value) => {
+            VsfType::a(algorithm, value) => {
                 let mut flat = Vec::new();
-                flat.push(b'h');
-                flat.extend_from_slice(&(value.len() * 8).encode_number());
+                flat.push(b'a');
+                flat.push(*algorithm); // Algorithm ID (e.g., b'h' for HMAC-SHA256)
+                flat.extend_from_slice(&(value.len() << 3).encode_number()); // Convert bytes to bits
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::g(value) => {
+            VsfType::h(algorithm, value) => {
+                let mut flat = Vec::new();
+                flat.push(b'h');
+                flat.push(*algorithm); // Algorithm ID (e.g., b'b' for BLAKE3)
+                flat.extend_from_slice(&(value.len() << 3).encode_number()); // Convert bytes to bits
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::g(algorithm, value) => {
                 let mut flat = Vec::new();
                 flat.push(b'g');
-                flat.extend_from_slice(&(value.len() * 8).encode_number());
+                flat.push(*algorithm); // Algorithm ID (e.g., b'e' for Ed25519)
+                flat.extend_from_slice(&(value.len() << 3).encode_number()); // Convert bytes to bits
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::k(algorithm, value) => {
+                let mut flat = Vec::new();
+                flat.push(b'k');
+                flat.push(*algorithm); // Algorithm ID (e.g., b'e' for Ed25519)
+                flat.extend_from_slice(&(value.len() << 3).encode_number()); // Convert bytes to bits
                 flat.extend_from_slice(value);
                 flat
             }
@@ -288,11 +308,18 @@ impl VsfType {
             // ==================== BITPACKED TENSORS ====================
             VsfType::p(tensor) => {
                 // Validate dimensions
-                assert!(!tensor.shape.is_empty(), "Bitpacked tensor must have at least one dimension");
+                assert!(
+                    !tensor.shape.is_empty(),
+                    "Bitpacked tensor must have at least one dimension"
+                );
 
                 // Validate data length
                 let total_elements: usize = tensor.shape.iter().product();
-                let bits_per_sample = if tensor.bit_depth == 0 { 256 } else { tensor.bit_depth as usize };
+                let bits_per_sample = if tensor.bit_depth == 0 {
+                    256
+                } else {
+                    tensor.bit_depth as usize
+                };
                 let total_bits = total_elements * bits_per_sample;
                 let expected_bytes = (total_bits + 7) / 8;
                 assert_eq!(
@@ -3301,8 +3328,8 @@ mod tests {
         assert_eq!(result[0], b'x');
         // New format: x [char_count] [huffman_bytes]
         assert_eq!(result[1], b'3'); // char_count=5, encoded as u8
-        assert_eq!(result[2], 5);    // 5 characters
-        // result[3..] is Huffman-encoded data
+        assert_eq!(result[2], 5); // 5 characters
+                                  // result[3..] is Huffman-encoded data
 
         // Overhead: 3 bytes (x + marker + count)
         // For short strings, Huffman may not compress

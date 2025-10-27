@@ -199,7 +199,11 @@ impl BitPackedTensor {
             total_elements
         );
 
-        let bits_per_sample = if bit_depth == 0 { 256 } else { bit_depth as usize };
+        let bits_per_sample = if bit_depth == 0 {
+            256
+        } else {
+            bit_depth as usize
+        };
         let max_value = if bits_per_sample == 256 {
             u64::MAX
         } else {
@@ -248,7 +252,11 @@ impl BitPackedTensor {
     /// Vector of sample values (u64)
     pub fn unpack(&self) -> Vec<u64> {
         let total_elements: usize = self.shape.iter().product();
-        let bits_per_sample = if self.bit_depth == 0 { 256 } else { self.bit_depth as usize };
+        let bits_per_sample = if self.bit_depth == 0 {
+            256
+        } else {
+            self.bit_depth as usize
+        };
         let mut samples = Vec::with_capacity(total_elements);
 
         let mut bit_offset = 0;

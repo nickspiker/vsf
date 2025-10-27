@@ -5,7 +5,7 @@
 
 use crate::file_format::VsfSection;
 use crate::types::VsfType;
-use crate::{VSF_VERSION, VSF_BACKWARD_COMPAT};
+use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
 
 /// Builder for complete VSF files with headers and sections
 pub struct VsfBuilder {
@@ -223,10 +223,13 @@ mod tests {
     #[test]
     fn test_simple_file() {
         let result = VsfBuilder::new()
-            .add_section("metadata", vec![
-                ("width".to_string(), VsfType::u(1920, false)),
-                ("height".to_string(), VsfType::u(1080, false)),
-            ])
+            .add_section(
+                "metadata",
+                vec![
+                    ("width".to_string(), VsfType::u(1920, false)),
+                    ("height".to_string(), VsfType::u(1080, false)),
+                ],
+            )
             .build();
 
         assert!(result.is_ok());
@@ -246,10 +249,13 @@ mod tests {
         let pixel_data = vec![0xFF; 1024];
 
         let result = VsfBuilder::new()
-            .add_section("metadata", vec![
-                ("width".to_string(), VsfType::u(32, false)),
-                ("height".to_string(), VsfType::u(32, false)),
-            ])
+            .add_section(
+                "metadata",
+                vec![
+                    ("width".to_string(), VsfType::u(32, false)),
+                    ("height".to_string(), VsfType::u(32, false)),
+                ],
+            )
             .add_unboxed("pixels", pixel_data.clone())
             .build();
 
@@ -267,12 +273,14 @@ mod tests {
     #[test]
     fn test_multiple_sections() {
         let result = VsfBuilder::new()
-            .add_section("section1", vec![
-                ("field1".to_string(), VsfType::u(100, false)),
-            ])
-            .add_section("section2", vec![
-                ("field2".to_string(), VsfType::u(200, false)),
-            ])
+            .add_section(
+                "section1",
+                vec![("field1".to_string(), VsfType::u(100, false))],
+            )
+            .add_section(
+                "section2",
+                vec![("field2".to_string(), VsfType::u(200, false))],
+            )
             .build();
 
         assert!(result.is_ok());

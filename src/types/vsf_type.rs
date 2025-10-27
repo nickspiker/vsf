@@ -92,8 +92,10 @@ use super::world_coord::WorldCoord;
 /// - `y`: Backward version
 /// - `m`: Marker definition
 /// - `r`: Marker reference
+/// - `a`: Message Authentication Code (MAC)
 /// - `h`: Hash
 /// - `g`: Signature
+/// - `k`: Cryptographic key
 /// - `w`: World coordinate (Dymaxion icosahedral)
 #[derive(Debug, Clone)]
 #[allow(non_camel_case_types)]
@@ -355,20 +357,22 @@ pub enum VsfType {
     p(BitPackedTensor), // Bitpacked tensor (1-256 bits per sample)
 
     // ==================== METADATA & SPECIAL TYPES ====================
-    x(String),       // Unicode text
-    e(EtType),       // Eagle Time (renamed from 'et')
-    w(WorldCoord),   // World coordinate (Dymaxion icosahedral)
+    x(String),     // Unicode text
+    e(EtType),     // Eagle Time
+    w(WorldCoord), // World coordinate (Dymaxion icosahedral)
 
     // VSF Structure
-    d(String),  // Data type name
-    l(String),  // Label
-    o(usize),   // Offset in bits
-    b(usize),   // Length in bits
-    n(usize),   // Number/count (renamed from 'c')
-    z(usize),   // Version
-    y(usize),   // Backward version
-    m(usize),   // Marker definition
-    r(usize),   // Marker reference
-    h(Vec<u8>), // Hash
-    g(Vec<u8>), // Signature
+    d(String),      // Data type name
+    l(String),      // Label
+    o(usize),       // Offset in bits
+    b(usize),       // Length in bits
+    n(usize),       // Number/count
+    z(usize),       // Version
+    y(usize),       // Backward version
+    m(usize),       // Marker definition
+    r(usize),       // Marker reference
+    a(u8, Vec<u8>), // Message Authentication Code (MAC)
+    h(u8, Vec<u8>), // Hash
+    g(u8, Vec<u8>), // Signature
+    k(u8, Vec<u8>), // Cryptographic key
 }

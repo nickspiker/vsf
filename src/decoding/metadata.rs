@@ -2,17 +2,17 @@
 
 use super::helpers::{decode_isize, decode_usize};
 use crate::types::{EtType, VsfType, WorldCoord};
-use crate::text_encoding::decode_text;
 use std::io::{Error, ErrorKind};
 
 // ==================== METADATA ====================
 
 pub fn parse_string(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+    use crate::text_encoding::decode_text_with_size;
+
     // Read character count
     let char_count = decode_usize(data, pointer)?;
 
     // Rest of data is Huffman-encoded bytes
-    // (VSF structure already knows byte boundaries)
     let huffman_bytes = &data[*pointer..];
 
     if huffman_bytes.is_empty() && char_count > 0 {
@@ -22,12 +22,12 @@ pub fn parse_string(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
         ));
     }
 
-    // Decode using Huffman decoder
-    let value = decode_text(huffman_bytes, char_count)
+    // Decode using Huffman decoder and get bytes consumed
+    let (value, bytes_consumed) = decode_text_with_size(huffman_bytes, char_count)
         .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Huffman decode: {}", e)))?;
 
-    // Consumed entire blob
-    *pointer = data.len();
+    // Advance pointer by actual bytes consumed
+    *pointer += bytes_consumed;
 
     Ok(VsfType::x(value))
 }
@@ -213,21 +213,71 @@ pub fn parse_marker_ref(data: &[u8], pointer: &mut usize) -> Result<VsfType, Err
     Ok(VsfType::r(value))
 }
 
+pub fn parse_mac(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+    // Read algorithm ID byte
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for MAC algorithm ID",
+        ));
+    }
+    let algorithm = data[*pointer];
+    *pointer += 1;
+
+    // Read MAC tag length and data
+    let length_bits = decode_usize(data, pointer)?;
+    let length_bytes = (length_bits + 7) >> 3; // Convert bits to bytes (round up)
+    if *pointer + length_bytes > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for MAC tag",
+        ));
+    }
+    let mac_tag = data[*pointer..*pointer + length_bytes].to_vec();
+    *pointer += length_bytes;
+    Ok(VsfType::a(algorithm, mac_tag))
+}
+
 pub fn parse_hash(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
-    let length = decode_usize(data, pointer)?;
-    if *pointer + length > data.len() {
+    // Read algorithm ID byte
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for hash algorithm ID",
+        ));
+    }
+    let algorithm = data[*pointer];
+    *pointer += 1;
+
+    // Read hash length and data
+    let length_bits = decode_usize(data, pointer)?;
+    let length_bytes = (length_bits + 7) >> 3; // Convert bits to bytes (round up)
+    if *pointer + length_bytes > data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
             "Not enough data for hash",
         ));
     }
-    let hash = data[*pointer..*pointer + length].to_vec();
-    *pointer += length;
-    Ok(VsfType::h(hash))
+    let hash = data[*pointer..*pointer + length_bytes].to_vec();
+    *pointer += length_bytes;
+    Ok(VsfType::h(algorithm, hash))
 }
 
 pub fn parse_signature(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
-    let length = decode_usize(data, pointer)?;
+    // Read algorithm ID byte
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for signature algorithm ID",
+        ));
+    }
+    let algorithm = data[*pointer];
+    *pointer += 1;
+
+    // Read signature length and data
+    let length_bits = decode_usize(data, pointer)?;
+    let length_bytes = (length_bits + 7) >> 3; // Convert bits to bytes (round up)
+    let length = length_bytes;
     if *pointer + length > data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
@@ -236,5 +286,126 @@ pub fn parse_signature(data: &[u8], pointer: &mut usize) -> Result<VsfType, Erro
     }
     let sig = data[*pointer..*pointer + length].to_vec();
     *pointer += length;
-    Ok(VsfType::g(sig))
+    Ok(VsfType::g(algorithm, sig))
+}
+
+pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+    // Read algorithm ID byte
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for key algorithm ID",
+        ));
+    }
+    let algorithm = data[*pointer];
+    *pointer += 1;
+
+    // Read key length and data
+    let length_bits = decode_usize(data, pointer)?;
+    let length_bytes = (length_bits + 7) >> 3; // Convert bits to bytes (round up)
+    if *pointer + length_bytes > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for cryptographic key",
+        ));
+    }
+    let key = data[*pointer..*pointer + length_bytes].to_vec();
+    *pointer += length_bytes;
+    Ok(VsfType::k(algorithm, key))
+}
+
+// ==================== PREAMBLE ====================
+
+/// Parse a preamble from VSF data
+///
+/// Format: {n[count] b[size] h?[hash] g?[signature]}
+///
+/// Returns (count, size_bits, hash, signature, bytes_consumed)
+pub fn parse_preamble(
+    data: &[u8],
+    pointer: &mut usize,
+) -> Result<(usize, usize, Option<Vec<u8>>, Option<Vec<u8>>), Error> {
+    // Expect opening brace
+    if *pointer >= data.len() || data[*pointer] != b'{' {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Expected '{{' for preamble at byte {}", pointer),
+        ));
+    }
+    *pointer += 1;
+
+    let mut count = None;
+    let mut size_bits = None;
+    let mut hash = None;
+    let mut signature = None;
+
+    // Parse fields until closing brace
+    while *pointer < data.len() && data[*pointer] != b'}' {
+        let marker = data[*pointer];
+        *pointer += 1;
+
+        match marker {
+            b'n' => {
+                // Parse count
+                count = Some(decode_usize(data, pointer)?);
+            }
+            b'b' => {
+                // Parse size in bits
+                size_bits = Some(decode_usize(data, pointer)?);
+            }
+            b'h' => {
+                // Parse hash
+                let hash_len = decode_usize(data, pointer)?;
+                if *pointer + hash_len > data.len() {
+                    return Err(Error::new(
+                        ErrorKind::UnexpectedEof,
+                        "Preamble hash extends beyond data",
+                    ));
+                }
+                hash = Some(data[*pointer..*pointer + hash_len].to_vec());
+                *pointer += hash_len;
+            }
+            b'g' => {
+                // Parse signature
+                let sig_len = decode_usize(data, pointer)?;
+                if *pointer + sig_len > data.len() {
+                    return Err(Error::new(
+                        ErrorKind::UnexpectedEof,
+                        "Preamble signature extends beyond data",
+                    ));
+                }
+                signature = Some(data[*pointer..*pointer + sig_len].to_vec());
+                *pointer += sig_len;
+            }
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Unknown preamble marker: {}", marker as char),
+                ));
+            }
+        }
+    }
+
+    // Expect closing brace
+    if *pointer >= data.len() || data[*pointer] != b'}' {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Expected '}}' to close preamble at byte {}", pointer),
+        ));
+    }
+    *pointer += 1;
+
+    // Verify required fields
+    let count = count.ok_or_else(|| {
+        Error::new(
+            ErrorKind::InvalidData,
+            "Missing 'n' (count) in preamble",
+        )
+    })?;
+
+    let size_bits = size_bits.ok_or_else(|| {
+        Error::new(ErrorKind::InvalidData, "Missing 'b' (size) in preamble")
+    })?;
+
+    Ok((count, size_bits, hash, signature))
 }

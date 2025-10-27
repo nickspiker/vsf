@@ -1,5 +1,43 @@
 # VSF Huffman Text Encoding - Change Log
 
+## Commit: TBD (2025-10-27)
+Add VSF preambles for hierarchical label sets and improve text API
+
+### Major changes:
+
+**1. VSF Preambles Implementation**
+- Added Preamble struct: `{n[count] b[size] h?[hash] g?[sig]}`
+- All label sets now have preambles for forensic recovery
+- Updated VsfSection::encode() to prepend preambles
+- Added parse_preamble() to decoding/metadata.rs
+- Updated parse_raw_image() to expect preambles
+
+**2. Text Encoding API Improvement**
+- decode_text() now returns (String, usize) tuple
+- Eliminates code duplication (wrapper around decode_text_with_size)
+- Users can ignore bytes_consumed: `let (text, _) = decode_text(...)`
+- Compiler optimizes away unused return values
+
+### Format change:
+```
+Before: RÅ<header>[(dfield:value)...]
+After:  RÅ<header>{n3 b3[800]}[(dfield:value)...]
+```
+
+### Benefits:
+- Forensic recovery: Sections parseable even if header corrupted
+- Integrity checking: Each section validates independently
+- Self-contained: Sections carry their own metadata
+- Minimal cost: ~3-6 bytes per section (~30 bytes for 5-section file)
+- Future-proof: Can extend preamble (compression flags, encryption, etc.)
+
+### Test results:
+- All 80 tests passing
+- Zero compiler warnings
+- Hierarchical nesting ready (labels can point to other label sets)
+
+---
+
 ## Commit: b73b5eb (2025-10-26)
 Update VSF documentation and metadata for v0.1.3
 

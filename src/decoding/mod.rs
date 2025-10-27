@@ -9,5 +9,6 @@ pub mod primitives;
 pub mod spirix;
 pub mod tensors;
 
-// Re-export the main parse function
+// Re-export the main parse function and preamble parser
+pub use metadata::parse_preamble;
 pub use parse::parse;
