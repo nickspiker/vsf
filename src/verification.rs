@@ -330,7 +330,10 @@ mod tests {
 
         // Hash should be present and valid (automatic)
         let result = verify_file_hash(&bytes);
-        assert!(result.is_ok(), "All VSF files should have valid hash automatically");
+        assert!(
+            result.is_ok(),
+            "All VSF files should have valid hash automatically"
+        );
     }
 
     #[test]
@@ -347,6 +350,9 @@ mod tests {
 
         // Hash verification should fail
         let result = verify_file_hash(&bytes);
-        assert!(result.is_err(), "Corrupted file should fail hash verification");
+        assert!(
+            result.is_err(),
+            "Corrupted file should fail hash verification"
+        );
     }
 }

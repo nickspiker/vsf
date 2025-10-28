@@ -364,11 +364,13 @@ VsfType::x(text)  // Automatically compressed
 - Signatures: Ed25519, ECDSA-P256, RSA-2048
 - Keys: Ed25519, X25519, P-256, RSA-2048
 - MACs: HMAC-SHA256/512, Poly1305, BLAKE3-keyed, CMAC
+- **Mandatory BLAKE3 file integrity** - automatic on every build
 
 ✅ **Camera RAW builders**
-- Complete metadata support, pretty sure
-- TOKEN authentication integration, eventually!
-- Calibration frame hashessss
+- Complete metadata support (CFA pattern, black/white levels, etc.)
+- Calibration frame hashes with algorithm IDs
+- Camera settings (ISO, shutter, aperture, focal length)
+- Lens metadata (make, model, focal range, aperture range)
 
 ### Coming Next (v0.2.0)
 
@@ -412,22 +414,195 @@ assert_eq!(original, decoded);
 ### Camera RAW with Metadata
 
 ```rust
-use vsf::builders::complete_raw_image;
+use vsf::builders::build_raw_image;
 
-let bytes = complete_raw_image(
+let bytes = build_raw_image(
     raw_tensor,
-    Some(CalibrationFrames { /* dark/flat frames */ }),
+    Some(RawMetadata {
+        cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']),
+        black_level: Some(64.0),
+        white_level: Some(4095.0),
+        // Calibration frame hashes (algorithm + bytes)
+        dark_frame_hash: Some((HASH_BLAKE3, dark_hash)),
+        flat_field_hash: Some((HASH_BLAKE3, flat_hash)),
+        // ...
+    }),
     Some(CameraSettings {
         iso_speed: Some(800.),
-        shutter_time_s: Some(1./60.),  // 1/60 second in seconds (f32)
+        shutter_time_s: Some(1./60.),
         aperture_f_number: Some(2.8),
-        focal_length_m: Some(0.024),   // 24mm in meters (f32)
+        focal_length_m: Some(0.024),  // 24mm in meters
         // ...
     }),
     Some(LensInfo { /* lens details */ }),
-    Some(TokenAuth { /* cryptographic signature */ }),
 )?;
+// File hash computed automatically - no additional steps needed!
 ```
+
+---
+
+## Data Provenance & Verification
+
+VSF treats integrity verification and data provenance as architectural requirements, not optional add-ons. While other formats bolt on checksums as an afterthought (or skip them entirely), VSF makes verification impossible to ignore.
+
+### Automatic File Integrity
+
+**Every VSF file includes mandatory BLAKE3 verification** - no exceptions, no opt-out:
+
+```rust
+// Just build - hash is computed automatically
+let bytes = builder.build()?;
+
+// Verify integrity later
+verify_file_hash(&bytes)?;  // Returns Ok(()) or Err("corruption detected")
+```
+
+**How it works:**
+1. Header contains `hb3[32][hash]` placeholder covering entire file
+2. `build()` automatically computes BLAKE3 over the complete file (using zero-out procedure)
+3. Hash written into placeholder position atomically
+4. Parser expects hash field - files without it are invalid VSF
+
+**Why this matters:**
+- Can't accidentally ship unverifiable files (hash is mandatory)
+- Can't strip verification without breaking the format
+- Corruption detected immediately on parse
+- Zero-overhead verification (hash computed once during build)
+
+**Performance: BLAKE3 is essentially free**
+
+"But won't hashing everything slow down my writes?" Nope!
+
+BLAKE3 throughput on modern hardware:
+- **~3-7 GB/s single-threaded** (faster than most SSDs)
+- **~10-15 GB/s multi-threaded** (saturates NVMe drives)
+- **SIMD-optimized** (AVX2/AVX-512 on x86, NEON on ARM)
+
+For context, typical hardware limits:
+- Consumer SSD: ~500 MB/s (SATA) to ~3 GB/s (NVMe Gen3)
+- Enterprise NVMe: ~7 GB/s (Gen4)
+
+**BLAKE3 is faster than your storage.** The hash computation happens while you're waiting for the disk write anyway - literally zero added latency in most cases.
+
+This is similar to Rust's bounds checking: "But won't array bounds checks slow me down?" In practice, the optimizer eliminates most checks, and the remaining ones are drowned out by cache misses. Safety first, performance second - and you get both anyway.
+
+Traditional formats like TIFF, PNG, and HDF5 make integrity checks optional. VSF makes them unavoidable.
+
+### Cryptographic Types as First-Class Citizens
+
+Hashes, signatures, and keys aren't byte blobs - they're strongly-typed primitives:
+
+```rust
+// Hash - integrity verification
+VsfType::h(HASH_BLAKE3, hash_bytes)      // Algorithm ID prevents confusion
+VsfType::h(HASH_SHA256, sha256_bytes)    // Type system enforces verification
+
+// Signature - authentication and non-repudiation
+VsfType::g(SIG_ED25519, signature)       // 64 bytes, Ed25519
+VsfType::g(SIG_ECDSA_P256, signature)    // NIST P-256
+
+// Public key - identity
+VsfType::k(KEY_ED25519, pubkey)          // 32 bytes
+VsfType::k(KEY_RSA_2048, pubkey)         // 256 bytes
+
+// MAC - message authentication
+VsfType::a(MAC_HMAC_SHA256, mac_tag)     // 32 bytes
+```
+
+**Algorithm identifiers prevent type confusion attacks:**
+- Can't substitute SHA-256 hash where BLAKE3 expected
+- Compiler enforces signature verification before payload access
+- "Forgot to verify signature" becomes a compile error
+
+**Supported algorithms:**
+- **Hashes**: BLAKE3, SHA-256, SHA-512, SHA3-256, SHA3-512
+- **Signatures**: Ed25519, ECDSA-P256, RSA-2048/3072/4096
+- **Keys**: Ed25519, X25519, P-256, P-384, RSA
+- **MACs**: HMAC-SHA256/512, Poly1305, BLAKE3-keyed, CMAC-AES
+
+### Per-Section Provenance (Strategy 2)
+
+Lock specific sections with signatures while allowing other sections to be modified freely:
+
+```rust
+// Camera signs RAW sensor data at capture
+let bytes = raw.build()?;
+let bytes = sign_section(bytes, "raw", &camera_private_key)?;
+
+// Later: Add thumbnail without breaking RAW signature
+builder.add_section("thumbnail", thumbnail_data);
+
+// Later: Add EXIF metadata without breaking RAW signature
+builder.add_section("exif", exif_data);
+
+// Verify original RAW data is untouched
+verify_section_signature(&bytes, "raw", &camera_public_key)?;
+```
+
+**Use cases:**
+- **Forensic photography**: Camera signs RAW at capture, establishes chain of custody. Lab adds analysis metadata without invalidating signature.
+- **Scientific instruments**: Sensor signs measurement data. Researchers annotate results without compromising provenance.
+- **Medical imaging**: Scanner signs DICOM data. Radiologist adds diagnosis without altering signed pixels.
+- **Legal documents**: Notary signs document hash. Clerk adds filing metadata without breaking signature.
+
+**Why per-section matters:**
+
+Traditional whole-file signatures break on any modification - even benign metadata updates. VSF's per-section signatures enable:
+- **Immutable provenance** for critical data (sensor readings, RAW pixels)
+- **Flexible metadata** that doesn't require re-signing
+- **Layered trust** - multiple parties can sign different sections
+
+### Calibration Frame Verification
+
+Camera RAW files reference external calibration frames (dark, flat, bias). VSF embeds cryptographic hashes to verify frame integrity:
+
+```rust
+RawMetadata {
+    // Each hash includes algorithm ID + hash bytes
+    dark_frame_hash: Some((HASH_BLAKE3, dark_hash)),
+    flat_field_hash: Some((HASH_BLAKE3, flat_hash)),
+    bias_frame_hash: Some((HASH_BLAKE3, bias_hash)),
+    vignette_correction_hash: Some((HASH_BLAKE3, vignette_hash)),
+    distortion_correction_hash: Some((HASH_BLAKE3, distortion_hash)),
+}
+```
+
+**Why this matters:**
+- Prevents using wrong calibration frames (would corrupt image)
+- Detects calibration frame corruption before processing
+- Enables distributed workflows (send RAW + hashes, verify calibration locally)
+- Supports multiple hash algorithms (BLAKE3 today, post-quantum tomorrow)
+
+### Why VSF Is Different
+
+**Other formats treat verification as optional or external:**
+
+| Format | File Integrity | Cryptographic Types | Per-Section Signing |
+|--------|---------------|---------------------|---------------------|
+| TIFF | ❌ None | ❌ Byte blobs | ❌ Not supported |
+| PNG | ⚠️ Optional CRC (can strip) | ❌ Byte blobs | ❌ Not supported |
+| HDF5 | ⚠️ Optional checksums | ❌ Byte blobs | ❌ Not supported |
+| JPEG | ❌ None | ❌ Byte blobs | ❌ Not supported |
+| Protobuf | ❌ None | ❌ Byte blobs | ❌ Not supported |
+| **VSF** | ✅ **Mandatory BLAKE3** | ✅ **First-class types** | ✅ **Built-in support** |
+
+**VSF makes data provenance impossible to ignore:**
+1. **Can't create unverifiable files** - hash is computed automatically
+2. **Can't strip verification** - removes hash field, breaks file structure
+3. **Can't ignore signatures** - type system enforces verification
+4. **Can't use wrong algorithm** - algorithm ID embedded in type
+
+For systems where data integrity matters - forensic photography (Lumis), scientific measurements, medical imaging, financial records, legal documents - VSF provides cryptographic guarantees from the ground up, not as a retrofit.
+
+### Verification is O(1) Skip-able
+
+Despite mandatory hashing, VSF maintains O(1) seek performance:
+- Hash stored in header (known location)
+- Sections have byte offsets in header
+- Can skip to any section without reading others
+- Verify only sections you care about
+
+**Traditional formats force a choice:** fast seeking OR integrity checks. VSF gives you both.
 
 ---
 

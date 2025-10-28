@@ -545,11 +545,7 @@ pub fn build_raw_image(
 /// * `samples` - RAW sensor sample values as u64 (0-4095 for 12-bit), will be bitpacked
 /// * `iso` - ISO speed (e.g., 100, 200, 400, 800, 1600, 3200)
 /// * `shutter_s` - Shutter time in seconds (e.g., 1./60. = 0.0167 for 1/60 second)
-pub fn lumis_raw_capture(
-    samples: Vec<u64>,
-    iso: f32,
-    shutter_s: f32,
-) -> Result<Vec<u8>, String> {
+pub fn lumis_raw_capture(samples: Vec<u64>, iso: f32, shutter_s: f32) -> Result<Vec<u8>, String> {
     // Create BitPackedTensor for 12-bit Lumis sensor
     let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
 
@@ -1265,7 +1261,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn test_roundtrip_minimal_raw() {
         // Create minimal RAW image
@@ -1528,7 +1523,6 @@ mod tests {
         assert_eq!(lens.min_aperture_f, Some(22.0));
         assert_eq!(lens.max_aperture_f, Some(2.8));
     }
-
 
     #[test]
     fn test_builder_pattern_full() {

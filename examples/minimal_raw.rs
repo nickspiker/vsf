@@ -22,7 +22,6 @@ fn main() -> Result<(), String> {
         image, None, // No sensor metadata
         None, // No camera settings
         None, // No lens info
-        None, // No TOKEN auth
     )?;
 
     println!("VSF file size: {} bytes", raw_bytes.len());

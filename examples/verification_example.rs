@@ -25,7 +25,6 @@ fn main() -> Result<(), String> {
 
     // Build with file hash placeholder
     let mut builder = vsf::VsfBuilder::new();
-    builder = builder.with_file_hash(); // Add hash placeholder
 
     // Add raw section manually (since RawImageBuilder uses VsfBuilder internally)
     // For now, let's use the simple approach:
