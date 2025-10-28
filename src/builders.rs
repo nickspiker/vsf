@@ -3,8 +3,7 @@
 //! This module provides constructors for complex data types that require
 //! packaging multiple VSF primitives together:
 //! - GPS coordinate conversions (lat/lon → WorldCoord)
-//! - Complete RAW camera images with full metadata
-//! - Geotagged photos
+//! - RAW camera images with metadata
 //!
 //! For simple types, use VsfType directly:
 //! - Text: `VsfType::x("Hello".to_string())`
