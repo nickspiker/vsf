@@ -69,20 +69,21 @@ VSF introduces **Exponential Width Encoding (EWE)** - a novel byte-aligned schem
 ```
 How it works:
 0. Type marker: 'u' (unsigned), 'i' (signed), etc.
-1. Size marker: ASCII character '3'-'Z'
-2. Data: Exactly 2^(ASCII-48) bits follow
+1. Size marker: ASCII character '0'-'Z'
+2. Data: Exactly 2^(ASCII) bits follow
+3. 0=bool, 3=8 bits, 4=16 bits, 5=32 bits, 6=64 bits, ..., Z=2^36 bits (8 GB)
 
-Example: 'u' '5' [4 bytes]
-         │   │    └─ Data (2^5 bits = 32 bits = 4 bytes)
-         │   └─ Size class marker
-         └─ Type marker
+Example: 'u' '5' [0x01234567]
+          │   │  └─ Data (2^5 bits = 32 bits = 4 bytes)
+          │   └─ Size class marker
+          └─ Type marker
 
 Result: O(1) seekability + unbounded integers
 ```
 
 **Why this works:**
 
-Every number can be represented as `mantissa × 2^exponent`. The key insight:
+Every number can be represented as `mantissa × 2^exponent`:
 - **Small numbers** → small exponents → small markers ('3', '4')
 - **Large numbers** → large exponents → large markers ('D', 'Z')
 - **The ASCII marker IS the exponent** (directly encoded, no recursion needed)
@@ -91,7 +92,7 @@ Every number can be represented as `mantissa × 2^exponent`. The key insight:
 - **Byte-aligned** - no bit-shifting, works with standard I/O
 - **O(1) seekability** - read one marker (two bytes), know exact size
 - **ASCII-readable** - markers are printable characters for debugging
-- **Unbounded** - extends from 8 bits to 8 GB seamlessly
+- **Unbounded** - bool to 8 GB (that's a HUGE number!)
 
 ### Overhead Analysis: From Tiny to Googolplex
 
@@ -116,7 +117,7 @@ Here are real-world numbers that **break** other formats but VSF handles trivial
 âœ… VSF: 'u' 'B' + 23 bytes = 25 bytes total
 ```
 
-#### JSON: Loses precision above 2^53
+#### JSON: Precision loss above 2^53
 ```
 ❌ Cryptographic keys (RSA-16384 = 2048 bytes)
    JSON can't represent integers > 2^53 exactly
@@ -124,10 +125,10 @@ Here are real-world numbers that **break** other formats but VSF handles trivial
 âœ… VSF: 'u' 'D' + 2048 bytes = 2050 bytes
 ```
 
-#### HDF5: 64-bit everywhere wastes space
+#### HDF5: 64-bit everywhere!
 ```
 ❌ Storing 1 million boolean flags as u64
-   8MB wasted (8 bytes × 1M instead of 1 bit × 1M)
+   Wastes 8 MB instead of 125 KB
 
 âœ… VSF bitpacked: 125KB (1000x smaller)
 ```
@@ -168,7 +169,7 @@ VSF is the only format that combines:
 - **O(1) seekability** (know size without parsing)
 - **Byte-aligned** (no bit-shifting overhead)
 
-This is possible because we solved the fundamental problem: **How do you encode the exponent of arbitrarily large numbers?**
+This is possible because I solved the fundamental problem: **How do you easily encode the exponent of arbitrarily large numbers?**
 
 Answer: **Directly**, using ASCII characters as exponential size class markers (Exponential Width Encoding).
 
@@ -176,8 +177,6 @@ Every other format either:
 0. Uses fixed exponents (hits limits, wastes space on small numbers), or
 1. Uses variable exponents but can't encode their length efficiently (not seekable), or
 2. Doesn't try at all (caps at 64 bits)
-
-**VSF does all three correctly.**
 
 ---
 
@@ -193,7 +192,7 @@ match self {
     // ... 208 more explicit cases ...
     VsfType::p(tensor) => encode_bitpacked(tensor),
 }
-// No _ => wildcard - every variant handled
+// No _ => I forgot?
 ```
 
 **Why this matters:**
@@ -202,22 +201,20 @@ match self {
 - Refactor? Guided thru every impact
 - Ship unhandled cases? Not possible
 
-**Why Rust specifically?** It's the only language that gives you:
+**Why Rust specifically?** It's the only language that gives you proven:
 - Memory safety **without** garbage collection
 - Thread safety **without** runtime checks
 - Zero-cost abstractions (no interpreter, no VM, no GC pauses)
-- **All proven at compile time**
+- **All enforced at compile time**
 
-This is not possible in any other language:
+This isn't possible in any other language:
 - C/C++: Manual memory (use-after-free, double-free, null pointers)
 - Java/C#/Go/Python/JS: Garbage collection (pauses, unpredictability)
 - Everything else: Pick your poison ☠️
 
-**The VSF Guarantee:** If it compiles, it won't crash. If tests pass, round-trips work.
-
 **Ways VSF can break:**
-0. **Cosmic rays** (hardware bit flips) → Use ECC RAM
-1. **Python FFI** → Just don't. Spirix already bans it anyway
+0. **Cosmic rays** (hardware bit flips) → Use ECC RAM, hash check will fail
+1. **Python FFI** → Just don't. Spirix bans it anyway
 2. **You modify the code** → Compiler catches it before you ship
 
 That's it. Those are the **only** ways VSF breaks. Everything else is systematically impossible! Cool eh?
@@ -338,15 +335,13 @@ VsfType::x(text)  // Automatically compressed
 
 ---
 
-## Status: Core Complete (v0.1.3)
-
 ### Working Now
 
-✅ **Complete type system** - 211 variants:
+✅ **Pretty damn complete type system** - 211 variants:
 - Primitives: u3-u7 (8-128 bit), i3-i7 (signed), f5-f6 (float), j5-j6 (complex)
-- Spirix: 50 types (scalar + circle combinations)
-- Tensors: 130 types (contiguous + strided)
-- Bitpacked: 1-256 bit depths
+- Spirix: 50 types (25 Scalar + 25 Circle varieties)
+- Tensors: 130 flavors (65 contiguous + 65 strided)
+- Bitpacked: 1-256 bit bins
 - Metadata: strings, time, hashes, signatures, keys, MACs
 
 ✅ **Encoding/decoding**
@@ -360,22 +355,31 @@ VsfType::x(text)  // Automatically compressed
 - Low overhead
 
 ✅ **Cryptographic support**
-- Hash algorithms: BLAKE3, SHA-256, SHA-512
+- Hash algorithms: BLAKE3 (default), SHA-256, SHA-512
 - Signatures: Ed25519, ECDSA-P256, RSA-2048
 - Keys: Ed25519, X25519, P-256, RSA-2048
 - MACs: HMAC-SHA256/512, Poly1305, BLAKE3-keyed, CMAC
-- **Mandatory BLAKE3 file integrity** - automatic on every build
+- **Mandatory file hash integrity** - automatic on every build
 
 ✅ **Camera RAW builders**
-- Complete metadata support (CFA pattern, black/white levels, etc.)
+- Extensive metadata support (CFA pattern, black/white levels, etc.)
 - Calibration frame hashes with algorithm IDs
 - Camera settings (ISO, shutter, aperture, focal length)
 - Lens metadata (make, model, focal range, aperture range)
 
+✅ **Builder pattern with dot notation**
+- Ergonomic field access: `raw.camera.iso_speed = Some(800.0)`
+- Nested builders for organized metadata
+- Already implemented and working
+
+✅ **Zero-copy mmap support**
+- BitPackedTensor data is raw bytes after header
+- Parse `'p' [bit_depth] [ndim] [shapes...]` then mmap the data
+- No "unboxed sections" needed - bulk data types are already mmap-able
+
 ### Coming Next (v0.2.0)
 
-🚧 **Hierarchical labels** - Organize data with dot notation (e.g., `camera.sensor.temperature`)
-🚧 **Unboxed sections** - Zero-copy mmap for bulk data (encode "4GB tensor lives at offset 0x1234") if it's a big demand
+🚧 **Hierarchical label names** - Actual section names with dots (e.g., label `"camera.sensor"` in file format, not just builder pattern)
 
 **Note on File I/O:** VSF gives you bytes - do whatever you want with them:
 ```rust
@@ -608,7 +612,7 @@ RawMetadata {
 2. **Can't ignore signatures** - type system enforces verification
 3. **Can't use wrong algorithm** - algorithm ID embedded in type
 
-For systems where data integrity matters - forensic photography (Lumis), scientific measurements, medical imaging, financial records, legal documents - VSF provides cryptographic guarantees from the ground up, not as a retrofit.
+For systems where data integrity matters - forensic photography, scientific measurements, medical imaging, financial records, legal documents - VSF provides cryptographic guarantees from the ground up, not as a retrofit.
 
 ### Verification is O(1) Skip-able
 
