@@ -438,9 +438,15 @@ let bytes = build_raw_image(image, None, None, None)?;
 
 ```rust
 use vsf::builders::build_raw_image;
+use vsf::types::BitPackedTensor;
+use vsf::crypto_algorithms::HASH_BLAKE3;
+
+// Create image with metadata
+let samples: Vec<u64> = vec![2048; 4096 * 3072];
+let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
 
 let bytes = build_raw_image(
-    raw_tensor,
+    image,
     Some(RawMetadata {
         cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']),
         black_level: Some(64.),
