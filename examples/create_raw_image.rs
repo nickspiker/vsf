@@ -3,35 +3,30 @@ use vsf::types::{BitPackedTensor, EtType};
 use vsf::WorldCoord;
 
 fn main() -> Result<(), String> {
-    println!("Creating example VSF RAW image file...\n");
-    println!("═══════════════════════════════════════════════════════════");
-    println!("IMPORTANT: BitPackedTensor is SELF-DESCRIBING!");
-    println!("  - It contains bit_depth (how many bits per pixel)");
-    println!("  - It contains shape ([width, height])");
-    println!("  - It contains the bitpacked pixel data");
-    println!("  NO redundant width/height/bits_per_pixel fields needed!");
-    println!("═══════════════════════════════════════════════════════════\n");
-
-    // Example: 8x8 8-bit grayscale RAW image
-    // Create simple gradient pattern: 0, 18, 36, 54, ... 252 (max 8-bit is 255)
-    let mut samples = Vec::new();
-    for y in 0..8 {
-        for x in 0..8 {
-            let value = ((x + y) * 18) as u64; // Max: 14*18 = 252 (fits in 8-bit)
-            samples.push(value);
-        }
+    // Example: 17x163 11-bit single plane RGGB bayer
+    let width = 17;
+    let height = 163;
+    let planes = 1;
+    let bits = 11;
+    let cfa = vec![b'R', b'G', b'C', b'Y']; // Red Green Cyan Yellow Bayer pattern
+    let blackpoint = 499;
+    let whitepoint = 8047;
+    let total_samples = width * height * planes;
+    let mut samples = Vec::with_capacity(total_samples);
+    let mut rng = 0usize;
+    for sample in 0..total_samples {
+        rng ^= rng.rotate_left(13).wrapping_add(sample);
+        let value = rng as u8 as u16 + blackpoint; // Simulate RAW image data
+        samples.push(value);
     }
 
-    println!("Creating complete RAW image with full metadata...");
-
-    // Create BitPackedTensor - this self-describes the image!
-    let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
+    let image = BitPackedTensor::pack(bits, vec![width, height], &samples);
 
     // Create complete RAW image with full metadata
-    let raw_bytes = complete_raw_image(
+    let raw_bytes = build_raw_image(
         image,
         Some(RawMetadata {
-            cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']), // RGGB Bayer pattern
+            cfa_pattern: Some(cfa), // RGGB Bayer pattern
             black_level: Some(64.),
             white_level: Some(255.),
             dark_frame_hash: Some(vec![0xAB; 32]), // Example hash
@@ -69,49 +64,19 @@ fn main() -> Result<(), String> {
         }),
     )?;
 
-    println!("✓ Created VSF RAW file: {} bytes", raw_bytes.len());
-    println!("  - Magic number: RÅ<");
-    println!("  - Contains: token auth + imaging raw + pixels");
-    println!("  - Sensor: 8×8 @ 8 bits/pixel (self-described in BitPackedTensor)");
-    println!("  - Camera: ISO 800, 1/60s, f/2.8, 24mm");
-    println!("  - Location: Seattle, WA");
-    println!();
-
-    // Example: Lumis-style capture (12-bit, 4096x3072)
-    println!("Creating Lumis 12-bit RAW capture...");
-    println!("  Note: lumis_raw_capture takes SAMPLES (u64 values 0-4095)");
-    println!("        It will bitpack them into minimal representation\n");
-
     let lumis_pixel_count = 4096 * 3072;
     let lumis_samples: Vec<u64> = vec![2048; lumis_pixel_count]; // Mid-gray (12-bit)
 
     let lumis_bytes = lumis_raw_capture(
         lumis_samples,
         800.0,
-        1. / 60., // 1/60 second shutter
+        1. / 60.,  // 1/60 second shutter
         987654321, // Numeric device serial
         vec![0xAB; 32],
         vec![0xCD; 64],
         EtType::f6(1234567890.123456),
         Some(WorldCoord::from_lat_lon(47.6062, -122.3321)),
     )?;
-
-    println!("✓ Created Lumis RAW file: {} bytes", lumis_bytes.len());
-    println!("  - Resolution: 4096×3072 (12.6 MP)");
-    println!("  - Bit depth: 12-bit");
-    println!("  - Bayer pattern: RGGB");
-    println!("  - TOKEN authenticated");
-    println!();
-
-    // You can write these to disk:
-    // std::fs::write("example_raw.vsf", &raw_bytes)?;
-    // std::fs::write("lumis_capture.vsf", &lumis_bytes)?;
-
-    println!("✓ All examples completed successfully!");
-    println!();
-    println!("Files are ready to write with:");
-    println!("  std::fs::write(\"example_raw.vsf\", &raw_bytes)");
-    println!("  std::fs::write(\"lumis_capture.vsf\", &lumis_bytes)");
 
     Ok(())
 }

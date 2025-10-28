@@ -22,8 +22,82 @@
 //! [raw_bytes...]                         Unboxed data (if n = 0)
 //! ```
 
-use crate::types::VsfType;
 use crate::encoding::traits::EncodeNumber;
+use crate::types::VsfType;
+
+/// Validate VSF section or field name
+///
+/// Rules:
+/// - Must start with lowercase letter
+/// - Can contain: lowercase letters, digits, underscores
+/// - Dots allowed for hierarchy (each segment follows same rules)
+/// - No trailing/leading dots, no consecutive dots
+/// - No trailing/leading underscores, no consecutive underscores
+/// - Regex: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
+///
+/// # Examples
+/// ```
+/// use vsf::file_format::validate_name;
+/// assert!(validate_name("camera").is_ok());
+/// assert!(validate_name("camera_sensor").is_ok());
+/// assert!(validate_name("camera.sensor").is_ok());
+/// assert!(validate_name("iso_speed_100").is_ok());
+/// assert!(validate_name("Camera").is_err());       // uppercase
+/// assert!(validate_name("9camera").is_err());      // starts with digit
+/// assert!(validate_name(".camera").is_err());      // starts with dot
+/// assert!(validate_name("camera.").is_err());      // ends with dot
+/// assert!(validate_name("camera..sensor").is_err()); // double dot
+/// assert!(validate_name("camera__sensor").is_err()); // double underscore
+/// ```
+pub fn validate_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Name cannot be empty".to_string());
+    }
+
+    // Check for leading/trailing dots or underscores
+    if name.starts_with('.') || name.ends_with('.') {
+        return Err(format!("Invalid name '{}' - cannot start or end with dot", name));
+    }
+    if name.starts_with('_') || name.ends_with('_') {
+        return Err(format!("Invalid name '{}' - cannot start or end with underscore", name));
+    }
+
+    // Check for consecutive dots or underscores
+    if name.contains("..") {
+        return Err(format!("Invalid name '{}' - cannot contain consecutive dots", name));
+    }
+    if name.contains("__") {
+        return Err(format!("Invalid name '{}' - cannot contain consecutive underscores", name));
+    }
+
+    // Split by dots and validate each segment
+    for segment in name.split('.') {
+        if segment.is_empty() {
+            return Err(format!("Invalid name '{}' - empty segment", name));
+        }
+
+        // First character must be lowercase letter
+        let first = segment.chars().next().unwrap();
+        if !first.is_ascii_lowercase() {
+            return Err(format!(
+                "Invalid name '{}' - segment '{}' must start with lowercase letter (found '{}')",
+                name, segment, first
+            ));
+        }
+
+        // Rest can be lowercase, digits, underscores
+        for ch in segment.chars() {
+            if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() && ch != '_' {
+                return Err(format!(
+                    "Invalid name '{}' - use lowercase letters, digits, and underscores only (found '{}')",
+                    name, ch
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
 
 /// VSF file header
 #[derive(Debug, Clone)]
@@ -48,10 +122,10 @@ pub struct LabelDefinition {
 /// Enables forensic recovery and integrity checking.
 #[derive(Debug, Clone)]
 pub struct Preamble {
-    pub count: usize,                   // n: number of labels in this set
-    pub size_bits: usize,               // b: total size in BITS (includes preamble itself)
-    pub hash: Option<Vec<u8>>,          // h: optional integrity hash
-    pub signature: Option<Vec<u8>>,     // g: optional authentication signature
+    pub count: usize,               // n: number of labels in this set
+    pub size_bits: usize,           // b: total size in BITS (includes preamble itself)
+    pub hash: Option<Vec<u8>>,      // h: optional integrity hash
+    pub signature: Option<Vec<u8>>, // g: optional authentication signature
 }
 
 impl Preamble {
@@ -211,36 +285,51 @@ pub struct VsfItem {
 }
 
 impl VsfSection {
-    /// Create new section
+    /// Create new section with validated name
+    ///
+    /// # Panics
+    /// Panics if the section name contains invalid characters
     pub fn new(name: impl Into<String>) -> Self {
+        let name_str = name.into();
+        validate_name(&name_str)
+            .unwrap_or_else(|e| panic!("Invalid section name: {}", e));
         Self {
-            name: name.into(),
+            name: name_str,
             items: Vec::new(),
         }
     }
 
-    /// Add an item to the section
+    /// Add an item to the section with validated field name
+    ///
+    /// # Panics
+    /// Panics if the field name contains invalid characters
     pub fn add_item(&mut self, name: impl Into<String>, value: VsfType) {
+        let name_str = name.into();
+        validate_name(&name_str)
+            .unwrap_or_else(|e| panic!("Invalid field name: {}", e));
         self.items.push(VsfItem {
-            name: name.into(),
+            name: name_str,
             value,
         });
     }
 
     /// Encode section to bytes (with preamble and brackets)
     ///
-    /// Format: {n[count] b[size]}[(field:value)...]
+    /// Format: {n[count] b[size]}[dsection_name(field:value)...]
     pub fn encode(&self) -> Vec<u8> {
         let mut section_body = Vec::new();
 
         // Section start
         section_body.push(b'[');
 
+        // Section name (namespace for all fields)
+        section_body.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
+
         // Encode each item
         for item in &self.items {
             section_body.push(b'(');
 
-            // Item name
+            // Item name (simple identifier, no dots - namespace comes from section)
             section_body.extend_from_slice(&VsfType::d(item.name.clone()).flatten());
 
             // Separator
@@ -354,5 +443,68 @@ mod tests {
         // Should contain hash marker
         assert!(bytes.contains(&b'h'));
         assert!(bytes.windows(32).any(|w| w == &vec![0xAB; 32][..]));
+    }
+
+    #[test]
+    fn test_validate_name_valid() {
+        assert!(validate_name("camera").is_ok());
+        assert!(validate_name("iso_speed").is_ok());
+        assert!(validate_name("camera.sensor").is_ok());
+        assert!(validate_name("lens_min_focal_m").is_ok());
+        assert!(validate_name("shutter_time_s").is_ok());
+        assert!(validate_name("test123").is_ok());
+        assert!(validate_name("camera2").is_ok());
+        assert!(validate_name("camera.sensor.temperature").is_ok());
+        assert!(validate_name("a").is_ok());
+        assert!(validate_name("a1").is_ok());
+        assert!(validate_name("a_b_c").is_ok());
+    }
+
+    #[test]
+    fn test_validate_name_invalid() {
+        // Empty
+        assert!(validate_name("").is_err());
+
+        // Uppercase
+        assert!(validate_name("Camera").is_err());
+        assert!(validate_name("cameraA").is_err());
+
+        // Invalid characters
+        assert!(validate_name("iso speed").is_err()); // space
+        assert!(validate_name("iso-speed").is_err()); // hyphen
+        assert!(validate_name("camera(main)").is_err()); // paren
+        assert!(validate_name("camera:sensor").is_err()); // colon
+        assert!(validate_name("lens/model").is_err()); // slash
+
+        // Invalid start
+        assert!(validate_name("9camera").is_err()); // starts with digit
+        assert!(validate_name("_camera").is_err()); // starts with underscore
+        assert!(validate_name(".camera").is_err()); // starts with dot
+        assert!(validate_name("1test").is_err()); // starts with digit
+
+        // Invalid end
+        assert!(validate_name("camera_").is_err()); // ends with underscore
+        assert!(validate_name("camera.").is_err()); // ends with dot
+
+        // Consecutive separators
+        assert!(validate_name("camera..sensor").is_err()); // double dot
+        assert!(validate_name("camera__sensor").is_err()); // double underscore
+
+        // Invalid segment start in hierarchical names
+        assert!(validate_name("camera.9sensor").is_err()); // segment starts with digit
+        assert!(validate_name("camera._private").is_err()); // segment starts with underscore
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid section name")]
+    fn test_section_name_validation_panics() {
+        VsfSection::new("Camera Sensor"); // uppercase and space
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid field name")]
+    fn test_field_name_validation_panics() {
+        let mut section = VsfSection::new("camera");
+        section.add_item("ISO Speed", VsfType::f5(800.0)); // uppercase and space
     }
 }

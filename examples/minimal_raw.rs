@@ -18,7 +18,7 @@ fn main() -> Result<(), String> {
     let image = BitPackedTensor::pack(8, vec![4, 4], &samples);
 
     // Create minimal RAW (no metadata, just the image)
-    let raw_bytes = complete_raw_image(
+    let raw_bytes = build_raw_image(
         image, None, // No sensor metadata
         None, // No camera settings
         None, // No lens info

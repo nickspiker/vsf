@@ -195,12 +195,12 @@ pub use encoding::{EncodeNumber, EncodeNumberInclusive};
 pub use decoding::parse;
 
 // Re-export file format and builder
-pub use file_format::{LabelDefinition, VsfHeader, VsfSection};
+pub use file_format::{validate_name, LabelDefinition, VsfHeader, VsfSection};
 pub use vsf_builder::VsfBuilder;
 
 // RAW image builders and parser
 pub use builders::{
-    complete_raw_image, lumis_raw_capture, parse_raw_image, CameraSettings, LensInfo,
+    build_raw_image, lumis_raw_capture, parse_raw_image, CameraSettings, LensInfo,
     ParsedRawImage, RawMetadata, TokenAuth,
 };
 
@@ -582,7 +582,7 @@ mod tests {
             assert_eq!(ptr, flat.len()); // Consumed all bytes
 
             // Unpack and verify
-            let unpacked = decoded.unpack();
+            let unpacked = decoded.unpack().into_u64();
             assert_eq!(unpacked.len(), 200);
             for (i, &val) in unpacked.iter().enumerate() {
                 assert_eq!(val, samples[i], "Sample {} mismatch", i);
@@ -611,7 +611,7 @@ mod tests {
             assert_eq!(decoded.shape, vec![8]);
             assert_eq!(decoded.data.len(), 1); // 8 bits = 1 byte
 
-            let unpacked = decoded.unpack();
+            let unpacked = decoded.unpack().into_u64();
             assert_eq!(unpacked, samples);
         } else {
             panic!("Expected bitpacked tensor");
@@ -636,7 +636,7 @@ mod tests {
             assert_eq!(decoded.bit_depth, 13);
             assert_eq!(decoded.shape, vec![5]);
 
-            let unpacked = decoded.unpack();
+            let unpacked = decoded.unpack().into_u64();
             assert_eq!(unpacked, samples);
         } else {
             panic!("Expected bitpacked tensor");
@@ -644,13 +644,26 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "exceeds max value")]
-    fn test_bitpacked_value_overflow() {
+    #[should_panic(expected = "Cannot pack")]
+    fn test_bitpacked_type_overflow() {
         use crate::types::BitPackedTensor;
 
-        // Try to pack value that's too large for bit depth
-        let samples: Vec<u64> = vec![4096]; // Max for 12-bit is 4095
-        BitPackedTensor::pack(12, vec![1], &samples); // Should panic
+        // Try to pack 12-bit values into u8 (type too small)
+        let samples: Vec<u8> = vec![255]; // u8 only holds 8 bits, need 12
+        BitPackedTensor::pack(12, vec![1], &samples); // Should panic: type capacity exceeded
+    }
+
+    #[test]
+    fn test_bitpacked_value_masking() {
+        use crate::types::BitPackedTensor;
+
+        // Values exceeding bit_depth are masked (no panic, just truncation)
+        let samples: Vec<u64> = vec![4096]; // 4096 = 0x1000, 12-bit max is 4095
+        let tensor = BitPackedTensor::pack(12, vec![1], &samples); // No panic!
+
+        // Unpack should give masked value: 4096 & 0xFFF = 0
+        let unpacked = tensor.unpack().into_u64();
+        assert_eq!(unpacked[0], 0); // Low 12 bits of 4096 (0x1000) = 0
     }
 
     #[test]

@@ -12,7 +12,7 @@ fn main() {
     println!(
         "UTF-8 size: {} bytes ({:.2} KB)",
         utf8_size,
-        utf8_size as f64 / 1024.0
+        utf8_size as f64 / 1024.
     );
 
     // Count ASCII vs Unicode and total chars
@@ -47,7 +47,7 @@ fn main() {
     println!(
         "Huffman size: {} bytes ({:.2} KB)",
         huffman_size,
-        huffman_size as f64 / 1024.0
+        huffman_size as f64 / 1024.
     );
     println!("Avg encode time: {:.2?} ({} runs)", avg_encode_time, runs);
     println!(
@@ -64,7 +64,7 @@ fn main() {
     println!(
         "Space saved: {} bytes ({:.2} KB)",
         space_saved,
-        space_saved as f64 / 1024.0
+        space_saved as f64 / 1024.
     );
     println!(
         "Compressed to: {:.2}% of original size",
@@ -83,7 +83,7 @@ fn main() {
 
     for _ in 0..runs {
         let start = Instant::now();
-        decoded = decode_text(&encoded, char_count).expect("Decode failed");
+        (decoded, _) = decode_text(&encoded, char_count).expect("Decode failed");
         total_decode_time += start.elapsed();
     }
 

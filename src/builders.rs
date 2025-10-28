@@ -100,14 +100,14 @@ pub struct TokenAuth {
 ///
 /// # Arguments
 /// * `bit_depth` - Bits per sample (1-256, where 0 = 256)
-/// * `width` - Image width in pixels
-/// * `height` - Image height in pixels
-/// * `samples` - Pixel values
+/// * `width` - Image width in samples
+/// * `height` - Image height in samples
+/// * `samples` - RAW sensor sample values (unreferenced, single-plane)
 ///
 /// # Example
 /// ```ignore
-/// let pixels: Vec<u64> = vec![2048; 4096 * 3072]; // 12-bit mid-gray
-/// let raw = raw_image(12, 4096, 3072, pixels);
+/// let samples: Vec<u64> = vec![2048; 4096 * 3072]; // 12-bit mid-gray
+/// let raw = raw_image(12, 4096, 3072, samples);
 /// ```
 pub fn raw_image(bit_depth: u8, width: usize, height: usize, samples: Vec<u64>) -> VsfType {
     let tensor = BitPackedTensor::pack(bit_depth, vec![width, height], &samples);
@@ -203,7 +203,7 @@ pub fn geotagged_photo(
 ///
 /// # Returns
 /// Complete VSF file bytes ready to write to disk
-pub fn complete_raw_image(
+pub fn build_raw_image(
     image: BitPackedTensor,
     metadata: Option<RawMetadata>,
     camera: Option<CameraSettings>,
@@ -216,14 +216,14 @@ pub fn complete_raw_image(
     if let Some(auth) = token_auth {
         let mut auth_items = vec![
             (
-                "creator pubkey".to_string(),
+                "creator_pubkey".to_string(),
                 VsfType::k(KEY_ED25519, auth.creator_pubkey),
             ),
             (
-                "device serial".to_string(),
+                "device_serial".to_string(),
                 VsfType::u(auth.device_serial, false),
             ),
-            ("timestamp et".to_string(), VsfType::e(auth.timestamp_et)),
+            ("timestamp_et".to_string(), VsfType::e(auth.timestamp_et)),
             (
                 "signature".to_string(),
                 VsfType::g(SIG_ED25519, auth.signature),
@@ -234,7 +234,7 @@ pub fn complete_raw_image(
             auth_items.push(("location".to_string(), VsfType::w(loc)));
         }
 
-        builder = builder.add_section("token auth", auth_items);
+        builder = builder.add_section("token_auth", auth_items);
     }
 
     // Build raw section - start with the image (p type has width, height, bit_depth)
@@ -246,7 +246,7 @@ pub fn complete_raw_image(
             // Validate CFA pattern contains only valid ASCII colours
             validate_cfa_pattern(&cfa)?;
             raw_items.push((
-                "cfa pattern".to_string(),
+                "cfa_pattern".to_string(),
                 VsfType::t_u3(Tensor {
                     shape: vec![cfa.len()],
                     data: cfa,
@@ -255,36 +255,36 @@ pub fn complete_raw_image(
         }
 
         if let Some(black) = meta.black_level {
-            raw_items.push(("black level".to_string(), VsfType::f5(black)));
+            raw_items.push(("black_level".to_string(), VsfType::f5(black)));
         }
 
         if let Some(white) = meta.white_level {
-            raw_items.push(("white level".to_string(), VsfType::f5(white)));
+            raw_items.push(("white_level".to_string(), VsfType::f5(white)));
         }
 
         // Calibration hashes (using BLAKE3 as default)
         if let Some(hash) = meta.dark_frame_hash {
-            raw_items.push(("dark frame hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
+            raw_items.push(("dark_frame_hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
         }
 
         if let Some(hash) = meta.flat_field_hash {
-            raw_items.push(("flat field hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
+            raw_items.push(("flat_field_hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
         }
 
         if let Some(hash) = meta.bias_frame_hash {
-            raw_items.push(("bias frame hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
+            raw_items.push(("bias_frame_hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
         }
 
         if let Some(hash) = meta.vignette_correction_hash {
             raw_items.push((
-                "vignette correction hash".to_string(),
+                "vignette_correction_hash".to_string(),
                 VsfType::h(HASH_BLAKE3, hash),
             ));
         }
 
         if let Some(hash) = meta.distortion_correction_hash {
             raw_items.push((
-                "distortion correction hash".to_string(),
+                "distortion_correction_hash".to_string(),
                 VsfType::h(HASH_BLAKE3, hash),
             ));
         }
@@ -298,7 +298,7 @@ pub fn complete_raw_image(
                 ));
             }
             raw_items.push((
-                "magic 9".to_string(),
+                "magic_9".to_string(),
                 VsfType::t_f5(Tensor {
                     shape: vec![3, 3],
                     data: matrix,
@@ -310,66 +310,66 @@ pub fn complete_raw_image(
     // Camera settings
     if let Some(cam) = camera {
         if let Some(iso) = cam.iso_speed {
-            raw_items.push(("iso speed".to_string(), VsfType::f5(iso)));
+            raw_items.push(("iso_speed".to_string(), VsfType::f5(iso)));
         }
 
         if let Some(shutter) = cam.shutter_time_s {
-            raw_items.push(("shutter time s".to_string(), VsfType::f5(shutter)));
+            raw_items.push(("shutter_time_s".to_string(), VsfType::f5(shutter)));
         }
 
         if let Some(aperture) = cam.aperture_f_number {
-            raw_items.push(("aperture f number".to_string(), VsfType::f5(aperture)));
+            raw_items.push(("aperture_f_number".to_string(), VsfType::f5(aperture)));
         }
 
         if let Some(focal) = cam.focal_length_m {
-            raw_items.push(("focal length m".to_string(), VsfType::f5(focal)));
+            raw_items.push(("focal_length_m".to_string(), VsfType::f5(focal)));
         }
 
         if let Some(comp) = cam.exposure_compensation {
-            raw_items.push(("exposure compensation".to_string(), VsfType::f5(comp)));
+            raw_items.push(("exposure_compensation".to_string(), VsfType::f5(comp)));
         }
 
         if let Some(focus) = cam.focus_distance_m {
-            raw_items.push(("focus distance m".to_string(), VsfType::f5(focus)));
+            raw_items.push(("focus_distance_m".to_string(), VsfType::f5(focus)));
         }
 
         if let Some(flash) = cam.flash_fired {
-            raw_items.push(("flash fired".to_string(), VsfType::u0(flash)));
+            raw_items.push(("flash_fired".to_string(), VsfType::u0(flash)));
         }
 
         if let Some(metering) = cam.metering_mode {
-            raw_items.push(("metering mode".to_string(), VsfType::x(metering)));
+            raw_items.push(("metering_mode".to_string(), VsfType::x(metering)));
         }
     }
 
     // Lens info
     if let Some(l) = lens {
         if let Some(make) = l.make {
-            raw_items.push(("lens make".to_string(), VsfType::x(make)));
+            raw_items.push(("lens_make".to_string(), VsfType::x(make)));
         }
 
         if let Some(model) = l.model {
-            raw_items.push(("lens model".to_string(), VsfType::x(model)));
+            raw_items.push(("lens_model".to_string(), VsfType::x(model)));
         }
 
         if let Some(serial) = l.serial_number {
-            raw_items.push(("lens serial".to_string(), VsfType::x(serial)));
+            raw_items.push(("lens_serial".to_string(), VsfType::x(serial)));
         }
 
         if let Some(min_focal) = l.min_focal_length_m {
-            raw_items.push(("lens min focal m".to_string(), VsfType::f5(min_focal)));
+            raw_items.push(("lens_min_focal_m".to_string(), VsfType::f5(min_focal)));
         }
 
         if let Some(max_focal) = l.max_focal_length_m {
-            raw_items.push(("lens max focal m".to_string(), VsfType::f5(max_focal)));
+            raw_items.push(("lens_max_focal_m".to_string(), VsfType::f5(max_focal)));
         }
 
         if let Some(min_ap) = l.min_aperture_f {
-            raw_items.push(("lens min aperture".to_string(), VsfType::f5(min_ap)));
+            raw_items.push(("lens_min_aperture".to_string(), VsfType::f5(min_ap)));
         }
 
         if let Some(max_ap) = l.max_aperture_f {
-            raw_items.push(("lens max aperture".to_string(), VsfType::f5(max_ap)));
+            raw_items.push(("lens_max_aperture".to_string(), VsfType::f5(max_ap)));
         }
     }
 
@@ -397,10 +397,10 @@ pub fn complete_raw_image(
 /// **The resulting p type contains EVERYTHING about the image:**
 /// - No separate width field (shape has it: [4096, 3072])
 /// - No separate bit_depth field (p encoding has it: 12)
-/// - No separate pixel data section (p has the bitpacked bytes)
+/// - No separate sample data section (p has the bitpacked bytes)
 ///
 /// # Arguments
-/// * `samples` - RAW pixel values as u64 (0-4095 for 12-bit), will be bitpacked
+/// * `samples` - RAW sensor sample values as u64 (0-4095 for 12-bit), will be bitpacked
 /// * `iso` - ISO speed (e.g., 100, 200, 400, 800, 1600, 3200)
 /// * `shutter_s` - Shutter time in seconds (e.g., 1./60. = 0.0167 for 1/60 second)
 /// * `device_serial` - Hardware serial number (e.g., "LUMIS-001")
@@ -421,7 +421,7 @@ pub fn lumis_raw_capture(
     // Create BitPackedTensor for 12-bit Lumis sensor
     let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
 
-    complete_raw_image(
+    build_raw_image(
         image,
         Some(RawMetadata {
             cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']), // RGGB Bayer pattern
@@ -629,8 +629,9 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
 
     // Parse preamble: {n[count] b[size]}
     use crate::decoding::parse_preamble;
-    let (_preamble_count, _preamble_size, _preamble_hash, _preamble_sig) = parse_preamble(data, &mut pointer)
-        .map_err(|e| format!("Failed to parse preamble: {}", e))?;
+    let (_preamble_count, _preamble_size, _preamble_hash, _preamble_sig) =
+        parse_preamble(data, &mut pointer)
+            .map_err(|e| format!("Failed to parse preamble: {}", e))?;
 
     // Now parse the "raw" section
     if data[pointer] != b'[' {
@@ -640,6 +641,14 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         ));
     }
     pointer += 1;
+
+    // Parse section name (namespace for all fields)
+    let section_name_type = parse(data, &mut pointer)
+        .map_err(|e| format!("Failed to parse section name: {}", e))?;
+    let _section_name = match section_name_type {
+        VsfType::d(name) => name,
+        _ => return Err("Expected d type for section name".to_string()),
+    };
 
     // Parse all fields in the section
     let mut image: Option<BitPackedTensor> = None;
@@ -713,132 +722,132 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
                 }
             }
             // Raw metadata
-            "cfa pattern" => {
+            "cfa_pattern" => {
                 if let VsfType::t_u3(tensor) = field_value {
                     cfa_pattern = Some(tensor.data);
                 }
             }
-            "black level" => {
+            "black_level" => {
                 if let VsfType::f5(v) = field_value {
                     black_level = Some(v);
                 }
             }
-            "white level" => {
+            "white_level" => {
                 if let VsfType::f5(v) = field_value {
                     white_level = Some(v);
                 }
             }
-            "dark frame hash" => {
+            "dark_frame_hash" => {
                 if let VsfType::h(_algorithm, v) = field_value {
                     dark_frame_hash = Some(v);
                 }
             }
-            "flat field hash" => {
+            "flat_field_hash" => {
                 if let VsfType::h(_algorithm, v) = field_value {
                     flat_field_hash = Some(v);
                 }
             }
-            "bias frame hash" => {
+            "bias_frame_hash" => {
                 if let VsfType::h(_algorithm, v) = field_value {
                     bias_frame_hash = Some(v);
                 }
             }
-            "vignette correction hash" => {
+            "vignette_correction_hash" => {
                 if let VsfType::h(_algorithm, v) = field_value {
                     vignette_correction_hash = Some(v);
                 }
             }
-            "distortion correction hash" => {
+            "distortion_correction_hash" => {
                 if let VsfType::h(_algorithm, v) = field_value {
                     distortion_correction_hash = Some(v);
                 }
             }
-            "magic 9" => {
+            "magic_9" => {
                 if let VsfType::t_f5(tensor) = field_value {
                     magic_9 = Some(tensor.data);
                 }
             }
             // Camera settings
-            "iso speed" => {
+            "iso_speed" => {
                 if let VsfType::f5(v) = field_value {
                     iso_speed = Some(v);
                 }
             }
-            "shutter time s" => {
+            "shutter_time_s" => {
                 if let VsfType::f5(v) = field_value {
                     shutter_time_s = Some(v);
                 }
             }
-            "aperture f number" => {
+            "aperture_f_number" => {
                 if let VsfType::f5(v) = field_value {
                     aperture_f_number = Some(v);
                 }
             }
-            "focal length m" => {
+            "focal_length_m" => {
                 if let VsfType::f5(v) = field_value {
                     focal_length_m = Some(v);
                 }
             }
-            "exposure compensation" => {
+            "exposure_compensation" => {
                 if let VsfType::f5(v) = field_value {
                     exposure_compensation = Some(v);
                 }
             }
-            "focus distance m" => {
+            "focus_distance_m" => {
                 if let VsfType::f5(v) = field_value {
                     focus_distance_m = Some(v);
                 }
             }
-            "flash fired" => flash_fired = to_usize(&field_value).map(|v| v != 0),
-            "metering mode" => {
+            "flash_fired" => flash_fired = to_usize(&field_value).map(|v| v != 0),
+            "metering_mode" => {
                 if let VsfType::x(v) = field_value {
                     metering_mode = Some(v);
                 }
             }
             // Lens info
-            "lens make" => {
+            "lens_make" => {
                 if let VsfType::x(v) = field_value {
                     lens_make = Some(v);
                 }
             }
-            "lens model" => {
+            "lens_model" => {
                 if let VsfType::x(v) = field_value {
                     lens_model = Some(v);
                 }
             }
-            "lens serial" => {
+            "lens_serial" => {
                 if let VsfType::x(v) = field_value {
                     lens_serial = Some(v);
                 }
             }
-            "lens min focal m" => {
+            "lens_min_focal_m" => {
                 if let VsfType::f5(v) = field_value {
                     lens_min_focal_m = Some(v);
                 }
             }
-            "lens max focal m" => {
+            "lens_max_focal_m" => {
                 if let VsfType::f5(v) = field_value {
                     lens_max_focal_m = Some(v);
                 }
             }
-            "lens min aperture" => {
+            "lens_min_aperture" => {
                 if let VsfType::f5(v) = field_value {
                     lens_min_aperture = Some(v);
                 }
             }
-            "lens max aperture" => {
+            "lens_max_aperture" => {
                 if let VsfType::f5(v) = field_value {
                     lens_max_aperture = Some(v);
                 }
             }
             // Token auth
-            "creator pubkey" => {
+            "creator_pubkey" => {
                 if let VsfType::k(_algorithm, v) = field_value {
                     creator_pubkey = Some(v);
                 }
             }
-            "device serial" => device_serial = to_usize(&field_value),
-            "timestamp et" => {
+            "device_serial" => device_serial = to_usize(&field_value),
+            "timestamp_et" => {
                 if let VsfType::e(et) = field_value {
                     timestamp_et = Some(et);
                 }
@@ -1073,7 +1082,7 @@ mod tests {
         let samples: Vec<u64> = vec![255; 64]; // 8x8, all white
         let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
 
-        let result = complete_raw_image(image, None, None, None, None);
+        let result = build_raw_image(image, None, None, None, None);
 
         assert!(result.is_ok());
         let bytes = result.unwrap();
@@ -1092,7 +1101,7 @@ mod tests {
         let samples: Vec<u64> = vec![255; 64]; // 8x8
         let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
 
-        let result = complete_raw_image(
+        let result = build_raw_image(
             image,
             Some(RawMetadata {
                 cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']),
@@ -1145,7 +1154,7 @@ mod tests {
             samples,
             800.0,
             1. / 60., // 1/60 second shutter
-            12345, // Numeric serial
+            12345,    // Numeric serial
             vec![0xAB; 32],
             vec![0xCD; 64],
             EtType::f6(1234567890.123456),
@@ -1171,7 +1180,7 @@ mod tests {
         let samples: Vec<u64> = vec![255; 64]; // 8x8
         let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
 
-        let result = complete_raw_image(
+        let result = build_raw_image(
             image,
             None,
             None,
@@ -1205,7 +1214,7 @@ mod tests {
         let original_image = BitPackedTensor::pack(8, vec![4, 4], &samples);
 
         // Build VSF file
-        let raw_bytes = complete_raw_image(original_image.clone(), None, None, None, None).unwrap();
+        let raw_bytes = build_raw_image(original_image.clone(), None, None, None, None).unwrap();
 
         // Parse it back
         let parsed = parse_raw_image(&raw_bytes).unwrap();
@@ -1215,8 +1224,8 @@ mod tests {
         assert_eq!(parsed.image.shape, vec![4, 4]);
 
         // Unpack and compare pixels
-        let original_samples = original_image.unpack();
-        let parsed_samples = parsed.image.unpack();
+        let original_samples = original_image.unpack().into_u64();
+        let parsed_samples = parsed.image.unpack().into_u64();
         assert_eq!(parsed_samples, original_samples);
         assert_eq!(parsed_samples, samples);
 
@@ -1257,7 +1266,7 @@ mod tests {
         };
 
         // Build VSF file
-        let raw_bytes = complete_raw_image(
+        let raw_bytes = build_raw_image(
             original_image.clone(),
             Some(original_metadata.clone()),
             Some(original_camera.clone()),
@@ -1272,7 +1281,7 @@ mod tests {
         // Verify image
         assert_eq!(parsed.image.bit_depth, 8);
         assert_eq!(parsed.image.shape, vec![8, 8]);
-        let parsed_samples = parsed.image.unpack();
+        let parsed_samples = parsed.image.unpack().into_u64();
         assert_eq!(parsed_samples, samples);
 
         // Verify metadata
@@ -1307,7 +1316,7 @@ mod tests {
         let samples: Vec<u64> = vec![100; 16]; // 4x4
         let image = BitPackedTensor::pack(8, vec![4, 4], &samples);
 
-        let raw_bytes = complete_raw_image(
+        let raw_bytes = build_raw_image(
             image,
             Some(RawMetadata {
                 cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']),
@@ -1353,8 +1362,7 @@ mod tests {
 
         // Next byte should be '[' (section start)
         assert_eq!(
-            raw_bytes[pointer],
-            b'[',
+            raw_bytes[pointer], b'[',
             "Expected '[' immediately after preamble"
         );
     }
@@ -1374,7 +1382,7 @@ mod tests {
         ];
 
         for cfa in valid_patterns {
-            let result = complete_raw_image(
+            let result = build_raw_image(
                 image.clone(),
                 Some(RawMetadata {
                     cfa_pattern: Some(cfa.clone()),
@@ -1406,7 +1414,7 @@ mod tests {
         ];
 
         for cfa in invalid_patterns {
-            let result = complete_raw_image(
+            let result = build_raw_image(
                 image.clone(),
                 Some(RawMetadata {
                     cfa_pattern: Some(cfa.clone()),

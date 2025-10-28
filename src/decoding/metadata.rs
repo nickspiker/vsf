@@ -396,16 +396,11 @@ pub fn parse_preamble(
     *pointer += 1;
 
     // Verify required fields
-    let count = count.ok_or_else(|| {
-        Error::new(
-            ErrorKind::InvalidData,
-            "Missing 'n' (count) in preamble",
-        )
-    })?;
+    let count = count
+        .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Missing 'n' (count) in preamble"))?;
 
-    let size_bits = size_bits.ok_or_else(|| {
-        Error::new(ErrorKind::InvalidData, "Missing 'b' (size) in preamble")
-    })?;
+    let size_bits = size_bits
+        .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Missing 'b' (size) in preamble"))?;
 
     Ok((count, size_bits, hash, signature))
 }

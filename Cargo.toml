@@ -9,8 +9,14 @@ repository = "https://github.com/nickspiker/vsf"
 keywords = ["binary", "serialization", "storage", "data-format"]
 categories = ["encoding", "data-structures"]
 
+[[bin]]
+name = "vsfinfo"
+path = "src/bin/vsfinfo.rs"
+
 [dependencies]
 bitvec = "1.0.1"
 chrono = "0.4.38"
 num-complex = "0.4.5"
 spirix = { path = "../spirix" }
+clap = { version = "4", features = ["derive"] }
+blake3 = "1"
