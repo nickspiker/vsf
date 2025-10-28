@@ -377,9 +377,14 @@ VsfType::x(text)  // Automatically compressed
 - Parse `'p' [bit_depth] [ndim] [shapes...]` then mmap the data
 - No "unboxed sections" needed - bulk data types are already mmap-able
 
+✅ **Hierarchical label names**
+- Section names support dots: `"camera.sensor"`, `"raw.calibration"`, etc.
+- Validation enforces clean syntax (no leading/trailing dots, no double dots)
+- Already implemented - use `builder.add_section("camera.sensor", items)`
+
 ### Coming Next (v0.2.0)
 
-🚧 **Hierarchical label names** - Actual section names with dots (e.g., label `"camera.sensor"` in file format, not just builder pattern)
+🚧 **Structured capability tokens** - Formal capability types built on existing crypto primitives (`g`, `k`, `h`, `a`)
 
 **Note on File I/O:** VSF gives you bytes - do whatever you want with them:
 ```rust
