@@ -493,6 +493,22 @@ Traditional formats like TIFF, PNG, and HDF5 make integrity checks optional. VSF
 Hashes, signatures, and keys aren't byte blobs - they're strongly-typed primitives:
 
 ```rust
+VsfType::h(algorithm, hash)       // Integrity verification
+VsfType::g(algorithm, signature)  // Authentication & authorization
+VsfType::k(algorithm, pubkey)     // Identity
+VsfType::a(algorithm, mac_tag)    // Message authentication
+```
+
+**These primitives enable:**
+- **File integrity** - Mandatory BLAKE3 hash on every file
+- **Data provenance** - Sign sections to establish chain of custody
+- **Capability-based security** - Signatures as unforgeable permission tokens
+- **Distributed trust** - No central authority required
+
+Algorithm identifiers prevent type confusion - the compiler enforces verification.
+
+**Concrete examples:**
+```rust
 // Hash - integrity verification
 VsfType::h(HASH_BLAKE3, hash_bytes)      // Algorithm ID prevents confusion
 VsfType::h(HASH_SHA256, sha256_bytes)    // Type system enforces verification
@@ -603,6 +619,36 @@ Despite mandatory hashing, VSF maintains O(1) seek performance:
 - Verify only sections you care about
 
 **Traditional formats force a choice:** fast seeking OR integrity checks. VSF gives you both.
+
+### Toward Capability-Based Security
+
+VSF's cryptographic types aren't just for verification - they're the foundation for capability-based permissions:
+
+**Traditional ACLs** (what UNIX does):
+- File metadata: "user alice can read, group lab can write"
+- Requires central identity database (UID/GID)
+- Doesn't work in distributed systems
+
+**Capabilities** (what VSF enables):
+- Signature: "holder of this token can read file with hash 0xABCD..."
+- Self-contained, unforgeable, delegatable
+- Works across distributed systems with TOKEN identities
+
+```rust
+// v0.2+ will enable:
+let read_permission = sign_capability(
+    resource_hash: file_hash,
+    permission: "read",
+    granted_to: editor_pubkey,
+    expires: unix_time + 30_days,
+    signing_key: camera_key
+);
+
+// Signature (VsfType::g) proves permission grant
+// No central authority needed - crypto proves authorization
+```
+
+VSF v0.1 provides the cryptographic primitives (`g`, `k`, `h`, `a`). v0.2 will add structured capability types built on these foundations.
 
 ---
 
