@@ -665,17 +665,20 @@ VSF's cryptographic types aren't just for verification - they're the foundation 
 
 ```rust
 // v0.2+ will enable:
-let read_permission = sign_capability(
-    resource_hash: file_hash,
+let capability = Capability {
+    resource: VsfType::h(HASH_BLAKE3, file_hash),
     permission: "read",
-    granted_to: editor_pubkey,
-    expires: EtType::f6(eagle_time + 30_days),  // Eagle Time, not Unix
-    location: WorldCoord::from_lat_lon(47.6062, -122.3321),  // Where granted
-    signing_key: camera_key
-);
+    granted_to: VsfType::k(KEY_ED25519, editor_pubkey),
+    granted_by: VsfType::k(KEY_ED25519, camera_pubkey),
+    expires: EtType::f6(eagle_time + 30_days),
+    location: WorldCoord::from_lat_lon(47.6062, -122.3321),
+};
 
-// Signature (VsfType::g) proves permission grant
+let signed_cap = VsfType::g(SIG_ED25519, sign(&capability, camera_private_key));
+
+// Signature proves: camera granted permission to editor
 // No central authority needed - crypto proves authorization
+// Capability is self-contained, unforgeable, delegatable
 ```
 
 VSF v0.1 provides the cryptographic primitives (`g`, `k`, `h`, `a`). v0.2 will add structured capability types built on these foundations.
