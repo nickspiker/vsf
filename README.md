@@ -301,7 +301,7 @@ Unicode strings with global frequency table:
 ```rust
 VsfType::x(text)  // Automatically compressed
 // ~36% compression on English text
-// 83 MB/s encode, 100+ MB/s decode
+// 83 MB/s encode, 100+ MB/s decode 2025 average CPU
 ```
 
 ---
@@ -420,7 +420,21 @@ let decoded = VsfType::parse(&encoded)?;
 assert_eq!(original, decoded);
 ```
 
-### Camera RAW with Metadata
+### Minimal Camera RAW
+
+```rust
+use vsf::builders::build_raw_image;
+use vsf::types::BitPackedTensor;
+
+// Just image data - no metadata
+let samples: Vec<u64> = vec![2048; 4096 * 3072]; // 12-bit, mid-gray
+let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
+
+let bytes = build_raw_image(image, None, None, None)?;
+// That's it! File includes mandatory BLAKE3 hash automatically
+```
+
+### Camera RAW with Full Metadata
 
 ```rust
 use vsf::builders::build_raw_image;
