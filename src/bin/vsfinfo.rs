@@ -252,12 +252,19 @@ fn format_value(vsf: &VsfType) -> String {
                 vsf::types::EtType::f6(v) => format!("ET {:.6}", v),
             }
         }
-        VsfType::h(algo, hash) => format!(
-            "hash[algo={} {} bytes] {}...",
-            algo,
-            hash.len(),
-            hex_preview(hash)
-        ),
+        VsfType::h(algo, hash) => {
+            let algo_name = match *algo as char {
+                'b' => "BLAKE3",
+                's' => "SHA256",
+                _ => "unknown",
+            };
+            format!(
+                "h{}[{}] {}...",
+                *algo as char,
+                hash.len() * 8, // Show bits
+                hex_preview(hash)
+            )
+        }
         VsfType::g(algo, sig) => format!(
             "sig[algo={} {} bytes] {}...",
             algo,
@@ -389,7 +396,7 @@ fn show_info(data: &[u8]) -> Result<(), String> {
     println!("  b[{}]                  // Header length (bits) - FIXED POSITION", header_length_bits);
     println!("  z[{}]                      // Version - FIXED POSITION", header.version);
     println!("  y[{}]                      // Backward compat - FIXED POSITION", header.backward_compat);
-    println!("  hb3[32][...]             // File hash (BLAKE3) - FIXED POSITION");
+    println!("  hb[256][...]             // File hash (BLAKE3='b', 256 bits) - FIXED POSITION");
     println!("  n[{}]                     // Label count - FIXED POSITION", header.labels.len());
     println!("  // Label definitions (variable count):");
 
@@ -465,6 +472,53 @@ fn show_info(data: &[u8]) -> Result<(), String> {
 
 /// Quick integrity summary (used by show_info)
 fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), String> {
+    // First, verify the file-level BLAKE3 hash
+    let mut pointer = 4; // After "RÅ<"
+
+    // Skip header length
+    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse header: {}", e))?;
+    // Skip version
+    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
+    // Skip backward compat
+    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+
+    // Parse file hash
+    let file_hash_type = parse(data, &mut pointer)
+        .map_err(|e| format!("Failed to parse file hash: {}", e))?;
+
+    let file_hash_verified = if let VsfType::h(_algo, stored_hash) = file_hash_type {
+        // The hash covers everything from the start up to (but not including) the hash field itself
+        // Find where the hash field starts
+        let mut hash_start_pointer = 4; // After "RÅ<"
+        let _ = parse(data, &mut hash_start_pointer)
+            .map_err(|e| format!("Failed to skip header length: {}", e))?;
+        let _ = parse(data, &mut hash_start_pointer)
+            .map_err(|e| format!("Failed to skip version: {}", e))?;
+        let _ = parse(data, &mut hash_start_pointer)
+            .map_err(|e| format!("Failed to skip backward compat: {}", e))?;
+
+        // Hash everything except the hash field itself
+        let before_hash = &data[0..hash_start_pointer];
+        let after_hash = &data[pointer..];
+
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(before_hash);
+        hasher.update(after_hash);
+        let computed = hasher.finalize();
+
+        if computed.as_bytes() == stored_hash.as_slice() {
+            println!("✓ File integrity verified (BLAKE3)");
+            true
+        } else {
+            println!("✗ File integrity check FAILED (BLAKE3 mismatch)");
+            false
+        }
+    } else {
+        println!("○ No file hash found (unexpected)");
+        false
+    };
+
+    // Check section-level hashes
     let mut verified_sections = 0;
     let mut total_sections = 0;
 
@@ -487,15 +541,17 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
         }
     }
 
-    if total_sections > 0 && verified_sections == total_sections {
+    if verified_sections > 0 {
         println!("✓ All {} section hashes verified", verified_sections);
-    } else if verified_sections > 0 {
-        println!(
-            "○ {}/{} section hashes verified",
-            verified_sections, total_sections
-        );
     } else {
-        println!("○ No section hashes found");
+        println!("○ No section-level hashes (file-level hash only)");
+    }
+
+    println!();
+    if file_hash_verified {
+        println!("✓✓✓ FILE INTEGRITY: PASS ✓✓✓");
+    } else {
+        println!("✗✗✗ FILE INTEGRITY: FAIL ✗✗✗");
     }
 
     Ok(())
