@@ -446,7 +446,7 @@ let samples: Vec<u64> = vec![2048; 4096 * 3072];
 let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
 
 let bytes = build_raw_image(
-    image,
+    image, // Only required field
     Some(RawMetadata {
         cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']),
         black_level: Some(64.),
@@ -515,7 +515,7 @@ For context, typical hardware limits:
 
 This is similar to Rust's bounds checking: "But won't array bounds checks slow me down?" In practice, the optimizer eliminates most checks, and the remaining ones are drowned out by cache misses. Safety first, performance second - and you get both anyway.
 
-Traditional formats like TIFF, PNG, and HDF5 make integrity checks optional. VSF makes them unavoidable.
+Traditional formats like TIFF, PNG, and HDF5 make integrity checks optional, if even supported. VSF makes them unavoidable.
 
 ### Cryptographic Types as First-Class Citizens
 
@@ -669,7 +669,8 @@ let read_permission = sign_capability(
     resource_hash: file_hash,
     permission: "read",
     granted_to: editor_pubkey,
-    expires: unix_time + 30_days,
+    expires: EtType::f6(eagle_time + 30_days),  // Eagle Time, not Unix
+    location: WorldCoord::from_lat_lon(47.6062, -122.3321),  // Where granted
     signing_key: camera_key
 );
 
