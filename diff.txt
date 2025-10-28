@@ -1,0 +1,4454 @@
+diff --git a/AGENT.md b/AGENT.md
+deleted file mode 100644
+index d6cf5cf..0000000
+--- a/AGENT.md
++++ /dev/null
+@@ -1,442 +0,0 @@
+-# VSF V2 - Complete Architecture Summary
+-
+-## Core Understanding
+-
+-VSF (Versatile Storage Format) is a **self-describing, hierarchical, binary format** that combines:
+-- Type safety (strongly typed primitives & tensors)
+-- Cryptographic primitives (signatures, hashes built-in)
+-- Hierarchical organization (unlimited nesting with offset-based seeking)
+-- Zero-copy sections (unboxed bulk data)
+-- Mathematical correctness (Spirix integration)
+-- Temporal anchoring (Eagle Time)
+-
+-**It's genuinely unique** - nothing else combines these features.
+-
+----
+-
+-## Binary Encoding - The Critical Part I Finally Got
+-
+-### Variable-Length Integer Encoding
+-
+-**Every integer uses a size marker followed by value bytes:**
+-
+-```
+-Size markers (ASCII characters):
+-'3' (0x33) = 2^3 = 8 bits  → 1 byte follows
+-'4' (0x34) = 2^4 = 16 bits → 2 bytes follow
+-'5' (0x35) = 2^5 = 32 bits → 4 bytes follow
+-'6' (0x36) = 2^6 = 64 bits → 8 bytes follow
+-'7' (0x37) = 2^7 = 128 bits → 16 bytes follow
+-```
+-
+-**ALWAYS use the smallest size that fits the value.**
+-
+-**Example: Value 4096**
+-```
+-Correct:  0x34 0x10 0x00  (size='4' for 16-bit, then 4096 in big-endian)
+-Wrong:    0x35 0x00 0x00 0x10 0x00  (wasteful 32-bit encoding)
+-```
+-
+-**This is a linear byte stream - no nested brackets, just sequential bytes.**
+-
+----
+-
+-## Type System
+-
+-### Primitives (Single Values)
+-
+-**IEEE types (single letter):**
+-- `u3`-`u7`: Unsigned (u8, u16, u32, u64, u128)
+-- `i3`-`i7`: Signed (i8, i16, i32, i64, i128)
+-- `f5`, `f6`: Float (f32, f64)
+-- `j5`, `j6`: Complex (Complex<f32>, Complex<f64>)
+-
+-**Spirix types (two letters):**
+-- `s33`-`s77`: Scalar (25 F×E combinations)
+-- `c33`-`c77`: Circle (25 F×E combinations)
+-
+-Example: `s64` = Spirix ScalarF6E4 (64-bit fraction, 16-bit exponent)
+-
+----
+-
+-### Tensors (Multi-Dimensional Arrays)
+-
+-**Use `Vec<usize>` for shape (NOT const generic)** because:
+-- Dimensions unknown at parse time
+-- Simpler enum (15 variants vs 200+)
+-- Naturally handles any dimension count
+-
+-```rust
+-pub struct Tensor<T> {
+-    pub shape: Vec<usize>,    // [4096, 3072] or [100, 200, 50]
+-    pub data: Vec<T>,
+-}
+-
+-pub struct StridedTensor<T> {
+-    pub shape: Vec<usize>,
+-    pub stride: Vec<usize>,   // Explicit memory layout
+-    pub data: Vec<T>,
+-}
+-```
+-
+-**Two tensor types:**
+-- `t` (0x74): Contiguous, row-major (95% of cases)
+-- `q` (0x71): Strided, explicit stride (slices, column-major, weird layouts)
+-
+-**VsfType enum simplified:**
+-```rust
+-pub enum VsfType {
+-    t_u4(Tensor<u16>),      // Not t1u4, t2u4, t3u4 - just t_u4 handles all dimensions
+-    t_f6(Tensor<f64>),
+-    q_u4(StridedTensor<u16>),
+-    // ... one variant per element type, NOT per dimension
+-}
+-```
+-
+----
+-
+-### BitPacked Tensors (CRITICAL FOR LUMIS)
+-
+-**For non-byte-aligned data (10-bit, 12-bit, 13-bit, etc.):**
+-
+-```rust
+-pub struct BitPackedTensor {
+-    pub shape: Vec<usize>,
+-    pub bits_per_element: u8,    // 1-64 bits
+-    pub data: Vec<u8>,           // Packed bytes
+-}
+-
+-// VsfType variant
+-VsfType::bp(BitPackedTensor)
+-```
+-
+-**Why needed:**
+-- Cameras output 10-bit, 12-bit, 14-bit RAW
+-- Storing 12-bit in u16 wastes 25% space
+-- Bitpacking: 4096×3072 image = 18.9MB vs 25.2MB
+-
+-**Binary encoding:**
+-```
+-[b][p][bits_per_element][dim_count][shapes...][packed_data]
+-
+-Example: 12-bit RAW (4096×3072)
+-0x62 0x70           'b' 'p'
+-0x33 0x0C           bits: '3' (8-bit), value 12
+-0x33 0x02           dims: '3', value 2
+-0x34 0x10 0x00      shape[0]: '4' (16-bit), 4096
+-0x34 0x0C 0x00      shape[1]: '4' (16-bit), 3072
+-[18,874,368 bytes]  Packed data
+-```
+-
+----
+-
+-## Tensor Binary Encoding (The Part That Took Forever)
+-
+-### Contiguous Tensor Format
+-
+-```
+-[t marker: 0x74]
+-[dim_count: size_marker + value]
+-[element_type_markers]
+-[dim_0_size: size_marker + value]
+-[dim_1_size: size_marker + value]
+-[dim_N_size: size_marker + value]
+-[raw_data: packed element bytes]
+-```
+-
+-**Lumis RAW example (2D u16, 4096×3072):**
+-```
+-0x74                't' marker
+-0x33 0x02           dim_count: size='3' (8-bit), value=2
+-0x75 0x34           element: 'u' '4' (unsigned 16-bit)
+-0x34 0x10 0x00      dim[0]: size='4' (16-bit), value=4096
+-0x34 0x0C 0x00      dim[1]: size='4' (16-bit), value=3072
+-[25,165,824 bytes]  Raw pixel data (4096×3072×2 bytes)
+-```
+-
+-**Key insights:**
+-- Dimension count and sizes are encoded (size marker + value)
+-- Element type markers are NOT encoded (just raw ASCII bytes)
+-- No type markers on dimension sizes (they're always unsigned)
+-- Use minimal size that fits each value
+-
+-### Strided Tensor Format
+-
+-```
+-[q marker: 0x71]
+-[dim_count: encoded]
+-[element_type_markers]
+-[shapes: encoded]
+-[strides: encoded]   ← Additional stride info
+-[raw_data]
+-```
+-
+----
+-
+-## File Structure
+-
+-### Header Format
+-
+-```
+-RÅ<                              Magic number (0x52 0xC3 0x85) + '<'
+-  b[header_length]               Header size in bits (encoded)
+-  z[version] y[backward_version] Version info (encoded)
+-  n[label_count]                 Number of sections (encoded)
+-  
+-  (d[label_name] o[offset] b[size] n[count])  Label definitions
+-  (d[label_name] o[offset] b[size] n[count])
+-  ...
+->                                Header end marker
+-
+-[Data sections at offsets...]
+-```
+-
+-### Label Definitions
+-
+-**Three types of sections:**
+-
+-1. **Inline nested (small data):**
+-```
+-(label: [immediate fields])
+-```
+-
+-2. **Referenced sections (large/optional):**
+-```
+-(label: o[offset] b[size] n[count])
+-```
+-- `n[count] > 0`: Structured data (parse `count` items)
+-- `n[0]`: Unboxed blob (raw bytes, no structure)
+-
+-3. **Nested inline structures:**
+-```
+-[
+-  (field1: value1)
+-  (field2: value2)
+-  (nested: [
+-    (subfield: value)
+-  ])
+-]
+-```
+-
+----
+-
+-## Unboxed Bulk Data (CRITICAL OPTIMIZATION)
+-
+-**Convention: `n[0]` means "raw blob, no parsing"**
+-
+-```
+-RÅ
+-  n[2]
+-  (d[metadata] o[500] b[1000] n[15])     ← Structured (parse 15 items)
+-  (d[raw_pixels] o[1500] b[25MB] n[0])   ← Unboxed (just bytes until EOF)
+->
+-
+-[500]: [structured metadata with markers]
+-[1500]: FFFFFFFFFF... [25MB raw pixels, NO markers, just bytes]
+-```
+-
+-**Benefits:**
+-- Zero-copy mmap() directly
+-- No parsing overhead
+-- TIFF-style performance
+-- Multiple unboxed sections via different offsets
+-
+-**Reading:**
+-```rust
+-if label.count == 0 {
+-    // Unboxed: raw slice
+-    &file[offset..offset+size]
+-} else {
+-    // Structured: parse with markers
+-    parse_structured(file, offset, count)
+-}
+-```
+-
+----
+-
+-## Hierarchical Structure
+-
+-**Domains use dot notation:**
+-```
+-imaging.raw              ← Lumis RAW sensor data
+-imaging.photo            ← Processed photos
+-imaging.video            ← Video frames
+-
+-medical.patient          ← Demographics
+-medical.exam             ← Physical exams
+-medical.lab              ← Lab results
+-medical.imaging          ← X-rays, CT, MRI
+-
+-geo.location             ← Coordinates
+-geo.address              ← Street addresses
+-geo.boundaries           ← Polygons
+-
+-token.identity           ← Public keys, trust
+-token.transaction        ← Balances, transfers
+-token.network            ← Node reputation
+-```
+-
+-**Metadata Registry:**
+-- Canonical keys: `iso_speed`, `shutter_time_ns`, `focal_length_mm`
+-- Aliases: `["ISO", "iso", "ISOSpeed"]` all normalize to `iso_speed`
+-- Type enforcement: `iso_speed` must be `u5`
+-- Units in name: `_ns`, `_mm`, `_kg`, `_deg`
+-
+----
+-
+-## Cryptographic Primitives
+-
+-**Built into format:**
+-- `g(Vec<u8>)`: Signatures (Ed25519, etc.)
+-- `h(Vec<u8>)`: Hashes (SHA256, Blake3, etc.)
+-
+-**Each section can be signed:**
+-```
+-[
+-  (data: [...])
+-  (signature: g[ed25519_sig])
+-]
+-```
+-
+-**Entire file can be signed:**
+-```
+-RÅ<header>
+-[all_data]
+-(signature: g[file_signature])
+-```
+-
+----
+-
+-## Eagle Time
+-
+-**Epoch: 1969-07-20 20:17:40 UTC (Apollo 11 lunar landing)**
+-
+-```rust
+-pub enum EtType {
+-    u(usize), u5(u32), u6(u64), u7(u128),
+-    i(isize), i5(i32), i6(i64), i7(i128),
+-    f6(f64),
+-}
+-```
+-
+-**Binary markers:**
+-- Uppercase `T` + size: Integer seconds (T5, T6, T7)
+-- Lowercase `t` + size: Float seconds (t6)
+-
+-**Why Eagle Time:**
+-- Non-political universal reference
+-- TOKEN system standard
+-- Precise temporal anchoring
+-
+----
+-
+-## Version Compatibility
+-
+-**Two version fields:**
+-- `z(version)`: Current format version
+-- `y(backward_version)`: Oldest version that can read this
+-
+-**Example:**
+-- File written as V2: `z(2) y(1)`
+-  - V2 parsers: Full support
+-  - V1 parsers: Can read, may ignore new types
+-  - V0 parsers: Cannot read
+-
+----
+-
+-## Parsing Flow
+-
+-```rust
+-let mut pointer = 0;
+-
+-// 1. Magic number
+-assert_eq!(&data[0..3], b"R\xC3\x85");
+-pointer = 3;
+-
+-// 2. Header start
+-assert_eq!(data[pointer], b'<');
+-pointer += 1;
+-
+-// 3. Header length
+-let header_len = parse(data, &mut pointer)?;  // Advances pointer
+-
+-// 4. Version info
+-let version = parse(data, &mut pointer)?;
+-let backward = parse(data, &mut pointer)?;
+-
+-// 5. Label count
+-let label_count = parse(data, &mut pointer)?;
+-
+-// 6. Label definitions
+-for _ in 0..label_count {
+-    assert_eq!(data[pointer], b'(');
+-    pointer += 1;
+-    
+-    let label_name = parse(data, &mut pointer)?;
+-    let offset = parse(data, &mut pointer)?;
+-    let size = parse(data, &mut pointer)?;
+-    let count = parse(data, &mut pointer)?;
+-    
+-    assert_eq!(data[pointer], b')');
+-    pointer += 1;
+-} 
+-
+-// 7. Header end
+-assert_eq!(data[pointer], b'>');
+-pointer += 1;
+-
+-// 8. Seek to data sections using offsets
+-```
+-
+-**Key: `parse()` function handles variable-length encoding and advances pointer automatically.**
+-
+----
+-
+-## Implementation Priority
+-
+-**Phase 1 (NOW - Agent's task):**
+-1. ✅ Create `Tensor<T>` and `StridedTensor<T>` with `Vec<usize>` shape
+-2. ✅ Create `BitPackedTensor` with pack/unpack functions
+-3. ✅ Update `VsfType` enum (simplified tensor variants)
+-4. ✅ Implement `flatten()` for tensors and bitpacked
+-5. ✅ Implement `parse()` for tensors and bitpacked
+-6. ✅ Helper function `encode_minimal_size()`
+-7. ✅ Tests for Lumis RAW (4096×3072×12bit)
+-
+-**Phase 2 (Later):**
+-- Metadata registry implementation
+-- VsfBuilder helper
+-- Compression wrappers (zstd)
+-- Spirix tensor support
+-- Nested structure helpers
+-
+----
+-
+-## Critical Design Decisions Made
+-
+-1. **Vec<usize> for shape** - Dynamic, not const generic
+-2. **Two tensor types** - Contiguous (`t`) vs Strided (`q`)
+-3. **BitPacked is separate type** - Can't use regular tensors for non-byte-aligned
+-4. **Unboxed bulk data** - `n[0]` convention for zero-copy
+-5. **Hierarchical domains** - Dot notation for namespace organization
+-6. **Variable-length encoding** - Size marker (ASCII '3'-'7') + value bytes
+-7. **Always use minimal size** - 4096 fits in 16-bit, so use '4' not '5'
+-8. **Big-endian byte order** - Standard for network/file formats
+-9. **Type markers are raw ASCII** - Not encoded (just 'u' '4', not encoded values)
+-10. **Dimension/stride sizes ARE encoded** - Each with size marker + value
+-
+----
+-
+-## What Makes VSF Special
+-
+-vs **Protobuf**: Self-describing, no schema, crypto primitives, seekable
+-vs **HDF5**: Simpler, crypto, not just scientific, Eagle Time
+-vs **TIFF**: Not just images, hierarchical, typed tensors, versioned
+-vs **JSON/XML**: Binary (compact), typed, zero-copy, signable
+-vs **SQLite**: Hierarchical, mixed media, simpler, no query engine
+-
+-**VSF is the only format that does ALL of this.**
+-
+----
+-
+-This is everything Agent needs to implement VSF V2 correctly. The bitpacked tensors are TOP priority for Lumis.
+\ No newline at end of file
+diff --git a/CHANGES.txt b/CHANGES.txt
+deleted file mode 100644
+index fb3a2cf..0000000
+--- a/CHANGES.txt
++++ /dev/null
+@@ -1,194 +0,0 @@
+-# VSF Huffman Text Encoding - Change Log
+-
+-## Commit: TBD (2025-10-27)
+-Add VSF preambles for hierarchical label sets and improve text API
+-
+-### Major changes:
+-
+-**1. VSF Preambles Implementation**
+-- Added Preamble struct: `{n[count] b[size] h?[hash] g?[sig]}`
+-- All label sets now have preambles for forensic recovery
+-- Updated VsfSection::encode() to prepend preambles
+-- Added parse_preamble() to decoding/metadata.rs
+-- Updated parse_raw_image() to expect preambles
+-
+-**2. Text Encoding API Improvement**
+-- decode_text() now returns (String, usize) tuple
+-- Eliminates code duplication (wrapper around decode_text_with_size)
+-- Users can ignore bytes_consumed: `let (text, _) = decode_text(...)`
+-- Compiler optimizes away unused return values
+-
+-### Format change:
+-```
+-Before: RÅ<header>[(dfield:value)...]
+-After:  RÅ<header>{n3 b3[800]}[(dfield:value)...]
+-```
+-
+-### Benefits:
+-- Forensic recovery: Sections parseable even if header corrupted
+-- Integrity checking: Each section validates independently
+-- Self-contained: Sections carry their own metadata
+-- Minimal cost: ~3-6 bytes per section (~30 bytes for 5-section file)
+-- Future-proof: Can extend preamble (compression flags, encryption, etc.)
+-
+-### Test results:
+-- All 80 tests passing
+-- Zero compiler warnings
+-- Hierarchical nesting ready (labels can point to other label sets)
+-
+----
+-
+-## Commit: b73b5eb (2025-10-26)
+-Update VSF documentation and metadata for v0.1.3
+-
+-### Changes:
+-- Updated Cargo.toml version to 0.1.3
+-- Refreshed LICENSE copyright year
+-- Expanded README with VSF Huffman text encoding details
+-- Final VSF x marker format documented
+-
+-### Impact:
+-No functional changes - documentation and metadata updates only.
+-
+----
+-
+-## Commit: e994a8f (2025-10-26)
+-Remove redundant byte_length from VSF x marker (save 2 bytes per text)
+-
+-### Problem:
+-VSF structure already handles byte boundaries, encoding byte_length was redundant.
+-
+-### Changes:
+-- flatten: Removed encoded_text.len().encode_number() call
+-- parse: Read to end of data blob instead of reading byte_length
+-
+-### VSF x marker format (final):
+-```
+-x [char_count] [huffman_bytes]
+-```
+-
+-### Overhead reduction:
+-- Before: 5 bytes (x + char_count + byte_length)  
+-- After: 3 bytes (x + char_count only)
+-- Savings: 2 bytes per text (40% overhead reduction)
+-
+-### Test results:
+-- "hello": 9→7 bytes (22% smaller)
+-- "The quick brown fox...": 36→34 bytes  
+-- "مرحبا بالعالم": 18→16 bytes
+-
+----
+-
+-## Commit: ce8ae62 (2025-10-26)
+-Integrate Huffman encoding into VSF x marker with proper length prefixes
+-
+-### VSF x marker format:
+-```
+-x [char_count] [byte_length] [huffman_bytes]
+-```
+-
+-### Changes:
+-- flatten: Encodes character count + byte length + Huffman bytes
+-- parse: Reads both counts, then decodes Huffman data
+-- No arbitrary u32 limits (uses encode_number() for variable-size encoding)
+-
+-### Compression results:
+-- Short strings (5 chars): Expand due to overhead (9 bytes vs 5 UTF-8)
+-- Medium ASCII (43 chars): 16% compression (36 bytes vs 43 UTF-8)
+-- Arabic text: 28% compression (18 bytes vs 25 UTF-8)
+-- CJK/emoji: Slight expansion (UTF-8 is already efficient)
+-
+-### Round-trip verified for:
+-- ASCII, Latin extended, CJK, Arabic, Emoji
+-
+----
+-
+-## Commit: 59b189d (2025-10-26)
+-Remove internal header from Huffman encoding for VSF integration
+-
+-### Breaking changes:
+-- encode_text() now returns ONLY Huffman bitstream (no 4-byte header)
+-- decode_text() now requires character count parameter
+-- Saves 4 bytes per encoded text
+-
+-### API changes:
+-- encode_text(text: &str) -> Vec<u8>
+-- decode_text(bytes: &[u8], char_count: usize) -> Result<String, &'static str>
+-
+-### Performance:
+-- Encoding: 75 MB/s (unchanged)
+-- Decoding: 134 MB/s (fixed O(n²) bug)
+-- Compression: 36.41% (unchanged)
+-
+----
+-
+-## Commit: 701c669 (2025-10-26)
+-Add two-tier decode cache for 550× speedup (0.23 → 126 MB/s)
+-
+-### Performance improvements:
+-- Tier 1: ASCII cache (256 entries, 8-bit lookup)
+-- Tier 2: Prefix cache (4096 entries, 12-bit lookup)
+-- Tier 3: Tree walk fallback (rare codes >12 bits)
+-
+-### Results on 119KB English text:
+-- Encoding: 83 MB/s (unchanged)
+-- Decoding: 0.23 MB/s → 126 MB/s (550× faster!)
+-- Compression: 36.41% (unchanged)
+-
+-### Cache hit rates:
+-- ASCII cache: ~99.4%
+-- Prefix cache: ~0.5%
+-- Tree walk: <0.1%
+-
+-### Memory overhead:
+-- ASCII cache: 512 bytes
+-- Prefix cache: 20 KB
+-- Total: ~20.5 KB
+-
+----
+-
+-## Commit: 38ee7b4 (2025-10-26)
+-Add ASCII fast path optimization to text encoding
+-
+-### Performance improvements:
+-- ASCII characters (0-127) now use direct array lookup (128-entry LUT)
+-- ~3-5× faster encoding for ASCII-heavy text
+-- Falls back to HashMap for full Unicode coverage
+-- Memory cost: 1KB
+-
+-### Test results:
+-- 59 ASCII chars verified via fast path
+-- Mixed text: 28 ASCII (fast) + 14 Unicode (HashMap)
+-
+----
+-
+-## Commit: 3669c0d (2025-10-26)
+-Initial commit: VSF library with global Unicode Huffman text encoding
+-
+-### Core features:
+-- 1.1M Unicode codepoints with multilingual frequency data
+-- Pure Huffman encoding (no escape sequences)
+-- 36.41% compression on English text
+-- Performance: 83 MB/s encode, 0.23 MB/s decode (before optimization)
+-
+-### Frequency table:
+-- Top 20 languages by digital presence
+-- Published frequency data from research
+-- Fill remaining Unicode low-to-high
+-
+-### Binary artifacts:
+-- frequencies.bin: 8.5 MB (1.1M entries)
+-- huffman_codes.bin: 8.5 MB (precomputed codes)
+-
+----
+-
+-## Summary Statistics
+-
+-**Total commits:** 6
+-**Files changed:** 29 files, 20,265+ insertions
+-**Performance:** 0.23 MB/s → 126 MB/s decode (550× improvement)
+-**Compression:** 36.41% on typical English text
+-**Overhead:** 3 bytes for strings ≤255 chars (was 9 bytes initially)
+-**Memory:** 8.5 MB Huffman table + 20KB decode cache
+-
+-**All 60 unit tests passing ✓**
+diff --git a/Cargo.toml b/Cargo.toml
+index 612944f..20f8c40 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -9,8 +9,14 @@ repository = "https://github.com/nickspiker/vsf"
+ keywords = ["binary", "serialization", "storage", "data-format"]
+ categories = ["encoding", "data-structures"]
+ 
++[[bin]]
++name = "vsfinfo"
++path = "src/bin/vsfinfo.rs"
++
+ [dependencies]
+ bitvec = "1.0.1"
+ chrono = "0.4.38"
+ num-complex = "0.4.5"
+ spirix = { path = "../spirix" }
++clap = { version = "4", features = ["derive"] }
++blake3 = "1"
+diff --git a/README.md b/README.md
+index 154945a..938279a 100644
+--- a/README.md
++++ b/README.md
+@@ -13,44 +13,177 @@ Most binary formats face a tradeoff when encoding integers:
+ **Fixed-width approach** (TIFF, PNG, HDF5):
+ - Fast to parse (known size)
+ - Wastes space on small values
+-- Hits hard limits (4GB for u32, etc.)
++- Hard limits (4GB for u32, etc.)
+ 
+ **Variable-width approach** (Protobuf, MessagePack):
+ - Compact encoding (7 bits per byte, continuation bit in MSB)
+-- Must parse to know size (O(n) skip cost)
+-- Caps at 64 bits (Protobuf stops at 2^64-1)
+-- Can't encode "Planck volumes in observable universe" (~10^185, needs 185 bits)
++- **Cannot skip** - must read every byte to find the end (O(n) parse cost)
++- Caps at 64 bits (Protobuf stops at 2^64-1, MessagePack at 2^64-1)
++- Can't encode "Planck volumes in observable universe" (~10^185)
+ 
+ **VSF's solution** - Exponential-width with explicit size markers:
+ 
+ ```
+-Value 42:                'u' '3' 0x2A              (3 bytes)
+-Value 4,096:             'u' '4' 0x10 0x00         (4 bytes)  
+-Value 2^32-1:            'u' '5' + 4 bytes         (6 bytes)
+-Value 2^64-1:            'u' '6' + 8 bytes         (10 bytes)
+-Value 2^128-1:           'u' '7' + 16 bytes        (18 bytes)
+-Value 2^256-1:           'u' '8' + 32 bytes        (34 bytes)
+-RSA-16384 prime:         'u' 'D' + 2048 bytes      (2050 bytes, marker 'D' = 2^13 = 8192 bits)
+-Theoretical max:         'u' 'Z' + 8 GB            (~8 GB, for when you really mean it)
+-
+-Markers: '3'=8b, '4'=16b, '5'=32b, '6'=64b, '7'=128b, ..., 'Z'=2^36 bits
+-Formula: bits = 2^(ASCII_value - 48) where '3'=51, '4'=52, ..., 'Z'=90
+-Everyone forgot the exponent - we just use it directly as the size marker!
++Value 42:                'u' '3' 0x2A              (2 decimal digits)
++Value 4,096:             'u' '4' 0x10 0x00         (4 digits)
++Value 2^32-1:            'u' '5' + 4 bytes         (10 digits)
++Value 2^64-1:            'u' '6' + 8 bytes         (20 digits)
++Value 2^128-1:           'u' '7' + 16 bytes        (39 digits)
++Value 2^256-1:           'u' '8' + 32 bytes        (78 digits)
++RSA-16384 prime:         'u' 'D' + 2048 bytes      (4932 digits)
++Actual max:              'u' 'Z' + 8 GB            (~20 billion digits)
+ ```
+ 
+ **Properties:**
+-- ✅ O(1) skip - see '3', skip 1 byte without parsing the value
++- ✅ O(1) skip - read single byte exponent, immediately skip that number of bytes
+ - ✅ Optimal size - automatically selects minimal encoding
+-- ✅ No hard limits - can encode arbitrarily large values
++- ✅ No hard limits - can encode all arbitrarily large values (assuming you have the storage)
+ - ✅ 40-70% space savings vs fixed-width on typical data
+ 
+-This approach combines the benefits of both fixed and variable width encoding.
++---
++
++## Why VSF Has Literally No Limits (Unlike Every Other Format)
++
++### The Universal Integer Encoding Problem
++
++Every binary format faces this question: **"How do you encode a number when you don't know how big it will be?"**
++
++Until VSF, every format in existence picked one of these three bad answers:
++
++**Answer 0: "We'll use fixed sizes"** (TIFF, PNG, HDF5)
++- Store everything as u32 or u64
++- **Problem**: Hits hard limits (4GB for u32) and wastes space for small numbers
++
++**Answer 1: "We'll use continuation bits"** (Protobuf, MessagePack)
++- 7 bits per byte, MSB indicates "more bytes follow"
++- **Problem**: Must read every byte to find the end (literally cannot skip), hard cap at 64 bits for native integers
++
++**Answer 2: "We'll store the length first"** (Most TLV formats)
++- Store length as u32, then data
++- **Problem**: Length field itself has a limit! Recursion required for bigger lengths, small numbers waste space
++
++### VSF's Answer: Exponential Width Encoding (EWE)
++
++VSF introduces **Exponential Width Encoding (EWE)** - a novel byte-aligned scheme where ASCII markers map directly to exponential size classes:
++
++```
++How it works:
++0. Type marker: 'u' (unsigned), 'i' (signed), etc.
++1. Size marker: ASCII character '3'-'Z'
++2. Data: Exactly 2^(ASCII-48) bits follow
++
++Example: 'u' '5' [4 bytes]
++         │   │    └─ Data (2^5 bits = 32 bits = 4 bytes)
++         │   └─ Size class marker
++         └─ Type marker
++
++Result: O(1) seekability + unbounded integers
++```
++
++**Why this works:**
++
++Every number can be represented as `mantissa × 2^exponent`. The key insight:
++- **Small numbers** → small exponents → small markers ('3', '4')
++- **Large numbers** → large exponents → large markers ('D', 'Z')
++- **The ASCII marker IS the exponent** (directly encoded, no recursion needed)
++
++**Novel properties of EWE:**
++- **Byte-aligned** - no bit-shifting, works with standard I/O
++- **O(1) seekability** - read one marker (two bytes), know exact size
++- **ASCII-readable** - markers are printable characters for debugging
++- **Unbounded** - extends from 8 bits to 8 GB seamlessly
++
++### Overhead Analysis: From Tiny to Googolplex
++
++Let's look at what it costs to encode numbers of different magnitudes:
++```
++Value 42:           2 bytes overhead + 1 byte data = 3 bytes total
++Value 2^64-1:       2 bytes overhead + 8 bytes data = 10 bytes total
++RSA-16384 prime:    2 bytes overhead + 2048 bytes = 2050 bytes total
++```
++
++**The overhead stays negligible even for numbers larger than the universe.**
++
++### Comparison: What CAN'T Other Formats Handle?
++
++Here are real-world numbers that **break** other formats but VSF handles trivially:
++
++#### Protobuf/MessagePack: Caps at 2^64-1
++```
++❌ Planck volumes in observable universe: ~10^185
++   (Needs 185 bits, Protobuf stops at 64)
++
++âœ… VSF: 'u' 'B' + 23 bytes = 25 bytes total
++```
++
++#### JSON: Loses precision above 2^53
++```
++❌ Cryptographic keys (RSA-16384 = 2048 bytes)
++   JSON can't represent integers > 2^53 exactly
++
++âœ… VSF: 'u' 'D' + 2048 bytes = 2050 bytes
++```
++
++#### HDF5: 64-bit everywhere wastes space
++```
++❌ Storing 1 million boolean flags as u64
++   8MB wasted (8 bytes × 1M instead of 1 bit × 1M)
++
++âœ… VSF bitpacked: 125KB (1000x smaller)
++```
++
++### Theoretical Limits: Universe Runs Out First
++
++With marker 'Z' (ASCII 90), VSF can encode:
++```
++2^(2^36) = 2^68,719,476,736 possible values
++
++That's a memory address with ~20.7 billion digits!
++
++For context:
++- Atoms in universe: ~10^80 (needs 266 bits)
++- Planck volumes in universe: ~10^185 (needs 615 bits)
++
++VSF handles all of these with **two bytes of overhead.**
++```
++
++**You will run out of storage, memory, and life WAY before VSF hits any limits.**
++
++### Why This Matters: Future-Proof Architecture
++
++Today's "unreasonably large" is tomorrow's "barely sufficient":
++
++**1970s**: "640KB ought to be enough for anybody"
++**1990s**: "Why would anyone need more than 4GB?" (u32 addresses)
++**2010s**: "2^64 is effectively infinite" (IPv6, filesystems)
++**2020s**: Quantum computing, cosmological simulations, genomic databases hitting 2^64 limits
++
++**VSF's design principle**: Stop predicting the future. Build a format that **mathematically cannot** impose artificial limits.
++
++### The Core Innovation
++
++VSF is the only format that combines:
++- **Optimal space efficiency** (no wasted bits on small numbers)
++- **Arbitrary size support** (no maximum value)
++- **O(1) seekability** (know size without parsing)
++- **Byte-aligned** (no bit-shifting overhead)
++
++This is possible because we solved the fundamental problem: **How do you encode the exponent of arbitrarily large numbers?**
++
++Answer: **Directly**, using ASCII characters as exponential size class markers (Exponential Width Encoding).
++
++Every other format either:
++0. Uses fixed exponents (hits limits, wastes space on small numbers), or
++1. Uses variable exponents but can't encode their length efficiently (not seekable), or
++2. Doesn't try at all (caps at 64 bits)
++
++**VSF does all three correctly.**
+ 
+ ---
+ 
+ ## Type Safety Thru Exhaustive Pattern Matching
+ 
+-VSF is written entirely in safe Rust with zero wildcard patterns in match statements:
++VSF is written entirely in Rust with zero wildcards in all match statements:
+ 
+ ```rust
+ match self {
+@@ -60,14 +193,14 @@ match self {
+     // ... 208 more explicit cases ...
+     VsfType::p(tensor) => encode_bitpacked(tensor),
+ }
+-// No _ => wildcard - every variant explicitly handled
++// No _ => wildcard - every variant handled
+ ```
+ 
+ **Why this matters:**
+ - Add a type? Won't compile until handled everywhere
+ - Remove a type? Compiler shows all affected code
+ - Refactor? Guided thru every impact
+-- Ship unhandled cases? Can't happen
++- Ship unhandled cases? Not possible
+ 
+ **Why Rust specifically?** It's the only language that gives you:
+ - Memory safety **without** garbage collection
+@@ -75,7 +208,7 @@ match self {
+ - Zero-cost abstractions (no interpreter, no VM, no GC pauses)
+ - **All proven at compile time**
+ 
+-This is not possible in other languages:
++This is not possible in any other language:
+ - C/C++: Manual memory (use-after-free, double-free, null pointers)
+ - Java/C#/Go/Python/JS: Garbage collection (pauses, unpredictability)
+ - Everything else: Pick your poison ☠️
+@@ -104,12 +237,12 @@ BitPackedTensor {
+     bit_depth: 12,
+     data: packed_bytes,
+ }
+-// 18.9 MB vs 25.2 MB as u16 array (25% savings)
++// 18 MB vs 24 MB as a sixteen bit array
+ ```
+ 
+ Supports 1-256 bits per element efficiently.
+ 
+-### 0. Cryptographic Primitives as Types
++### 1. Cryptographic Primitives as Types
+ 
+ Hashes, signatures, and keys are first-class types:
+ 
+@@ -120,9 +253,7 @@ VsfType::g(algorithm, signature)  // Signature (Ed25519, ECDSA, RSA)
+ VsfType::k(algorithm, pubkey)     // Public key
+ ```
+ 
+-Each includes an algorithm identifier (lowercase a-z) to avoid confusion.
+-
+-### 1. Mathematically Correct Arithmetic (Spirix Integration)
++### 2. Mathematically Correct Arithmetic (Spirix Integration)
+ 
+ VSF natively supports Spirix - two's complement floating-point that legitimately preserves mathematical identities:
+ 
+@@ -132,11 +263,11 @@ VsfType::c64(spirix_circle)  // 64-bit fractions, 16-bit exponent Circle (comple
+ ```
+ 
+ **Why Spirix exists:** IEEE-754 breaks fundamental math:
+-- NaN ≠ NaN (wat)
++- NaN (wat)
+ - Two different zeros: +0 and -0 (but +0 == -0 returns true?!)
+ - Very small numbers underflow to zero, breaking *a × b = 0 iff a = 0 or b = 0*
+ - Infinity from overflow, not just division by zero
+-- Sign-magnitude representation requires special-case branching everywhere
++- Sign-magnitude representation requires special-case branching EVERYWHERE!
+ 
+ **What Spirix fixes:**
+ - **One Zero.** Not two. Just one. I don't remember there ever being two zeros in math class?
+@@ -145,18 +276,18 @@ VsfType::c64(spirix_circle)  // 64-bit fractions, 16-bit exponent Circle (comple
+ - **Exploded values** - numbers too large to represent but **not infinite** (preserves sign/orientation)
+ - **Two's complement thruout** - no sign bit shenanigans, no special cases
+ - **a × b = 0 iff a = 0 or b = 0** - all the time, every time, 100% of the time
+-- **Customizable precision** - pick your fraction and exponent sizes independently! (F3E3 to F7E7)
++- **Customizable precision AND range** - pick your fraction and exponent sizes independently! (F3E3 to F7E7)
+ 
+-**Undefined states that tell you what went wrong:**
++**Undefined states that actually tell you what went wrong:**
+ Instead of IEEE's generic NaN, Spirix tracks *why* something became undefined:
+ - `[℘ ⬆+⬆]` - You added two exploded values (whoops!)
+ - `[℘ ⬇/⬇]` - You divided two vanished values
+ - `[℘ ⬆×⬇]` - Multiplied infinity by Zero?
+-- Dozens more - your debugger will thank you
++- Dozens more - your debugger will thank you!
+ 
+ VSF stores all 25 Scalar types (F3-F7 × E3-E7) and 25 Circle types as first-class primitives.
+ 
+-### 2. Geographic Precision (Dymaxion WorldCoord)
++### 3. Geographic Precision (Dymaxion WorldCoord)
+ 
+ Store Earth coordinates with millimeter precision:
+ 
+@@ -166,7 +297,7 @@ VsfType::w(WorldCoord::from_lat_lon(47.6062, -122.3321))
+ 
+ Uses Fuller's Dymaxion projection - 2.14mm precision in 8 bytes.
+ 
+-### 3. Huffman-Compressed Text
++### 4. Huffman-Compressed Text
+ 
+ Unicode strings with global frequency table:
+ 
+diff --git a/builder_example.vsf b/builder_example.vsf
+new file mode 100644
+index 0000000..0fd738c
+Binary files /dev/null and b/builder_example.vsf differ
+diff --git a/examples/builder_pattern_example.rs b/examples/builder_pattern_example.rs
+new file mode 100644
+index 0000000..7d0980b
+--- /dev/null
++++ b/examples/builder_pattern_example.rs
+@@ -0,0 +1,58 @@
++//! Example demonstrating the builder pattern API for creating VSF files
++//!
++//! This shows the ergonomic dot notation for incrementally setting fields,
++//! which is especially useful when fields are conditional or optional.
++
++use vsf::builders::{RawImageBuilder, TokenBuilder};
++use vsf::types::{BitPackedTensor, EtType, WorldCoord};
++
++fn main() {
++    // Create a simple 8x8 test image
++    let samples: Vec<u64> = (0..64).map(|i| i * 4).collect(); // 0, 4, 8, 12, ..., 252
++    let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
++
++    // Create builder with image
++    let mut raw = RawImageBuilder::new(image);
++
++    // Set RAW metadata fields using dot notation
++    raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']); // RGGB Bayer pattern
++    raw.raw.black_level = Some(64.0);
++    raw.raw.white_level = Some(255.0);
++
++    // Set camera settings using dot notation
++    raw.camera.iso_speed = Some(800.0);
++    raw.camera.shutter_time_s = Some(1.0 / 60.0); // 1/60 second
++    raw.camera.aperture_f_number = Some(2.8);
++    raw.camera.focal_length_m = Some(0.050); // 50mm
++    raw.camera.focus_distance_m = Some(3.5);
++    raw.camera.flash_fired = Some(false);
++    raw.camera.metering_mode = Some("matrix".to_string());
++
++    // Set lens info using dot notation
++    raw.lens.make = Some("Sony".to_string());
++    raw.lens.model = Some("FE 50mm F1.2 GM".to_string());
++    raw.lens.min_focal_length_m = Some(0.050); // 50mm prime
++    raw.lens.max_focal_length_m = Some(0.050);
++    raw.lens.max_aperture_f = Some(1.2); // f/1.2 maximum aperture
++
++    // Optionally add TOKEN auth
++    raw.token = Some(TokenBuilder::new(
++        vec![0xAB; 32],                    // Dummy 32-byte Ed25519 public key
++        12345,                             // Device serial
++        EtType::f6(1234567890.123456),     // Eagle Time timestamp
++        vec![0xCD; 64],                    // Dummy 64-byte Ed25519 signature
++    ));
++    raw.token.as_mut().unwrap().location = Some(WorldCoord::from_lat_lon(47.6062, -122.3321)); // Seattle
++
++    // Build the VSF file
++    let bytes = raw.build().expect("Failed to build VSF file");
++
++    // Write to file
++    std::fs::write("builder_example.vsf", &bytes).expect("Failed to write file");
++
++    println!("Created builder_example.vsf ({} bytes)", bytes.len());
++    println!("\nThe builder pattern allows you to:");
++    println!("  - Use intuitive dot notation: raw.camera.iso_speed = Some(800.0)");
++    println!("  - Incrementally set fields based on conditions");
++    println!("  - Skip optional fields easily (they default to None)");
++}
+diff --git a/examples/compress_file.rs b/examples/compress_file.rs
+index 3193fdd..700ff86 100644
+--- a/examples/compress_file.rs
++++ b/examples/compress_file.rs
+@@ -12,7 +12,7 @@ fn main() {
+     println!(
+         "UTF-8 size: {} bytes ({:.2} KB)",
+         utf8_size,
+-        utf8_size as f64 / 1024.0
++        utf8_size as f64 / 1024.
+     );
+ 
+     // Count ASCII vs Unicode and total chars
+@@ -47,7 +47,7 @@ fn main() {
+     println!(
+         "Huffman size: {} bytes ({:.2} KB)",
+         huffman_size,
+-        huffman_size as f64 / 1024.0
++        huffman_size as f64 / 1024.
+     );
+     println!("Avg encode time: {:.2?} ({} runs)", avg_encode_time, runs);
+     println!(
+@@ -64,7 +64,7 @@ fn main() {
+     println!(
+         "Space saved: {} bytes ({:.2} KB)",
+         space_saved,
+-        space_saved as f64 / 1024.0
++        space_saved as f64 / 1024.
+     );
+     println!(
+         "Compressed to: {:.2}% of original size",
+@@ -83,7 +83,7 @@ fn main() {
+ 
+     for _ in 0..runs {
+         let start = Instant::now();
+-        decoded = decode_text(&encoded, char_count).expect("Decode failed");
++        (decoded, _) = decode_text(&encoded, char_count).expect("Decode failed");
+         total_decode_time += start.elapsed();
+     }
+ 
+diff --git a/examples/create_raw_image.rs b/examples/create_raw_image.rs
+index 5596c66..0e2c3a1 100644
+--- a/examples/create_raw_image.rs
++++ b/examples/create_raw_image.rs
+@@ -3,35 +3,30 @@ use vsf::types::{BitPackedTensor, EtType};
+ use vsf::WorldCoord;
+ 
+ fn main() -> Result<(), String> {
+-    println!("Creating example VSF RAW image file...\n");
+-    println!("═══════════════════════════════════════════════════════════");
+-    println!("IMPORTANT: BitPackedTensor is SELF-DESCRIBING!");
+-    println!("  - It contains bit_depth (how many bits per pixel)");
+-    println!("  - It contains shape ([width, height])");
+-    println!("  - It contains the bitpacked pixel data");
+-    println!("  NO redundant width/height/bits_per_pixel fields needed!");
+-    println!("═══════════════════════════════════════════════════════════\n");
+-
+-    // Example: 8x8 8-bit grayscale RAW image
+-    // Create simple gradient pattern: 0, 18, 36, 54, ... 252 (max 8-bit is 255)
+-    let mut samples = Vec::new();
+-    for y in 0..8 {
+-        for x in 0..8 {
+-            let value = ((x + y) * 18) as u64; // Max: 14*18 = 252 (fits in 8-bit)
+-            samples.push(value);
+-        }
++    // Example: 17x163 11-bit single plane RGGB bayer
++    let width = 17;
++    let height = 163;
++    let planes = 1;
++    let bits = 11;
++    let cfa = vec![b'R', b'G', b'C', b'Y']; // Red Green Cyan Yellow Bayer pattern
++    let blackpoint = 499;
++    let whitepoint = 8047;
++    let total_samples = width * height * planes;
++    let mut samples = Vec::with_capacity(total_samples);
++    let mut rng = 0usize;
++    for sample in 0..total_samples {
++        rng ^= rng.rotate_left(13).wrapping_add(sample);
++        let value = rng as u8 as u16 + blackpoint; // Simulate RAW image data
++        samples.push(value);
+     }
+ 
+-    println!("Creating complete RAW image with full metadata...");
+-
+-    // Create BitPackedTensor - this self-describes the image!
+-    let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
++    let image = BitPackedTensor::pack(bits, vec![width, height], &samples);
+ 
+     // Create complete RAW image with full metadata
+-    let raw_bytes = complete_raw_image(
++    let raw_bytes = build_raw_image(
+         image,
+         Some(RawMetadata {
+-            cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']), // RGGB Bayer pattern
++            cfa_pattern: Some(cfa), // RGGB Bayer pattern
+             black_level: Some(64.),
+             white_level: Some(255.),
+             dark_frame_hash: Some(vec![0xAB; 32]), // Example hash
+@@ -60,35 +55,15 @@ fn main() -> Result<(), String> {
+             min_aperture_f: Some(2.8),
+             max_aperture_f: Some(22.0),
+         }),
+-        Some(TokenAuth {
+-            creator_pubkey: vec![0xAB; 32],
+-            device_serial: 123456789, // Numeric serial
+-            timestamp_et: EtType::f6(1234567890.123456),
+-            location: Some(WorldCoord::from_lat_lon(47.6062, -122.3321)), // Seattle
+-            signature: vec![0xCD; 64],
+-        }),
+     )?;
+ 
+-    println!("✓ Created VSF RAW file: {} bytes", raw_bytes.len());
+-    println!("  - Magic number: RÅ<");
+-    println!("  - Contains: token auth + imaging raw + pixels");
+-    println!("  - Sensor: 8×8 @ 8 bits/pixel (self-described in BitPackedTensor)");
+-    println!("  - Camera: ISO 800, 1/60s, f/2.8, 24mm");
+-    println!("  - Location: Seattle, WA");
+-    println!();
+-
+-    // Example: Lumis-style capture (12-bit, 4096x3072)
+-    println!("Creating Lumis 12-bit RAW capture...");
+-    println!("  Note: lumis_raw_capture takes SAMPLES (u64 values 0-4095)");
+-    println!("        It will bitpack them into minimal representation\n");
+-
+     let lumis_pixel_count = 4096 * 3072;
+     let lumis_samples: Vec<u64> = vec![2048; lumis_pixel_count]; // Mid-gray (12-bit)
+ 
+     let lumis_bytes = lumis_raw_capture(
+         lumis_samples,
+         800.0,
+-        1. / 60., // 1/60 second shutter
++        1. / 60.,  // 1/60 second shutter
+         987654321, // Numeric device serial
+         vec![0xAB; 32],
+         vec![0xCD; 64],
+@@ -96,22 +71,5 @@ fn main() -> Result<(), String> {
+         Some(WorldCoord::from_lat_lon(47.6062, -122.3321)),
+     )?;
+ 
+-    println!("✓ Created Lumis RAW file: {} bytes", lumis_bytes.len());
+-    println!("  - Resolution: 4096×3072 (12.6 MP)");
+-    println!("  - Bit depth: 12-bit");
+-    println!("  - Bayer pattern: RGGB");
+-    println!("  - TOKEN authenticated");
+-    println!();
+-
+-    // You can write these to disk:
+-    // std::fs::write("example_raw.vsf", &raw_bytes)?;
+-    // std::fs::write("lumis_capture.vsf", &lumis_bytes)?;
+-
+-    println!("✓ All examples completed successfully!");
+-    println!();
+-    println!("Files are ready to write with:");
+-    println!("  std::fs::write(\"example_raw.vsf\", &raw_bytes)");
+-    println!("  std::fs::write(\"lumis_capture.vsf\", &lumis_bytes)");
+-
+     Ok(())
+ }
+diff --git a/examples/create_test_vsf.rs b/examples/create_test_vsf.rs
+new file mode 100644
+index 0000000..905fd02
+--- /dev/null
++++ b/examples/create_test_vsf.rs
+@@ -0,0 +1,53 @@
++//! Create a sample VSF file for testing vsfinfo
++
++use vsf::builders::{build_raw_image, CameraSettings, RawMetadata, TokenAuth};
++use vsf::types::{BitPackedTensor, EtType, WorldCoord};
++
++fn main() {
++    // Create a simple 8x8 test image
++    let samples: Vec<u64> = (0..64).map(|i| i * 4).collect(); // 0, 4, 8, 12, ..., 252
++    let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
++
++    // Create metadata
++    let metadata = RawMetadata {
++        cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']), // RGGB Bayer pattern
++        black_level: Some(64.0),
++        white_level: Some(255.0),
++        dark_frame_hash: None,
++        flat_field_hash: None,
++        bias_frame_hash: None,
++        vignette_correction_hash: None,
++        distortion_correction_hash: None,
++        magic_9: None,
++    };
++
++    // Create camera settings
++    let camera = CameraSettings {
++        iso_speed: Some(800.0),
++        shutter_time_s: Some(1.0 / 60.0), // 1/60 second
++        aperture_f_number: Some(2.8),
++        focal_length_m: Some(0.050), // 50mm
++        exposure_compensation: None,
++        focus_distance_m: Some(3.5),
++        flash_fired: Some(false),
++        metering_mode: Some("matrix".to_string()),
++    };
++
++    // Create TOKEN auth
++    let token_auth = TokenAuth {
++        creator_pubkey: vec![0xAB; 32], // Dummy 32-byte Ed25519 public key
++        device_serial: 12345,
++        timestamp_et: EtType::f6(1234567890.123456),
++        location: Some(WorldCoord::from_lat_lon(47.6062, -122.3321)), // Seattle
++        signature: vec![0xCD; 64], // Dummy 64-byte Ed25519 signature
++    };
++
++    // Build the VSF file
++    let bytes = build_raw_image(image, Some(metadata), Some(camera), None, Some(token_auth))
++        .expect("Failed to build VSF file");
++
++    // Write to file
++    std::fs::write("test_sample.vsf", &bytes).expect("Failed to write file");
++
++    println!("Created test_sample.vsf ({} bytes)", bytes.len());
++}
+diff --git a/examples/minimal_raw.rs b/examples/minimal_raw.rs
+index 85d419a..904fa5c 100644
+--- a/examples/minimal_raw.rs
++++ b/examples/minimal_raw.rs
+@@ -18,7 +18,7 @@ fn main() -> Result<(), String> {
+     let image = BitPackedTensor::pack(8, vec![4, 4], &samples);
+ 
+     // Create minimal RAW (no metadata, just the image)
+-    let raw_bytes = complete_raw_image(
++    let raw_bytes = build_raw_image(
+         image, None, // No sensor metadata
+         None, // No camera settings
+         None, // No lens info
+diff --git a/examples/verification_example.rs b/examples/verification_example.rs
+new file mode 100644
+index 0000000..72c20b8
+--- /dev/null
++++ b/examples/verification_example.rs
+@@ -0,0 +1,83 @@
++//! Example demonstrating VSF verification strategies
++//!
++//! Shows both Strategy 1 (full file hash) and Strategy 2 (per-section hash/sign)
++
++use vsf::builders::RawImageBuilder;
++use vsf::types::BitPackedTensor;
++use vsf::verification::{add_file_hash, verify_file_hash};
++use vsf::vsf_builder::VsfBuilder;
++
++fn main() -> Result<(), String> {
++    println!("=== VSF Verification Strategies ===\n");
++
++    // ========== STRATEGY 1: Full File Hash ==========
++    println!("Strategy 1: Full File Hash");
++    println!("- Single hash in header covering entire file");
++    println!("- Simple integrity check for archives\n");
++
++    // Create a RAW image
++    let samples: Vec<u64> = (0..64).map(|i| i * 4).collect();
++    let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
++
++    let mut raw = RawImageBuilder::new(image);
++    raw.camera.iso_speed = Some(800.0);
++    raw.camera.shutter_time_s = Some(1.0 / 60.0);
++
++    // Build with file hash placeholder
++    let mut builder = vsf::VsfBuilder::new();
++    builder = builder.with_file_hash(); // Add hash placeholder
++
++    // Add raw section manually (since RawImageBuilder uses VsfBuilder internally)
++    // For now, let's use the simple approach:
++    let bytes_without_hash = raw.build()?;
++    println!("  Built VSF file: {} bytes", bytes_without_hash.len());
++
++    // Add file hash using VsfBuilder directly
++    let samples2: Vec<u64> = (0..64).map(|i| i * 4).collect();
++    let image2 = BitPackedTensor::pack(8, vec![8, 8], &samples2);
++    let mut raw2 = RawImageBuilder::new(image2);
++    raw2.camera.iso_speed = Some(800.0);
++
++    // For demonstration, rebuild using VsfBuilder with hash
++    println!("  TODO: Demonstrate with_file_hash() on VsfBuilder");
++    println!("  (RawImageBuilder wraps VsfBuilder internally)\n");
++
++    // ========== STRATEGY 2: Per-Section Hash ==========
++    println!("Strategy 2: Per-Section Hash/Signature");
++    println!("- Hash/sig stored in label definition");
++    println!("- Signs only specific sections");
++    println!("- Allows selective editing (lock image, edit metadata)\n");
++
++    println!("  TODO: Implement add_section_hash()");
++    println!("  TODO: Implement sign_section()\n");
++
++    // ========== VERIFICATION WORKFLOW ==========
++    println!("=== Verification Workflow ===\n");
++
++    println!("1. Build VSF file:");
++    println!("   let bytes = raw.build()?;\n");
++
++    println!("2. Add verification (choose strategy):");
++    println!("   Strategy 1: let bytes = add_file_hash(bytes)?;");
++    println!("   Strategy 2: let bytes = add_section_hash(bytes, \"raw\")?;");
++    println!("   Strategy 2: let bytes = sign_section(bytes, \"raw\", &key)?;\n");
++
++    println!("3. Verify later:");
++    println!("   Strategy 1: verify_file_hash(&bytes)?;");
++    println!("   Strategy 2: verify_section_hash(&bytes, \"raw\")?;");
++    println!("   Strategy 2: verify_section_signature(&bytes, \"raw\", &pubkey)?;\n");
++
++    // ========== COMBINED STRATEGIES ==========
++    println!("=== Combined Strategies ===\n");
++    println!("You can use both:");
++    println!("  let bytes = raw.build()?;");
++    println!("  let bytes = add_file_hash(bytes)?;        // Full file integrity");
++    println!("  let bytes = sign_section(bytes, \"raw\", &key)?;  // Lock image data\n");
++
++    println!("Benefits:");
++    println!("  - File hash: Simple integrity check");
++    println!("  - Section sig: Cryptographic provenance");
++    println!("  - Both: Maximum verification + selective editing");
++
++    Ok(())
++}
+diff --git a/src/bin/vsfinfo.rs b/src/bin/vsfinfo.rs
+new file mode 100644
+index 0000000..b8b058c
+--- /dev/null
++++ b/src/bin/vsfinfo.rs
+@@ -0,0 +1,613 @@
++//! VSF File Inspector - A tool for viewing, verifying, and extracting VSF file contents
++//!
++//! Similar to exiftool for images, vsfinfo provides detailed inspection of VSF files
++//! including metadata, structure verification, and field extraction.
++
++use clap::{Parser, Subcommand};
++use std::fs;
++use std::path::PathBuf;
++use vsf::decoding::parse::parse;
++use vsf::decoding::parse_preamble;
++use vsf::types::VsfType;
++
++#[derive(Parser)]
++#[command(name = "vsfinfo")]
++#[command(about = "VSF File Inspector - Inspect, verify, and extract VSF file contents", long_about = None)]
++#[command(version)]
++struct Cli {
++    /// VSF file to inspect
++    #[arg(value_name = "FILE")]
++    file: PathBuf,
++
++    #[command(subcommand)]
++    command: Option<Commands>,
++}
++
++#[derive(Subcommand)]
++enum Commands {
++    /// Show detailed file information (default)
++    Info,
++
++    /// Verify file integrity and signatures
++    Verify,
++
++    /// Extract a specific field value
++    #[command(name = "get")]
++    Extract {
++        /// Field path in format "section.field"
++        #[arg(value_name = "FIELD_PATH")]
++        field_path: String,
++    },
++
++    /// Show file structure as a tree
++    Tree,
++}
++
++fn main() {
++    let cli = Cli::parse();
++
++    // Read the file
++    let data = match fs::read(&cli.file) {
++        Ok(d) => d,
++        Err(e) => {
++            eprintln!("Error reading file: {}", e);
++            std::process::exit(1);
++        }
++    };
++
++    // Execute the appropriate command
++    let result = match cli.command {
++        Some(Commands::Info) | None => show_info(&data),
++        Some(Commands::Verify) => verify_file(&data),
++        Some(Commands::Extract { field_path }) => extract_field(&data, &field_path),
++        Some(Commands::Tree) => show_tree(&data),
++    };
++
++    if let Err(e) = result {
++        eprintln!("Error: {}", e);
++        std::process::exit(1);
++    }
++}
++
++/// Parse VSF header and return structured information
++struct VsfHeader {
++    version: usize,
++    backward_compat: usize,
++    labels: Vec<LabelInfo>,
++}
++
++struct LabelInfo {
++    name: String,
++    offset: usize,
++    size: usize,
++    child_count: usize,
++}
++
++impl VsfHeader {
++    fn parse(data: &[u8]) -> Result<Self, String> {
++        // Verify magic number
++        if data.len() < 4 {
++            return Err("File too small to be valid VSF".to_string());
++        }
++        if &data[0..3] != "RÅ".as_bytes() || data[3] != b'<' {
++            return Err("Invalid VSF magic number".to_string());
++        }
++
++        let mut pointer = 4; // Skip "RÅ<"
++
++        // Parse header length (in bits)
++        let header_length_type = parse(data, &mut pointer)
++            .map_err(|e| format!("Failed to parse header length: {}", e))?;
++        let _header_length_bits = match header_length_type {
++            VsfType::b(bits) => bits,
++            _ => return Err("Expected b type for header length".to_string()),
++        };
++
++        // Parse version and backward compat
++        let version_type =
++            parse(data, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
++        let version = match version_type {
++            VsfType::z(v) => v,
++            _ => return Err("Expected z type for version".to_string()),
++        };
++
++        let backward_type = parse(data, &mut pointer)
++            .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
++        let backward_compat = match backward_type {
++            VsfType::y(v) => v,
++            _ => return Err("Expected y type for backward compat".to_string()),
++        };
++
++        // Parse label count
++        let label_count_type =
++            parse(data, &mut pointer).map_err(|e| format!("Failed to parse label count: {}", e))?;
++        let label_count = match label_count_type {
++            VsfType::n(count) => count,
++            _ => return Err("Expected n type for label count".to_string()),
++        };
++
++        // Parse each label definition
++        let mut labels = Vec::new();
++        for _ in 0..label_count {
++            if data[pointer] != b'(' {
++                return Err("Expected '(' for label definition".to_string());
++            }
++            pointer += 1;
++
++            let label_name_type = parse(data, &mut pointer)
++                .map_err(|e| format!("Failed to parse label name: {}", e))?;
++            let label_name = match label_name_type {
++                VsfType::d(name) => name,
++                _ => return Err("Expected d type for label name".to_string()),
++            };
++
++            let offset_type =
++                parse(data, &mut pointer).map_err(|e| format!("Failed to parse offset: {}", e))?;
++            let offset_bits = match offset_type {
++                VsfType::o(bits) => bits,
++                _ => return Err("Expected o type for offset".to_string()),
++            };
++
++            let size_type =
++                parse(data, &mut pointer).map_err(|e| format!("Failed to parse size: {}", e))?;
++            let size_bits = match size_type {
++                VsfType::b(bits) => bits,
++                _ => return Err("Expected b type for size".to_string()),
++            };
++
++            let field_count_type = parse(data, &mut pointer)
++                .map_err(|e| format!("Failed to parse field count: {}", e))?;
++            let field_count = match field_count_type {
++                VsfType::n(count) => count,
++                _ => return Err("Expected n type for field count".to_string()),
++            };
++
++            if data[pointer] != b')' {
++                return Err("Expected ')' after label definition".to_string());
++            }
++            pointer += 1;
++
++            labels.push(LabelInfo {
++                name: label_name,
++                offset: offset_bits / 8, // Convert bits to bytes
++                size: size_bits / 8,     // Convert bits to bytes
++                child_count: field_count,
++            });
++        }
++
++        Ok(VsfHeader {
++            version,
++            backward_compat,
++            labels,
++        })
++    }
++}
++
++/// Format a VsfType value for display
++fn format_value(vsf: &VsfType) -> String {
++    match vsf {
++        VsfType::u0(b) => format!("{}", b),
++        VsfType::u(v, _) => format!("{}", v),
++        VsfType::u3(v) => format!("{}", v),
++        VsfType::u4(v) => format!("{}", v),
++        VsfType::u5(v) => format!("{}", v),
++        VsfType::u6(v) => format!("{}", v),
++        VsfType::u7(v) => format!("{}", v),
++        VsfType::i(v) => format!("{}", v),
++        VsfType::i3(v) => format!("{}", v),
++        VsfType::i4(v) => format!("{}", v),
++        VsfType::i5(v) => format!("{}", v),
++        VsfType::i6(v) => format!("{}", v),
++        VsfType::i7(v) => format!("{}", v),
++        VsfType::f5(v) => format!("{:.4}", v),
++        VsfType::f6(v) => format!("{:.8}", v),
++        VsfType::x(s) => format!("\"{}\"", s),
++        VsfType::p(tensor) => format!(
++            "p[{}-bit] {}×{} ({} pixels, {} bytes)",
++            tensor.bit_depth,
++            tensor.shape.get(0).unwrap_or(&0),
++            tensor.shape.get(1).unwrap_or(&0),
++            tensor.len(),
++            tensor.data.len()
++        ),
++        VsfType::t_u3(tensor) => {
++            let shape_str = tensor
++                .shape
++                .iter()
++                .map(|d| d.to_string())
++                .collect::<Vec<_>>()
++                .join("×");
++            format!("t_u3[{}] {} bytes", shape_str, tensor.data.len())
++        }
++        VsfType::t_f5(tensor) => {
++            let shape_str = tensor
++                .shape
++                .iter()
++                .map(|d| d.to_string())
++                .collect::<Vec<_>>()
++                .join("×");
++            format!("t_f5[{}] {} elements", shape_str, tensor.data.len())
++        }
++        VsfType::w(coord) => {
++            let (lat, lon) = coord.to_lat_lon();
++            format!("({:.4}°N, {:.4}°W)", lat, lon)
++        }
++        VsfType::e(et) => {
++            // Format EtType based on its variant
++            match et {
++                vsf::types::EtType::u(v) => format!("ET {}", v),
++                vsf::types::EtType::u5(v) => format!("ET {}", v),
++                vsf::types::EtType::u6(v) => format!("ET {}", v),
++                vsf::types::EtType::u7(v) => format!("ET {}", v),
++                vsf::types::EtType::i(v) => format!("ET {}", v),
++                vsf::types::EtType::i5(v) => format!("ET {}", v),
++                vsf::types::EtType::i6(v) => format!("ET {}", v),
++                vsf::types::EtType::i7(v) => format!("ET {}", v),
++                vsf::types::EtType::f5(v) => format!("ET {:.6}", v),
++                vsf::types::EtType::f6(v) => format!("ET {:.6}", v),
++            }
++        }
++        VsfType::h(algo, hash) => format!(
++            "hash[algo={} {} bytes] {}...",
++            algo,
++            hash.len(),
++            hex_preview(hash)
++        ),
++        VsfType::g(algo, sig) => format!(
++            "sig[algo={} {} bytes] {}...",
++            algo,
++            sig.len(),
++            hex_preview(sig)
++        ),
++        VsfType::k(algo, key) => format!(
++            "key[algo={} {} bytes] {}...",
++            algo,
++            key.len(),
++            hex_preview(key)
++        ),
++        VsfType::a(algo, mac) => format!(
++            "mac[algo={} {} bytes] {}...",
++            algo,
++            mac.len(),
++            hex_preview(mac)
++        ),
++        _ => format!("{:?}", vsf),
++    }
++}
++
++/// Format a VsfType value for short display (tree view)
++fn format_value_short(vsf: &VsfType) -> String {
++    match vsf {
++        VsfType::p(tensor) => format!(
++            "{}×{} {}-bit",
++            tensor.shape.get(0).unwrap_or(&0),
++            tensor.shape.get(1).unwrap_or(&0),
++            tensor.bit_depth
++        ),
++        VsfType::x(s) if s.len() > 30 => format!("\"{}...\"", &s[..27]),
++        VsfType::x(s) => format!("\"{}\"", s),
++        _ => format_value(vsf),
++    }
++}
++
++/// Generate hex preview of bytes
++fn hex_preview(bytes: &[u8]) -> String {
++    bytes
++        .iter()
++        .take(4)
++        .map(|b| format!("{:02X}", b))
++        .collect::<Vec<_>>()
++        .join("")
++}
++
++/// Parse section fields and return as vec of (name, value) tuples
++fn parse_section_fields(data: &[u8], label: &LabelInfo) -> Result<Vec<(String, VsfType)>, String> {
++    let mut pointer = label.offset;
++    let mut fields = Vec::new();
++
++    // Parse preamble if structured
++    if label.child_count > 0 {
++        let _ = parse_preamble(data, &mut pointer)
++            .map_err(|e| format!("Failed to parse preamble: {}", e))?;
++    }
++
++    // Parse fields
++    if pointer >= data.len() {
++        return Ok(fields);
++    }
++
++    if data[pointer] == b'[' {
++        pointer += 1;
++
++        for _ in 0..label.child_count {
++            if pointer >= data.len() {
++                break;
++            }
++
++            if data[pointer] == b'(' {
++                pointer += 1;
++
++                let field_name_type = parse(data, &mut pointer)
++                    .map_err(|e| format!("Failed to parse field name: {}", e))?;
++
++                if let VsfType::d(name) = field_name_type {
++                    if pointer < data.len() && data[pointer] == b':' {
++                        pointer += 1;
++
++                        let field_value = parse(data, &mut pointer)
++                            .map_err(|e| format!("Failed to parse field value: {}", e))?;
++
++                        fields.push((name, field_value));
++                    }
++                }
++
++                if pointer < data.len() && data[pointer] == b')' {
++                    pointer += 1;
++                }
++            }
++        }
++    }
++
++    Ok(fields)
++}
++
++/// Show basic file information (default mode)
++fn show_info(data: &[u8]) -> Result<(), String> {
++    let header = VsfHeader::parse(data)?;
++
++    println!("VSF File Inspector v{}", env!("CARGO_PKG_VERSION"));
++    println!(
++        "Size: {} bytes ({:.1} MB)",
++        data.len(),
++        data.len() as f64 / 1_000_000.0
++    );
++    println!();
++
++    println!("Header:");
++    println!("  Version: {}", header.version);
++    println!("  Backward Compat: {}", header.backward_compat);
++    println!("  Sections: {}", header.labels.len());
++    println!();
++
++    for (i, label) in header.labels.iter().enumerate() {
++        println!("Section {}: {}", i, label.name);
++        println!("  Offset: {} bytes", label.offset);
++        println!(
++            "  Size: {} bytes ({:.1} KB)",
++            label.size,
++            label.size as f64 / 1024.0
++        );
++        println!("  Fields: {}", label.child_count);
++
++        // Parse and show preamble info
++        if label.child_count > 0 {
++            let mut pointer = label.offset;
++            if let Ok((count, size_bits, hash, sig)) = parse_preamble(data, &mut pointer) {
++                println!("  Preamble: {{n={} b={}}}", count, size_bits);
++                if hash.is_some() {
++                    println!("  Hash: Present");
++                }
++                if sig.is_some() {
++                    println!("  Signature: Present");
++                }
++            }
++        }
++
++        // Parse and display fields
++        if let Ok(fields) = parse_section_fields(data, label) {
++            for (field_name, field_value) in fields {
++                println!("    {}: {}", field_name, format_value(&field_value));
++            }
++        }
++
++        println!();
++    }
++
++    Ok(())
++}
++
++/// Verify file integrity
++fn verify_file(data: &[u8]) -> Result<(), String> {
++    println!("Verifying VSF file...\n");
++
++    let mut errors = 0;
++    let mut warnings = 0;
++
++    // Check magic number
++    if data.len() < 4 || &data[0..3] != "RÅ".as_bytes() || data[3] != b'<' {
++        println!("✗ Invalid magic number");
++        errors += 1;
++    } else {
++        println!("✓ Magic number valid");
++    }
++
++    // Parse header
++    let header = match VsfHeader::parse(data) {
++        Ok(h) => {
++            println!("✓ Header structure valid");
++            h
++        }
++        Err(e) => {
++            println!("✗ Header parsing failed: {}", e);
++            errors += 1;
++            return Err("Cannot continue verification".into());
++        }
++    };
++
++    // Verify each section
++    for label in &header.labels {
++        let mut pointer = label.offset;
++
++        // Check preamble if structured
++        if label.child_count > 0 {
++            match parse_preamble(data, &mut pointer) {
++                Ok((count, size_bits, hash, sig)) => {
++                    // Verify count matches
++                    if count != label.child_count {
++                        println!(
++                            "✗ Section '{}': preamble count {} != label count {}",
++                            label.name, count, label.child_count
++                        );
++                        errors += 1;
++                    }
++
++                    // Verify size matches
++                    let expected_bits = label.size * 8;
++                    if size_bits != expected_bits {
++                        println!(
++                            "✗ Section '{}': preamble size {} != label size {}",
++                            label.name, size_bits, expected_bits
++                        );
++                        errors += 1;
++                    }
++
++                    // Verify hash if present
++                    if let Some(h) = hash {
++                        let section_end = label.offset + label.size;
++                        if section_end <= data.len() {
++                            let section_data = &data[label.offset..section_end];
++                            let computed = blake3::hash(section_data);
++                            if computed.as_bytes() == h.as_slice() {
++                                println!("✓ Section '{}': hash verified", label.name);
++                            } else {
++                                println!("✗ Section '{}': hash mismatch!", label.name);
++                                errors += 1;
++                            }
++                        } else {
++                            println!("✗ Section '{}': section exceeds file size", label.name);
++                            errors += 1;
++                        }
++                    }
++
++                    // Note signature presence
++                    if sig.is_some() {
++                        println!(
++                            "✓ Section '{}': signature present (verification TBD)",
++                            label.name
++                        );
++                        warnings += 1;
++                    }
++                }
++                Err(e) => {
++                    println!("✗ Section '{}': preamble parsing failed: {}", label.name, e);
++                    errors += 1;
++                }
++            }
++        }
++    }
++
++    // Look for TOKEN signature
++    if let Some(_token_section) = header
++        .labels
++        .iter()
++        .find(|l| l.name == "token_auth" || l.name == "token auth")
++    {
++        println!("\n✓ Found TOKEN auth section");
++        println!("  (Full signature verification TBD)");
++        warnings += 1;
++    } else {
++        println!("\n○ No TOKEN auth section found");
++    }
++
++    println!("\n{}", "=".repeat(50));
++    if errors == 0 && warnings == 0 {
++        println!("✓ ALL CHECKS PASSED");
++    } else if errors == 0 {
++        println!("✓ VALID ({} warnings)", warnings);
++    } else {
++        println!("✗ INVALID ({} errors, {} warnings)", errors, warnings);
++    }
++
++    Ok(())
++}
++
++/// Extract a specific field value
++fn extract_field(data: &[u8], field_path: &str) -> Result<(), String> {
++    // field_path like "raw.iso_speed" or "token_auth.location"
++    let parts: Vec<&str> = field_path.split('.').collect();
++
++    if parts.len() != 2 {
++        return Err("Field path must be 'section.field'".into());
++    }
++
++    let section_name = parts[0];
++    let field_name = parts[1];
++
++    let header = VsfHeader::parse(data)?;
++
++    // Find section (handle both space and underscore variants)
++    let section = header
++        .labels
++        .iter()
++        .find(|l| {
++            l.name == section_name
++                || l.name.replace(' ', "_") == section_name
++                || l.name.replace('_', " ") == section_name
++        })
++        .ok_or(format!("Section '{}' not found", section_name))?;
++
++    // Parse section fields
++    let fields = parse_section_fields(data, section)?;
++
++    // Find the requested field (handle both space and underscore variants)
++    for (name, value) in fields {
++        if name == field_name
++            || name.replace(' ', "_") == field_name
++            || name.replace('_', " ") == field_name
++        {
++            println!("{}", format_value(&value));
++            return Ok(());
++        }
++    }
++
++    Err(format!(
++        "Field '{}' not found in section '{}'",
++        field_name, section_name
++    ))
++}
++
++/// Show file structure as a tree
++fn show_tree(data: &[u8]) -> Result<(), String> {
++    let header = VsfHeader::parse(data)?;
++
++    println!("VSF File Tree");
++    println!("{}", "=".repeat(50));
++    println!();
++
++    for (i, label) in header.labels.iter().enumerate() {
++        let is_last = i == header.labels.len() - 1;
++        let prefix = if is_last { "└── " } else { "├── " };
++
++        println!(
++            "{}{} ({} bytes, {} fields)",
++            prefix, label.name, label.size, label.child_count
++        );
++
++        // Parse fields
++        if let Ok(fields) = parse_section_fields(data, label) {
++            for (j, (field_name, field_value)) in fields.iter().enumerate() {
++                let is_field_last = j == fields.len() - 1;
++                let field_prefix = if is_last { "    " } else { "│   " };
++                let field_marker = if is_field_last {
++                    "└── "
++                } else {
++                    "├── "
++                };
++
++                println!(
++                    "{}{}{}: {}",
++                    field_prefix,
++                    field_marker,
++                    field_name,
++                    format_value_short(field_value)
++                );
++            }
++        }
++
++        if !is_last {
++            println!("│");
++        }
++    }
++
++    Ok(())
++}
+diff --git a/src/builders.rs b/src/builders.rs
+index 29b0f69..e42aa94 100644
+--- a/src/builders.rs
++++ b/src/builders.rs
+@@ -94,20 +94,236 @@ pub struct TokenAuth {
+     pub signature: Vec<u8>,      // Ed25519 signature (64 bytes) over entire capture
+ }
+ 
++// ==================== BUILDER PATTERN API ====================
++
++/// Builder for RawMetadata with convenient field access
++#[derive(Debug, Clone, Default)]
++pub struct RawMetadataBuilder {
++    pub cfa_pattern: Option<Vec<u8>>,
++    pub black_level: Option<f32>,
++    pub white_level: Option<f32>,
++    pub dark_frame_hash: Option<Vec<u8>>,
++    pub flat_field_hash: Option<Vec<u8>>,
++    pub bias_frame_hash: Option<Vec<u8>>,
++    pub vignette_correction_hash: Option<Vec<u8>>,
++    pub distortion_correction_hash: Option<Vec<u8>>,
++    pub magic_9: Option<Vec<f32>>,
++}
++
++impl RawMetadataBuilder {
++    /// Convert builder to RawMetadata (returns None if all fields are None)
++    fn build(self) -> Option<RawMetadata> {
++        if self.cfa_pattern.is_none()
++            && self.black_level.is_none()
++            && self.white_level.is_none()
++            && self.dark_frame_hash.is_none()
++            && self.flat_field_hash.is_none()
++            && self.bias_frame_hash.is_none()
++            && self.vignette_correction_hash.is_none()
++            && self.distortion_correction_hash.is_none()
++            && self.magic_9.is_none()
++        {
++            None
++        } else {
++            Some(RawMetadata {
++                cfa_pattern: self.cfa_pattern,
++                black_level: self.black_level,
++                white_level: self.white_level,
++                dark_frame_hash: self.dark_frame_hash,
++                flat_field_hash: self.flat_field_hash,
++                bias_frame_hash: self.bias_frame_hash,
++                vignette_correction_hash: self.vignette_correction_hash,
++                distortion_correction_hash: self.distortion_correction_hash,
++                magic_9: self.magic_9,
++            })
++        }
++    }
++}
++
++/// Builder for CameraSettings with convenient field access
++#[derive(Debug, Clone, Default)]
++pub struct CameraBuilder {
++    pub iso_speed: Option<f32>,
++    pub shutter_time_s: Option<f32>,
++    pub aperture_f_number: Option<f32>,
++    pub focal_length_m: Option<f32>,
++    pub exposure_compensation: Option<f32>,
++    pub focus_distance_m: Option<f32>,
++    pub flash_fired: Option<bool>,
++    pub metering_mode: Option<String>,
++}
++
++impl CameraBuilder {
++    /// Convert builder to CameraSettings (returns None if all fields are None)
++    fn build(self) -> Option<CameraSettings> {
++        if self.iso_speed.is_none()
++            && self.shutter_time_s.is_none()
++            && self.aperture_f_number.is_none()
++            && self.focal_length_m.is_none()
++            && self.exposure_compensation.is_none()
++            && self.focus_distance_m.is_none()
++            && self.flash_fired.is_none()
++            && self.metering_mode.is_none()
++        {
++            None
++        } else {
++            Some(CameraSettings {
++                iso_speed: self.iso_speed,
++                shutter_time_s: self.shutter_time_s,
++                aperture_f_number: self.aperture_f_number,
++                focal_length_m: self.focal_length_m,
++                exposure_compensation: self.exposure_compensation,
++                focus_distance_m: self.focus_distance_m,
++                flash_fired: self.flash_fired,
++                metering_mode: self.metering_mode,
++            })
++        }
++    }
++}
++
++/// Builder for LensInfo with convenient field access
++#[derive(Debug, Clone, Default)]
++pub struct LensBuilder {
++    pub make: Option<String>,
++    pub model: Option<String>,
++    pub serial_number: Option<String>,
++    pub min_focal_length_m: Option<f32>,
++    pub max_focal_length_m: Option<f32>,
++    pub min_aperture_f: Option<f32>,
++    pub max_aperture_f: Option<f32>,
++}
++
++impl LensBuilder {
++    /// Convert builder to LensInfo (returns None if all fields are None)
++    fn build(self) -> Option<LensInfo> {
++        if self.make.is_none()
++            && self.model.is_none()
++            && self.serial_number.is_none()
++            && self.min_focal_length_m.is_none()
++            && self.max_focal_length_m.is_none()
++            && self.min_aperture_f.is_none()
++            && self.max_aperture_f.is_none()
++        {
++            None
++        } else {
++            Some(LensInfo {
++                make: self.make,
++                model: self.model,
++                serial_number: self.serial_number,
++                min_focal_length_m: self.min_focal_length_m,
++                max_focal_length_m: self.max_focal_length_m,
++                min_aperture_f: self.min_aperture_f,
++                max_aperture_f: self.max_aperture_f,
++            })
++        }
++    }
++}
++
++/// Builder for TokenAuth with convenient field access
++#[derive(Debug, Clone)]
++pub struct TokenBuilder {
++    pub creator_pubkey: Vec<u8>,
++    pub device_serial: usize,
++    pub timestamp_et: EtType,
++    pub location: Option<WorldCoord>,
++    pub signature: Vec<u8>,
++}
++
++impl TokenBuilder {
++    /// Create a new TokenBuilder with required fields
++    pub fn new(
++        creator_pubkey: Vec<u8>,
++        device_serial: usize,
++        timestamp_et: EtType,
++        signature: Vec<u8>,
++    ) -> Self {
++        Self {
++            creator_pubkey,
++            device_serial,
++            timestamp_et,
++            location: None,
++            signature,
++        }
++    }
++
++    /// Convert builder to TokenAuth
++    fn build(self) -> TokenAuth {
++        TokenAuth {
++            creator_pubkey: self.creator_pubkey,
++            device_serial: self.device_serial,
++            timestamp_et: self.timestamp_et,
++            location: self.location,
++            signature: self.signature,
++        }
++    }
++}
++
++/// Builder pattern for creating RAW images with ergonomic dot notation
++///
++/// # Example
++/// ```ignore
++/// use vsf::builders::RawImageBuilder;
++/// use vsf::types::BitPackedTensor;
++///
++/// let samples: Vec<u64> = vec![2048; 4096 * 3072];
++/// let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
++///
++/// let mut raw = RawImageBuilder::new(image);
++/// raw.camera.iso_speed = Some(800.0);
++/// raw.camera.shutter_time_s = Some(1.0 / 60.0);
++/// raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']);
++/// raw.lens.make = Some("Sony".to_string());
++///
++/// let bytes = raw.build()?;
++/// ```
++#[derive(Debug, Clone)]
++pub struct RawImageBuilder {
++    image: BitPackedTensor,
++    pub raw: RawMetadataBuilder,
++    pub camera: CameraBuilder,
++    pub lens: LensBuilder,
++    pub token: Option<TokenBuilder>,
++}
++
++impl RawImageBuilder {
++    /// Create a new RawImageBuilder with the image data
++    pub fn new(image: BitPackedTensor) -> Self {
++        Self {
++            image,
++            raw: RawMetadataBuilder::default(),
++            camera: CameraBuilder::default(),
++            lens: LensBuilder::default(),
++            token: None,
++        }
++    }
++
++    /// Build the complete VSF RAW image file
++    pub fn build(self) -> Result<Vec<u8>, String> {
++        let metadata = self.raw.build();
++        let camera = self.camera.build();
++        let lens = self.lens.build();
++        let token = self.token.map(|t| t.build());
++
++        build_raw_image(self.image, metadata, camera, lens, token)
++    }
++}
++
++// ==================== SIMPLE HELPER FUNCTIONS ====================
++
+ /// Create a RAW camera image with arbitrary bit depth
+ ///
+ /// Supports 1-256 bits per sample
+ ///
+ /// # Arguments
+ /// * `bit_depth` - Bits per sample (1-256, where 0 = 256)
+-/// * `width` - Image width in pixels
+-/// * `height` - Image height in pixels
+-/// * `samples` - Pixel values
++/// * `width` - Image width in samples
++/// * `height` - Image height in samples
++/// * `samples` - RAW sensor sample values (unreferenced, single-plane)
+ ///
+ /// # Example
+ /// ```ignore
+-/// let pixels: Vec<u64> = vec![2048; 4096 * 3072]; // 12-bit mid-gray
+-/// let raw = raw_image(12, 4096, 3072, pixels);
++/// let samples: Vec<u64> = vec![2048; 4096 * 3072]; // 12-bit mid-gray
++/// let raw = raw_image(12, 4096, 3072, samples);
+ /// ```
+ pub fn raw_image(bit_depth: u8, width: usize, height: usize, samples: Vec<u64>) -> VsfType {
+     let tensor = BitPackedTensor::pack(bit_depth, vec![width, height], &samples);
+@@ -203,7 +419,7 @@ pub fn geotagged_photo(
+ ///
+ /// # Returns
+ /// Complete VSF file bytes ready to write to disk
+-pub fn complete_raw_image(
++pub fn build_raw_image(
+     image: BitPackedTensor,
+     metadata: Option<RawMetadata>,
+     camera: Option<CameraSettings>,
+@@ -216,14 +432,14 @@ pub fn complete_raw_image(
+     if let Some(auth) = token_auth {
+         let mut auth_items = vec![
+             (
+-                "creator pubkey".to_string(),
++                "creator_pubkey".to_string(),
+                 VsfType::k(KEY_ED25519, auth.creator_pubkey),
+             ),
+             (
+-                "device serial".to_string(),
++                "device_serial".to_string(),
+                 VsfType::u(auth.device_serial, false),
+             ),
+-            ("timestamp et".to_string(), VsfType::e(auth.timestamp_et)),
++            ("timestamp_et".to_string(), VsfType::e(auth.timestamp_et)),
+             (
+                 "signature".to_string(),
+                 VsfType::g(SIG_ED25519, auth.signature),
+@@ -234,7 +450,7 @@ pub fn complete_raw_image(
+             auth_items.push(("location".to_string(), VsfType::w(loc)));
+         }
+ 
+-        builder = builder.add_section("token auth", auth_items);
++        builder = builder.add_section("token_auth", auth_items);
+     }
+ 
+     // Build raw section - start with the image (p type has width, height, bit_depth)
+@@ -246,7 +462,7 @@ pub fn complete_raw_image(
+             // Validate CFA pattern contains only valid ASCII colours
+             validate_cfa_pattern(&cfa)?;
+             raw_items.push((
+-                "cfa pattern".to_string(),
++                "cfa_pattern".to_string(),
+                 VsfType::t_u3(Tensor {
+                     shape: vec![cfa.len()],
+                     data: cfa,
+@@ -255,36 +471,36 @@ pub fn complete_raw_image(
+         }
+ 
+         if let Some(black) = meta.black_level {
+-            raw_items.push(("black level".to_string(), VsfType::f5(black)));
++            raw_items.push(("black_level".to_string(), VsfType::f5(black)));
+         }
+ 
+         if let Some(white) = meta.white_level {
+-            raw_items.push(("white level".to_string(), VsfType::f5(white)));
++            raw_items.push(("white_level".to_string(), VsfType::f5(white)));
+         }
+ 
+         // Calibration hashes (using BLAKE3 as default)
+         if let Some(hash) = meta.dark_frame_hash {
+-            raw_items.push(("dark frame hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
++            raw_items.push(("dark_frame_hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
+         }
+ 
+         if let Some(hash) = meta.flat_field_hash {
+-            raw_items.push(("flat field hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
++            raw_items.push(("flat_field_hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
+         }
+ 
+         if let Some(hash) = meta.bias_frame_hash {
+-            raw_items.push(("bias frame hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
++            raw_items.push(("bias_frame_hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
+         }
+ 
+         if let Some(hash) = meta.vignette_correction_hash {
+             raw_items.push((
+-                "vignette correction hash".to_string(),
++                "vignette_correction_hash".to_string(),
+                 VsfType::h(HASH_BLAKE3, hash),
+             ));
+         }
+ 
+         if let Some(hash) = meta.distortion_correction_hash {
+             raw_items.push((
+-                "distortion correction hash".to_string(),
++                "distortion_correction_hash".to_string(),
+                 VsfType::h(HASH_BLAKE3, hash),
+             ));
+         }
+@@ -298,7 +514,7 @@ pub fn complete_raw_image(
+                 ));
+             }
+             raw_items.push((
+-                "magic 9".to_string(),
++                "magic_9".to_string(),
+                 VsfType::t_f5(Tensor {
+                     shape: vec![3, 3],
+                     data: matrix,
+@@ -310,66 +526,66 @@ pub fn complete_raw_image(
+     // Camera settings
+     if let Some(cam) = camera {
+         if let Some(iso) = cam.iso_speed {
+-            raw_items.push(("iso speed".to_string(), VsfType::f5(iso)));
++            raw_items.push(("iso_speed".to_string(), VsfType::f5(iso)));
+         }
+ 
+         if let Some(shutter) = cam.shutter_time_s {
+-            raw_items.push(("shutter time s".to_string(), VsfType::f5(shutter)));
++            raw_items.push(("shutter_time_s".to_string(), VsfType::f5(shutter)));
+         }
+ 
+         if let Some(aperture) = cam.aperture_f_number {
+-            raw_items.push(("aperture f number".to_string(), VsfType::f5(aperture)));
++            raw_items.push(("aperture_f_number".to_string(), VsfType::f5(aperture)));
+         }
+ 
+         if let Some(focal) = cam.focal_length_m {
+-            raw_items.push(("focal length m".to_string(), VsfType::f5(focal)));
++            raw_items.push(("focal_length_m".to_string(), VsfType::f5(focal)));
+         }
+ 
+         if let Some(comp) = cam.exposure_compensation {
+-            raw_items.push(("exposure compensation".to_string(), VsfType::f5(comp)));
++            raw_items.push(("exposure_compensation".to_string(), VsfType::f5(comp)));
+         }
+ 
+         if let Some(focus) = cam.focus_distance_m {
+-            raw_items.push(("focus distance m".to_string(), VsfType::f5(focus)));
++            raw_items.push(("focus_distance_m".to_string(), VsfType::f5(focus)));
+         }
+ 
+         if let Some(flash) = cam.flash_fired {
+-            raw_items.push(("flash fired".to_string(), VsfType::u0(flash)));
++            raw_items.push(("flash_fired".to_string(), VsfType::u0(flash)));
+         }
+ 
+         if let Some(metering) = cam.metering_mode {
+-            raw_items.push(("metering mode".to_string(), VsfType::x(metering)));
++            raw_items.push(("metering_mode".to_string(), VsfType::x(metering)));
+         }
+     }
+ 
+     // Lens info
+     if let Some(l) = lens {
+         if let Some(make) = l.make {
+-            raw_items.push(("lens make".to_string(), VsfType::x(make)));
++            raw_items.push(("lens_make".to_string(), VsfType::x(make)));
+         }
+ 
+         if let Some(model) = l.model {
+-            raw_items.push(("lens model".to_string(), VsfType::x(model)));
++            raw_items.push(("lens_model".to_string(), VsfType::x(model)));
+         }
+ 
+         if let Some(serial) = l.serial_number {
+-            raw_items.push(("lens serial".to_string(), VsfType::x(serial)));
++            raw_items.push(("lens_serial".to_string(), VsfType::x(serial)));
+         }
+ 
+         if let Some(min_focal) = l.min_focal_length_m {
+-            raw_items.push(("lens min focal m".to_string(), VsfType::f5(min_focal)));
++            raw_items.push(("lens_min_focal_m".to_string(), VsfType::f5(min_focal)));
+         }
+ 
+         if let Some(max_focal) = l.max_focal_length_m {
+-            raw_items.push(("lens max focal m".to_string(), VsfType::f5(max_focal)));
++            raw_items.push(("lens_max_focal_m".to_string(), VsfType::f5(max_focal)));
+         }
+ 
+         if let Some(min_ap) = l.min_aperture_f {
+-            raw_items.push(("lens min aperture".to_string(), VsfType::f5(min_ap)));
++            raw_items.push(("lens_min_aperture".to_string(), VsfType::f5(min_ap)));
+         }
+ 
+         if let Some(max_ap) = l.max_aperture_f {
+-            raw_items.push(("lens max aperture".to_string(), VsfType::f5(max_ap)));
++            raw_items.push(("lens_max_aperture".to_string(), VsfType::f5(max_ap)));
+         }
+     }
+ 
+@@ -397,10 +613,10 @@ pub fn complete_raw_image(
+ /// **The resulting p type contains EVERYTHING about the image:**
+ /// - No separate width field (shape has it: [4096, 3072])
+ /// - No separate bit_depth field (p encoding has it: 12)
+-/// - No separate pixel data section (p has the bitpacked bytes)
++/// - No separate sample data section (p has the bitpacked bytes)
+ ///
+ /// # Arguments
+-/// * `samples` - RAW pixel values as u64 (0-4095 for 12-bit), will be bitpacked
++/// * `samples` - RAW sensor sample values as u64 (0-4095 for 12-bit), will be bitpacked
+ /// * `iso` - ISO speed (e.g., 100, 200, 400, 800, 1600, 3200)
+ /// * `shutter_s` - Shutter time in seconds (e.g., 1./60. = 0.0167 for 1/60 second)
+ /// * `device_serial` - Hardware serial number (e.g., "LUMIS-001")
+@@ -421,7 +637,7 @@ pub fn lumis_raw_capture(
+     // Create BitPackedTensor for 12-bit Lumis sensor
+     let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
+ 
+-    complete_raw_image(
++    build_raw_image(
+         image,
+         Some(RawMetadata {
+             cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']), // RGGB Bayer pattern
+@@ -561,53 +777,71 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
+         _ => return Err("Expected n type for label count".to_string()),
+     };
+ 
+-    if label_count != 1 {
+-        return Err(format!("Expected 1 label (raw), found {}", label_count));
+-    }
++    // Find both "raw" and "token_auth" labels (if present)
++    let mut raw_offset_bits: Option<usize> = None;
++    let mut raw_field_count: Option<usize> = None;
++    let mut token_auth_offset_bits: Option<usize> = None;
++    let mut token_auth_field_count: Option<usize> = None;
+ 
+-    // Parse the "raw" label definition
+-    // Format: (d[name] o[offset] b[size] n[count])
+-    if data[pointer] != b'(' {
+-        return Err("Expected '(' for label definition".to_string());
+-    }
+-    pointer += 1;
++    for _ in 0..label_count {
++        // Parse label definition: (d[name] o[offset] b[size] n[count])
++        if data[pointer] != b'(' {
++            return Err("Expected '(' for label definition".to_string());
++        }
++        pointer += 1;
+ 
+-    let label_name_type =
+-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse label name: {}", e))?;
+-    let label_name = match label_name_type {
+-        VsfType::d(name) => name,
+-        _ => return Err("Expected d type for label name".to_string()),
+-    };
++        let label_name_type =
++            parse(data, &mut pointer).map_err(|e| format!("Failed to parse label name: {}", e))?;
++        let label_name = match label_name_type {
++            VsfType::d(name) => name,
++            _ => return Err("Expected d type for label name".to_string()),
++        };
+ 
+-    if label_name != "raw" {
+-        return Err(format!("Expected 'raw' label, found '{}'", label_name));
+-    }
++        let offset_type =
++            parse(data, &mut pointer).map_err(|e| format!("Failed to parse offset: {}", e))?;
++        let offset_bits = match offset_type {
++            VsfType::o(bits) => bits,
++            _ => return Err("Expected o type for offset".to_string()),
++        };
+ 
+-    let offset_type =
+-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse offset: {}", e))?;
+-    let offset_bits = match offset_type {
+-        VsfType::o(bits) => bits,
+-        _ => return Err("Expected o type for offset".to_string()),
+-    };
++        let size_type =
++            parse(data, &mut pointer).map_err(|e| format!("Failed to parse size: {}", e))?;
++        let _size_bits = match size_type {
++            VsfType::b(bits) => bits,
++            _ => return Err("Expected b type for size".to_string()),
++        };
+ 
+-    let size_type =
+-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse size: {}", e))?;
+-    let _size_bits = match size_type {
+-        VsfType::b(bits) => bits,
+-        _ => return Err("Expected b type for size".to_string()),
+-    };
++        let field_count_type =
++            parse(data, &mut pointer).map_err(|e| format!("Failed to parse field count: {}", e))?;
++        let field_count = match field_count_type {
++            VsfType::n(count) => count,
++            _ => return Err("Expected n type for field count".to_string()),
++        };
+ 
+-    let field_count_type =
+-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse field count: {}", e))?;
+-    let field_count = match field_count_type {
+-        VsfType::n(count) => count,
+-        _ => return Err("Expected n type for field count".to_string()),
+-    };
++        if data[pointer] != b')' {
++            return Err("Expected ')' after label definition".to_string());
++        }
++        pointer += 1;
+ 
+-    if data[pointer] != b')' {
+-        return Err("Expected ')' after label definition".to_string());
++        // Store label info
++        match label_name.as_str() {
++            "raw" => {
++                raw_offset_bits = Some(offset_bits);
++                raw_field_count = Some(field_count);
++            }
++            "token_auth" => {
++                token_auth_offset_bits = Some(offset_bits);
++                token_auth_field_count = Some(field_count);
++            }
++            _ => {} // Ignore other labels
++        }
+     }
+-    pointer += 1;
++
++    // Ensure we found the raw label
++    let (raw_offset, raw_count) = match (raw_offset_bits, raw_field_count) {
++        (Some(o), Some(c)) => (o, c),
++        _ => return Err("Required 'raw' label not found".to_string()),
++    };
+ 
+     // Skip to end of header
+     if data[pointer] != b'>' {
+@@ -615,33 +849,7 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
+     }
+     // Note: pointer is not incremented here since we seek directly to section_start_byte below
+ 
+-    // Seek to the "raw" section using offset from label definition
+-    // This works with arbitrary section ordering (thumbnail first, raw first, etc.)
+-    let section_start_byte = offset_bits >> 3; // Convert bits to bytes (divide by 8)
+-    if section_start_byte >= data.len() {
+-        return Err(format!(
+-            "Section offset {} exceeds file size {}",
+-            section_start_byte,
+-            data.len()
+-        ));
+-    }
+-    pointer = section_start_byte;
+-
+-    // Parse preamble: {n[count] b[size]}
+-    use crate::decoding::parse_preamble;
+-    let (_preamble_count, _preamble_size, _preamble_hash, _preamble_sig) = parse_preamble(data, &mut pointer)
+-        .map_err(|e| format!("Failed to parse preamble: {}", e))?;
+-
+-    // Now parse the "raw" section
+-    if data[pointer] != b'[' {
+-        return Err(format!(
+-            "Expected '[' for section start at byte {}, found {:?}",
+-            pointer, data[pointer] as char
+-        ));
+-    }
+-    pointer += 1;
+-
+-    // Parse all fields in the section
++    // Initialize all field variables
+     let mut image: Option<BitPackedTensor> = None;
+ 
+     // Raw metadata fields
+@@ -681,7 +889,146 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
+     let mut location: Option<WorldCoord> = None;
+     let mut signature: Option<Vec<u8>> = None;
+ 
+-    for i in 0..field_count {
++    // Parse token_auth section if present
++    if let (Some(token_offset), Some(token_count)) = (token_auth_offset_bits, token_auth_field_count) {
++        // Seek to token_auth section
++        let section_start_byte = token_offset >> 3;
++        if section_start_byte >= data.len() {
++            return Err(format!(
++                "Token auth section offset {} exceeds file size {}",
++                section_start_byte,
++                data.len()
++            ));
++        }
++        pointer = section_start_byte;
++
++        // Parse preamble
++        use crate::decoding::parse_preamble;
++        let (_preamble_count, _preamble_size, _preamble_hash, _preamble_sig) =
++            parse_preamble(data, &mut pointer)
++                .map_err(|e| format!("Failed to parse token_auth preamble: {}", e))?;
++
++        // Parse section start
++        if data[pointer] != b'[' {
++            return Err(format!(
++                "Expected '[' for token_auth section at byte {}, found {:?}",
++                pointer, data[pointer] as char
++            ));
++        }
++        pointer += 1;
++
++        // Parse section name
++        let section_name_type = parse(data, &mut pointer)
++            .map_err(|e| format!("Failed to parse token_auth section name: {}", e))?;
++        let _section_name = match section_name_type {
++            VsfType::d(name) => name,
++            _ => return Err("Expected d type for token_auth section name".to_string()),
++        };
++
++        // Parse token_auth fields
++        for i in 0..token_count {
++            if data[pointer] != b'(' {
++                return Err(format!("Expected '(' for token_auth field {}", i));
++            }
++            pointer += 1;
++
++            let field_name_type = parse(data, &mut pointer)
++                .map_err(|e| format!("Failed to parse token_auth field {} name: {}", i, e))?;
++            let field_name = match field_name_type {
++                VsfType::d(name) => name,
++                _ => return Err(format!("Expected d type for token_auth field {} name", i)),
++            };
++
++            if data[pointer] != b':' {
++                return Err(format!("Expected ':' after token_auth field '{}'", field_name));
++            }
++            pointer += 1;
++
++            let field_value = parse(data, &mut pointer)
++                .map_err(|e| format!("Failed to parse token_auth field '{}': {}", field_name, e))?;
++
++            // Store token_auth field values
++            match field_name.as_str() {
++                "creator_pubkey" => {
++                    if let VsfType::k(_algorithm, v) = field_value {
++                        creator_pubkey = Some(v);
++                    }
++                }
++                "device_serial" => device_serial = to_usize(&field_value),
++                "timestamp_et" => {
++                    if let VsfType::e(et) = field_value {
++                        timestamp_et = Some(et);
++                    }
++                }
++                "location" => {
++                    if let VsfType::w(v) = field_value {
++                        location = Some(v);
++                    }
++                }
++                "signature" => {
++                    if let VsfType::g(_algorithm, v) = field_value {
++                        signature = Some(v);
++                    }
++                }
++                _ => {} // Unknown field, skip
++            }
++
++            if pointer >= data.len() {
++                return Err(format!(
++                    "Unexpected EOF after parsing token_auth field '{}' (field {} of {})",
++                    field_name, i, token_count
++                ));
++            }
++            if data[pointer] != b')' {
++                return Err(format!(
++                    "Expected ')' after token_auth field '{}' at byte {}, found {:?}",
++                    field_name, pointer, data[pointer] as char
++                ));
++            }
++            pointer += 1;
++        }
++
++        if data[pointer] != b']' {
++            return Err("Expected ']' for token_auth section end".to_string());
++        }
++    }
++
++    // Parse the "raw" section
++    let section_start_byte = raw_offset >> 3; // Convert bits to bytes
++    if section_start_byte >= data.len() {
++        return Err(format!(
++            "Raw section offset {} exceeds file size {}",
++            section_start_byte,
++            data.len()
++        ));
++    }
++    pointer = section_start_byte;
++
++    // Parse preamble
++    use crate::decoding::parse_preamble;
++    let (_preamble_count, _preamble_size, _preamble_hash, _preamble_sig) =
++        parse_preamble(data, &mut pointer)
++            .map_err(|e| format!("Failed to parse raw preamble: {}", e))?;
++
++    // Parse section start
++    if data[pointer] != b'[' {
++        return Err(format!(
++            "Expected '[' for raw section at byte {}, found {:?}",
++            pointer, data[pointer] as char
++        ));
++    }
++    pointer += 1;
++
++    // Parse section name
++    let section_name_type = parse(data, &mut pointer)
++        .map_err(|e| format!("Failed to parse raw section name: {}", e))?;
++    let _section_name = match section_name_type {
++        VsfType::d(name) => name,
++        _ => return Err("Expected d type for raw section name".to_string()),
++    };
++
++    // Parse raw section fields
++    for i in 0..raw_count {
+         if data[pointer] != b'(' {
+             return Err(format!("Expected '(' for field {}", i));
+         }
+@@ -713,146 +1060,124 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
+                 }
+             }
+             // Raw metadata
+-            "cfa pattern" => {
++            "cfa_pattern" => {
+                 if let VsfType::t_u3(tensor) = field_value {
+                     cfa_pattern = Some(tensor.data);
+                 }
+             }
+-            "black level" => {
++            "black_level" => {
+                 if let VsfType::f5(v) = field_value {
+                     black_level = Some(v);
+                 }
+             }
+-            "white level" => {
++            "white_level" => {
+                 if let VsfType::f5(v) = field_value {
+                     white_level = Some(v);
+                 }
+             }
+-            "dark frame hash" => {
++            "dark_frame_hash" => {
+                 if let VsfType::h(_algorithm, v) = field_value {
+                     dark_frame_hash = Some(v);
+                 }
+             }
+-            "flat field hash" => {
++            "flat_field_hash" => {
+                 if let VsfType::h(_algorithm, v) = field_value {
+                     flat_field_hash = Some(v);
+                 }
+             }
+-            "bias frame hash" => {
++            "bias_frame_hash" => {
+                 if let VsfType::h(_algorithm, v) = field_value {
+                     bias_frame_hash = Some(v);
+                 }
+             }
+-            "vignette correction hash" => {
++            "vignette_correction_hash" => {
+                 if let VsfType::h(_algorithm, v) = field_value {
+                     vignette_correction_hash = Some(v);
+                 }
+             }
+-            "distortion correction hash" => {
++            "distortion_correction_hash" => {
+                 if let VsfType::h(_algorithm, v) = field_value {
+                     distortion_correction_hash = Some(v);
+                 }
+             }
+-            "magic 9" => {
++            "magic_9" => {
+                 if let VsfType::t_f5(tensor) = field_value {
+                     magic_9 = Some(tensor.data);
+                 }
+             }
+             // Camera settings
+-            "iso speed" => {
++            "iso_speed" => {
+                 if let VsfType::f5(v) = field_value {
+                     iso_speed = Some(v);
+                 }
+             }
+-            "shutter time s" => {
++            "shutter_time_s" => {
+                 if let VsfType::f5(v) = field_value {
+                     shutter_time_s = Some(v);
+                 }
+             }
+-            "aperture f number" => {
++            "aperture_f_number" => {
+                 if let VsfType::f5(v) = field_value {
+                     aperture_f_number = Some(v);
+                 }
+             }
+-            "focal length m" => {
++            "focal_length_m" => {
+                 if let VsfType::f5(v) = field_value {
+                     focal_length_m = Some(v);
+                 }
+             }
+-            "exposure compensation" => {
++            "exposure_compensation" => {
+                 if let VsfType::f5(v) = field_value {
+                     exposure_compensation = Some(v);
+                 }
+             }
+-            "focus distance m" => {
++            "focus_distance_m" => {
+                 if let VsfType::f5(v) = field_value {
+                     focus_distance_m = Some(v);
+                 }
+             }
+-            "flash fired" => flash_fired = to_usize(&field_value).map(|v| v != 0),
+-            "metering mode" => {
++            "flash_fired" => flash_fired = to_usize(&field_value).map(|v| v != 0),
++            "metering_mode" => {
+                 if let VsfType::x(v) = field_value {
+                     metering_mode = Some(v);
+                 }
+             }
+             // Lens info
+-            "lens make" => {
++            "lens_make" => {
+                 if let VsfType::x(v) = field_value {
+                     lens_make = Some(v);
+                 }
+             }
+-            "lens model" => {
++            "lens_model" => {
+                 if let VsfType::x(v) = field_value {
+                     lens_model = Some(v);
+                 }
+             }
+-            "lens serial" => {
++            "lens_serial" => {
+                 if let VsfType::x(v) = field_value {
+                     lens_serial = Some(v);
+                 }
+             }
+-            "lens min focal m" => {
++            "lens_min_focal_m" => {
+                 if let VsfType::f5(v) = field_value {
+                     lens_min_focal_m = Some(v);
+                 }
+             }
+-            "lens max focal m" => {
++            "lens_max_focal_m" => {
+                 if let VsfType::f5(v) = field_value {
+                     lens_max_focal_m = Some(v);
+                 }
+             }
+-            "lens min aperture" => {
++            "lens_min_aperture" => {
+                 if let VsfType::f5(v) = field_value {
+                     lens_min_aperture = Some(v);
+                 }
+             }
+-            "lens max aperture" => {
++            "lens_max_aperture" => {
+                 if let VsfType::f5(v) = field_value {
+                     lens_max_aperture = Some(v);
+                 }
+             }
+-            // Token auth
+-            "creator pubkey" => {
+-                if let VsfType::k(_algorithm, v) = field_value {
+-                    creator_pubkey = Some(v);
+-                }
+-            }
+-            "device serial" => device_serial = to_usize(&field_value),
+-            "timestamp et" => {
+-                if let VsfType::e(et) = field_value {
+-                    timestamp_et = Some(et);
+-                }
+-            }
+-            "location" => {
+-                if let VsfType::w(v) = field_value {
+-                    location = Some(v);
+-                }
+-            }
+-            "signature" => {
+-                if let VsfType::g(_algorithm, v) = field_value {
+-                    signature = Some(v);
+-                }
+-            }
+             _ => {
+                 // Unknown field, skip
+             }
+@@ -860,8 +1185,8 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
+ 
+         if pointer >= data.len() {
+             return Err(format!(
+-                "Unexpected EOF after parsing field '{}' (field {} of {})",
+-                field_name, i, field_count
++                "Unexpected EOF after parsing raw field '{}' (field {} of {})",
++                field_name, i, raw_count
+             ));
+         }
+         if data[pointer] != b')' {
+@@ -1073,7 +1398,7 @@ mod tests {
+         let samples: Vec<u64> = vec![255; 64]; // 8x8, all white
+         let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
+ 
+-        let result = complete_raw_image(image, None, None, None, None);
++        let result = build_raw_image(image, None, None, None, None);
+ 
+         assert!(result.is_ok());
+         let bytes = result.unwrap();
+@@ -1092,7 +1417,7 @@ mod tests {
+         let samples: Vec<u64> = vec![255; 64]; // 8x8
+         let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
+ 
+-        let result = complete_raw_image(
++        let result = build_raw_image(
+             image,
+             Some(RawMetadata {
+                 cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']),
+@@ -1145,7 +1470,7 @@ mod tests {
+             samples,
+             800.0,
+             1. / 60., // 1/60 second shutter
+-            12345, // Numeric serial
++            12345,    // Numeric serial
+             vec![0xAB; 32],
+             vec![0xCD; 64],
+             EtType::f6(1234567890.123456),
+@@ -1171,7 +1496,7 @@ mod tests {
+         let samples: Vec<u64> = vec![255; 64]; // 8x8
+         let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
+ 
+-        let result = complete_raw_image(
++        let result = build_raw_image(
+             image,
+             None,
+             None,
+@@ -1205,7 +1530,7 @@ mod tests {
+         let original_image = BitPackedTensor::pack(8, vec![4, 4], &samples);
+ 
+         // Build VSF file
+-        let raw_bytes = complete_raw_image(original_image.clone(), None, None, None, None).unwrap();
++        let raw_bytes = build_raw_image(original_image.clone(), None, None, None, None).unwrap();
+ 
+         // Parse it back
+         let parsed = parse_raw_image(&raw_bytes).unwrap();
+@@ -1215,8 +1540,8 @@ mod tests {
+         assert_eq!(parsed.image.shape, vec![4, 4]);
+ 
+         // Unpack and compare pixels
+-        let original_samples = original_image.unpack();
+-        let parsed_samples = parsed.image.unpack();
++        let original_samples = original_image.unpack().into_u64();
++        let parsed_samples = parsed.image.unpack().into_u64();
+         assert_eq!(parsed_samples, original_samples);
+         assert_eq!(parsed_samples, samples);
+ 
+@@ -1257,7 +1582,7 @@ mod tests {
+         };
+ 
+         // Build VSF file
+-        let raw_bytes = complete_raw_image(
++        let raw_bytes = build_raw_image(
+             original_image.clone(),
+             Some(original_metadata.clone()),
+             Some(original_camera.clone()),
+@@ -1272,7 +1597,7 @@ mod tests {
+         // Verify image
+         assert_eq!(parsed.image.bit_depth, 8);
+         assert_eq!(parsed.image.shape, vec![8, 8]);
+-        let parsed_samples = parsed.image.unpack();
++        let parsed_samples = parsed.image.unpack().into_u64();
+         assert_eq!(parsed_samples, samples);
+ 
+         // Verify metadata
+@@ -1307,7 +1632,7 @@ mod tests {
+         let samples: Vec<u64> = vec![100; 16]; // 4x4
+         let image = BitPackedTensor::pack(8, vec![4, 4], &samples);
+ 
+-        let raw_bytes = complete_raw_image(
++        let raw_bytes = build_raw_image(
+             image,
+             Some(RawMetadata {
+                 cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']),
+@@ -1353,12 +1678,216 @@ mod tests {
+ 
+         // Next byte should be '[' (section start)
+         assert_eq!(
+-            raw_bytes[pointer],
+-            b'[',
++            raw_bytes[pointer], b'[',
+             "Expected '[' immediately after preamble"
+         );
+     }
+ 
++    #[test]
++    fn test_builder_pattern_minimal() {
++        // Test minimal builder with just image
++        let samples: Vec<u64> = (0..16).collect();
++        let image = BitPackedTensor::pack(8, vec![4, 4], &samples);
++
++        let raw = RawImageBuilder::new(image);
++        let result = raw.build();
++
++        assert!(result.is_ok());
++        let bytes = result.unwrap();
++
++        // Verify magic number
++        assert_eq!(&bytes[0..3], "RÅ".as_bytes());
++
++        // Parse and verify
++        let parsed = parse_raw_image(&bytes).unwrap();
++        assert_eq!(parsed.image.bit_depth, 8);
++        assert_eq!(parsed.image.shape, vec![4, 4]);
++    }
++
++    #[test]
++    fn test_builder_pattern_camera_settings() {
++        // Test builder with camera settings
++        let samples: Vec<u64> = vec![100; 64];
++        let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
++
++        let mut raw = RawImageBuilder::new(image);
++        raw.camera.iso_speed = Some(800.0);
++        raw.camera.shutter_time_s = Some(1.0 / 60.0);
++        raw.camera.aperture_f_number = Some(2.8);
++        raw.camera.flash_fired = Some(false);
++        raw.camera.metering_mode = Some("matrix".to_string());
++
++        let result = raw.build();
++        assert!(result.is_ok());
++        let bytes = result.unwrap();
++
++        // Parse and verify camera settings
++        let parsed = parse_raw_image(&bytes).unwrap();
++        assert!(parsed.camera.is_some());
++        let cam = parsed.camera.unwrap();
++        assert_eq!(cam.iso_speed, Some(800.0));
++        assert_eq!(cam.shutter_time_s, Some(1.0 / 60.0));
++        assert_eq!(cam.aperture_f_number, Some(2.8));
++        assert_eq!(cam.flash_fired, Some(false));
++        assert_eq!(cam.metering_mode, Some("matrix".to_string()));
++    }
++
++    #[test]
++    fn test_builder_pattern_raw_metadata() {
++        // Test builder with raw metadata
++        let samples: Vec<u64> = vec![100; 64];
++        let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
++
++        let mut raw = RawImageBuilder::new(image);
++        raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']);
++        raw.raw.black_level = Some(64.0);
++        raw.raw.white_level = Some(4095.0);
++        raw.raw.dark_frame_hash = Some(vec![0xAB; 32]);
++
++        let result = raw.build();
++        assert!(result.is_ok());
++        let bytes = result.unwrap();
++
++        // Parse and verify metadata
++        let parsed = parse_raw_image(&bytes).unwrap();
++        assert!(parsed.metadata.is_some());
++        let meta = parsed.metadata.unwrap();
++        assert_eq!(meta.cfa_pattern, Some(vec![b'R', b'G', b'G', b'B']));
++        assert_eq!(meta.black_level, Some(64.0));
++        assert_eq!(meta.white_level, Some(4095.0));
++        assert_eq!(meta.dark_frame_hash, Some(vec![0xAB; 32]));
++    }
++
++    #[test]
++    fn test_builder_pattern_lens_info() {
++        // Test builder with lens info
++        let samples: Vec<u64> = vec![100; 64];
++        let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
++
++        let mut raw = RawImageBuilder::new(image);
++        raw.lens.make = Some("Sony".to_string());
++        raw.lens.model = Some("FE 24-70mm F2.8 GM II".to_string());
++        raw.lens.serial_number = Some("ABC123456".to_string());
++        raw.lens.min_focal_length_m = Some(0.024); // 24mm
++        raw.lens.max_focal_length_m = Some(0.070); // 70mm
++        raw.lens.min_aperture_f = Some(22.0);
++        raw.lens.max_aperture_f = Some(2.8);
++
++        let result = raw.build();
++        assert!(result.is_ok());
++        let bytes = result.unwrap();
++
++        // Parse and verify lens info
++        let parsed = parse_raw_image(&bytes).unwrap();
++        assert!(parsed.lens.is_some());
++        let lens = parsed.lens.unwrap();
++        assert_eq!(lens.make, Some("Sony".to_string()));
++        assert_eq!(lens.model, Some("FE 24-70mm F2.8 GM II".to_string()));
++        assert_eq!(lens.serial_number, Some("ABC123456".to_string()));
++        assert_eq!(lens.min_focal_length_m, Some(0.024));
++        assert_eq!(lens.max_focal_length_m, Some(0.070));
++        assert_eq!(lens.min_aperture_f, Some(22.0));
++        assert_eq!(lens.max_aperture_f, Some(2.8));
++    }
++
++    #[test]
++    fn test_builder_pattern_token_auth() {
++        // Test builder with token auth
++        let samples: Vec<u64> = vec![100; 64];
++        let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
++
++        let mut raw = RawImageBuilder::new(image);
++        raw.token = Some(TokenBuilder::new(
++            vec![0xAB; 32],
++            12345,
++            EtType::f6(1234567890.0),
++            vec![0xCD; 64],
++        ));
++        raw.token.as_mut().unwrap().location = Some(WorldCoord::from_lat_lon(47.6062, -122.3321));
++
++        let result = raw.build();
++        assert!(result.is_ok());
++        let bytes = result.unwrap();
++
++        // Parse and verify token auth
++        let parsed = parse_raw_image(&bytes).unwrap();
++        assert!(parsed.token_auth.is_some());
++        let token = parsed.token_auth.unwrap();
++        assert_eq!(token.creator_pubkey, vec![0xAB; 32]);
++        assert_eq!(token.device_serial, 12345);
++        assert!(token.location.is_some());
++    }
++
++    #[test]
++    fn test_builder_pattern_full() {
++        // Test builder with all fields populated
++        let samples: Vec<u64> = vec![2048; 64];
++        let image = BitPackedTensor::pack(12, vec![8, 8], &samples);
++
++        let mut raw = RawImageBuilder::new(image);
++
++        // Raw metadata
++        raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']);
++        raw.raw.black_level = Some(64.0);
++        raw.raw.white_level = Some(4095.0);
++        raw.raw.magic_9 = Some(vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
++
++        // Camera settings
++        raw.camera.iso_speed = Some(800.0);
++        raw.camera.shutter_time_s = Some(1.0 / 125.0);
++        raw.camera.aperture_f_number = Some(2.8);
++        raw.camera.focal_length_m = Some(0.050); // 50mm
++        raw.camera.exposure_compensation = Some(-0.5);
++        raw.camera.focus_distance_m = Some(3.5);
++        raw.camera.flash_fired = Some(false);
++        raw.camera.metering_mode = Some("spot".to_string());
++
++        // Lens info
++        raw.lens.make = Some("Sony".to_string());
++        raw.lens.model = Some("FE 50mm F1.2 GM".to_string());
++
++        // Token auth
++        raw.token = Some(TokenBuilder::new(
++            vec![0x01; 32],
++            99999,
++            EtType::f6(1234567890.123456),
++            vec![0x02; 64],
++        ));
++
++        let result = raw.build();
++        assert!(result.is_ok());
++        let bytes = result.unwrap();
++
++        // Parse and verify everything
++        let parsed = parse_raw_image(&bytes).unwrap();
++
++        // Verify image
++        assert_eq!(parsed.image.bit_depth, 12);
++        assert_eq!(parsed.image.shape, vec![8, 8]);
++
++        // Verify metadata
++        assert!(parsed.metadata.is_some());
++        let meta = parsed.metadata.unwrap();
++        assert_eq!(meta.cfa_pattern, Some(vec![b'R', b'G', b'G', b'B']));
++        assert_eq!(meta.black_level, Some(64.0));
++
++        // Verify camera
++        assert!(parsed.camera.is_some());
++        let cam = parsed.camera.unwrap();
++        assert_eq!(cam.iso_speed, Some(800.0));
++        assert_eq!(cam.metering_mode, Some("spot".to_string()));
++
++        // Verify lens
++        assert!(parsed.lens.is_some());
++        let lens = parsed.lens.unwrap();
++        assert_eq!(lens.make, Some("Sony".to_string()));
++
++        // Verify token
++        assert!(parsed.token_auth.is_some());
++        let token = parsed.token_auth.unwrap();
++        assert_eq!(token.device_serial, 99999);
++    }
++
+     #[test]
+     fn test_cfa_pattern_validation() {
+         let samples: Vec<u64> = vec![100; 16];
+@@ -1374,7 +1903,7 @@ mod tests {
+         ];
+ 
+         for cfa in valid_patterns {
+-            let result = complete_raw_image(
++            let result = build_raw_image(
+                 image.clone(),
+                 Some(RawMetadata {
+                     cfa_pattern: Some(cfa.clone()),
+@@ -1406,7 +1935,7 @@ mod tests {
+         ];
+ 
+         for cfa in invalid_patterns {
+-            let result = complete_raw_image(
++            let result = build_raw_image(
+                 image.clone(),
+                 Some(RawMetadata {
+                     cfa_pattern: Some(cfa.clone()),
+diff --git a/src/decoding/metadata.rs b/src/decoding/metadata.rs
+index e5caa28..6c87a51 100644
+--- a/src/decoding/metadata.rs
++++ b/src/decoding/metadata.rs
+@@ -396,16 +396,11 @@ pub fn parse_preamble(
+     *pointer += 1;
+ 
+     // Verify required fields
+-    let count = count.ok_or_else(|| {
+-        Error::new(
+-            ErrorKind::InvalidData,
+-            "Missing 'n' (count) in preamble",
+-        )
+-    })?;
++    let count = count
++        .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Missing 'n' (count) in preamble"))?;
+ 
+-    let size_bits = size_bits.ok_or_else(|| {
+-        Error::new(ErrorKind::InvalidData, "Missing 'b' (size) in preamble")
+-    })?;
++    let size_bits = size_bits
++        .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Missing 'b' (size) in preamble"))?;
+ 
+     Ok((count, size_bits, hash, signature))
+ }
+diff --git a/src/file_format.rs b/src/file_format.rs
+index 634e733..86daef9 100644
+--- a/src/file_format.rs
++++ b/src/file_format.rs
+@@ -22,8 +22,82 @@
+ //! [raw_bytes...]                         Unboxed data (if n = 0)
+ //! ```
+ 
+-use crate::types::VsfType;
+ use crate::encoding::traits::EncodeNumber;
++use crate::types::VsfType;
++
++/// Validate VSF section or field name
++///
++/// Rules:
++/// - Must start with lowercase letter
++/// - Can contain: lowercase letters, digits, underscores
++/// - Dots allowed for hierarchy (each segment follows same rules)
++/// - No trailing/leading dots, no consecutive dots
++/// - No trailing/leading underscores, no consecutive underscores
++/// - Regex: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
++///
++/// # Examples
++/// ```
++/// use vsf::file_format::validate_name;
++/// assert!(validate_name("camera").is_ok());
++/// assert!(validate_name("camera_sensor").is_ok());
++/// assert!(validate_name("camera.sensor").is_ok());
++/// assert!(validate_name("iso_speed_100").is_ok());
++/// assert!(validate_name("Camera").is_err());       // uppercase
++/// assert!(validate_name("9camera").is_err());      // starts with digit
++/// assert!(validate_name(".camera").is_err());      // starts with dot
++/// assert!(validate_name("camera.").is_err());      // ends with dot
++/// assert!(validate_name("camera..sensor").is_err()); // double dot
++/// assert!(validate_name("camera__sensor").is_err()); // double underscore
++/// ```
++pub fn validate_name(name: &str) -> Result<(), String> {
++    if name.is_empty() {
++        return Err("Name cannot be empty".to_string());
++    }
++
++    // Check for leading/trailing dots or underscores
++    if name.starts_with('.') || name.ends_with('.') {
++        return Err(format!("Invalid name '{}' - cannot start or end with dot", name));
++    }
++    if name.starts_with('_') || name.ends_with('_') {
++        return Err(format!("Invalid name '{}' - cannot start or end with underscore", name));
++    }
++
++    // Check for consecutive dots or underscores
++    if name.contains("..") {
++        return Err(format!("Invalid name '{}' - cannot contain consecutive dots", name));
++    }
++    if name.contains("__") {
++        return Err(format!("Invalid name '{}' - cannot contain consecutive underscores", name));
++    }
++
++    // Split by dots and validate each segment
++    for segment in name.split('.') {
++        if segment.is_empty() {
++            return Err(format!("Invalid name '{}' - empty segment", name));
++        }
++
++        // First character must be lowercase letter
++        let first = segment.chars().next().unwrap();
++        if !first.is_ascii_lowercase() {
++            return Err(format!(
++                "Invalid name '{}' - segment '{}' must start with lowercase letter (found '{}')",
++                name, segment, first
++            ));
++        }
++
++        // Rest can be lowercase, digits, underscores
++        for ch in segment.chars() {
++            if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() && ch != '_' {
++                return Err(format!(
++                    "Invalid name '{}' - use lowercase letters, digits, and underscores only (found '{}')",
++                    name, ch
++                ));
++            }
++        }
++    }
++
++    Ok(())
++}
+ 
+ /// VSF file header
+ #[derive(Debug, Clone)]
+@@ -48,10 +122,10 @@ pub struct LabelDefinition {
+ /// Enables forensic recovery and integrity checking.
+ #[derive(Debug, Clone)]
+ pub struct Preamble {
+-    pub count: usize,                   // n: number of labels in this set
+-    pub size_bits: usize,               // b: total size in BITS (includes preamble itself)
+-    pub hash: Option<Vec<u8>>,          // h: optional integrity hash
+-    pub signature: Option<Vec<u8>>,     // g: optional authentication signature
++    pub count: usize,               // n: number of labels in this set
++    pub size_bits: usize,           // b: total size in BITS (includes preamble itself)
++    pub hash: Option<Vec<u8>>,      // h: optional integrity hash
++    pub signature: Option<Vec<u8>>, // g: optional authentication signature
+ }
+ 
+ impl Preamble {
+@@ -211,36 +285,51 @@ pub struct VsfItem {
+ }
+ 
+ impl VsfSection {
+-    /// Create new section
++    /// Create new section with validated name
++    ///
++    /// # Panics
++    /// Panics if the section name contains invalid characters
+     pub fn new(name: impl Into<String>) -> Self {
++        let name_str = name.into();
++        validate_name(&name_str)
++            .unwrap_or_else(|e| panic!("Invalid section name: {}", e));
+         Self {
+-            name: name.into(),
++            name: name_str,
+             items: Vec::new(),
+         }
+     }
+ 
+-    /// Add an item to the section
++    /// Add an item to the section with validated field name
++    ///
++    /// # Panics
++    /// Panics if the field name contains invalid characters
+     pub fn add_item(&mut self, name: impl Into<String>, value: VsfType) {
++        let name_str = name.into();
++        validate_name(&name_str)
++            .unwrap_or_else(|e| panic!("Invalid field name: {}", e));
+         self.items.push(VsfItem {
+-            name: name.into(),
++            name: name_str,
+             value,
+         });
+     }
+ 
+     /// Encode section to bytes (with preamble and brackets)
+     ///
+-    /// Format: {n[count] b[size]}[(field:value)...]
++    /// Format: {n[count] b[size]}[dsection_name(field:value)...]
+     pub fn encode(&self) -> Vec<u8> {
+         let mut section_body = Vec::new();
+ 
+         // Section start
+         section_body.push(b'[');
+ 
++        // Section name (namespace for all fields)
++        section_body.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
++
+         // Encode each item
+         for item in &self.items {
+             section_body.push(b'(');
+ 
+-            // Item name
++            // Item name (simple identifier, no dots - namespace comes from section)
+             section_body.extend_from_slice(&VsfType::d(item.name.clone()).flatten());
+ 
+             // Separator
+@@ -355,4 +444,67 @@ mod tests {
+         assert!(bytes.contains(&b'h'));
+         assert!(bytes.windows(32).any(|w| w == &vec![0xAB; 32][..]));
+     }
++
++    #[test]
++    fn test_validate_name_valid() {
++        assert!(validate_name("camera").is_ok());
++        assert!(validate_name("iso_speed").is_ok());
++        assert!(validate_name("camera.sensor").is_ok());
++        assert!(validate_name("lens_min_focal_m").is_ok());
++        assert!(validate_name("shutter_time_s").is_ok());
++        assert!(validate_name("test123").is_ok());
++        assert!(validate_name("camera2").is_ok());
++        assert!(validate_name("camera.sensor.temperature").is_ok());
++        assert!(validate_name("a").is_ok());
++        assert!(validate_name("a1").is_ok());
++        assert!(validate_name("a_b_c").is_ok());
++    }
++
++    #[test]
++    fn test_validate_name_invalid() {
++        // Empty
++        assert!(validate_name("").is_err());
++
++        // Uppercase
++        assert!(validate_name("Camera").is_err());
++        assert!(validate_name("cameraA").is_err());
++
++        // Invalid characters
++        assert!(validate_name("iso speed").is_err()); // space
++        assert!(validate_name("iso-speed").is_err()); // hyphen
++        assert!(validate_name("camera(main)").is_err()); // paren
++        assert!(validate_name("camera:sensor").is_err()); // colon
++        assert!(validate_name("lens/model").is_err()); // slash
++
++        // Invalid start
++        assert!(validate_name("9camera").is_err()); // starts with digit
++        assert!(validate_name("_camera").is_err()); // starts with underscore
++        assert!(validate_name(".camera").is_err()); // starts with dot
++        assert!(validate_name("1test").is_err()); // starts with digit
++
++        // Invalid end
++        assert!(validate_name("camera_").is_err()); // ends with underscore
++        assert!(validate_name("camera.").is_err()); // ends with dot
++
++        // Consecutive separators
++        assert!(validate_name("camera..sensor").is_err()); // double dot
++        assert!(validate_name("camera__sensor").is_err()); // double underscore
++
++        // Invalid segment start in hierarchical names
++        assert!(validate_name("camera.9sensor").is_err()); // segment starts with digit
++        assert!(validate_name("camera._private").is_err()); // segment starts with underscore
++    }
++
++    #[test]
++    #[should_panic(expected = "Invalid section name")]
++    fn test_section_name_validation_panics() {
++        VsfSection::new("Camera Sensor"); // uppercase and space
++    }
++
++    #[test]
++    #[should_panic(expected = "Invalid field name")]
++    fn test_field_name_validation_panics() {
++        let mut section = VsfSection::new("camera");
++        section.add_item("ISO Speed", VsfType::f5(800.0)); // uppercase and space
++    }
+ }
+diff --git a/src/lib.rs b/src/lib.rs
+index 9d15e20..d73cc4c 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -182,6 +182,9 @@ pub mod vsf_builder;
+ // Cryptographic algorithm identifiers (h, g, k types)
+ pub mod crypto_algorithms;
+ 
++// Verification functions for hashing and signing VSF files
++pub mod verification;
++
+ // Re-export main types
+ pub use types::{
+     datetime_to_eagle_time, EagleTime, EtType, LayoutOrder, StridedTensor, Tensor, VsfType,
+@@ -195,13 +198,14 @@ pub use encoding::{EncodeNumber, EncodeNumberInclusive};
+ pub use decoding::parse;
+ 
+ // Re-export file format and builder
+-pub use file_format::{LabelDefinition, VsfHeader, VsfSection};
++pub use file_format::{validate_name, LabelDefinition, VsfHeader, VsfSection};
+ pub use vsf_builder::VsfBuilder;
+ 
+ // RAW image builders and parser
+ pub use builders::{
+-    complete_raw_image, lumis_raw_capture, parse_raw_image, CameraSettings, LensInfo,
+-    ParsedRawImage, RawMetadata, TokenAuth,
++    build_raw_image, lumis_raw_capture, parse_raw_image, CameraBuilder, CameraSettings,
++    LensBuilder, LensInfo, ParsedRawImage, RawImageBuilder, RawMetadata, RawMetadataBuilder,
++    TokenAuth, TokenBuilder,
+ };
+ 
+ // Coming soon
+@@ -582,7 +586,7 @@ mod tests {
+             assert_eq!(ptr, flat.len()); // Consumed all bytes
+ 
+             // Unpack and verify
+-            let unpacked = decoded.unpack();
++            let unpacked = decoded.unpack().into_u64();
+             assert_eq!(unpacked.len(), 200);
+             for (i, &val) in unpacked.iter().enumerate() {
+                 assert_eq!(val, samples[i], "Sample {} mismatch", i);
+@@ -611,7 +615,7 @@ mod tests {
+             assert_eq!(decoded.shape, vec![8]);
+             assert_eq!(decoded.data.len(), 1); // 8 bits = 1 byte
+ 
+-            let unpacked = decoded.unpack();
++            let unpacked = decoded.unpack().into_u64();
+             assert_eq!(unpacked, samples);
+         } else {
+             panic!("Expected bitpacked tensor");
+@@ -636,7 +640,7 @@ mod tests {
+             assert_eq!(decoded.bit_depth, 13);
+             assert_eq!(decoded.shape, vec![5]);
+ 
+-            let unpacked = decoded.unpack();
++            let unpacked = decoded.unpack().into_u64();
+             assert_eq!(unpacked, samples);
+         } else {
+             panic!("Expected bitpacked tensor");
+@@ -644,13 +648,26 @@ mod tests {
+     }
+ 
+     #[test]
+-    #[should_panic(expected = "exceeds max value")]
+-    fn test_bitpacked_value_overflow() {
++    #[should_panic(expected = "Cannot pack")]
++    fn test_bitpacked_type_overflow() {
+         use crate::types::BitPackedTensor;
+ 
+-        // Try to pack value that's too large for bit depth
+-        let samples: Vec<u64> = vec![4096]; // Max for 12-bit is 4095
+-        BitPackedTensor::pack(12, vec![1], &samples); // Should panic
++        // Try to pack 12-bit values into u8 (type too small)
++        let samples: Vec<u8> = vec![255]; // u8 only holds 8 bits, need 12
++        BitPackedTensor::pack(12, vec![1], &samples); // Should panic: type capacity exceeded
++    }
++
++    #[test]
++    fn test_bitpacked_value_masking() {
++        use crate::types::BitPackedTensor;
++
++        // Values exceeding bit_depth are masked (no panic, just truncation)
++        let samples: Vec<u64> = vec![4096]; // 4096 = 0x1000, 12-bit max is 4095
++        let tensor = BitPackedTensor::pack(12, vec![1], &samples); // No panic!
++
++        // Unpack should give masked value: 4096 & 0xFFF = 0
++        let unpacked = tensor.unpack().into_u64();
++        assert_eq!(unpacked[0], 0); // Low 12 bits of 4096 (0x1000) = 0
+     }
+ 
+     #[test]
+diff --git a/src/types/tensor.rs b/src/types/tensor.rs
+index 4cd8b82..91ff06e 100644
+--- a/src/types/tensor.rs
++++ b/src/types/tensor.rs
+@@ -1,3 +1,5 @@
++//! Tensor types for VSF: contiguous, strided, and bitpacked
++
+ /// Layout order for tensor data
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ pub enum LayoutOrder {
+@@ -142,11 +144,12 @@ impl<T> StridedTensor<T> {
+     }
+ }
+ 
+-/// Bitpacked tensor for arbitrary bit depths (1-256 bits per sample)
++/// Bitpacked tensor for arbitrary bit depths (1-128 bits per sample)
+ ///
+ /// Binary format: `[p][dim_count][bit_depth][shape...][packed_data...]`
+-/// - bit_depth stored as u8: 0x01-0xFF (0x00 = 256-bit)
++/// - bit_depth stored as u8: 0x01-0x80 (1-128 bits)
+ /// - Samples packed MSB-first, big-endian across byte boundaries
++/// - Only low `bit_depth` bits of input values are packed; high bits ignored
+ /// - Final byte zero-padded to align to 8-bit boundary
+ /// - Row-major storage (like Tensor<T>)
+ ///
+@@ -159,18 +162,18 @@ impl<T> StridedTensor<T> {
+ /// ```
+ /// use vsf::BitPackedTensor;
+ ///
+-/// // Lumis 12-bit RAW: 1920×1080 camera sensor
+-/// let samples: Vec<u64> = vec![2048; 1920 * 1080];  // 12-bit values (0-4095)
++/// // Option 1: Generic "just works" (most common)
++/// let samples: Vec<u16> = vec![2048; 1920 * 1080];  // 12-bit values (0-4095)
+ /// let tensor = BitPackedTensor::pack(12, vec![1920, 1080], &samples);
+-/// assert_eq!(tensor.bit_depth, 12);
++/// let unpacked = tensor.unpack().into_u64();  // Auto-sized, then promoted
+ ///
+-/// // Unpack back to samples
+-/// let unpacked = tensor.unpack();
+-/// assert_eq!(unpacked[0], 2048);
++/// // Option 2: Explicit type control (when you need guarantees)
++/// let tensor = BitPackedTensor::pack_u16(12, vec![1920, 1080], &samples);
++/// let unpacked: Vec<u16> = tensor.unpack_u16();  // Explicit, no enum
+ /// ```
+ #[derive(Debug, Clone)]
+ pub struct BitPackedTensor {
+-    /// Bits per sample (1-256): 0x01-0xFF, where 0x00 represents 256-bit
++    /// Bits per sample (1-128): 0x01-0x80
+     pub bit_depth: u8,
+     /// Tensor dimensions (row-major)
+     pub shape: Vec<usize>,
+@@ -178,85 +181,360 @@ pub struct BitPackedTensor {
+     pub data: Vec<u8>,
+ }
+ 
++/// Trait for types that can be packed into a BitPackedTensor
++///
++/// This exists solely to enable the generic pack() convenience method.
++/// For explicit type handling, use pack_u8(), pack_u16(), etc. directly.
++pub trait PackableUnsigned: Copy {
++    fn pack_samples(bit_depth: u8, shape: Vec<usize>, samples: &[Self]) -> BitPackedTensor;
++}
++
++// Macro to generate explicit pack_u* methods on BitPackedTensor
++macro_rules! impl_bitpack {
++    ($fn_name:ident, $t:ty, $work_t:ty) => {
++        impl BitPackedTensor {
++            #[doc = concat!("Pack ", stringify!($t), " samples into bitpacked tensor\n\n")]
++            #[doc = "# Arguments\n"]
++            #[doc = "* `bit_depth` - Bits per sample (1-128 supported, 0 reserved for future 256-bit)\n"]
++            #[doc = "* `shape` - Tensor dimensions\n"]
++            #[doc = "* `samples` - Sample values (only low `bit_depth` bits are packed, high bits ignored)\n\n"]
++            #[doc = "# Panics\n"]
++            #[doc = "* If bit_depth exceeds the type's bit width\n"]
++            #[doc = "* If bit_depth > 128 (256-bit not yet supported)\n"]
++            #[doc = "* If samples.len() doesn't match shape product\n"]
++            pub fn $fn_name(bit_depth: u8, shape: Vec<usize>, samples: &[$t]) -> Self {
++                let total_elements: usize = shape.iter().product();
++                assert_eq!(
++                    samples.len(),
++                    total_elements,
++                    "Sample count {} doesn't match shape {:?} (expected {})",
++                    samples.len(),
++                    shape,
++                    total_elements
++                );
++
++                let bits_per_sample = if bit_depth == 0 {
++                    panic!("bit_depth=0 (256-bit) not yet supported - use 1-128");
++                } else {
++                    bit_depth as usize
++                };
++
++                // Reject >128 bit depths until hardware support
++                if bits_per_sample > 128 {
++                    panic!("bit_depth > 128 not yet supported (waiting for native u256 support)");
++                }
++
++                // Type-level check: can this type hold bit_depth bits?
++                if bits_per_sample > <$t>::BITS as usize {
++                    panic!(
++                        "Cannot pack {}-bit values into {}-bit type {}",
++                        bits_per_sample,
++                        <$t>::BITS,
++                        std::any::type_name::<$t>()
++                    );
++                }
++
++                // Calculate total bits and bytes needed
++                let total_bits = total_elements * bits_per_sample;
++                let byte_count = (total_bits + 7) / 8;
++                let mut data = vec![0u8; byte_count];
++
++                // Pack samples MSB-first, big-endian
++                // Only low bit_depth bits are read; high bits are ignored
++                let mut bit_offset = 0;
++                for &sample in samples {
++                    let value = sample as $work_t;
++                    for bit_idx in (0..bits_per_sample).rev() {
++                        let bit = if (value >> bit_idx) & 1 == 1 { 1u8 } else { 0u8 };
++                        let byte_idx = bit_offset / 8;
++                        let bit_pos = 7 - (bit_offset % 8);
++                        data[byte_idx] |= bit << bit_pos;
++                        bit_offset += 1;
++                    }
++                }
++
++                BitPackedTensor {
++                    bit_depth,
++                    shape,
++                    data,
++                }
++            }
++        }
++    };
++}
++
++// Generate pack_* methods for each unsigned type
++// Use u64 as work type for u8/u16/u32/u64 (native 64-bit ops)
++// Use u128 for u128 (unavoidably emulated until hardware u256 support)
++impl_bitpack!(pack_u8, u8, u64);
++impl_bitpack!(pack_u16, u16, u64);
++impl_bitpack!(pack_u32, u32, u64);
++impl_bitpack!(pack_u64, u64, u64);
++impl_bitpack!(pack_u128, u128, u128);
++impl_bitpack!(pack_usize, usize, u64);
++
++// Trait implementations that delegate to explicit pack_u* methods
++impl PackableUnsigned for u8 {
++    fn pack_samples(bit_depth: u8, shape: Vec<usize>, samples: &[Self]) -> BitPackedTensor {
++        BitPackedTensor::pack_u8(bit_depth, shape, samples)
++    }
++}
++
++impl PackableUnsigned for u16 {
++    fn pack_samples(bit_depth: u8, shape: Vec<usize>, samples: &[Self]) -> BitPackedTensor {
++        BitPackedTensor::pack_u16(bit_depth, shape, samples)
++    }
++}
++
++impl PackableUnsigned for u32 {
++    fn pack_samples(bit_depth: u8, shape: Vec<usize>, samples: &[Self]) -> BitPackedTensor {
++        BitPackedTensor::pack_u32(bit_depth, shape, samples)
++    }
++}
++
++impl PackableUnsigned for u64 {
++    fn pack_samples(bit_depth: u8, shape: Vec<usize>, samples: &[Self]) -> BitPackedTensor {
++        BitPackedTensor::pack_u64(bit_depth, shape, samples)
++    }
++}
++
++impl PackableUnsigned for u128 {
++    fn pack_samples(bit_depth: u8, shape: Vec<usize>, samples: &[Self]) -> BitPackedTensor {
++        BitPackedTensor::pack_u128(bit_depth, shape, samples)
++    }
++}
++
++impl PackableUnsigned for usize {
++    fn pack_samples(bit_depth: u8, shape: Vec<usize>, samples: &[Self]) -> BitPackedTensor {
++        BitPackedTensor::pack_usize(bit_depth, shape, samples)
++    }
++}
++
++/// Unpacked samples from a BitPackedTensor
++///
++/// The enum variant matches the minimal type needed for the bit depth.
++/// For explicit type control, use unpack_u8(), unpack_u16(), etc. directly.
++#[derive(Debug, Clone, PartialEq)]
++pub enum UnpackedSamples {
++    U8(Vec<u8>),     // 1-8 bit depths
++    U16(Vec<u16>),   // 9-16 bit depths
++    U32(Vec<u32>),   // 17-32 bit depths
++    U64(Vec<u64>),   // 33-64 bit depths
++    U128(Vec<u128>), // 65-128 bit depths
++}
++
++impl UnpackedSamples {
++    /// Convert to u64, promoting smaller types (panics for >64 bit)
++    pub fn into_u64(self) -> Vec<u64> {
++        match self {
++            UnpackedSamples::U8(v) => v.into_iter().map(|x| x as u64).collect(),
++            UnpackedSamples::U16(v) => v.into_iter().map(|x| x as u64).collect(),
++            UnpackedSamples::U32(v) => v.into_iter().map(|x| x as u64).collect(),
++            UnpackedSamples::U64(v) => v,
++            UnpackedSamples::U128(_) => {
++                panic!("Cannot convert >64 bit samples to u64 (would truncate)")
++            }
++        }
++    }
++
++    /// Convert to u128, promoting all types
++    pub fn into_u128(self) -> Vec<u128> {
++        match self {
++            UnpackedSamples::U8(v) => v.into_iter().map(|x| x as u128).collect(),
++            UnpackedSamples::U16(v) => v.into_iter().map(|x| x as u128).collect(),
++            UnpackedSamples::U32(v) => v.into_iter().map(|x| x as u128).collect(),
++            UnpackedSamples::U64(v) => v.into_iter().map(|x| x as u128).collect(),
++            UnpackedSamples::U128(v) => v,
++        }
++    }
++
++    /// Get the number of samples
++    pub fn len(&self) -> usize {
++        match self {
++            UnpackedSamples::U8(v) => v.len(),
++            UnpackedSamples::U16(v) => v.len(),
++            UnpackedSamples::U32(v) => v.len(),
++            UnpackedSamples::U64(v) => v.len(),
++            UnpackedSamples::U128(v) => v.len(),
++        }
++    }
++
++    /// Check if empty
++    pub fn is_empty(&self) -> bool {
++        self.len() == 0
++    }
++}
++
+ impl BitPackedTensor {
+-    /// Pack samples into bitpacked tensor
++    /// Pack samples with automatic type dispatch (convenience wrapper)
+     ///
+-    /// # Arguments
+-    /// * `bit_depth` - Bits per sample (1-256, where 0 = 256)
+-    /// * `shape` - Tensor dimensions
+-    /// * `samples` - Sample values (must fit in bit_depth bits)
++    /// Calls the appropriate pack_u* method based on the input type.
++    /// Use explicit pack_u8(), pack_u16() etc. methods if you need compile-time guarantees.
++    ///
++    /// # Examples
++    /// ```ignore
++    /// // Generic - works with any unsigned type
++    /// let samples: Vec<u16> = vec![2048; 1920 * 1080];
++    /// let tensor = BitPackedTensor::pack(12, vec![1920, 1080], &samples);
++    /// ```
++    pub fn pack<T: PackableUnsigned>(bit_depth: u8, shape: Vec<usize>, samples: &[T]) -> Self {
++        T::pack_samples(bit_depth, shape, samples)
++    }
++
++    /// Unpack to the minimal type that fits bit_depth
++    ///
++    /// Returns:
++    /// - Vec<u8> for 1-8 bit depths
++    /// - Vec<u16> for 9-16 bit depths
++    /// - Vec<u32> for 17-32 bit depths
++    /// - Vec<u64> for 33-64 bit depths
++    /// - Vec<u128> for 65-128 bit depths
++    ///
++    /// Use explicit unpack_u8(), unpack_u16() etc. if you need a specific type.
++    ///
++    /// # Examples
++    /// ```ignore
++    /// let tensor = BitPackedTensor::pack(12, vec![100, 100], &samples);
++    /// // Auto-sized, then promoted to u64
++    /// let unpacked = tensor.unpack().into_u64();
++    /// ```
++    pub fn unpack(&self) -> UnpackedSamples {
++        let bits = self.bit_depth as usize;
++        match bits {
++            1..=8 => UnpackedSamples::U8(self.unpack_to_u8()),
++            9..=16 => UnpackedSamples::U16(self.unpack_to_u16()),
++            17..=32 => UnpackedSamples::U32(self.unpack_to_u32()),
++            33..=64 => UnpackedSamples::U64(self.unpack_to_u64()),
++            65..=128 => UnpackedSamples::U128(self.unpack_to_u128()),
++            _ => panic!("bit_depth {} not supported (max 128)", self.bit_depth),
++        }
++    }
++
++    /// Unpack to u8 samples
+     ///
+     /// # Panics
+-    /// Panics if any sample exceeds max value for bit_depth
+-    pub fn pack(bit_depth: u8, shape: Vec<usize>, samples: &[u64]) -> Self {
+-        let total_elements: usize = shape.iter().product();
+-        assert_eq!(
+-            samples.len(),
+-            total_elements,
+-            "Sample count {} doesn't match shape {:?} (expected {})",
+-            samples.len(),
+-            shape,
+-            total_elements
+-        );
++    /// Panics if bit_depth > 8 (data wouldn't fit)
++    pub fn unpack_u8(&self) -> Vec<u8> {
++        if self.bit_depth > 8 {
++            panic!(
++                "Cannot unpack {}-bit data into u8 (would truncate)",
++                self.bit_depth
++            );
++        }
++        self.unpack_to_u8()
++    }
+ 
+-        let bits_per_sample = if bit_depth == 0 {
+-            256
+-        } else {
+-            bit_depth as usize
+-        };
+-        let max_value = if bits_per_sample == 256 {
+-            u64::MAX
+-        } else {
+-            (1u64 << bits_per_sample) - 1
+-        };
+-
+-        // Validate all samples fit in bit_depth
+-        for (i, &sample) in samples.iter().enumerate() {
+-            assert!(
+-                sample <= max_value,
+-                "Sample {} at index {} exceeds max value {} for {}-bit depth",
+-                sample,
+-                i,
+-                max_value,
+-                bits_per_sample
++    /// Unpack to u16 samples
++    ///
++    /// # Panics
++    /// Panics if bit_depth > 16 (data wouldn't fit)
++    pub fn unpack_u16(&self) -> Vec<u16> {
++        if self.bit_depth > 16 {
++            panic!(
++                "Cannot unpack {}-bit data into u16 (would truncate)",
++                self.bit_depth
+             );
+         }
++        self.unpack_to_u16()
++    }
+ 
+-        // Calculate total bits and bytes needed
+-        let total_bits = total_elements * bits_per_sample;
+-        let byte_count = (total_bits + 7) / 8;
+-        let mut data = vec![0u8; byte_count];
++    /// Unpack to u32 samples
++    ///
++    /// # Panics
++    /// Panics if bit_depth > 32 (data wouldn't fit)
++    pub fn unpack_u32(&self) -> Vec<u32> {
++        if self.bit_depth > 32 {
++            panic!(
++                "Cannot unpack {}-bit data into u32 (would truncate)",
++                self.bit_depth
++            );
++        }
++        self.unpack_to_u32()
++    }
++
++    /// Unpack to u64 samples
++    ///
++    /// # Panics
++    /// Panics if bit_depth > 64 (data wouldn't fit)
++    pub fn unpack_u64(&self) -> Vec<u64> {
++        if self.bit_depth > 64 {
++            panic!(
++                "Cannot unpack {}-bit data into u64 (would truncate)",
++                self.bit_depth
++            );
++        }
++        self.unpack_to_u64()
++    }
++
++    /// Unpack to u128 samples (works for all current bit depths 1-128)
++    pub fn unpack_u128(&self) -> Vec<u128> {
++        self.unpack_to_u128()
++    }
++
++    // Private unpack helpers for each type
++    fn unpack_to_u8(&self) -> Vec<u8> {
++        let total_elements: usize = self.shape.iter().product();
++        let bits_per_sample = self.bit_depth as usize;
++        let mut samples = Vec::with_capacity(total_elements);
+ 
+-        // Pack samples MSB-first, big-endian
+         let mut bit_offset = 0;
+-        for &sample in samples {
+-            for bit_idx in (0..bits_per_sample).rev() {
+-                let bit = ((sample >> bit_idx) & 1) as u8;
++        for _ in 0..total_elements {
++            let mut sample = 0u8;
++            for _ in 0..bits_per_sample {
+                 let byte_idx = bit_offset / 8;
+                 let bit_pos = 7 - (bit_offset % 8);
+-                data[byte_idx] |= bit << bit_pos;
++                let bit = (self.data[byte_idx] >> bit_pos) & 1;
++                sample = (sample << 1) | bit;
+                 bit_offset += 1;
+             }
++            samples.push(sample);
+         }
++        samples
++    }
+ 
+-        BitPackedTensor {
+-            bit_depth,
+-            shape,
+-            data,
++    fn unpack_to_u16(&self) -> Vec<u16> {
++        let total_elements: usize = self.shape.iter().product();
++        let bits_per_sample = self.bit_depth as usize;
++        let mut samples = Vec::with_capacity(total_elements);
++
++        let mut bit_offset = 0;
++        for _ in 0..total_elements {
++            let mut sample = 0u16;
++            for _ in 0..bits_per_sample {
++                let byte_idx = bit_offset / 8;
++                let bit_pos = 7 - (bit_offset % 8);
++                let bit = (self.data[byte_idx] >> bit_pos) & 1;
++                sample = (sample << 1) | (bit as u16);
++                bit_offset += 1;
++            }
++            samples.push(sample);
+         }
++        samples
+     }
+ 
+-    /// Unpack bitpacked tensor back to samples
+-    ///
+-    /// # Returns
+-    /// Vector of sample values (u64)
+-    pub fn unpack(&self) -> Vec<u64> {
++    fn unpack_to_u32(&self) -> Vec<u32> {
++        let total_elements: usize = self.shape.iter().product();
++        let bits_per_sample = self.bit_depth as usize;
++        let mut samples = Vec::with_capacity(total_elements);
++
++        let mut bit_offset = 0;
++        for _ in 0..total_elements {
++            let mut sample = 0u32;
++            for _ in 0..bits_per_sample {
++                let byte_idx = bit_offset / 8;
++                let bit_pos = 7 - (bit_offset % 8);
++                let bit = (self.data[byte_idx] >> bit_pos) & 1;
++                sample = (sample << 1) | (bit as u32);
++                bit_offset += 1;
++            }
++            samples.push(sample);
++        }
++        samples
++    }
++
++    fn unpack_to_u64(&self) -> Vec<u64> {
+         let total_elements: usize = self.shape.iter().product();
+-        let bits_per_sample = if self.bit_depth == 0 {
+-            256
+-        } else {
+-            self.bit_depth as usize
+-        };
++        let bits_per_sample = self.bit_depth as usize;
+         let mut samples = Vec::with_capacity(total_elements);
+ 
+         let mut bit_offset = 0;
+@@ -271,7 +549,26 @@ impl BitPackedTensor {
+             }
+             samples.push(sample);
+         }
++        samples
++    }
+ 
++    fn unpack_to_u128(&self) -> Vec<u128> {
++        let total_elements: usize = self.shape.iter().product();
++        let bits_per_sample = self.bit_depth as usize;
++        let mut samples = Vec::with_capacity(total_elements);
++
++        let mut bit_offset = 0;
++        for _ in 0..total_elements {
++            let mut sample = 0u128;
++            for _ in 0..bits_per_sample {
++                let byte_idx = bit_offset / 8;
++                let bit_pos = 7 - (bit_offset % 8);
++                let bit = (self.data[byte_idx] >> bit_pos) & 1;
++                sample = (sample << 1) | (bit as u128);
++                bit_offset += 1;
++            }
++            samples.push(sample);
++        }
+         samples
+     }
+ 
+diff --git a/src/verification.rs b/src/verification.rs
+new file mode 100644
+index 0000000..f2e5787
+--- /dev/null
++++ b/src/verification.rs
+@@ -0,0 +1,338 @@
++//! VSF verification functions for hashing and signing
++//!
++//! This module provides standalone functions for adding cryptographic verification
++//! to VSF files after they've been built. Two independent strategies are supported:
++//!
++//! **Strategy 1: Full File Hash**
++//! - Single hash in header covering entire file
++//! - Simple integrity check for archives
++//! - Use `add_file_hash()` function
++//!
++//! **Strategy 2: Per-Section Hash/Signature**
++//! - Hash/signature stored in label definition
++//! - Signs only specific sections (e.g., lock image data, allow metadata edits)
++//! - Use `add_section_hash()` or `sign_section()` functions
++//!
++//! # Example
++//! ```ignore
++//! use vsf::builders::RawImageBuilder;
++//! use vsf::verification::{add_file_hash, add_section_hash, sign_section};
++//!
++//! // Build the VSF
++//! let bytes = raw.build()?;
++//!
++//! // Add verification as needed
++//! let bytes = add_file_hash(bytes)?;                    // Strategy 1
++//! let bytes = add_section_hash(bytes, "raw")?;          // Strategy 2 (hash)
++//! let bytes = sign_section(bytes, "raw", &key)?;        // Strategy 2 (sign)
++//! ```
++
++use crate::crypto_algorithms::{HASH_BLAKE3, SIG_ED25519};
++use crate::decoding::parse;
++use crate::types::VsfType;
++
++/// Add a full-file BLAKE3 hash to the VSF header (Strategy 1)
++///
++/// This function:
++/// 1. Checks if a file hash already exists in the header
++/// 2. If not, rebuilds the header with `hb3[32][zeros]` placeholder
++/// 3. Hashes the entire file (with zeros in place)
++/// 4. Writes the computed hash into the placeholder position
++///
++/// # Arguments
++/// * `vsf_bytes` - Complete VSF file bytes
++///
++/// # Returns
++/// Modified VSF bytes with file hash in header
++///
++/// # Example
++/// ```ignore
++/// let raw_bytes = raw.build()?;
++/// let verified_bytes = add_file_hash(raw_bytes)?;
++/// ```
++pub fn add_file_hash(mut vsf_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
++    // Verify magic number
++    if vsf_bytes.len() < 4 {
++        return Err("File too small to be valid VSF".to_string());
++    }
++    if &vsf_bytes[0..3] != "RÅ".as_bytes() || vsf_bytes[3] != b'<' {
++        return Err("Invalid VSF magic number".to_string());
++    }
++
++    let mut pointer = 4; // Skip "RÅ<"
++
++    // Parse header length
++    let header_length_type = parse(&vsf_bytes, &mut pointer)
++        .map_err(|e| format!("Failed to parse header length: {}", e))?;
++    let header_length_bits = match header_length_type {
++        VsfType::b(bits) => bits,
++        _ => return Err("Expected b type for header length".to_string()),
++    };
++
++    // Parse version and backward compat
++    let _version = parse(&vsf_bytes, &mut pointer)
++        .map_err(|e| format!("Failed to parse version: {}", e))?;
++    let _backward = parse(&vsf_bytes, &mut pointer)
++        .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
++
++    // Check if file hash already exists
++    let hash_position = pointer;
++    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'h' {
++        // Hash already exists, parse it
++        let hash_type = parse(&vsf_bytes, &mut pointer)
++            .map_err(|e| format!("Failed to parse existing hash: {}", e))?;
++
++        if let VsfType::h(alg, hash_bytes) = hash_type {
++            if alg != HASH_BLAKE3 {
++                return Err(format!("Unexpected hash algorithm: expected BLAKE3 ({}), found {}", HASH_BLAKE3, alg));
++            }
++            if hash_bytes.len() != 32 {
++                return Err(format!("Invalid hash size: expected 32 bytes, found {}", hash_bytes.len()));
++            }
++
++            // Zero out the 32 hash bytes (keep marker 'h' and algorithm and size)
++            let hash_value_start = hash_position + 1 + 1 + 1 + 1; // 'h' + alg + '[' + size + ']'
++            // Actually we need to find where the hash bytes start after the marker encoding
++            // Let me re-parse to find exact position
++
++            // For now, let's rebuild with zeros, hash, and write back
++            let mut temp_bytes = vsf_bytes.clone();
++
++            // Find the hash value bytes (after 'h', alg byte, size encoding)
++            let hash_start = find_hash_value_position(&temp_bytes, hash_position)?;
++
++            // Zero out the 32 hash bytes
++            for i in 0..32 {
++                temp_bytes[hash_start + i] = 0;
++            }
++
++            // Compute BLAKE3 hash of entire file
++            let computed_hash = blake3::hash(&temp_bytes);
++
++            // Write hash into the placeholder
++            vsf_bytes[hash_start..hash_start + 32].copy_from_slice(computed_hash.as_bytes());
++
++            return Ok(vsf_bytes);
++        }
++    }
++
++    // No hash exists, need to rebuild header with hash placeholder
++    // This is more complex - we need to:
++    // 1. Parse the entire header
++    // 2. Rebuild it with hash placeholder after version/backward
++    // 3. Adjust all offsets in label definitions
++    // 4. Hash the file
++    // 5. Write hash into placeholder
++
++    Err("Adding file hash to existing VSF without hash not yet implemented. Build with placeholder first.".to_string())
++}
++
++/// Find the position of hash value bytes within the encoded hash type
++fn find_hash_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize, String> {
++    // Re-parse the hash to find where the value bytes start
++    let mut pos = hash_marker_pos;
++
++    // Parse the hash using the decode function
++    let hash_type = parse(data, &mut pos)
++        .map_err(|e| format!("Failed to parse hash at position {}: {}", hash_marker_pos, e))?;
++
++    match hash_type {
++        VsfType::h(_, hash_bytes) => {
++            // pos now points AFTER the hash
++            // Calculate where the hash bytes started
++            let hash_start = pos - hash_bytes.len();
++            Ok(hash_start)
++        }
++        _ => Err("Expected hash type".to_string()),
++    }
++}
++
++/// Add a BLAKE3 hash to a specific section's label definition (Strategy 2)
++///
++/// This function:
++/// 1. Finds the specified section in the header
++/// 2. Rebuilds the label definition with `hb3[32][zeros]` if not present
++/// 3. Hashes the `{preamble}[section]` bytes only
++/// 4. Writes the computed hash into the label definition
++///
++/// # Arguments
++/// * `vsf_bytes` - Complete VSF file bytes
++/// * `section` - Name of the section to hash (e.g., "raw")
++///
++/// # Returns
++/// Modified VSF bytes with section hash in label definition
++///
++/// # Example
++/// ```ignore
++/// let bytes = add_section_hash(bytes, "raw")?;
++/// ```
++pub fn add_section_hash(vsf_bytes: Vec<u8>, section: &str) -> Result<Vec<u8>, String> {
++    // TODO: Implement section-specific hashing
++    Err("add_section_hash not yet implemented".to_string())
++}
++
++/// Sign a specific section with Ed25519 (Strategy 2)
++///
++/// This function:
++/// 1. Finds the specified section in the header
++/// 2. Rebuilds the label definition with `g4[64][zeros]` if not present
++/// 3. Signs the `{preamble}[section]` bytes only
++/// 4. Writes the signature into the label definition
++///
++/// # Arguments
++/// * `vsf_bytes` - Complete VSF file bytes
++/// * `section` - Name of the section to sign (e.g., "raw")
++/// * `signing_key` - Ed25519 signing key (32 bytes)
++///
++/// # Returns
++/// Modified VSF bytes with section signature in label definition
++///
++/// # Example
++/// ```ignore
++/// let key = load_signing_key()?;
++/// let bytes = sign_section(bytes, "raw", &key)?;
++/// ```
++pub fn sign_section(
++    vsf_bytes: Vec<u8>,
++    section: &str,
++    signing_key: &[u8],
++) -> Result<Vec<u8>, String> {
++    // TODO: Implement section signing
++    Err("sign_section not yet implemented".to_string())
++}
++
++/// Verify the full-file hash in a VSF header
++///
++/// # Arguments
++/// * `vsf_bytes` - Complete VSF file bytes
++///
++/// # Returns
++/// `Ok(())` if hash is valid, `Err` with description if invalid or missing
++pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
++    // Verify magic number
++    if vsf_bytes.len() < 4 {
++        return Err("File too small to be valid VSF".to_string());
++    }
++    if &vsf_bytes[0..3] != "RÅ".as_bytes() || vsf_bytes[3] != b'<' {
++        return Err("Invalid VSF magic number".to_string());
++    }
++
++    let mut pointer = 4; // Skip "RÅ<"
++
++    // Parse header length
++    let header_length_type = parse(vsf_bytes, &mut pointer)
++        .map_err(|e| format!("Failed to parse header length: {}", e))?;
++    let _header_length_bits = match header_length_type {
++        VsfType::b(bits) => bits,
++        _ => return Err("Expected b type for header length".to_string()),
++    };
++
++    // Parse version and backward compat
++    let _version = parse(vsf_bytes, &mut pointer)
++        .map_err(|e| format!("Failed to parse version: {}", e))?;
++    let _backward = parse(vsf_bytes, &mut pointer)
++        .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
++
++    // Check if file hash exists
++    let hash_position = pointer;
++    if pointer >= vsf_bytes.len() || vsf_bytes[pointer] != b'h' {
++        return Err("No file hash found in header".to_string());
++    }
++
++    // Parse the hash
++    let hash_type = parse(vsf_bytes, &mut pointer)
++        .map_err(|e| format!("Failed to parse hash: {}", e))?;
++
++    let stored_hash = match hash_type {
++        VsfType::h(alg, hash_bytes) => {
++            if alg != HASH_BLAKE3 {
++                return Err(format!("Unexpected hash algorithm: expected BLAKE3 ({}), found {}", HASH_BLAKE3, alg));
++            }
++            if hash_bytes.len() != 32 {
++                return Err(format!("Invalid hash size: expected 32 bytes, found {}", hash_bytes.len()));
++            }
++            hash_bytes
++        }
++        _ => return Err("Expected hash type in header".to_string()),
++    };
++
++    // Create a copy with zeroed hash
++    let mut temp_bytes = vsf_bytes.to_vec();
++    let hash_start = find_hash_value_position(&temp_bytes, hash_position)?;
++
++    // Zero out the 32 hash bytes
++    for i in 0..32 {
++        temp_bytes[hash_start + i] = 0;
++    }
++
++    // Compute BLAKE3 hash of entire file
++    let computed_hash = blake3::hash(&temp_bytes);
++
++    // Compare
++    if computed_hash.as_bytes() == stored_hash.as_slice() {
++        Ok(())
++    } else {
++        Err("File hash verification failed: computed hash does not match stored hash".to_string())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::builders::RawImageBuilder;
++    use crate::types::BitPackedTensor;
++
++    #[test]
++    fn test_add_and_verify_file_hash() {
++        use crate::vsf_builder::VsfBuilder;
++        use crate::file_format::VsfSection;
++
++        // Create a simple VSF file with hash placeholder
++        let mut section = VsfSection::new("test");
++        section.add_item("value", VsfType::u(42, false));
++
++        let builder = VsfBuilder::new()
++            .with_file_hash()  // Add hash placeholder
++            .add_section("test", vec![("value".to_string(), VsfType::u(42, false))]);
++
++        let bytes = builder.build().unwrap();
++
++        // The file should have a hash placeholder (all zeros)
++        assert!(bytes.len() > 50); // Has header + hash + section
++
++        // Compute and add the file hash
++        let verified_bytes = add_file_hash(bytes).unwrap();
++
++        // Verify the hash
++        let result = verify_file_hash(&verified_bytes);
++        assert!(result.is_ok(), "Hash verification should succeed");
++    }
++
++    #[test]
++    fn test_add_file_hash_to_file_without_placeholder() {
++        // Create a minimal VSF file WITHOUT hash placeholder
++        let samples: Vec<u64> = (0..16).collect();
++        let image = BitPackedTensor::pack(8, vec![4, 4], &samples);
++        let raw = RawImageBuilder::new(image);
++        let bytes = raw.build().unwrap();
++
++        // This should fail for now (not yet implemented)
++        let result = add_file_hash(bytes);
++        assert!(result.is_err());
++        assert!(result.unwrap_err().contains("not yet implemented"));
++    }
++
++    #[test]
++    fn test_verify_file_hash_missing() {
++        // Create a minimal VSF file without hash
++        let samples: Vec<u64> = (0..16).collect();
++        let image = BitPackedTensor::pack(8, vec![4, 4], &samples);
++        let raw = RawImageBuilder::new(image);
++        let bytes = raw.build().unwrap();
++
++        // Should fail because no hash present
++        let result = verify_file_hash(&bytes);
++        assert!(result.is_err());
++        assert!(result.unwrap_err().contains("No file hash found"));
++    }
++}
+diff --git a/src/vsf_builder.rs b/src/vsf_builder.rs
+index f2a8f45..a31586f 100644
+--- a/src/vsf_builder.rs
++++ b/src/vsf_builder.rs
+@@ -13,6 +13,7 @@ pub struct VsfBuilder {
+     backward_compat: usize,
+     sections: Vec<VsfSection>,
+     unboxed: Vec<(String, Vec<u8>)>,
++    include_file_hash: bool, // If true, include hb3[32][zeros] placeholder in header
+ }
+ 
+ impl VsfBuilder {
+@@ -23,9 +24,19 @@ impl VsfBuilder {
+             backward_compat: VSF_BACKWARD_COMPAT,
+             sections: Vec::new(),
+             unboxed: Vec::new(),
++            include_file_hash: false,
+         }
+     }
+ 
++    /// Include a file hash placeholder in the header (Strategy 1)
++    ///
++    /// This adds `hb3[32][zeros]` after the version markers.
++    /// Use `vsf::verification::add_file_hash()` to compute and write the hash.
++    pub fn with_file_hash(mut self) -> Self {
++        self.include_file_hash = true;
++        self
++    }
++
+     /// Set version numbers
+     pub fn version(mut self, version: usize, backward_compat: usize) -> Self {
+         self.version = version;
+@@ -76,6 +87,12 @@ impl VsfBuilder {
+         vsf.push(VsfType::z(self.version).flatten());
+         vsf[header_index].extend_from_slice(&VsfType::y(self.backward_compat).flatten());
+ 
++        // File hash placeholder (Strategy 1) - if requested
++        if self.include_file_hash {
++            use crate::crypto_algorithms::HASH_BLAKE3;
++            vsf[header_index].extend_from_slice(&VsfType::h(HASH_BLAKE3, vec![0u8; 32]).flatten());
++        }
++
+         // Label count
+         let total_labels = self.sections.len() + self.unboxed.len();
+         vsf[header_index].extend_from_slice(&VsfType::n(total_labels).flatten());
+diff --git a/test_sample.vsf b/test_sample.vsf
+new file mode 100644
+index 0000000..081af3a
+Binary files /dev/null and b/test_sample.vsf differ
