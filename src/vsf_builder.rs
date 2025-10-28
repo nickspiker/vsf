@@ -2,39 +2,39 @@
 //!
 //! Uses the Vec<Vec<u8>> pattern from basecalc with stabilization loop
 //! to handle the chicken-and-egg problem of header size calculation.
+//!
+//! **Note:** Every VSF file automatically includes a BLAKE3 hash in the header
+//! for integrity verification. This is computed transparently during `build()`.
+//! No manual hashing required - just call `builder.build()` and you're done!
 
 use crate::file_format::VsfSection;
 use crate::types::VsfType;
 use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
 
 /// Builder for complete VSF files with headers and sections
+///
+/// All VSF files automatically include a BLAKE3 hash for integrity verification.
 pub struct VsfBuilder {
     version: usize,
     backward_compat: usize,
     sections: Vec<VsfSection>,
     unboxed: Vec<(String, Vec<u8>)>,
-    include_file_hash: bool, // If true, include hb3[32][zeros] placeholder in header
+    include_file_hash: bool, // Always true - BLAKE3 hash is mandatory for all VSF files
 }
 
 impl VsfBuilder {
     /// Create a new VSF file builder
+    ///
+    /// **Note:** Every VSF file automatically includes a BLAKE3 hash in the header
+    /// for integrity verification. This is computed transparently during `build()`.
     pub fn new() -> Self {
         Self {
             version: VSF_VERSION,
             backward_compat: VSF_BACKWARD_COMPAT,
             sections: Vec::new(),
             unboxed: Vec::new(),
-            include_file_hash: false,
+            include_file_hash: true, // Always hash - required for all VSF files
         }
-    }
-
-    /// Include a file hash placeholder in the header (Strategy 1)
-    ///
-    /// This adds `hb3[32][zeros]` after the version markers.
-    /// Use `vsf::verification::add_file_hash()` to compute and write the hash.
-    pub fn with_file_hash(mut self) -> Self {
-        self.include_file_hash = true;
-        self
     }
 
     /// Set version numbers
@@ -223,7 +223,9 @@ impl VsfBuilder {
             result.extend_from_slice(&data);
         }
 
-        Ok(result)
+        // Automatically compute and insert the BLAKE3 hash (always included)
+        use crate::verification::add_file_hash;
+        add_file_hash(result)
     }
 }
 

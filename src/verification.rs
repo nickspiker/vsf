@@ -27,7 +27,7 @@
 //! let bytes = sign_section(bytes, "raw", &key)?;        // Strategy 2 (sign)
 //! ```
 
-use crate::crypto_algorithms::{HASH_BLAKE3, SIG_ED25519};
+use crate::crypto_algorithms::HASH_BLAKE3;
 use crate::decoding::parse;
 use crate::types::VsfType;
 
@@ -70,8 +70,8 @@ pub fn add_file_hash(mut vsf_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
     };
 
     // Parse version and backward compat
-    let _version = parse(&vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse version: {}", e))?;
+    let _version =
+        parse(&vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
     let _backward = parse(&vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
 
@@ -84,16 +84,22 @@ pub fn add_file_hash(mut vsf_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
 
         if let VsfType::h(alg, hash_bytes) = hash_type {
             if alg != HASH_BLAKE3 {
-                return Err(format!("Unexpected hash algorithm: expected BLAKE3 ({}), found {}", HASH_BLAKE3, alg));
+                return Err(format!(
+                    "Unexpected hash algorithm: expected BLAKE3 ({}), found {}",
+                    HASH_BLAKE3, alg
+                ));
             }
             if hash_bytes.len() != 32 {
-                return Err(format!("Invalid hash size: expected 32 bytes, found {}", hash_bytes.len()));
+                return Err(format!(
+                    "Invalid hash size: expected 32 bytes, found {}",
+                    hash_bytes.len()
+                ));
             }
 
             // Zero out the 32 hash bytes (keep marker 'h' and algorithm and size)
             let hash_value_start = hash_position + 1 + 1 + 1 + 1; // 'h' + alg + '[' + size + ']'
-            // Actually we need to find where the hash bytes start after the marker encoding
-            // Let me re-parse to find exact position
+                                                                  // Actually we need to find where the hash bytes start after the marker encoding
+                                                                  // Let me re-parse to find exact position
 
             // For now, let's rebuild with zeros, hash, and write back
             let mut temp_bytes = vsf_bytes.clone();
@@ -133,8 +139,12 @@ fn find_hash_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize
     let mut pos = hash_marker_pos;
 
     // Parse the hash using the decode function
-    let hash_type = parse(data, &mut pos)
-        .map_err(|e| format!("Failed to parse hash at position {}: {}", hash_marker_pos, e))?;
+    let hash_type = parse(data, &mut pos).map_err(|e| {
+        format!(
+            "Failed to parse hash at position {}: {}",
+            hash_marker_pos, e
+        )
+    })?;
 
     match hash_type {
         VsfType::h(_, hash_bytes) => {
@@ -228,8 +238,8 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
     };
 
     // Parse version and backward compat
-    let _version = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse version: {}", e))?;
+    let _version =
+        parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
     let _backward = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
 
@@ -240,16 +250,22 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
     }
 
     // Parse the hash
-    let hash_type = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse hash: {}", e))?;
+    let hash_type =
+        parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse hash: {}", e))?;
 
     let stored_hash = match hash_type {
         VsfType::h(alg, hash_bytes) => {
             if alg != HASH_BLAKE3 {
-                return Err(format!("Unexpected hash algorithm: expected BLAKE3 ({}), found {}", HASH_BLAKE3, alg));
+                return Err(format!(
+                    "Unexpected hash algorithm: expected BLAKE3 ({}), found {}",
+                    HASH_BLAKE3, alg
+                ));
             }
             if hash_bytes.len() != 32 {
-                return Err(format!("Invalid hash size: expected 32 bytes, found {}", hash_bytes.len()));
+                return Err(format!(
+                    "Invalid hash size: expected 32 bytes, found {}",
+                    hash_bytes.len()
+                ));
             }
             hash_bytes
         }
@@ -284,24 +300,20 @@ mod tests {
 
     #[test]
     fn test_add_and_verify_file_hash() {
-        use crate::vsf_builder::VsfBuilder;
         use crate::file_format::VsfSection;
+        use crate::vsf_builder::VsfBuilder;
 
-        // Create a simple VSF file with hash placeholder
+        // Create a simple VSF file (hash is automatic now)
         let mut section = VsfSection::new("test");
         section.add_item("value", VsfType::u(42, false));
 
         let builder = VsfBuilder::new()
-            .with_file_hash()  // Add hash placeholder
             .add_section("test", vec![("value".to_string(), VsfType::u(42, false))]);
 
-        let bytes = builder.build().unwrap();
+        let verified_bytes = builder.build().unwrap();
 
-        // The file should have a hash placeholder (all zeros)
-        assert!(bytes.len() > 50); // Has header + hash + section
-
-        // Compute and add the file hash
-        let verified_bytes = add_file_hash(bytes).unwrap();
+        // The file should have a computed hash (automatic)
+        assert!(verified_bytes.len() > 50); // Has header + hash + section
 
         // Verify the hash
         let result = verify_file_hash(&verified_bytes);
@@ -309,30 +321,32 @@ mod tests {
     }
 
     #[test]
-    fn test_add_file_hash_to_file_without_placeholder() {
-        // Create a minimal VSF file WITHOUT hash placeholder
+    fn test_automatic_hash_inclusion() {
+        // All VSF files now automatically include a hash - test RAW image
         let samples: Vec<u64> = (0..16).collect();
         let image = BitPackedTensor::pack(8, vec![4, 4], &samples);
         let raw = RawImageBuilder::new(image);
         let bytes = raw.build().unwrap();
 
-        // This should fail for now (not yet implemented)
-        let result = add_file_hash(bytes);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not yet implemented"));
+        // Hash should be present and valid (automatic)
+        let result = verify_file_hash(&bytes);
+        assert!(result.is_ok(), "All VSF files should have valid hash automatically");
     }
 
     #[test]
-    fn test_verify_file_hash_missing() {
-        // Create a minimal VSF file without hash
+    fn test_verify_hash_integrity() {
+        // Test that hash actually catches corruption
         let samples: Vec<u64> = (0..16).collect();
         let image = BitPackedTensor::pack(8, vec![4, 4], &samples);
         let raw = RawImageBuilder::new(image);
-        let bytes = raw.build().unwrap();
+        let mut bytes = raw.build().unwrap();
 
-        // Should fail because no hash present
+        // Corrupt a byte in the data section (not in the hash itself)
+        let corruption_index = bytes.len() - 10;
+        bytes[corruption_index] ^= 0xFF;
+
+        // Hash verification should fail
         let result = verify_file_hash(&bytes);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("No file hash found"));
+        assert!(result.is_err(), "Corrupted file should fail hash verification");
     }
 }

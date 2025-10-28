@@ -28,7 +28,7 @@ fn main() -> Result<(), String> {
     for sample in 0..total_samples {
         rng ^= rng.rotate_left(13).wrapping_add(sample);
         let value = rng as u8 as u16 + blackpoint; // Simulate RAW image data
-        samples.push(value as u64);
+        samples.push(value);
     }
 
     // Pack into BitPackedTensor (efficient storage for 11-bit samples)
@@ -54,12 +54,12 @@ fn main() -> Result<(), String> {
     ]);
 
     // Set camera settings
-    raw.camera.iso_speed = Some(800.0);
-    raw.camera.shutter_time_s = Some(1.0 / 60.0); // 1/60 second
+    raw.camera.iso_speed = Some(800.);
+    raw.camera.shutter_time_s = Some(1. / 60.); // 1/60 second
     raw.camera.aperture_f_number = Some(2.8);
     raw.camera.focal_length_m = Some(0.024); // 24mm = 0.024m
-    raw.camera.exposure_compensation = Some(0.0);
-    raw.camera.focus_distance_m = Some(5.0);
+    raw.camera.exposure_compensation = Some(0.);
+    raw.camera.focus_distance_m = Some(5.);
     raw.camera.flash_fired = Some(false);
     raw.camera.metering_mode = Some("matrix".to_string());
 
@@ -70,7 +70,7 @@ fn main() -> Result<(), String> {
     raw.lens.min_focal_length_m = Some(0.024); // Prime lens
     raw.lens.max_focal_length_m = Some(0.024);
     raw.lens.min_aperture_f = Some(2.8);
-    raw.lens.max_aperture_f = Some(22.0);
+    raw.lens.max_aperture_f = Some(22.);
 
     // Build the VSF file
     let raw_bytes = raw.build()?;

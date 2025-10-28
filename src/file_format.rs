@@ -56,18 +56,30 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 
     // Check for leading/trailing dots or underscores
     if name.starts_with('.') || name.ends_with('.') {
-        return Err(format!("Invalid name '{}' - cannot start or end with dot", name));
+        return Err(format!(
+            "Invalid name '{}' - cannot start or end with dot",
+            name
+        ));
     }
     if name.starts_with('_') || name.ends_with('_') {
-        return Err(format!("Invalid name '{}' - cannot start or end with underscore", name));
+        return Err(format!(
+            "Invalid name '{}' - cannot start or end with underscore",
+            name
+        ));
     }
 
     // Check for consecutive dots or underscores
     if name.contains("..") {
-        return Err(format!("Invalid name '{}' - cannot contain consecutive dots", name));
+        return Err(format!(
+            "Invalid name '{}' - cannot contain consecutive dots",
+            name
+        ));
     }
     if name.contains("__") {
-        return Err(format!("Invalid name '{}' - cannot contain consecutive underscores", name));
+        return Err(format!(
+            "Invalid name '{}' - cannot contain consecutive underscores",
+            name
+        ));
     }
 
     // Split by dots and validate each segment
@@ -291,8 +303,7 @@ impl VsfSection {
     /// Panics if the section name contains invalid characters
     pub fn new(name: impl Into<String>) -> Self {
         let name_str = name.into();
-        validate_name(&name_str)
-            .unwrap_or_else(|e| panic!("Invalid section name: {}", e));
+        validate_name(&name_str).unwrap_or_else(|e| panic!("Invalid section name: {}", e));
         Self {
             name: name_str,
             items: Vec::new(),
@@ -305,8 +316,7 @@ impl VsfSection {
     /// Panics if the field name contains invalid characters
     pub fn add_item(&mut self, name: impl Into<String>, value: VsfType) {
         let name_str = name.into();
-        validate_name(&name_str)
-            .unwrap_or_else(|e| panic!("Invalid field name: {}", e));
+        validate_name(&name_str).unwrap_or_else(|e| panic!("Invalid field name: {}", e));
         self.items.push(VsfItem {
             name: name_str,
             value,

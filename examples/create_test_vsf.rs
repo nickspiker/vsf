@@ -1,7 +1,7 @@
 //! Create a sample VSF file for testing vsfinfo
 
-use vsf::builders::{build_raw_image, CameraSettings, RawMetadata, TokenAuth};
-use vsf::types::{BitPackedTensor, EtType, WorldCoord};
+use vsf::builders::{build_raw_image, CameraSettings, RawMetadata};
+use vsf::types::BitPackedTensor;
 
 fn main() {
     // Create a simple 8x8 test image
@@ -33,17 +33,8 @@ fn main() {
         metering_mode: Some("matrix".to_string()),
     };
 
-    // Create TOKEN auth
-    let token_auth = TokenAuth {
-        creator_pubkey: vec![0xAB; 32], // Dummy 32-byte Ed25519 public key
-        device_serial: 12345,
-        timestamp_et: EtType::f6(1234567890.123456),
-        location: Some(WorldCoord::from_lat_lon(47.6062, -122.3321)), // Seattle
-        signature: vec![0xCD; 64], // Dummy 64-byte Ed25519 signature
-    };
-
     // Build the VSF file
-    let bytes = build_raw_image(image, Some(metadata), Some(camera), None, Some(token_auth))
+    let bytes = build_raw_image(image, Some(metadata), Some(camera), None)
         .expect("Failed to build VSF file");
 
     // Write to file

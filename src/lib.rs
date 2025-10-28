@@ -205,7 +205,6 @@ pub use vsf_builder::VsfBuilder;
 pub use builders::{
     build_raw_image, lumis_raw_capture, parse_raw_image, CameraBuilder, CameraSettings,
     LensBuilder, LensInfo, ParsedRawImage, RawImageBuilder, RawMetadata, RawMetadataBuilder,
-    TokenAuth, TokenBuilder,
 };
 
 // Coming soon

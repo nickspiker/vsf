@@ -27,7 +27,7 @@
 //! ]);
 //! ```
 
-use crate::crypto_algorithms::{HASH_BLAKE3, KEY_ED25519, SIG_ED25519};
+use crate::crypto_algorithms::HASH_BLAKE3;
 use crate::types::{BitPackedTensor, EtType, Tensor, VsfType, WorldCoord};
 use crate::vsf_builder::VsfBuilder;
 
@@ -47,12 +47,13 @@ pub struct RawMetadata {
     pub white_level: Option<f32>, // Sensor white point (saturation)
 
     // Calibration frames (by hash reference, not embedded)
-    // Hash length implies algorithm: 32 bytes=BLAKE3, 64 bytes=BLAKE2b/SHA-512
-    pub dark_frame_hash: Option<Vec<u8>>,
-    pub flat_field_hash: Option<Vec<u8>>,
-    pub bias_frame_hash: Option<Vec<u8>>,
-    pub vignette_correction_hash: Option<Vec<u8>>,
-    pub distortion_correction_hash: Option<Vec<u8>>,
+    // Stored as (algorithm_id, hash_bytes) tuple
+    // Algorithm IDs defined in crypto_algorithms module (e.g., HASH_BLAKE3 = 'b')
+    pub dark_frame_hash: Option<(u8, Vec<u8>)>,
+    pub flat_field_hash: Option<(u8, Vec<u8>)>,
+    pub bias_frame_hash: Option<(u8, Vec<u8>)>,
+    pub vignette_correction_hash: Option<(u8, Vec<u8>)>,
+    pub distortion_correction_hash: Option<(u8, Vec<u8>)>,
 
     // Magic 9 (3×3 colour matrix: Sensor RGB → LMS)
     pub magic_9: Option<Vec<f32>>, // Must be exactly 9 elements, row-major order
@@ -84,16 +85,6 @@ pub struct LensInfo {
     pub max_aperture_f: Option<f32>, // Largest aperture (smallest f-number, e.g. f/1.4)
 }
 
-/// TOKEN authentication for capture
-#[derive(Debug, Clone)]
-pub struct TokenAuth {
-    pub creator_pubkey: Vec<u8>, // Ed25519 public key (32 bytes) - stored as k type
-    pub device_serial: usize,    // Numeric hardware serial number
-    pub timestamp_et: EtType,    // Eagle Time timestamp
-    pub location: Option<WorldCoord>, // Dymaxion location (if GPS available)
-    pub signature: Vec<u8>,      // Ed25519 signature (64 bytes) over entire capture
-}
-
 // ==================== BUILDER PATTERN API ====================
 
 /// Builder for RawMetadata with convenient field access
@@ -102,11 +93,11 @@ pub struct RawMetadataBuilder {
     pub cfa_pattern: Option<Vec<u8>>,
     pub black_level: Option<f32>,
     pub white_level: Option<f32>,
-    pub dark_frame_hash: Option<Vec<u8>>,
-    pub flat_field_hash: Option<Vec<u8>>,
-    pub bias_frame_hash: Option<Vec<u8>>,
-    pub vignette_correction_hash: Option<Vec<u8>>,
-    pub distortion_correction_hash: Option<Vec<u8>>,
+    pub dark_frame_hash: Option<(u8, Vec<u8>)>,
+    pub flat_field_hash: Option<(u8, Vec<u8>)>,
+    pub bias_frame_hash: Option<(u8, Vec<u8>)>,
+    pub vignette_correction_hash: Option<(u8, Vec<u8>)>,
+    pub distortion_correction_hash: Option<(u8, Vec<u8>)>,
     pub magic_9: Option<Vec<f32>>,
 }
 
@@ -219,45 +210,6 @@ impl LensBuilder {
     }
 }
 
-/// Builder for TokenAuth with convenient field access
-#[derive(Debug, Clone)]
-pub struct TokenBuilder {
-    pub creator_pubkey: Vec<u8>,
-    pub device_serial: usize,
-    pub timestamp_et: EtType,
-    pub location: Option<WorldCoord>,
-    pub signature: Vec<u8>,
-}
-
-impl TokenBuilder {
-    /// Create a new TokenBuilder with required fields
-    pub fn new(
-        creator_pubkey: Vec<u8>,
-        device_serial: usize,
-        timestamp_et: EtType,
-        signature: Vec<u8>,
-    ) -> Self {
-        Self {
-            creator_pubkey,
-            device_serial,
-            timestamp_et,
-            location: None,
-            signature,
-        }
-    }
-
-    /// Convert builder to TokenAuth
-    fn build(self) -> TokenAuth {
-        TokenAuth {
-            creator_pubkey: self.creator_pubkey,
-            device_serial: self.device_serial,
-            timestamp_et: self.timestamp_et,
-            location: self.location,
-            signature: self.signature,
-        }
-    }
-}
-
 /// Builder pattern for creating RAW images with ergonomic dot notation
 ///
 /// # Example
@@ -282,7 +234,6 @@ pub struct RawImageBuilder {
     pub raw: RawMetadataBuilder,
     pub camera: CameraBuilder,
     pub lens: LensBuilder,
-    pub token: Option<TokenBuilder>,
 }
 
 impl RawImageBuilder {
@@ -293,7 +244,6 @@ impl RawImageBuilder {
             raw: RawMetadataBuilder::default(),
             camera: CameraBuilder::default(),
             lens: LensBuilder::default(),
-            token: None,
         }
     }
 
@@ -302,9 +252,8 @@ impl RawImageBuilder {
         let metadata = self.raw.build();
         let camera = self.camera.build();
         let lens = self.lens.build();
-        let token = self.token.map(|t| t.build());
 
-        build_raw_image(self.image, metadata, camera, lens, token)
+        build_raw_image(self.image, metadata, camera, lens)
     }
 }
 
@@ -415,43 +364,21 @@ pub fn geotagged_photo(
 /// * `metadata` - Optional sensor metadata (CFA pattern, black/white levels, calibration hashes)
 /// * `camera` - Optional camera settings (ISO, shutter, aperture, etc.)
 /// * `lens` - Optional lens info (make, model, focal range, aperture range)
-/// * `token_auth` - Optional TOKEN authentication (pubkey, signature, timestamp, location)
 ///
 /// # Returns
 /// Complete VSF file bytes ready to write to disk
+///
+/// # Note
+/// To add cryptographic verification, use the verification module functions:
+/// - `verification::add_file_hash()` for full file integrity
+/// - `verification::sign_section()` for per-section signatures
 pub fn build_raw_image(
     image: BitPackedTensor,
     metadata: Option<RawMetadata>,
     camera: Option<CameraSettings>,
     lens: Option<LensInfo>,
-    token_auth: Option<TokenAuth>,
 ) -> Result<Vec<u8>, String> {
     let mut builder = VsfBuilder::new();
-
-    // TOKEN auth section (if provided)
-    if let Some(auth) = token_auth {
-        let mut auth_items = vec![
-            (
-                "creator_pubkey".to_string(),
-                VsfType::k(KEY_ED25519, auth.creator_pubkey),
-            ),
-            (
-                "device_serial".to_string(),
-                VsfType::u(auth.device_serial, false),
-            ),
-            ("timestamp_et".to_string(), VsfType::e(auth.timestamp_et)),
-            (
-                "signature".to_string(),
-                VsfType::g(SIG_ED25519, auth.signature),
-            ),
-        ];
-
-        if let Some(loc) = auth.location {
-            auth_items.push(("location".to_string(), VsfType::w(loc)));
-        }
-
-        builder = builder.add_section("token_auth", auth_items);
-    }
 
     // Build raw section - start with the image (p type has width, height, bit_depth)
     let mut raw_items = vec![("image".to_string(), VsfType::p(image))];
@@ -478,30 +405,30 @@ pub fn build_raw_image(
             raw_items.push(("white_level".to_string(), VsfType::f5(white)));
         }
 
-        // Calibration hashes (using BLAKE3 as default)
-        if let Some(hash) = meta.dark_frame_hash {
-            raw_items.push(("dark_frame_hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
+        // Calibration hashes (algorithm + hash bytes)
+        if let Some((alg, hash)) = meta.dark_frame_hash {
+            raw_items.push(("dark_frame_hash".to_string(), VsfType::h(alg, hash)));
         }
 
-        if let Some(hash) = meta.flat_field_hash {
-            raw_items.push(("flat_field_hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
+        if let Some((alg, hash)) = meta.flat_field_hash {
+            raw_items.push(("flat_field_hash".to_string(), VsfType::h(alg, hash)));
         }
 
-        if let Some(hash) = meta.bias_frame_hash {
-            raw_items.push(("bias_frame_hash".to_string(), VsfType::h(HASH_BLAKE3, hash)));
+        if let Some((alg, hash)) = meta.bias_frame_hash {
+            raw_items.push(("bias_frame_hash".to_string(), VsfType::h(alg, hash)));
         }
 
-        if let Some(hash) = meta.vignette_correction_hash {
+        if let Some((alg, hash)) = meta.vignette_correction_hash {
             raw_items.push((
                 "vignette_correction_hash".to_string(),
-                VsfType::h(HASH_BLAKE3, hash),
+                VsfType::h(alg, hash),
             ));
         }
 
-        if let Some(hash) = meta.distortion_correction_hash {
+        if let Some((alg, hash)) = meta.distortion_correction_hash {
             raw_items.push((
                 "distortion_correction_hash".to_string(),
-                VsfType::h(HASH_BLAKE3, hash),
+                VsfType::h(alg, hash),
             ));
         }
 
@@ -608,7 +535,6 @@ pub fn build_raw_image(
 ///    12-bit samples into the minimal bitpacked representation
 /// 2. Adds sensor metadata (CFA pattern, black/white levels)
 /// 3. Adds camera settings (ISO, shutter speed)
-/// 4. Adds TOKEN authentication (pubkey, signature, timestamp, location)
 ///
 /// **The resulting p type contains EVERYTHING about the image:**
 /// - No separate width field (shape has it: [4096, 3072])
@@ -619,20 +545,10 @@ pub fn build_raw_image(
 /// * `samples` - RAW sensor sample values as u64 (0-4095 for 12-bit), will be bitpacked
 /// * `iso` - ISO speed (e.g., 100, 200, 400, 800, 1600, 3200)
 /// * `shutter_s` - Shutter time in seconds (e.g., 1./60. = 0.0167 for 1/60 second)
-/// * `device_serial` - Hardware serial number (e.g., "LUMIS-001")
-/// * `creator_pubkey` - Ed25519 public key (must be exactly 32 bytes)
-/// * `signature` - Ed25519 signature over the entire capture (must be exactly 64 bytes)
-/// * `timestamp_et` - Eagle Time timestamp (seconds since 1969-07-20 20:17:40 UTC)
-/// * `location` - Optional GPS location (Dymaxion WorldCoord, 2.14mm precision)
 pub fn lumis_raw_capture(
     samples: Vec<u64>,
     iso: f32,
     shutter_s: f32,
-    device_serial: usize,
-    creator_pubkey: Vec<u8>,
-    signature: Vec<u8>,
-    timestamp_et: EtType,
-    location: Option<WorldCoord>,
 ) -> Result<Vec<u8>, String> {
     // Create BitPackedTensor for 12-bit Lumis sensor
     let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
@@ -661,13 +577,6 @@ pub fn lumis_raw_capture(
             metering_mode: None,
         }),
         None, // No lens info (phone camera)
-        Some(TokenAuth {
-            creator_pubkey,
-            device_serial,
-            timestamp_et,
-            location,
-            signature,
-        }),
     )
 }
 
@@ -679,7 +588,6 @@ pub struct ParsedRawImage {
     pub metadata: Option<RawMetadata>,
     pub camera: Option<CameraSettings>,
     pub lens: Option<LensInfo>,
-    pub token_auth: Option<TokenAuth>,
 }
 
 // Helper to convert any VsfType unsigned variant to Rust usize
@@ -769,6 +677,10 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     let _backward =
         parse(data, &mut pointer).map_err(|e| format!("Failed to parse backward compat: {}", e))?;
 
+    // Skip file hash (always present now)
+    let _file_hash =
+        parse(data, &mut pointer).map_err(|e| format!("Failed to parse file hash: {}", e))?;
+
     // Parse label count
     let label_count_type =
         parse(data, &mut pointer).map_err(|e| format!("Failed to parse label count: {}", e))?;
@@ -777,11 +689,9 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         _ => return Err("Expected n type for label count".to_string()),
     };
 
-    // Find both "raw" and "token_auth" labels (if present)
+    // Find the "raw" label
     let mut raw_offset_bits: Option<usize> = None;
     let mut raw_field_count: Option<usize> = None;
-    let mut token_auth_offset_bits: Option<usize> = None;
-    let mut token_auth_field_count: Option<usize> = None;
 
     for _ in 0..label_count {
         // Parse label definition: (d[name] o[offset] b[size] n[count])
@@ -829,10 +739,6 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
                 raw_offset_bits = Some(offset_bits);
                 raw_field_count = Some(field_count);
             }
-            "token_auth" => {
-                token_auth_offset_bits = Some(offset_bits);
-                token_auth_field_count = Some(field_count);
-            }
             _ => {} // Ignore other labels
         }
     }
@@ -856,11 +762,11 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     let mut cfa_pattern: Option<Vec<u8>> = None;
     let mut black_level: Option<f32> = None;
     let mut white_level: Option<f32> = None;
-    let mut dark_frame_hash: Option<Vec<u8>> = None;
-    let mut flat_field_hash: Option<Vec<u8>> = None;
-    let mut bias_frame_hash: Option<Vec<u8>> = None;
-    let mut vignette_correction_hash: Option<Vec<u8>> = None;
-    let mut distortion_correction_hash: Option<Vec<u8>> = None;
+    let mut dark_frame_hash: Option<(u8, Vec<u8>)> = None;
+    let mut flat_field_hash: Option<(u8, Vec<u8>)> = None;
+    let mut bias_frame_hash: Option<(u8, Vec<u8>)> = None;
+    let mut vignette_correction_hash: Option<(u8, Vec<u8>)> = None;
+    let mut distortion_correction_hash: Option<(u8, Vec<u8>)> = None;
     let mut magic_9: Option<Vec<f32>> = None;
 
     // Camera settings fields
@@ -881,117 +787,6 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     let mut lens_max_focal_m: Option<f32> = None;
     let mut lens_min_aperture: Option<f32> = None;
     let mut lens_max_aperture: Option<f32> = None;
-
-    // Token auth fields
-    let mut creator_pubkey: Option<Vec<u8>> = None;
-    let mut device_serial: Option<usize> = None;
-    let mut timestamp_et: Option<EtType> = None;
-    let mut location: Option<WorldCoord> = None;
-    let mut signature: Option<Vec<u8>> = None;
-
-    // Parse token_auth section if present
-    if let (Some(token_offset), Some(token_count)) = (token_auth_offset_bits, token_auth_field_count) {
-        // Seek to token_auth section
-        let section_start_byte = token_offset >> 3;
-        if section_start_byte >= data.len() {
-            return Err(format!(
-                "Token auth section offset {} exceeds file size {}",
-                section_start_byte,
-                data.len()
-            ));
-        }
-        pointer = section_start_byte;
-
-        // Parse preamble
-        use crate::decoding::parse_preamble;
-        let (_preamble_count, _preamble_size, _preamble_hash, _preamble_sig) =
-            parse_preamble(data, &mut pointer)
-                .map_err(|e| format!("Failed to parse token_auth preamble: {}", e))?;
-
-        // Parse section start
-        if data[pointer] != b'[' {
-            return Err(format!(
-                "Expected '[' for token_auth section at byte {}, found {:?}",
-                pointer, data[pointer] as char
-            ));
-        }
-        pointer += 1;
-
-        // Parse section name
-        let section_name_type = parse(data, &mut pointer)
-            .map_err(|e| format!("Failed to parse token_auth section name: {}", e))?;
-        let _section_name = match section_name_type {
-            VsfType::d(name) => name,
-            _ => return Err("Expected d type for token_auth section name".to_string()),
-        };
-
-        // Parse token_auth fields
-        for i in 0..token_count {
-            if data[pointer] != b'(' {
-                return Err(format!("Expected '(' for token_auth field {}", i));
-            }
-            pointer += 1;
-
-            let field_name_type = parse(data, &mut pointer)
-                .map_err(|e| format!("Failed to parse token_auth field {} name: {}", i, e))?;
-            let field_name = match field_name_type {
-                VsfType::d(name) => name,
-                _ => return Err(format!("Expected d type for token_auth field {} name", i)),
-            };
-
-            if data[pointer] != b':' {
-                return Err(format!("Expected ':' after token_auth field '{}'", field_name));
-            }
-            pointer += 1;
-
-            let field_value = parse(data, &mut pointer)
-                .map_err(|e| format!("Failed to parse token_auth field '{}': {}", field_name, e))?;
-
-            // Store token_auth field values
-            match field_name.as_str() {
-                "creator_pubkey" => {
-                    if let VsfType::k(_algorithm, v) = field_value {
-                        creator_pubkey = Some(v);
-                    }
-                }
-                "device_serial" => device_serial = to_usize(&field_value),
-                "timestamp_et" => {
-                    if let VsfType::e(et) = field_value {
-                        timestamp_et = Some(et);
-                    }
-                }
-                "location" => {
-                    if let VsfType::w(v) = field_value {
-                        location = Some(v);
-                    }
-                }
-                "signature" => {
-                    if let VsfType::g(_algorithm, v) = field_value {
-                        signature = Some(v);
-                    }
-                }
-                _ => {} // Unknown field, skip
-            }
-
-            if pointer >= data.len() {
-                return Err(format!(
-                    "Unexpected EOF after parsing token_auth field '{}' (field {} of {})",
-                    field_name, i, token_count
-                ));
-            }
-            if data[pointer] != b')' {
-                return Err(format!(
-                    "Expected ')' after token_auth field '{}' at byte {}, found {:?}",
-                    field_name, pointer, data[pointer] as char
-                ));
-            }
-            pointer += 1;
-        }
-
-        if data[pointer] != b']' {
-            return Err("Expected ']' for token_auth section end".to_string());
-        }
-    }
 
     // Parse the "raw" section
     let section_start_byte = raw_offset >> 3; // Convert bits to bytes
@@ -1076,28 +871,28 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
                 }
             }
             "dark_frame_hash" => {
-                if let VsfType::h(_algorithm, v) = field_value {
-                    dark_frame_hash = Some(v);
+                if let VsfType::h(algorithm, v) = field_value {
+                    dark_frame_hash = Some((algorithm, v));
                 }
             }
             "flat_field_hash" => {
-                if let VsfType::h(_algorithm, v) = field_value {
-                    flat_field_hash = Some(v);
+                if let VsfType::h(algorithm, v) = field_value {
+                    flat_field_hash = Some((algorithm, v));
                 }
             }
             "bias_frame_hash" => {
-                if let VsfType::h(_algorithm, v) = field_value {
-                    bias_frame_hash = Some(v);
+                if let VsfType::h(algorithm, v) = field_value {
+                    bias_frame_hash = Some((algorithm, v));
                 }
             }
             "vignette_correction_hash" => {
-                if let VsfType::h(_algorithm, v) = field_value {
-                    vignette_correction_hash = Some(v);
+                if let VsfType::h(algorithm, v) = field_value {
+                    vignette_correction_hash = Some((algorithm, v));
                 }
             }
             "distortion_correction_hash" => {
-                if let VsfType::h(_algorithm, v) = field_value {
-                    distortion_correction_hash = Some(v);
+                if let VsfType::h(algorithm, v) = field_value {
+                    distortion_correction_hash = Some((algorithm, v));
                 }
             }
             "magic_9" => {
@@ -1275,26 +1070,11 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         None
     };
 
-    let token_auth = if let (Some(pubkey), Some(serial), Some(timestamp), Some(sig)) =
-        (creator_pubkey, device_serial, timestamp_et, signature)
-    {
-        Some(TokenAuth {
-            creator_pubkey: pubkey,
-            device_serial: serial,
-            timestamp_et: timestamp,
-            location,
-            signature: sig,
-        })
-    } else {
-        None
-    };
-
     Ok(ParsedRawImage {
         image,
         metadata: raw_metadata,
         camera: camera_settings,
         lens: lens_info,
-        token_auth,
     })
 }
 
@@ -1398,7 +1178,7 @@ mod tests {
         let samples: Vec<u64> = vec![255; 64]; // 8x8, all white
         let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
 
-        let result = build_raw_image(image, None, None, None, None);
+        let result = build_raw_image(image, None, None, None);
 
         assert!(result.is_ok());
         let bytes = result.unwrap();
@@ -1423,7 +1203,7 @@ mod tests {
                 cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']),
                 black_level: Some(64.0),
                 white_level: Some(255.0),
-                dark_frame_hash: Some(vec![0xAB; 32]),
+                dark_frame_hash: Some((HASH_BLAKE3, vec![0xAB; 32])),
                 flat_field_hash: None,
                 bias_frame_hash: None,
                 vignette_correction_hash: None,
@@ -1440,7 +1220,6 @@ mod tests {
                 flash_fired: Some(false),
                 metering_mode: Some("matrix".to_string()),
             }),
-            None,
             None,
         );
 
@@ -1470,11 +1249,6 @@ mod tests {
             samples,
             800.0,
             1. / 60., // 1/60 second shutter
-            12345,    // Numeric serial
-            vec![0xAB; 32],
-            vec![0xCD; 64],
-            EtType::f6(1234567890.123456),
-            Some(WorldCoord::from_lat_lon(47.6062, -122.3321)),
         );
 
         assert!(result.is_ok());
@@ -1491,37 +1265,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_raw_with_token_auth() {
-        let samples: Vec<u64> = vec![255; 64]; // 8x8
-        let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
-
-        let result = build_raw_image(
-            image,
-            None,
-            None,
-            None,
-            Some(TokenAuth {
-                creator_pubkey: vec![0xAB; 32],
-                device_serial: 12345,
-                timestamp_et: EtType::f6(1234567890.0),
-                location: Some(WorldCoord::from_lat_lon(0.0, 0.0)),
-                signature: vec![0xCD; 64],
-            }),
-        );
-
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
-
-        // Verify magic number
-        assert_eq!(&bytes[0..3], "RÅ".as_bytes());
-
-        // Should have meaningful structure (header + sections + pixels)
-        assert!(
-            bytes.len() > 200,
-            "File should have header + metadata + pixels"
-        );
-    }
 
     #[test]
     fn test_roundtrip_minimal_raw() {
@@ -1530,7 +1273,7 @@ mod tests {
         let original_image = BitPackedTensor::pack(8, vec![4, 4], &samples);
 
         // Build VSF file
-        let raw_bytes = build_raw_image(original_image.clone(), None, None, None, None).unwrap();
+        let raw_bytes = build_raw_image(original_image.clone(), None, None, None).unwrap();
 
         // Parse it back
         let parsed = parse_raw_image(&raw_bytes).unwrap();
@@ -1549,7 +1292,6 @@ mod tests {
         assert!(parsed.metadata.is_none());
         assert!(parsed.camera.is_none());
         assert!(parsed.lens.is_none());
-        assert!(parsed.token_auth.is_none());
     }
 
     #[test]
@@ -1562,8 +1304,8 @@ mod tests {
             cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']), // RGGB Bayer pattern
             black_level: Some(64.0),
             white_level: Some(255.0),
-            dark_frame_hash: Some(vec![0xAB; 32]),
-            flat_field_hash: Some(vec![0xCD; 32]),
+            dark_frame_hash: Some((HASH_BLAKE3, vec![0xAB; 32])),
+            flat_field_hash: Some((HASH_BLAKE3, vec![0xCD; 32])),
             bias_frame_hash: None,
             vignette_correction_hash: None,
             distortion_correction_hash: None,
@@ -1587,7 +1329,6 @@ mod tests {
             Some(original_metadata.clone()),
             Some(original_camera.clone()),
             None, // No lens
-            None, // No token auth
         )
         .unwrap();
 
@@ -1606,8 +1347,8 @@ mod tests {
         assert_eq!(meta.cfa_pattern, Some(vec![b'R', b'G', b'G', b'B']));
         assert_eq!(meta.black_level, Some(64.0));
         assert_eq!(meta.white_level, Some(255.0));
-        assert_eq!(meta.dark_frame_hash, Some(vec![0xAB; 32]));
-        assert_eq!(meta.flat_field_hash, Some(vec![0xCD; 32]));
+        assert_eq!(meta.dark_frame_hash, Some((HASH_BLAKE3, vec![0xAB; 32])));
+        assert_eq!(meta.flat_field_hash, Some((HASH_BLAKE3, vec![0xCD; 32])));
 
         // Verify camera settings
         assert!(parsed.camera.is_some());
@@ -1621,9 +1362,8 @@ mod tests {
         assert_eq!(cam.flash_fired, Some(false));
         assert_eq!(cam.metering_mode, Some("matrix".to_string()));
 
-        // Verify no lens or token
+        // Verify no lens
         assert!(parsed.lens.is_none());
-        assert!(parsed.token_auth.is_none());
     }
 
     #[test]
@@ -1645,7 +1385,6 @@ mod tests {
                 distortion_correction_hash: None,
                 magic_9: None,
             }),
-            None,
             None,
             None,
         )
@@ -1742,7 +1481,7 @@ mod tests {
         raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']);
         raw.raw.black_level = Some(64.0);
         raw.raw.white_level = Some(4095.0);
-        raw.raw.dark_frame_hash = Some(vec![0xAB; 32]);
+        raw.raw.dark_frame_hash = Some((HASH_BLAKE3, vec![0xAB; 32]));
 
         let result = raw.build();
         assert!(result.is_ok());
@@ -1755,7 +1494,7 @@ mod tests {
         assert_eq!(meta.cfa_pattern, Some(vec![b'R', b'G', b'G', b'B']));
         assert_eq!(meta.black_level, Some(64.0));
         assert_eq!(meta.white_level, Some(4095.0));
-        assert_eq!(meta.dark_frame_hash, Some(vec![0xAB; 32]));
+        assert_eq!(meta.dark_frame_hash, Some((HASH_BLAKE3, vec![0xAB; 32])));
     }
 
     #[test]
@@ -1790,33 +1529,6 @@ mod tests {
         assert_eq!(lens.max_aperture_f, Some(2.8));
     }
 
-    #[test]
-    fn test_builder_pattern_token_auth() {
-        // Test builder with token auth
-        let samples: Vec<u64> = vec![100; 64];
-        let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
-
-        let mut raw = RawImageBuilder::new(image);
-        raw.token = Some(TokenBuilder::new(
-            vec![0xAB; 32],
-            12345,
-            EtType::f6(1234567890.0),
-            vec![0xCD; 64],
-        ));
-        raw.token.as_mut().unwrap().location = Some(WorldCoord::from_lat_lon(47.6062, -122.3321));
-
-        let result = raw.build();
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
-
-        // Parse and verify token auth
-        let parsed = parse_raw_image(&bytes).unwrap();
-        assert!(parsed.token_auth.is_some());
-        let token = parsed.token_auth.unwrap();
-        assert_eq!(token.creator_pubkey, vec![0xAB; 32]);
-        assert_eq!(token.device_serial, 12345);
-        assert!(token.location.is_some());
-    }
 
     #[test]
     fn test_builder_pattern_full() {
@@ -1846,14 +1558,6 @@ mod tests {
         raw.lens.make = Some("Sony".to_string());
         raw.lens.model = Some("FE 50mm F1.2 GM".to_string());
 
-        // Token auth
-        raw.token = Some(TokenBuilder::new(
-            vec![0x01; 32],
-            99999,
-            EtType::f6(1234567890.123456),
-            vec![0x02; 64],
-        ));
-
         let result = raw.build();
         assert!(result.is_ok());
         let bytes = result.unwrap();
@@ -1881,11 +1585,6 @@ mod tests {
         assert!(parsed.lens.is_some());
         let lens = parsed.lens.unwrap();
         assert_eq!(lens.make, Some("Sony".to_string()));
-
-        // Verify token
-        assert!(parsed.token_auth.is_some());
-        let token = parsed.token_auth.unwrap();
-        assert_eq!(token.device_serial, 99999);
     }
 
     #[test]
@@ -1918,7 +1617,6 @@ mod tests {
                 }),
                 None,
                 None,
-                None,
             );
             assert!(
                 result.is_ok(),
@@ -1948,7 +1646,6 @@ mod tests {
                     distortion_correction_hash: None,
                     magic_9: None,
                 }),
-                None,
                 None,
                 None,
             );

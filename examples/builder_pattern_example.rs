@@ -3,8 +3,8 @@
 //! This shows the ergonomic dot notation for incrementally setting fields,
 //! which is especially useful when fields are conditional or optional.
 
-use vsf::builders::{RawImageBuilder, TokenBuilder};
-use vsf::types::{BitPackedTensor, EtType, WorldCoord};
+use vsf::builders::RawImageBuilder;
+use vsf::types::BitPackedTensor;
 
 fn main() {
     // Create a simple 8x8 test image
@@ -34,15 +34,6 @@ fn main() {
     raw.lens.min_focal_length_m = Some(0.050); // 50mm prime
     raw.lens.max_focal_length_m = Some(0.050);
     raw.lens.max_aperture_f = Some(1.2); // f/1.2 maximum aperture
-
-    // Optionally add TOKEN auth
-    raw.token = Some(TokenBuilder::new(
-        vec![0xAB; 32],                    // Dummy 32-byte Ed25519 public key
-        12345,                             // Device serial
-        EtType::f6(1234567890.123456),     // Eagle Time timestamp
-        vec![0xCD; 64],                    // Dummy 64-byte Ed25519 signature
-    ));
-    raw.token.as_mut().unwrap().location = Some(WorldCoord::from_lat_lon(47.6062, -122.3321)); // Seattle
 
     // Build the VSF file
     let bytes = raw.build().expect("Failed to build VSF file");
