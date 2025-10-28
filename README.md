@@ -740,25 +740,12 @@ Each value includes its type information. Files can be parsed without external s
 
 ### Variable-Length Integer Encoding
 
-```
-Size markers indicate bit width (ASCII '3'-'7' and beyond):
+See "Core Innovation: Exponential-Width Integer Encoding" section above for complete details.
 
-'3' = 8 bits  = 1 byte   (0-255)
-'4' = 16 bits = 2 bytes  (0-65,535)
-'5' = 32 bits = 4 bytes  (0-4.2 billion)
-'6' = 64 bits = 8 bytes  (0-18 quintillion)
-'7' = 128 bits = 16 bytes (a lot!)
-... extends to Z giving 2^36 bits if needed. That's literally a single number that's 8GB!
-
-Example: Value 4096
-Encoding: 'u' '4' 0x10 0x00
-          │   │   └──┴─ Value (big-endian u16)
-          │   └─ Size marker '4' (16-bit follows)
-          └─ Type marker 'u' (unsigned integer)
-
-Overhead: 2 bytes (type + size marker)
-Skip cost: O(1) - see '4', skip 2 bytes
-```
+**Quick summary:**
+- Type marker (`u`, `i`, etc.) + size marker (ASCII '3'-'Z')
+- 2 bytes overhead, O(1) skip
+- Extends from 8 bits to 8 GB (2^36 bits max)
 
 ### Bitpacked Tensor Format
 
