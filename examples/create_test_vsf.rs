@@ -26,6 +26,9 @@ fn main() {
 
     // Create camera settings
     let camera = CameraSettings {
+        make: None,
+        model: None,
+        serial_number: None,
         iso_speed: Some(IsoSpeed::new(800.0).unwrap()),
         shutter_time_s: Some(ShutterTime::new(1.0 / 60.0).unwrap()), // 1/60 second
         aperture_f_number: Some(Aperture::new(2.8).unwrap()),

@@ -2,7 +2,7 @@
 //!
 //! This module provides constructors for complex data types that require
 //! packaging multiple VSF primitives together:
-//! - GPS coordinate conversion (lat/lon → WorldCoord)
+//! - GPS coordinate conversions (lat/lon → WorldCoord)
 //! - Complete RAW camera images with full metadata
 //! - Geotagged photos
 //!
@@ -19,13 +19,6 @@
 //!
 //! // RAW camera image (12-bit sensor)
 //! let raw = raw_image(12, 4096, 3072, pixel_data);
-//!
-//! // GPS track (converts lat/lon to WorldCoord)
-//! let track = gps_track(vec![
-//!     (40.7128, -74.0060),  // NYC
-//!     (51.5074, -0.1278),   // London
-//! ]);
-//! ```
 
 use crate::types::{BitPackedTensor, Tensor, VsfType, WorldCoord};
 use crate::vsf_builder::VsfBuilder;
@@ -486,6 +479,9 @@ pub struct RawMetadata {
 /// Camera settings at time of capture
 #[derive(Debug, Clone)]
 pub struct CameraSettings {
+    pub make: Option<Manufacturer>,
+    pub model: Option<ModelName>,
+    pub serial_number: Option<SerialNumber>,
     pub iso_speed: Option<IsoSpeed>,
     pub shutter_time_s: Option<ShutterTime>,
     pub aperture_f_number: Option<Aperture>,
@@ -542,18 +538,9 @@ impl RawMetadataBuilder {
         }
 
         Ok(Some(RawMetadata {
-            cfa_pattern: self
-                .cfa_pattern
-                .map(|p| CfaPattern::new(p))
-                .transpose()?,
-            black_level: self
-                .black_level
-                .map(|l| BlackLevel::new(l))
-                .transpose()?,
-            white_level: self
-                .white_level
-                .map(|l| WhiteLevel::new(l))
-                .transpose()?,
+            cfa_pattern: self.cfa_pattern.map(|p| CfaPattern::new(p)).transpose()?,
+            black_level: self.black_level.map(|l| BlackLevel::new(l)).transpose()?,
+            white_level: self.white_level.map(|l| WhiteLevel::new(l)).transpose()?,
             dark_frame_hash: self
                 .dark_frame_hash
                 .map(|(alg, hash)| CalibrationHash::new(alg, hash))
@@ -582,6 +569,9 @@ impl RawMetadataBuilder {
 /// Builder for CameraSettings with convenient field access
 #[derive(Debug, Clone, Default)]
 pub struct CameraBuilder {
+    pub make: Option<String>,
+    pub model: Option<String>,
+    pub serial_number: Option<String>,
     pub iso_speed: Option<f32>,
     pub shutter_time_s: Option<f32>,
     pub aperture_f_number: Option<f32>,
@@ -595,7 +585,10 @@ pub struct CameraBuilder {
 impl CameraBuilder {
     /// Convert builder to CameraSettings (returns None if all fields are None)
     fn build(self) -> Result<Option<CameraSettings>, String> {
-        if self.iso_speed.is_none()
+        if self.make.is_none()
+            && self.model.is_none()
+            && self.serial_number.is_none()
+            && self.iso_speed.is_none()
             && self.shutter_time_s.is_none()
             && self.aperture_f_number.is_none()
             && self.focal_length_m.is_none()
@@ -608,6 +601,9 @@ impl CameraBuilder {
         }
 
         Ok(Some(CameraSettings {
+            make: self.make.map(|m| Manufacturer::new(m)).transpose()?,
+            model: self.model.map(|m| ModelName::new(m)).transpose()?,
+            serial_number: self.serial_number.map(|s| SerialNumber::new(s)).transpose()?,
             iso_speed: self.iso_speed.map(|i| IsoSpeed::new(i)).transpose()?,
             shutter_time_s: self
                 .shutter_time_s
@@ -629,10 +625,7 @@ impl CameraBuilder {
                 .focus_distance_m
                 .map(|f| FocusDistance::new(f))
                 .transpose()?,
-            flash_fired: self
-                .flash_fired
-                .map(|f| FlashFired::new(f))
-                .transpose()?,
+            flash_fired: self.flash_fired.map(|f| FlashFired::new(f)).transpose()?,
             metering_mode: self
                 .metering_mode
                 .map(|m| MeteringMode::new(m))
@@ -682,14 +675,8 @@ impl LensBuilder {
                 .max_focal_length_m
                 .map(|f| FocalLength::new(f))
                 .transpose()?,
-            min_aperture_f: self
-                .min_aperture_f
-                .map(|a| Aperture::new(a))
-                .transpose()?,
-            max_aperture_f: self
-                .max_aperture_f
-                .map(|a| Aperture::new(a))
-                .transpose()?,
+            min_aperture_f: self.min_aperture_f.map(|a| Aperture::new(a)).transpose()?,
+            max_aperture_f: self.max_aperture_f.map(|a| Aperture::new(a)).transpose()?,
         }))
     }
 }
@@ -895,17 +882,11 @@ pub fn build_raw_image(
         }
 
         if let Some(hash) = meta.vignette_correction_hash {
-            raw_items.push((
-                "vignette_correction_hash".to_string(),
-                hash.to_vsf_type(),
-            ));
+            raw_items.push(("vignette_correction_hash".to_string(), hash.to_vsf_type()));
         }
 
         if let Some(hash) = meta.distortion_correction_hash {
-            raw_items.push((
-                "distortion_correction_hash".to_string(),
-                hash.to_vsf_type(),
-            ));
+            raw_items.push(("distortion_correction_hash".to_string(), hash.to_vsf_type()));
         }
 
         // Magic 9 (3×3 colour matrix: Sensor RGB → LMS)
@@ -916,6 +897,18 @@ pub fn build_raw_image(
 
     // Camera settings
     if let Some(cam) = camera {
+        if let Some(make) = cam.make {
+            raw_items.push(("camera_make".to_string(), make.to_vsf_type()));
+        }
+
+        if let Some(model) = cam.model {
+            raw_items.push(("camera_model".to_string(), model.to_vsf_type()));
+        }
+
+        if let Some(serial) = cam.serial_number {
+            raw_items.push(("camera_serial".to_string(), serial.to_vsf_type()));
+        }
+
         if let Some(iso) = cam.iso_speed {
             raw_items.push(("iso_speed".to_string(), iso.to_vsf_type()));
         }
@@ -1027,6 +1020,9 @@ pub fn lumis_raw_capture(samples: Vec<u64>, iso: f32, shutter_s: f32) -> Result<
             magic_9: None,
         }),
         Some(CameraSettings {
+            make: None,
+            model: None,
+            serial_number: None,
             iso_speed: Some(IsoSpeed::new(iso)?),
             shutter_time_s: Some(ShutterTime::new(shutter_s)?),
             aperture_f_number: None,
@@ -1193,6 +1189,9 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     let mut magic_9: Option<Vec<f32>> = None;
 
     // Camera settings fields
+    let mut camera_make: Option<String> = None;
+    let mut camera_model: Option<String> = None;
+    let mut camera_serial: Option<String> = None;
     let mut iso_speed: Option<f32> = None;
     let mut shutter_time_s: Option<f32> = None;
     let mut aperture_f_number: Option<f32> = None;
@@ -1324,6 +1323,21 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
                 }
             }
             // Camera settings
+            "camera_make" => {
+                if let VsfType::x(v) = field_value {
+                    camera_make = Some(v);
+                }
+            }
+            "camera_model" => {
+                if let VsfType::x(v) = field_value {
+                    camera_model = Some(v);
+                }
+            }
+            "camera_serial" => {
+                if let VsfType::x(v) = field_value {
+                    camera_serial = Some(v);
+                }
+            }
             "iso_speed" => {
                 if let VsfType::f5(v) = field_value {
                     iso_speed = Some(v);
@@ -1459,7 +1473,10 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         None
     };
 
-    let camera_settings = if iso_speed.is_some()
+    let camera_settings = if camera_make.is_some()
+        || camera_model.is_some()
+        || camera_serial.is_some()
+        || iso_speed.is_some()
         || shutter_time_s.is_some()
         || aperture_f_number.is_some()
         || focal_length_m.is_some()
@@ -1469,6 +1486,9 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         || metering_mode.is_some()
     {
         Some(CameraSettings {
+            make: camera_make.map(|m| Manufacturer::new(m)).transpose()?,
+            model: camera_model.map(|m| ModelName::new(m)).transpose()?,
+            serial_number: camera_serial.map(|s| SerialNumber::new(s)).transpose()?,
             iso_speed: iso_speed.map(|i| IsoSpeed::new(i)).transpose()?,
             shutter_time_s: shutter_time_s.map(|s| ShutterTime::new(s)).transpose()?,
             aperture_f_number: aperture_f_number.map(|a| Aperture::new(a)).transpose()?,
@@ -1476,7 +1496,9 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
             exposure_compensation: exposure_compensation
                 .map(|e| ExposureCompensation::new(e))
                 .transpose()?,
-            focus_distance_m: focus_distance_m.map(|f| FocusDistance::new(f)).transpose()?,
+            focus_distance_m: focus_distance_m
+                .map(|f| FocusDistance::new(f))
+                .transpose()?,
             flash_fired: flash_fired.map(|f| FlashFired::new(f)).transpose()?,
             metering_mode: metering_mode.map(|m| MeteringMode::new(m)).transpose()?,
         })
@@ -1496,12 +1518,8 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
             make: lens_make.map(|m| Manufacturer::new(m)).transpose()?,
             model: lens_model.map(|m| ModelName::new(m)).transpose()?,
             serial_number: lens_serial.map(|s| SerialNumber::new(s)).transpose()?,
-            min_focal_length_m: lens_min_focal_m
-                .map(|f| FocalLength::new(f))
-                .transpose()?,
-            max_focal_length_m: lens_max_focal_m
-                .map(|f| FocalLength::new(f))
-                .transpose()?,
+            min_focal_length_m: lens_min_focal_m.map(|f| FocalLength::new(f)).transpose()?,
+            max_focal_length_m: lens_max_focal_m.map(|f| FocalLength::new(f)).transpose()?,
             min_aperture_f: lens_min_aperture.map(|a| Aperture::new(a)).transpose()?,
             max_aperture_f: lens_max_aperture.map(|a| Aperture::new(a)).transpose()?,
         })
@@ -1648,9 +1666,14 @@ mod tests {
                 bias_frame_hash: None,
                 vignette_correction_hash: None,
                 distortion_correction_hash: None,
-                magic_9: Some(Magic9::new(vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]).unwrap()),
+                magic_9: Some(
+                    Magic9::new(vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]).unwrap(),
+                ),
             }),
             Some(CameraSettings {
+                make: None,
+                model: None,
+                serial_number: None,
                 iso_speed: Some(IsoSpeed::new(800.0).unwrap()),
                 shutter_time_s: Some(ShutterTime::new(1. / 60.).unwrap()), // 1/60 second
                 aperture_f_number: Some(Aperture::new(2.8).unwrap()),
@@ -1752,6 +1775,9 @@ mod tests {
         };
 
         let original_camera = CameraSettings {
+            make: Some(Manufacturer::new("TestCam".to_string()).unwrap()),
+            model: Some(ModelName::new("Model X".to_string()).unwrap()),
+            serial_number: Some(SerialNumber::new("CAM123456".to_string()).unwrap()),
             iso_speed: Some(IsoSpeed::new(800.0).unwrap()),
             shutter_time_s: Some(ShutterTime::new(1. / 60.).unwrap()), // 1/60 sec
             aperture_f_number: Some(Aperture::new(2.8).unwrap()),

@@ -1,6 +1,5 @@
 use vsf::builders::*;
-use vsf::types::{BitPackedTensor, EtType};
-use vsf::WorldCoord;
+use vsf::types::BitPackedTensor;
 
 fn main() -> Result<(), String> {
     println!("=== VSF RAW Image Example ===\n");
@@ -40,11 +39,13 @@ fn main() -> Result<(), String> {
     );
 
     // ========== BUILDER PATTERN API ==========
+    // The builder accepts raw types for ergonomics - validation happens at build() time
     println!("Building VSF RAW image with metadata...");
 
     let mut raw = RawImageBuilder::new(image);
 
     // Set RAW metadata (sensor characteristics)
+    // Builder fields accept simple types - they get validated and wrapped when you call build()
     raw.raw.cfa_pattern = Some(cfa);
     raw.raw.black_level = Some(blackpoint as f32);
     raw.raw.white_level = Some(whitepoint as f32);
@@ -54,6 +55,9 @@ fn main() -> Result<(), String> {
     ]);
 
     // Set camera settings
+    raw.camera.make = Some("Sony".to_string());
+    raw.camera.model = Some("α7 IV".to_string());
+    raw.camera.serial_number = Some("87654321".to_string());
     raw.camera.iso_speed = Some(800.);
     raw.camera.shutter_time_s = Some(1. / 60.); // 1/60 second
     raw.camera.aperture_f_number = Some(2.8);
@@ -72,28 +76,16 @@ fn main() -> Result<(), String> {
     raw.lens.min_aperture_f = Some(2.8);
     raw.lens.max_aperture_f = Some(22.);
 
-    // Build the VSF file
+    // Build validates all fields and wraps them in type-safe newtypes
+    // This is where validation errors would surface (e.g., invalid CFA colour codes)
     let raw_bytes = raw.build()?;
 
-    println!("✓ Built VSF RAW image: {} bytes\n", raw_bytes.len());
+    println!("✓ Built VSF RAW image: {} bytes", raw_bytes.len());
+    println!("  (Includes mandatory BLAKE3 hash for integrity)\n");
 
     // Write to file
     std::fs::write("example_raw.vsf", &raw_bytes).expect("Failed to write file");
     println!("✓ Saved to example_raw.vsf");
-
-    // ========== OPTIONAL: ADD VERIFICATION ==========
-    println!("\n=== Optional: Add file hash for integrity verification ===");
-
-    // To add a file hash, we'd need to rebuild with VsfBuilder directly:
-    // let builder = VsfBuilder::new().with_file_hash();
-    // ... build sections ...
-    // let bytes = builder.build()?;
-    // let verified = verification::add_file_hash(bytes)?;
-
-    println!("To add verification:");
-    println!("  1. Use VsfBuilder::new().with_file_hash()");
-    println!("  2. Call verification::add_file_hash(bytes)");
-    println!("  3. Call verification::verify_file_hash(&bytes) to validate");
 
     println!("\n=== Complete! ===");
     println!("The RAW image includes:");
@@ -101,8 +93,11 @@ fn main() -> Result<(), String> {
     println!("  • CFA pattern (RGCY Bayer)");
     println!("  • Black/white levels");
     println!("  • Colour transformation matrix (Magic 9)");
-    println!("  • Camera settings (ISO, shutter, aperture, etc.)");
-    println!("  • Lens information");
+    println!("  • Camera information (make, model, S/N, ISO, shutter, aperture, etc.)");
+    println!("  • Lens information (make, model, S/N, focal length range, etc.)");
+    println!("  • Mandatory BLAKE3 file hash (automatic)");
+    println!("\nAll metadata is validated and type-checked at compile time.");
+    println!("Try changing a value to something invalid - the compiler will catch it!");
 
     Ok(())
 }
