@@ -118,6 +118,11 @@ impl VsfHeader {
             _ => return Err("Expected y type for backward compat".to_string()),
         };
 
+        // Parse file hash (mandatory BLAKE3 hash)
+        let _file_hash_type = parse(data, &mut pointer)
+            .map_err(|e| format!("Failed to parse file hash: {}", e))?;
+        // Note: We don't verify the file hash here, just skip past it
+
         // Parse label count
         let label_count_type =
             parse(data, &mut pointer).map_err(|e| format!("Failed to parse label count: {}", e))?;
@@ -319,6 +324,14 @@ fn parse_section_fields(data: &[u8], label: &LabelInfo) -> Result<Vec<(String, V
     if data[pointer] == b'[' {
         pointer += 1;
 
+        // Parse section name
+        let section_name_type = parse(data, &mut pointer)
+            .map_err(|e| format!("Failed to parse section name: {}", e))?;
+        let _section_name = match section_name_type {
+            VsfType::d(name) => name,
+            _ => return Err("Expected d type for section name".to_string()),
+        };
+
         for _ in 0..label.child_count {
             if pointer >= data.len() {
                 break;
@@ -355,52 +368,134 @@ fn parse_section_fields(data: &[u8], label: &LabelInfo) -> Result<Vec<(String, V
 fn show_info(data: &[u8]) -> Result<(), String> {
     let header = VsfHeader::parse(data)?;
 
-    println!("VSF File Inspector v{}", env!("CARGO_PKG_VERSION"));
+    // Calculate actual header length by parsing
+    let mut pointer = 4; // After "RÅ<"
+    let header_length_type = parse(data, &mut pointer)
+        .map_err(|e| format!("Failed to parse header length: {}", e))?;
+    let header_length_bits = match header_length_type {
+        VsfType::b(bits) => bits,
+        _ => return Err("Expected b type for header length".to_string()),
+    };
+
     println!(
-        "Size: {} bytes ({:.1} MB)",
+        "VSF File: {} bytes ({:.1} KB)",
         data.len(),
-        data.len() as f64 / 1_000_000.0
+        data.len() as f64 / 1024.0
     );
     println!();
 
-    println!("Header:");
-    println!("  Version: {}", header.version);
-    println!("  Backward Compat: {}", header.backward_compat);
-    println!("  Sections: {}", header.labels.len());
+    // Show actual VSF header structure (fixed order)
+    println!("RÅ<                          // Magic number");
+    println!("  b[{}]                  // Header length (bits) - FIXED POSITION", header_length_bits);
+    println!("  z[{}]                      // Version - FIXED POSITION", header.version);
+    println!("  y[{}]                      // Backward compat - FIXED POSITION", header.backward_compat);
+    println!("  hb3[32][...]             // File hash (BLAKE3) - FIXED POSITION");
+    println!("  n[{}]                     // Label count - FIXED POSITION", header.labels.len());
+    println!("  // Label definitions (variable count):");
+
+    // Show label definitions
+    for label in &header.labels {
+        println!(
+            "  (d\"{}\" o[{}] b[{}] n[{}])",
+            label.name,
+            label.offset * 8, // Show in bits
+            label.size * 8,
+            label.child_count
+        );
+    }
+    println!(">");
     println!();
 
+    // Show sections with their actual structure
     for (i, label) in header.labels.iter().enumerate() {
-        println!("Section {}: {}", i, label.name);
-        println!("  Offset: {} bytes", label.offset);
-        println!(
-            "  Size: {} bytes ({:.1} KB)",
-            label.size,
-            label.size as f64 / 1024.0
-        );
-        println!("  Fields: {}", label.child_count);
+        let is_last = i == header.labels.len() - 1;
+        let connector = if is_last { "└─" } else { "├─" };
 
-        // Parse and show preamble info
-        if label.child_count > 0 {
-            let mut pointer = label.offset;
+        // Show preamble
+        let mut pointer = label.offset;
+        let (preamble_count, preamble_size_bits, has_hash, has_sig) =
             if let Ok((count, size_bits, hash, sig)) = parse_preamble(data, &mut pointer) {
-                println!("  Preamble: {{n={} b={}}}", count, size_bits);
-                if hash.is_some() {
-                    println!("  Hash: Present");
-                }
-                if sig.is_some() {
-                    println!("  Signature: Present");
-                }
-            }
-        }
+                (count, size_bits, hash.is_some(), sig.is_some())
+            } else {
+                (label.child_count, label.size * 8, false, false)
+            };
 
-        // Parse and display fields
+        let mut preamble_str = format!("{{n[{}] b[{}]", preamble_count, preamble_size_bits);
+        if has_hash {
+            preamble_str.push_str(" hb3[32]");
+        }
+        if has_sig {
+            preamble_str.push_str(" g[...]");
+        }
+        preamble_str.push('}');
+
+        println!("{}{}[d\"{}\"", connector, preamble_str, label.name);
+
+        // Parse and show fields
         if let Ok(fields) = parse_section_fields(data, label) {
-            for (field_name, field_value) in fields {
-                println!("    {}: {}", field_name, format_value(&field_value));
+            for (j, (field_name, field_value)) in fields.iter().enumerate() {
+                let is_field_last = j == fields.len() - 1;
+                let field_prefix = if is_last { "  " } else { "│ " };
+                let field_connector = if is_field_last { "└─" } else { "├─" };
+                println!(
+                    "{}{} (d\"{}\":{})",
+                    field_prefix,
+                    field_connector,
+                    field_name,
+                    format_value_short(field_value)
+                );
             }
         }
+        println!("{}]", if is_last { "  " } else { "│ " });
+        if !is_last {
+            println!("│");
+        }
+    }
 
-        println!();
+    println!();
+    println!("{}", "=".repeat(50));
+    println!("Integrity Check:");
+    println!("{}", "=".repeat(50));
+
+    // Quick integrity verification
+    verify_integrity_summary(data, &header)?;
+
+    Ok(())
+}
+
+/// Quick integrity summary (used by show_info)
+fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), String> {
+    let mut verified_sections = 0;
+    let mut total_sections = 0;
+
+    for label in &header.labels {
+        if label.child_count > 0 {
+            total_sections += 1;
+            let mut pointer = label.offset;
+            if let Ok((_, _, hash, _)) = parse_preamble(data, &mut pointer) {
+                if let Some(h) = hash {
+                    let section_end = label.offset + label.size;
+                    if section_end <= data.len() {
+                        let section_data = &data[label.offset..section_end];
+                        let computed = blake3::hash(section_data);
+                        if computed.as_bytes() == h.as_slice() {
+                            verified_sections += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if total_sections > 0 && verified_sections == total_sections {
+        println!("✓ All {} section hashes verified", verified_sections);
+    } else if verified_sections > 0 {
+        println!(
+            "○ {}/{} section hashes verified",
+            verified_sections, total_sections
+        );
+    } else {
+        println!("○ No section hashes found");
     }
 
     Ok(())
