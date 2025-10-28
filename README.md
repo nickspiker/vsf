@@ -769,9 +769,9 @@ VSF is part of a broader computational foundation:
 - **TOKEN** - Unfakeable cryptographic identity
 - **VSF** - Optimal serialization
 - **Eagle Time** - Physics-bounded consensus timestamps
-- **Dymaxion Encoding** - Uses Fuller's Dymaxion projection - 2.14mm avg, 5.07mm max in 64 bits.
+- **Dymaxion Encoding** - Global precision of 2.14mm avg, 5.07mm max in 64 bits.
 
-Each component addresses fundamental problems from first principles.
+Each component addresses fundamental problems that irritated me for a minute now.
 
 ---
 

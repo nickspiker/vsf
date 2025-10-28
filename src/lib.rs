@@ -203,8 +203,14 @@ pub use vsf_builder::VsfBuilder;
 
 // RAW image builders and parser
 pub use builders::{
-    build_raw_image, lumis_raw_capture, parse_raw_image, CameraBuilder, CameraSettings,
-    LensBuilder, LensInfo, ParsedRawImage, RawImageBuilder, RawMetadata, RawMetadataBuilder,
+    build_raw_image, lumis_raw_capture, parse_raw_image,
+    // Builder structs
+    CameraBuilder, CameraSettings, LensBuilder, LensInfo, ParsedRawImage, RawImageBuilder,
+    RawMetadata, RawMetadataBuilder,
+    // Newtype wrappers for type safety
+    Aperture, BlackLevel, CalibrationHash, CfaPattern, ExposureCompensation, FlashFired,
+    FocalLength, FocusDistance, IsoSpeed, Magic9, Manufacturer, MeteringMode, ModelName,
+    SerialNumber, ShutterTime, WhiteLevel,
 };
 
 // Coming soon

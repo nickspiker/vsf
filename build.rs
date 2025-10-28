@@ -115,7 +115,7 @@ fn generate_codes(tree: &Node) -> HashMap<char, (u32, u8)> {
 fn main() {
     println!("cargo:rerun-if-changed=frequencies.bin");
 
-    // 1. Load frequencies
+    // 0. Load frequencies
     let mut file = File::open("frequencies.bin").expect("Need frequencies.bin");
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).unwrap();
@@ -137,15 +137,15 @@ fn main() {
 
     println!("cargo:warning=Loaded {} character frequencies", count);
 
-    // 2. Build Huffman tree
+    // 1. Build Huffman tree
     let tree = build_huffman_tree(&frequencies);
 
-    // 3. Generate codes
+    // 2. Generate codes
     let codes = generate_codes(&tree);
 
     println!("cargo:warning=Generated {} Huffman codes", codes.len());
 
-    // 4. Write huffman_codes.bin
+    // 3. Write huffman_codes.bin
     let mut output = File::create("huffman_codes.bin").unwrap();
 
     // Header

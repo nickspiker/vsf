@@ -1,6 +1,9 @@
 //! Create a sample VSF file for testing vsfinfo
 
-use vsf::builders::{build_raw_image, CameraSettings, RawMetadata};
+use vsf::builders::{
+    build_raw_image, Aperture, BlackLevel, CameraSettings, CfaPattern, FlashFired, FocalLength,
+    FocusDistance, IsoSpeed, MeteringMode, RawMetadata, ShutterTime, WhiteLevel,
+};
 use vsf::types::BitPackedTensor;
 
 fn main() {
@@ -10,9 +13,9 @@ fn main() {
 
     // Create metadata
     let metadata = RawMetadata {
-        cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']), // RGGB Bayer pattern
-        black_level: Some(64.0),
-        white_level: Some(255.0),
+        cfa_pattern: Some(CfaPattern::new(vec![b'R', b'G', b'G', b'B']).unwrap()), // RGGB Bayer pattern
+        black_level: Some(BlackLevel::new(64.0).unwrap()),
+        white_level: Some(WhiteLevel::new(255.0).unwrap()),
         dark_frame_hash: None,
         flat_field_hash: None,
         bias_frame_hash: None,
@@ -23,14 +26,14 @@ fn main() {
 
     // Create camera settings
     let camera = CameraSettings {
-        iso_speed: Some(800.0),
-        shutter_time_s: Some(1.0 / 60.0), // 1/60 second
-        aperture_f_number: Some(2.8),
-        focal_length_m: Some(0.050), // 50mm
+        iso_speed: Some(IsoSpeed::new(800.0).unwrap()),
+        shutter_time_s: Some(ShutterTime::new(1.0 / 60.0).unwrap()), // 1/60 second
+        aperture_f_number: Some(Aperture::new(2.8).unwrap()),
+        focal_length_m: Some(FocalLength::new(0.050).unwrap()), // 50mm
         exposure_compensation: None,
-        focus_distance_m: Some(3.5),
-        flash_fired: Some(false),
-        metering_mode: Some("matrix".to_string()),
+        focus_distance_m: Some(FocusDistance::new(3.5).unwrap()),
+        flash_fired: Some(FlashFired::new(false).unwrap()),
+        metering_mode: Some(MeteringMode::new("matrix".to_string()).unwrap()),
     };
 
     // Build the VSF file
