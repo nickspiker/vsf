@@ -182,6 +182,9 @@ pub mod vsf_builder;
 // Cryptographic algorithm identifiers (h, g, k types)
 pub mod crypto_algorithms;
 
+// Verification functions for hashing and signing VSF files
+pub mod verification;
+
 // Re-export main types
 pub use types::{
     datetime_to_eagle_time, EagleTime, EtType, LayoutOrder, StridedTensor, Tensor, VsfType,

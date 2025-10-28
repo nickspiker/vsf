@@ -13,6 +13,7 @@ pub struct VsfBuilder {
     backward_compat: usize,
     sections: Vec<VsfSection>,
     unboxed: Vec<(String, Vec<u8>)>,
+    include_file_hash: bool, // If true, include hb3[32][zeros] placeholder in header
 }
 
 impl VsfBuilder {
@@ -23,7 +24,17 @@ impl VsfBuilder {
             backward_compat: VSF_BACKWARD_COMPAT,
             sections: Vec::new(),
             unboxed: Vec::new(),
+            include_file_hash: false,
         }
+    }
+
+    /// Include a file hash placeholder in the header (Strategy 1)
+    ///
+    /// This adds `hb3[32][zeros]` after the version markers.
+    /// Use `vsf::verification::add_file_hash()` to compute and write the hash.
+    pub fn with_file_hash(mut self) -> Self {
+        self.include_file_hash = true;
+        self
     }
 
     /// Set version numbers
@@ -75,6 +86,12 @@ impl VsfBuilder {
         header_index = vsf.len();
         vsf.push(VsfType::z(self.version).flatten());
         vsf[header_index].extend_from_slice(&VsfType::y(self.backward_compat).flatten());
+
+        // File hash placeholder (Strategy 1) - if requested
+        if self.include_file_hash {
+            use crate::crypto_algorithms::HASH_BLAKE3;
+            vsf[header_index].extend_from_slice(&VsfType::h(HASH_BLAKE3, vec![0u8; 32]).flatten());
+        }
 
         // Label count
         let total_labels = self.sections.len() + self.unboxed.len();

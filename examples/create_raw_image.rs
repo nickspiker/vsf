@@ -55,13 +55,6 @@ fn main() -> Result<(), String> {
             min_aperture_f: Some(2.8),
             max_aperture_f: Some(22.0),
         }),
-        Some(TokenAuth {
-            creator_pubkey: vec![0xAB; 32],
-            device_serial: 123456789, // Numeric serial
-            timestamp_et: EtType::f6(1234567890.123456),
-            location: Some(WorldCoord::from_lat_lon(47.6062, -122.3321)), // Seattle
-            signature: vec![0xCD; 64],
-        }),
     )?;
 
     let lumis_pixel_count = 4096 * 3072;
