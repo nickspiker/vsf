@@ -314,6 +314,32 @@ pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
     Ok(VsfType::k(algorithm, key))
 }
 
+/// Parse wrapped/encoded data (v type)
+pub fn parse_wrapped(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+    // Read algorithm ID byte
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for wrapped data algorithm ID",
+        ));
+    }
+    let algorithm = data[*pointer];
+    *pointer += 1;
+
+    // Read wrapped data length and data
+    let length_bits = decode_usize(data, pointer)?;
+    let length_bytes = (length_bits + 7) >> 3; // Convert bits to bytes (round up)
+    if *pointer + length_bytes > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for wrapped data",
+        ));
+    }
+    let wrapped_data = data[*pointer..*pointer + length_bytes].to_vec();
+    *pointer += length_bytes;
+    Ok(VsfType::v(algorithm, wrapped_data))
+}
+
 // ==================== PREAMBLE ====================
 
 /// Parse a preamble from VSF data

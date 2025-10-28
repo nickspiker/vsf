@@ -7,7 +7,7 @@ use std::io::{Error, ErrorKind};
 use super::metadata::{
     parse_backward_version, parse_count, parse_dtype, parse_eagle_time, parse_hash, parse_key,
     parse_label, parse_length, parse_mac, parse_marker_def, parse_marker_ref, parse_offset,
-    parse_signature, parse_string, parse_version, parse_world_coord,
+    parse_signature, parse_string, parse_version, parse_world_coord, parse_wrapped,
 };
 use super::primitives::{parse_complex, parse_float, parse_signed, parse_unsigned};
 use super::spirix::{parse_spirix_circle, parse_spirix_scalar};
@@ -68,6 +68,7 @@ pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
         b'h' => parse_hash(data, pointer),
         b'g' => parse_signature(data, pointer),
         b'k' => parse_key(data, pointer),
+        b'v' => parse_wrapped(data, pointer),
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Invalid type marker: {}", type_byte as char),

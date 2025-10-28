@@ -97,6 +97,7 @@ use super::world_coord::WorldCoord;
 /// - `g`: Signature
 /// - `k`: Cryptographic key
 /// - `w`: World coordinate (Dymaxion icosahedral)
+/// - `v`: Wrapped/encoded data (optional: compression, error correction, encryption)
 #[derive(Debug, Clone)]
 #[allow(non_camel_case_types)]
 pub enum VsfType {
@@ -375,4 +376,31 @@ pub enum VsfType {
     h(u8, Vec<u8>), // Hash
     g(u8, Vec<u8>), // Signature
     k(u8, Vec<u8>), // Cryptographic key
+
+    // ==================== WRAPPED/ENCODED DATA (OPTIONAL) ====================
+    /// Wrapped/encoded VSF data with compression, error correction, or encryption
+    ///
+    /// Format: v[algorithm][encoded_data]
+    ///
+    /// Algorithm identifiers (single ASCII character):
+    /// - 'z' = zstd compression
+    /// - 'r' = Reed-Solomon error correction
+    /// - 'x' = XZ/LZMA compression
+    /// - 'e' = Encryption (algorithm-specific)
+    ///
+    /// Example usage:
+    /// ```ignore
+    /// // Compress VSF bytes with zstd
+    /// let original = VsfType::t_u3(tensor);
+    /// let compressed = compress_zstd(&original.flatten());
+    /// let wrapped = VsfType::v(b'z', compressed);
+    ///
+    /// // Can nest wrappers (compress then error-correct)
+    /// let inner = VsfType::v(b'z', compressed_bytes);
+    /// let outer = VsfType::v(b'r', reed_solomon_encode(&inner.flatten()));
+    /// ```
+    ///
+    /// This is OPTIONAL - core VSF doesn't require it.
+    /// Use when your application needs compression, error correction, or encryption.
+    v(u8, Vec<u8>), // Wrapped data (algorithm byte, encoded bytes)
 }

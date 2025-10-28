@@ -305,6 +305,16 @@ impl VsfType {
                 flat
             }
 
+            // ==================== WRAPPED/ENCODED DATA ====================
+            VsfType::v(algorithm, value) => {
+                let mut flat = Vec::new();
+                flat.push(b'v');
+                flat.push(*algorithm); // Algorithm ID (e.g., b'z' for zstd, b'r' for Reed-Solomon)
+                flat.extend_from_slice(&(value.len() << 3).encode_number()); // Convert bytes to bits
+                flat.extend_from_slice(value);
+                flat
+            }
+
             // ==================== BITPACKED TENSORS ====================
             VsfType::p(tensor) => {
                 // Validate dimensions

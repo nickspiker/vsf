@@ -727,4 +727,52 @@ mod tests {
         let decoded = WorldCoord::from_words(&words).expect("Should decode valid words");
         assert_eq!(decoded.raw(), coord.raw());
     }
+
+    #[test]
+    fn test_wrapped_type_roundtrip() {
+        // Test the 'v' wrapped data type
+        let original_data = vec![1, 2, 3, 4, 5, 6, 7, 8];
+
+        // Wrap with algorithm 'z' (zstd compression - simulated)
+        let wrapped = VsfType::v(b'z', original_data.clone());
+        let flat = wrapped.flatten();
+
+        // Verify encoding
+        assert_eq!(flat[0], b'v'); // Marker
+        assert_eq!(flat[1], b'z'); // Algorithm
+
+        // Parse back
+        let mut ptr = 0;
+        let parsed = parse(&flat, &mut ptr).unwrap();
+
+        if let VsfType::v(alg, data) = parsed {
+            assert_eq!(alg, b'z');
+            assert_eq!(data, original_data);
+            assert_eq!(ptr, flat.len()); // Consumed all bytes
+        } else {
+            panic!("Expected wrapped type");
+        }
+    }
+
+    #[test]
+    fn test_wrapped_type_algorithms() {
+        // Test different algorithm identifiers
+        let algorithms = vec![b'z', b'r', b'x', b'e'];
+        let test_data = vec![0xAB; 100];
+
+        for alg in algorithms {
+            let wrapped = VsfType::v(alg, test_data.clone());
+            let flat = wrapped.flatten();
+
+            let mut ptr = 0;
+            let parsed = parse(&flat, &mut ptr).unwrap();
+
+            if let VsfType::v(parsed_alg, parsed_data) = parsed {
+                assert_eq!(parsed_alg, alg);
+                assert_eq!(parsed_data, test_data);
+            } else {
+                panic!("Expected wrapped type for algorithm '{}'", alg as char);
+            }
+        }
+    }
 }
