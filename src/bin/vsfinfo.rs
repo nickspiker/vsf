@@ -391,14 +391,13 @@ fn show_info(data: &[u8]) -> Result<(), String> {
     );
     println!();
 
-    // Show actual VSF header structure (fixed order)
-    println!("RÅ<                          // Magic number");
-    println!("  b[{}]                  // Header length (bits) - FIXED POSITION", header_length_bits);
-    println!("  z[{}]                      // Version - FIXED POSITION", header.version);
-    println!("  y[{}]                      // Backward compat - FIXED POSITION", header.backward_compat);
-    println!("  hb[256][...]             // File hash (BLAKE3='b', 256 bits) - FIXED POSITION");
-    println!("  n[{}]                     // Label count - FIXED POSITION", header.labels.len());
-    println!("  // Label definitions (variable count):");
+    // Show actual VSF header structure
+    println!("RÅ<");
+    println!("  b[{}] : Header length (bits)", header_length_bits);
+    println!("  z[{}] : Version", header.version);
+    println!("  y[{}] : Backward compat", header.backward_compat);
+    println!("  hb[256][...] : File hash (BLAKE3)");
+    println!("  n[{}] : Label count", header.labels.len());
 
     // Show label definitions
     for label in &header.labels {
@@ -460,9 +459,7 @@ fn show_info(data: &[u8]) -> Result<(), String> {
     }
 
     println!();
-    println!("{}", "=".repeat(50));
     println!("Integrity Check:");
-    println!("{}", "=".repeat(50));
 
     // Quick integrity verification
     verify_integrity_summary(data, &header)?;
@@ -515,14 +512,11 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
         let computed = blake3::hash(&temp_data);
 
         if computed.as_bytes() == stored_hash.as_slice() {
-            println!("✓ File integrity verified (BLAKE3)");
             true
         } else {
-            println!("✗ File integrity check FAILED (BLAKE3 mismatch)");
             false
         }
     } else {
-        println!("○ No file hash found (unexpected)");
         false
     };
 
@@ -549,17 +543,10 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
         }
     }
 
-    if verified_sections > 0 {
-        println!("✓ All {} section hashes verified", verified_sections);
-    } else {
-        println!("○ No section-level hashes (file-level hash only)");
-    }
-
-    println!();
     if file_hash_verified {
-        println!("✓✓✓ FILE INTEGRITY: PASS ✓✓✓");
+        println!("PASS");
     } else {
-        println!("✗✗✗ FILE INTEGRITY: FAIL ✗✗✗");
+        println!("FAIL");
     }
 
     Ok(())
