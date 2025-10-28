@@ -487,24 +487,32 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
         .map_err(|e| format!("Failed to parse file hash: {}", e))?;
 
     let file_hash_verified = if let VsfType::h(_algo, stored_hash) = file_hash_type {
-        // The hash covers everything from the start up to (but not including) the hash field itself
-        // Find where the hash field starts
-        let mut hash_start_pointer = 4; // After "RÅ<"
-        let _ = parse(data, &mut hash_start_pointer)
+        // The hash is computed over the entire file with the hash bytes zeroed out
+        // Find where the hash bytes start (after 'h', algo byte, and size encoding)
+        let mut hash_field_start = 4; // After "RÅ<"
+        let _ = parse(data, &mut hash_field_start)
             .map_err(|e| format!("Failed to skip header length: {}", e))?;
-        let _ = parse(data, &mut hash_start_pointer)
+        let _ = parse(data, &mut hash_field_start)
             .map_err(|e| format!("Failed to skip version: {}", e))?;
-        let _ = parse(data, &mut hash_start_pointer)
+        let _ = parse(data, &mut hash_field_start)
             .map_err(|e| format!("Failed to skip backward compat: {}", e))?;
 
-        // Hash everything except the hash field itself
-        let before_hash = &data[0..hash_start_pointer];
-        let after_hash = &data[pointer..];
+        // Parse the hash again to find where the actual hash bytes are
+        let mut temp_pointer = hash_field_start;
+        let _hash_reparsed = parse(data, &mut temp_pointer)
+            .map_err(|e| format!("Failed to reparse hash: {}", e))?;
 
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(before_hash);
-        hasher.update(after_hash);
-        let computed = hasher.finalize();
+        // Hash bytes are at the end of the hash field
+        let hash_bytes_start = temp_pointer - stored_hash.len();
+
+        // Create a copy with hash bytes zeroed
+        let mut temp_data = data.to_vec();
+        for i in 0..stored_hash.len() {
+            temp_data[hash_bytes_start + i] = 0;
+        }
+
+        // Compute hash over entire file with zeroed hash bytes
+        let computed = blake3::hash(&temp_data);
 
         if computed.as_bytes() == stored_hash.as_slice() {
             println!("✓ File integrity verified (BLAKE3)");
