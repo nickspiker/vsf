@@ -420,8 +420,8 @@ let bytes = build_raw_image(
     raw_tensor,
     Some(RawMetadata {
         cfa_pattern: Some(vec![b'R', b'G', b'G', b'B']),
-        black_level: Some(64.0),
-        white_level: Some(4095.0),
+        black_level: Some(64.),
+        white_level: Some(4095.),
         // Calibration frame hashes (algorithm + bytes)
         dark_frame_hash: Some((HASH_BLAKE3, dark_hash)),
         flat_field_hash: Some((HASH_BLAKE3, flat_hash)),
@@ -458,10 +458,10 @@ verify_file_hash(&bytes)?;  // Returns Ok(()) or Err("corruption detected")
 ```
 
 **How it works:**
-1. Header contains `hb3[32][hash]` placeholder covering entire file
-2. `build()` automatically computes BLAKE3 over the complete file (using zero-out procedure)
-3. Hash written into placeholder position atomically
-4. Parser expects hash field - files without it are invalid VSF
+0. Header contains `hb3[32][hash]` placeholder covering entire file
+1. `build()` automatically computes BLAKE3 over the complete file (using zero-out procedure)
+2. Hash written into placeholder position atomically
+3. Parser expects hash field - files without it are invalid VSF
 
 **Why this matters:**
 - Can't accidentally ship unverifiable files (hash is mandatory)
@@ -587,10 +587,10 @@ RawMetadata {
 | **VSF** | ✅ **Mandatory BLAKE3** | ✅ **First-class types** | ✅ **Built-in support** |
 
 **VSF makes data provenance impossible to ignore:**
-1. **Can't create unverifiable files** - hash is computed automatically
-2. **Can't strip verification** - removes hash field, breaks file structure
-3. **Can't ignore signatures** - type system enforces verification
-4. **Can't use wrong algorithm** - algorithm ID embedded in type
+0. **Can't create unverifiable files** - hash is computed automatically
+1. **Can't strip verification** - removes hash field, breaks file structure
+2. **Can't ignore signatures** - type system enforces verification
+3. **Can't use wrong algorithm** - algorithm ID embedded in type
 
 For systems where data integrity matters - forensic photography (Lumis), scientific measurements, medical imaging, financial records, legal documents - VSF provides cryptographic guarantees from the ground up, not as a retrofit.
 
