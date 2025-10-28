@@ -94,6 +94,222 @@ pub struct TokenAuth {
     pub signature: Vec<u8>,      // Ed25519 signature (64 bytes) over entire capture
 }
 
+// ==================== BUILDER PATTERN API ====================
+
+/// Builder for RawMetadata with convenient field access
+#[derive(Debug, Clone, Default)]
+pub struct RawMetadataBuilder {
+    pub cfa_pattern: Option<Vec<u8>>,
+    pub black_level: Option<f32>,
+    pub white_level: Option<f32>,
+    pub dark_frame_hash: Option<Vec<u8>>,
+    pub flat_field_hash: Option<Vec<u8>>,
+    pub bias_frame_hash: Option<Vec<u8>>,
+    pub vignette_correction_hash: Option<Vec<u8>>,
+    pub distortion_correction_hash: Option<Vec<u8>>,
+    pub magic_9: Option<Vec<f32>>,
+}
+
+impl RawMetadataBuilder {
+    /// Convert builder to RawMetadata (returns None if all fields are None)
+    fn build(self) -> Option<RawMetadata> {
+        if self.cfa_pattern.is_none()
+            && self.black_level.is_none()
+            && self.white_level.is_none()
+            && self.dark_frame_hash.is_none()
+            && self.flat_field_hash.is_none()
+            && self.bias_frame_hash.is_none()
+            && self.vignette_correction_hash.is_none()
+            && self.distortion_correction_hash.is_none()
+            && self.magic_9.is_none()
+        {
+            None
+        } else {
+            Some(RawMetadata {
+                cfa_pattern: self.cfa_pattern,
+                black_level: self.black_level,
+                white_level: self.white_level,
+                dark_frame_hash: self.dark_frame_hash,
+                flat_field_hash: self.flat_field_hash,
+                bias_frame_hash: self.bias_frame_hash,
+                vignette_correction_hash: self.vignette_correction_hash,
+                distortion_correction_hash: self.distortion_correction_hash,
+                magic_9: self.magic_9,
+            })
+        }
+    }
+}
+
+/// Builder for CameraSettings with convenient field access
+#[derive(Debug, Clone, Default)]
+pub struct CameraBuilder {
+    pub iso_speed: Option<f32>,
+    pub shutter_time_s: Option<f32>,
+    pub aperture_f_number: Option<f32>,
+    pub focal_length_m: Option<f32>,
+    pub exposure_compensation: Option<f32>,
+    pub focus_distance_m: Option<f32>,
+    pub flash_fired: Option<bool>,
+    pub metering_mode: Option<String>,
+}
+
+impl CameraBuilder {
+    /// Convert builder to CameraSettings (returns None if all fields are None)
+    fn build(self) -> Option<CameraSettings> {
+        if self.iso_speed.is_none()
+            && self.shutter_time_s.is_none()
+            && self.aperture_f_number.is_none()
+            && self.focal_length_m.is_none()
+            && self.exposure_compensation.is_none()
+            && self.focus_distance_m.is_none()
+            && self.flash_fired.is_none()
+            && self.metering_mode.is_none()
+        {
+            None
+        } else {
+            Some(CameraSettings {
+                iso_speed: self.iso_speed,
+                shutter_time_s: self.shutter_time_s,
+                aperture_f_number: self.aperture_f_number,
+                focal_length_m: self.focal_length_m,
+                exposure_compensation: self.exposure_compensation,
+                focus_distance_m: self.focus_distance_m,
+                flash_fired: self.flash_fired,
+                metering_mode: self.metering_mode,
+            })
+        }
+    }
+}
+
+/// Builder for LensInfo with convenient field access
+#[derive(Debug, Clone, Default)]
+pub struct LensBuilder {
+    pub make: Option<String>,
+    pub model: Option<String>,
+    pub serial_number: Option<String>,
+    pub min_focal_length_m: Option<f32>,
+    pub max_focal_length_m: Option<f32>,
+    pub min_aperture_f: Option<f32>,
+    pub max_aperture_f: Option<f32>,
+}
+
+impl LensBuilder {
+    /// Convert builder to LensInfo (returns None if all fields are None)
+    fn build(self) -> Option<LensInfo> {
+        if self.make.is_none()
+            && self.model.is_none()
+            && self.serial_number.is_none()
+            && self.min_focal_length_m.is_none()
+            && self.max_focal_length_m.is_none()
+            && self.min_aperture_f.is_none()
+            && self.max_aperture_f.is_none()
+        {
+            None
+        } else {
+            Some(LensInfo {
+                make: self.make,
+                model: self.model,
+                serial_number: self.serial_number,
+                min_focal_length_m: self.min_focal_length_m,
+                max_focal_length_m: self.max_focal_length_m,
+                min_aperture_f: self.min_aperture_f,
+                max_aperture_f: self.max_aperture_f,
+            })
+        }
+    }
+}
+
+/// Builder for TokenAuth with convenient field access
+#[derive(Debug, Clone)]
+pub struct TokenBuilder {
+    pub creator_pubkey: Vec<u8>,
+    pub device_serial: usize,
+    pub timestamp_et: EtType,
+    pub location: Option<WorldCoord>,
+    pub signature: Vec<u8>,
+}
+
+impl TokenBuilder {
+    /// Create a new TokenBuilder with required fields
+    pub fn new(
+        creator_pubkey: Vec<u8>,
+        device_serial: usize,
+        timestamp_et: EtType,
+        signature: Vec<u8>,
+    ) -> Self {
+        Self {
+            creator_pubkey,
+            device_serial,
+            timestamp_et,
+            location: None,
+            signature,
+        }
+    }
+
+    /// Convert builder to TokenAuth
+    fn build(self) -> TokenAuth {
+        TokenAuth {
+            creator_pubkey: self.creator_pubkey,
+            device_serial: self.device_serial,
+            timestamp_et: self.timestamp_et,
+            location: self.location,
+            signature: self.signature,
+        }
+    }
+}
+
+/// Builder pattern for creating RAW images with ergonomic dot notation
+///
+/// # Example
+/// ```ignore
+/// use vsf::builders::RawImageBuilder;
+/// use vsf::types::BitPackedTensor;
+///
+/// let samples: Vec<u64> = vec![2048; 4096 * 3072];
+/// let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
+///
+/// let mut raw = RawImageBuilder::new(image);
+/// raw.camera.iso_speed = Some(800.0);
+/// raw.camera.shutter_time_s = Some(1.0 / 60.0);
+/// raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']);
+/// raw.lens.make = Some("Sony".to_string());
+///
+/// let bytes = raw.build()?;
+/// ```
+#[derive(Debug, Clone)]
+pub struct RawImageBuilder {
+    image: BitPackedTensor,
+    pub raw: RawMetadataBuilder,
+    pub camera: CameraBuilder,
+    pub lens: LensBuilder,
+    pub token: Option<TokenBuilder>,
+}
+
+impl RawImageBuilder {
+    /// Create a new RawImageBuilder with the image data
+    pub fn new(image: BitPackedTensor) -> Self {
+        Self {
+            image,
+            raw: RawMetadataBuilder::default(),
+            camera: CameraBuilder::default(),
+            lens: LensBuilder::default(),
+            token: None,
+        }
+    }
+
+    /// Build the complete VSF RAW image file
+    pub fn build(self) -> Result<Vec<u8>, String> {
+        let metadata = self.raw.build();
+        let camera = self.camera.build();
+        let lens = self.lens.build();
+        let token = self.token.map(|t| t.build());
+
+        build_raw_image(self.image, metadata, camera, lens, token)
+    }
+}
+
+// ==================== SIMPLE HELPER FUNCTIONS ====================
+
 /// Create a RAW camera image with arbitrary bit depth
 ///
 /// Supports 1-256 bits per sample
@@ -561,53 +777,71 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         _ => return Err("Expected n type for label count".to_string()),
     };
 
-    if label_count != 1 {
-        return Err(format!("Expected 1 label (raw), found {}", label_count));
+    // Find both "raw" and "token_auth" labels (if present)
+    let mut raw_offset_bits: Option<usize> = None;
+    let mut raw_field_count: Option<usize> = None;
+    let mut token_auth_offset_bits: Option<usize> = None;
+    let mut token_auth_field_count: Option<usize> = None;
+
+    for _ in 0..label_count {
+        // Parse label definition: (d[name] o[offset] b[size] n[count])
+        if data[pointer] != b'(' {
+            return Err("Expected '(' for label definition".to_string());
+        }
+        pointer += 1;
+
+        let label_name_type =
+            parse(data, &mut pointer).map_err(|e| format!("Failed to parse label name: {}", e))?;
+        let label_name = match label_name_type {
+            VsfType::d(name) => name,
+            _ => return Err("Expected d type for label name".to_string()),
+        };
+
+        let offset_type =
+            parse(data, &mut pointer).map_err(|e| format!("Failed to parse offset: {}", e))?;
+        let offset_bits = match offset_type {
+            VsfType::o(bits) => bits,
+            _ => return Err("Expected o type for offset".to_string()),
+        };
+
+        let size_type =
+            parse(data, &mut pointer).map_err(|e| format!("Failed to parse size: {}", e))?;
+        let _size_bits = match size_type {
+            VsfType::b(bits) => bits,
+            _ => return Err("Expected b type for size".to_string()),
+        };
+
+        let field_count_type =
+            parse(data, &mut pointer).map_err(|e| format!("Failed to parse field count: {}", e))?;
+        let field_count = match field_count_type {
+            VsfType::n(count) => count,
+            _ => return Err("Expected n type for field count".to_string()),
+        };
+
+        if data[pointer] != b')' {
+            return Err("Expected ')' after label definition".to_string());
+        }
+        pointer += 1;
+
+        // Store label info
+        match label_name.as_str() {
+            "raw" => {
+                raw_offset_bits = Some(offset_bits);
+                raw_field_count = Some(field_count);
+            }
+            "token_auth" => {
+                token_auth_offset_bits = Some(offset_bits);
+                token_auth_field_count = Some(field_count);
+            }
+            _ => {} // Ignore other labels
+        }
     }
 
-    // Parse the "raw" label definition
-    // Format: (d[name] o[offset] b[size] n[count])
-    if data[pointer] != b'(' {
-        return Err("Expected '(' for label definition".to_string());
-    }
-    pointer += 1;
-
-    let label_name_type =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse label name: {}", e))?;
-    let label_name = match label_name_type {
-        VsfType::d(name) => name,
-        _ => return Err("Expected d type for label name".to_string()),
+    // Ensure we found the raw label
+    let (raw_offset, raw_count) = match (raw_offset_bits, raw_field_count) {
+        (Some(o), Some(c)) => (o, c),
+        _ => return Err("Required 'raw' label not found".to_string()),
     };
-
-    if label_name != "raw" {
-        return Err(format!("Expected 'raw' label, found '{}'", label_name));
-    }
-
-    let offset_type =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse offset: {}", e))?;
-    let offset_bits = match offset_type {
-        VsfType::o(bits) => bits,
-        _ => return Err("Expected o type for offset".to_string()),
-    };
-
-    let size_type =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse size: {}", e))?;
-    let _size_bits = match size_type {
-        VsfType::b(bits) => bits,
-        _ => return Err("Expected b type for size".to_string()),
-    };
-
-    let field_count_type =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse field count: {}", e))?;
-    let field_count = match field_count_type {
-        VsfType::n(count) => count,
-        _ => return Err("Expected n type for field count".to_string()),
-    };
-
-    if data[pointer] != b')' {
-        return Err("Expected ')' after label definition".to_string());
-    }
-    pointer += 1;
 
     // Skip to end of header
     if data[pointer] != b'>' {
@@ -615,42 +849,7 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     }
     // Note: pointer is not incremented here since we seek directly to section_start_byte below
 
-    // Seek to the "raw" section using offset from label definition
-    // This works with arbitrary section ordering (thumbnail first, raw first, etc.)
-    let section_start_byte = offset_bits >> 3; // Convert bits to bytes (divide by 8)
-    if section_start_byte >= data.len() {
-        return Err(format!(
-            "Section offset {} exceeds file size {}",
-            section_start_byte,
-            data.len()
-        ));
-    }
-    pointer = section_start_byte;
-
-    // Parse preamble: {n[count] b[size]}
-    use crate::decoding::parse_preamble;
-    let (_preamble_count, _preamble_size, _preamble_hash, _preamble_sig) =
-        parse_preamble(data, &mut pointer)
-            .map_err(|e| format!("Failed to parse preamble: {}", e))?;
-
-    // Now parse the "raw" section
-    if data[pointer] != b'[' {
-        return Err(format!(
-            "Expected '[' for section start at byte {}, found {:?}",
-            pointer, data[pointer] as char
-        ));
-    }
-    pointer += 1;
-
-    // Parse section name (namespace for all fields)
-    let section_name_type = parse(data, &mut pointer)
-        .map_err(|e| format!("Failed to parse section name: {}", e))?;
-    let _section_name = match section_name_type {
-        VsfType::d(name) => name,
-        _ => return Err("Expected d type for section name".to_string()),
-    };
-
-    // Parse all fields in the section
+    // Initialize all field variables
     let mut image: Option<BitPackedTensor> = None;
 
     // Raw metadata fields
@@ -690,7 +889,146 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     let mut location: Option<WorldCoord> = None;
     let mut signature: Option<Vec<u8>> = None;
 
-    for i in 0..field_count {
+    // Parse token_auth section if present
+    if let (Some(token_offset), Some(token_count)) = (token_auth_offset_bits, token_auth_field_count) {
+        // Seek to token_auth section
+        let section_start_byte = token_offset >> 3;
+        if section_start_byte >= data.len() {
+            return Err(format!(
+                "Token auth section offset {} exceeds file size {}",
+                section_start_byte,
+                data.len()
+            ));
+        }
+        pointer = section_start_byte;
+
+        // Parse preamble
+        use crate::decoding::parse_preamble;
+        let (_preamble_count, _preamble_size, _preamble_hash, _preamble_sig) =
+            parse_preamble(data, &mut pointer)
+                .map_err(|e| format!("Failed to parse token_auth preamble: {}", e))?;
+
+        // Parse section start
+        if data[pointer] != b'[' {
+            return Err(format!(
+                "Expected '[' for token_auth section at byte {}, found {:?}",
+                pointer, data[pointer] as char
+            ));
+        }
+        pointer += 1;
+
+        // Parse section name
+        let section_name_type = parse(data, &mut pointer)
+            .map_err(|e| format!("Failed to parse token_auth section name: {}", e))?;
+        let _section_name = match section_name_type {
+            VsfType::d(name) => name,
+            _ => return Err("Expected d type for token_auth section name".to_string()),
+        };
+
+        // Parse token_auth fields
+        for i in 0..token_count {
+            if data[pointer] != b'(' {
+                return Err(format!("Expected '(' for token_auth field {}", i));
+            }
+            pointer += 1;
+
+            let field_name_type = parse(data, &mut pointer)
+                .map_err(|e| format!("Failed to parse token_auth field {} name: {}", i, e))?;
+            let field_name = match field_name_type {
+                VsfType::d(name) => name,
+                _ => return Err(format!("Expected d type for token_auth field {} name", i)),
+            };
+
+            if data[pointer] != b':' {
+                return Err(format!("Expected ':' after token_auth field '{}'", field_name));
+            }
+            pointer += 1;
+
+            let field_value = parse(data, &mut pointer)
+                .map_err(|e| format!("Failed to parse token_auth field '{}': {}", field_name, e))?;
+
+            // Store token_auth field values
+            match field_name.as_str() {
+                "creator_pubkey" => {
+                    if let VsfType::k(_algorithm, v) = field_value {
+                        creator_pubkey = Some(v);
+                    }
+                }
+                "device_serial" => device_serial = to_usize(&field_value),
+                "timestamp_et" => {
+                    if let VsfType::e(et) = field_value {
+                        timestamp_et = Some(et);
+                    }
+                }
+                "location" => {
+                    if let VsfType::w(v) = field_value {
+                        location = Some(v);
+                    }
+                }
+                "signature" => {
+                    if let VsfType::g(_algorithm, v) = field_value {
+                        signature = Some(v);
+                    }
+                }
+                _ => {} // Unknown field, skip
+            }
+
+            if pointer >= data.len() {
+                return Err(format!(
+                    "Unexpected EOF after parsing token_auth field '{}' (field {} of {})",
+                    field_name, i, token_count
+                ));
+            }
+            if data[pointer] != b')' {
+                return Err(format!(
+                    "Expected ')' after token_auth field '{}' at byte {}, found {:?}",
+                    field_name, pointer, data[pointer] as char
+                ));
+            }
+            pointer += 1;
+        }
+
+        if data[pointer] != b']' {
+            return Err("Expected ']' for token_auth section end".to_string());
+        }
+    }
+
+    // Parse the "raw" section
+    let section_start_byte = raw_offset >> 3; // Convert bits to bytes
+    if section_start_byte >= data.len() {
+        return Err(format!(
+            "Raw section offset {} exceeds file size {}",
+            section_start_byte,
+            data.len()
+        ));
+    }
+    pointer = section_start_byte;
+
+    // Parse preamble
+    use crate::decoding::parse_preamble;
+    let (_preamble_count, _preamble_size, _preamble_hash, _preamble_sig) =
+        parse_preamble(data, &mut pointer)
+            .map_err(|e| format!("Failed to parse raw preamble: {}", e))?;
+
+    // Parse section start
+    if data[pointer] != b'[' {
+        return Err(format!(
+            "Expected '[' for raw section at byte {}, found {:?}",
+            pointer, data[pointer] as char
+        ));
+    }
+    pointer += 1;
+
+    // Parse section name
+    let section_name_type = parse(data, &mut pointer)
+        .map_err(|e| format!("Failed to parse raw section name: {}", e))?;
+    let _section_name = match section_name_type {
+        VsfType::d(name) => name,
+        _ => return Err("Expected d type for raw section name".to_string()),
+    };
+
+    // Parse raw section fields
+    for i in 0..raw_count {
         if data[pointer] != b'(' {
             return Err(format!("Expected '(' for field {}", i));
         }
@@ -840,28 +1178,6 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
                     lens_max_aperture = Some(v);
                 }
             }
-            // Token auth
-            "creator_pubkey" => {
-                if let VsfType::k(_algorithm, v) = field_value {
-                    creator_pubkey = Some(v);
-                }
-            }
-            "device_serial" => device_serial = to_usize(&field_value),
-            "timestamp_et" => {
-                if let VsfType::e(et) = field_value {
-                    timestamp_et = Some(et);
-                }
-            }
-            "location" => {
-                if let VsfType::w(v) = field_value {
-                    location = Some(v);
-                }
-            }
-            "signature" => {
-                if let VsfType::g(_algorithm, v) = field_value {
-                    signature = Some(v);
-                }
-            }
             _ => {
                 // Unknown field, skip
             }
@@ -869,8 +1185,8 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
 
         if pointer >= data.len() {
             return Err(format!(
-                "Unexpected EOF after parsing field '{}' (field {} of {})",
-                field_name, i, field_count
+                "Unexpected EOF after parsing raw field '{}' (field {} of {})",
+                field_name, i, raw_count
             ));
         }
         if data[pointer] != b')' {
@@ -1365,6 +1681,211 @@ mod tests {
             raw_bytes[pointer], b'[',
             "Expected '[' immediately after preamble"
         );
+    }
+
+    #[test]
+    fn test_builder_pattern_minimal() {
+        // Test minimal builder with just image
+        let samples: Vec<u64> = (0..16).collect();
+        let image = BitPackedTensor::pack(8, vec![4, 4], &samples);
+
+        let raw = RawImageBuilder::new(image);
+        let result = raw.build();
+
+        assert!(result.is_ok());
+        let bytes = result.unwrap();
+
+        // Verify magic number
+        assert_eq!(&bytes[0..3], "RÅ".as_bytes());
+
+        // Parse and verify
+        let parsed = parse_raw_image(&bytes).unwrap();
+        assert_eq!(parsed.image.bit_depth, 8);
+        assert_eq!(parsed.image.shape, vec![4, 4]);
+    }
+
+    #[test]
+    fn test_builder_pattern_camera_settings() {
+        // Test builder with camera settings
+        let samples: Vec<u64> = vec![100; 64];
+        let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
+
+        let mut raw = RawImageBuilder::new(image);
+        raw.camera.iso_speed = Some(800.0);
+        raw.camera.shutter_time_s = Some(1.0 / 60.0);
+        raw.camera.aperture_f_number = Some(2.8);
+        raw.camera.flash_fired = Some(false);
+        raw.camera.metering_mode = Some("matrix".to_string());
+
+        let result = raw.build();
+        assert!(result.is_ok());
+        let bytes = result.unwrap();
+
+        // Parse and verify camera settings
+        let parsed = parse_raw_image(&bytes).unwrap();
+        assert!(parsed.camera.is_some());
+        let cam = parsed.camera.unwrap();
+        assert_eq!(cam.iso_speed, Some(800.0));
+        assert_eq!(cam.shutter_time_s, Some(1.0 / 60.0));
+        assert_eq!(cam.aperture_f_number, Some(2.8));
+        assert_eq!(cam.flash_fired, Some(false));
+        assert_eq!(cam.metering_mode, Some("matrix".to_string()));
+    }
+
+    #[test]
+    fn test_builder_pattern_raw_metadata() {
+        // Test builder with raw metadata
+        let samples: Vec<u64> = vec![100; 64];
+        let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
+
+        let mut raw = RawImageBuilder::new(image);
+        raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']);
+        raw.raw.black_level = Some(64.0);
+        raw.raw.white_level = Some(4095.0);
+        raw.raw.dark_frame_hash = Some(vec![0xAB; 32]);
+
+        let result = raw.build();
+        assert!(result.is_ok());
+        let bytes = result.unwrap();
+
+        // Parse and verify metadata
+        let parsed = parse_raw_image(&bytes).unwrap();
+        assert!(parsed.metadata.is_some());
+        let meta = parsed.metadata.unwrap();
+        assert_eq!(meta.cfa_pattern, Some(vec![b'R', b'G', b'G', b'B']));
+        assert_eq!(meta.black_level, Some(64.0));
+        assert_eq!(meta.white_level, Some(4095.0));
+        assert_eq!(meta.dark_frame_hash, Some(vec![0xAB; 32]));
+    }
+
+    #[test]
+    fn test_builder_pattern_lens_info() {
+        // Test builder with lens info
+        let samples: Vec<u64> = vec![100; 64];
+        let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
+
+        let mut raw = RawImageBuilder::new(image);
+        raw.lens.make = Some("Sony".to_string());
+        raw.lens.model = Some("FE 24-70mm F2.8 GM II".to_string());
+        raw.lens.serial_number = Some("ABC123456".to_string());
+        raw.lens.min_focal_length_m = Some(0.024); // 24mm
+        raw.lens.max_focal_length_m = Some(0.070); // 70mm
+        raw.lens.min_aperture_f = Some(22.0);
+        raw.lens.max_aperture_f = Some(2.8);
+
+        let result = raw.build();
+        assert!(result.is_ok());
+        let bytes = result.unwrap();
+
+        // Parse and verify lens info
+        let parsed = parse_raw_image(&bytes).unwrap();
+        assert!(parsed.lens.is_some());
+        let lens = parsed.lens.unwrap();
+        assert_eq!(lens.make, Some("Sony".to_string()));
+        assert_eq!(lens.model, Some("FE 24-70mm F2.8 GM II".to_string()));
+        assert_eq!(lens.serial_number, Some("ABC123456".to_string()));
+        assert_eq!(lens.min_focal_length_m, Some(0.024));
+        assert_eq!(lens.max_focal_length_m, Some(0.070));
+        assert_eq!(lens.min_aperture_f, Some(22.0));
+        assert_eq!(lens.max_aperture_f, Some(2.8));
+    }
+
+    #[test]
+    fn test_builder_pattern_token_auth() {
+        // Test builder with token auth
+        let samples: Vec<u64> = vec![100; 64];
+        let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
+
+        let mut raw = RawImageBuilder::new(image);
+        raw.token = Some(TokenBuilder::new(
+            vec![0xAB; 32],
+            12345,
+            EtType::f6(1234567890.0),
+            vec![0xCD; 64],
+        ));
+        raw.token.as_mut().unwrap().location = Some(WorldCoord::from_lat_lon(47.6062, -122.3321));
+
+        let result = raw.build();
+        assert!(result.is_ok());
+        let bytes = result.unwrap();
+
+        // Parse and verify token auth
+        let parsed = parse_raw_image(&bytes).unwrap();
+        assert!(parsed.token_auth.is_some());
+        let token = parsed.token_auth.unwrap();
+        assert_eq!(token.creator_pubkey, vec![0xAB; 32]);
+        assert_eq!(token.device_serial, 12345);
+        assert!(token.location.is_some());
+    }
+
+    #[test]
+    fn test_builder_pattern_full() {
+        // Test builder with all fields populated
+        let samples: Vec<u64> = vec![2048; 64];
+        let image = BitPackedTensor::pack(12, vec![8, 8], &samples);
+
+        let mut raw = RawImageBuilder::new(image);
+
+        // Raw metadata
+        raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']);
+        raw.raw.black_level = Some(64.0);
+        raw.raw.white_level = Some(4095.0);
+        raw.raw.magic_9 = Some(vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+
+        // Camera settings
+        raw.camera.iso_speed = Some(800.0);
+        raw.camera.shutter_time_s = Some(1.0 / 125.0);
+        raw.camera.aperture_f_number = Some(2.8);
+        raw.camera.focal_length_m = Some(0.050); // 50mm
+        raw.camera.exposure_compensation = Some(-0.5);
+        raw.camera.focus_distance_m = Some(3.5);
+        raw.camera.flash_fired = Some(false);
+        raw.camera.metering_mode = Some("spot".to_string());
+
+        // Lens info
+        raw.lens.make = Some("Sony".to_string());
+        raw.lens.model = Some("FE 50mm F1.2 GM".to_string());
+
+        // Token auth
+        raw.token = Some(TokenBuilder::new(
+            vec![0x01; 32],
+            99999,
+            EtType::f6(1234567890.123456),
+            vec![0x02; 64],
+        ));
+
+        let result = raw.build();
+        assert!(result.is_ok());
+        let bytes = result.unwrap();
+
+        // Parse and verify everything
+        let parsed = parse_raw_image(&bytes).unwrap();
+
+        // Verify image
+        assert_eq!(parsed.image.bit_depth, 12);
+        assert_eq!(parsed.image.shape, vec![8, 8]);
+
+        // Verify metadata
+        assert!(parsed.metadata.is_some());
+        let meta = parsed.metadata.unwrap();
+        assert_eq!(meta.cfa_pattern, Some(vec![b'R', b'G', b'G', b'B']));
+        assert_eq!(meta.black_level, Some(64.0));
+
+        // Verify camera
+        assert!(parsed.camera.is_some());
+        let cam = parsed.camera.unwrap();
+        assert_eq!(cam.iso_speed, Some(800.0));
+        assert_eq!(cam.metering_mode, Some("spot".to_string()));
+
+        // Verify lens
+        assert!(parsed.lens.is_some());
+        let lens = parsed.lens.unwrap();
+        assert_eq!(lens.make, Some("Sony".to_string()));
+
+        // Verify token
+        assert!(parsed.token_auth.is_some());
+        let token = parsed.token_auth.unwrap();
+        assert_eq!(token.device_serial, 99999);
     }
 
     #[test]
