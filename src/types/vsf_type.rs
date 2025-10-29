@@ -365,17 +365,39 @@ pub enum VsfType {
     // VSF Structure
     d(String),      // Data type name
     l(String),      // Label
-    o(usize),       // Offset in bits
-    b(usize),       // Length in bits
+    o(usize),       // Offset in Bytes
+    b(usize, bool), // Length in Bytes (value, inclusive_mode)
     n(usize),       // Number/count
     z(usize),       // Version
     y(usize),       // Backward version
     m(usize),       // Marker definition
     r(usize),       // Marker reference
-    a(u8, Vec<u8>), // Message Authentication Code (MAC)
-    h(u8, Vec<u8>), // Hash
-    g(u8, Vec<u8>), // Signature
-    k(u8, Vec<u8>), // Cryptographic key
+
+    // ==================== CRYPTOGRAPHIC TYPES ====================
+    // Hash algorithms - store (length-1) as single byte, then data
+    hb3(Vec<u8>), // BLAKE3 hash (u3 length: 1-256 Bytes)
+    hb4(Vec<u8>), // BLAKE3 hash (u4 length: 257-65536 Bytes)
+    h23(Vec<u8>), // SHA-256 hash (u3 length: always 32 Bytes)
+    h53(Vec<u8>), // SHA-512 hash (u3 length: always 64 Bytes)
+
+    // Signature algorithms - store (length-1) as single byte, then data
+    ge3(Vec<u8>), // Ed25519 signature (u3 length: always 64 Bytes)
+    gp3(Vec<u8>), // ECDSA-P256 signature (u3 length: always 64 Bytes)
+    gr4(Vec<u8>), // RSA-2048 signature (u4 length: always 256 Bytes)
+
+    // Cryptographic keys - store (length-1) as single byte, then data
+    ke3(Vec<u8>), // Ed25519 public key (u3 length: always 32 Bytes)
+    kx3(Vec<u8>), // X25519 key (u3 length: always 32 Bytes)
+    kp3(Vec<u8>), // ECDSA-P256 key (u3 length: always 32 Bytes)
+    kc3(Vec<u8>), // ChaCha20-Poly1305 key (u3 length: always 32 Bytes)
+    ka3(Vec<u8>), // AES-256-GCM key (u3 length: always 32 Bytes)
+
+    // MAC (Message Authentication Code) - store (length-1) as single byte, then data
+    ah3(Vec<u8>), // HMAC-SHA256 (u3 length: always 32 Bytes)
+    as3(Vec<u8>), // HMAC-SHA512 (u3 length: always 64 Bytes)
+    ap3(Vec<u8>), // Poly1305 (u3 length: always 16 Bytes)
+    ab3(Vec<u8>), // BLAKE3-keyed (u3 length: 1-256 Bytes, default 32)
+    ac3(Vec<u8>), // CMAC-AES (u3 length: always 16 Bytes)
 
     // ==================== WRAPPED/ENCODED DATA (OPTIONAL) ====================
     /// Wrapped/encoded VSF data with compression, error correction, or encryption
@@ -390,7 +412,7 @@ pub enum VsfType {
     ///
     /// Example usage:
     /// ```ignore
-    /// // Compress VSF bytes with zstd
+    /// // Compress VSF Bytes with zstd
     /// let original = VsfType::t_u3(tensor);
     /// let compressed = compress_zstd(&original.flatten());
     /// let wrapped = VsfType::v(b'z', compressed);
@@ -402,5 +424,5 @@ pub enum VsfType {
     ///
     /// This is OPTIONAL - core VSF doesn't require it.
     /// Use when your application needs compression, error correction, or encryption.
-    v(u8, Vec<u8>), // Wrapped data (algorithm byte, encoded bytes)
+    v(u8, Vec<u8>), // Wrapped data (algorithm byte, encoded Bytes)
 }

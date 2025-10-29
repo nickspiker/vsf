@@ -227,7 +227,9 @@ impl VsfType {
                 flat
             }
 
-            VsfType::b(value) => {
+            VsfType::b(value, _inclusive) => {
+                // Note: inclusive mode is handled by the stabilization loop in vsf_builder
+                // The value already includes its own encoding size when needed
                 let mut flat = Vec::new();
                 flat.push(b'b');
                 flat.extend_from_slice(&value.encode_number());
@@ -269,38 +271,125 @@ impl VsfType {
                 flat
             }
 
-            VsfType::a(algorithm, value) => {
-                let mut flat = Vec::new();
-                flat.push(b'a');
-                flat.push(*algorithm); // Algorithm ID (e.g., b'h' for HMAC-SHA256)
-                flat.extend_from_slice(&(value.len() << 3).encode_number()); // Convert bytes to bits
+            // ==================== HASHES ====================
+            VsfType::hb3(value) => {
+                let mut flat = vec![b'h', b'b', b'3'];
+                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::h(algorithm, value) => {
-                let mut flat = Vec::new();
-                flat.push(b'h');
-                flat.push(*algorithm); // Algorithm ID (e.g., b'b' for BLAKE3)
-                flat.extend_from_slice(&(value.len() << 3).encode_number()); // Convert bytes to bits
+            VsfType::hb4(value) => {
+                let mut flat = vec![b'h', b'b', b'4'];
+                flat.extend_from_slice(&((value.len() - 1) as u16).to_be_bytes()); // Store (len-1) as u16
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::g(algorithm, value) => {
-                let mut flat = Vec::new();
-                flat.push(b'g');
-                flat.push(*algorithm); // Algorithm ID (e.g., b'e' for Ed25519)
-                flat.extend_from_slice(&(value.len() << 3).encode_number()); // Convert bytes to bits
+            VsfType::h23(value) => {
+                let mut flat = vec![b'h', b'2', b'3'];
+                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::k(algorithm, value) => {
-                let mut flat = Vec::new();
-                flat.push(b'k');
-                flat.push(*algorithm); // Algorithm ID (e.g., b'e' for Ed25519)
-                flat.extend_from_slice(&(value.len() << 3).encode_number()); // Convert bytes to bits
+            VsfType::h53(value) => {
+                let mut flat = vec![b'h', b'5', b'3'];
+                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            // ==================== SIGNATURES ====================
+            VsfType::ge3(value) => {
+                let mut flat = vec![b'g', b'e', b'3'];
+                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::gp3(value) => {
+                let mut flat = vec![b'g', b'p', b'3'];
+                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::gr4(value) => {
+                let mut flat = vec![b'g', b'r', b'4'];
+                flat.extend_from_slice(&((value.len() - 1) as u16).to_be_bytes()); // Store (len-1) as u16
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            // ==================== KEYS ====================
+            VsfType::ke3(value) => {
+                let mut flat = vec![b'k', b'e', b'3'];
+                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::kx3(value) => {
+                let mut flat = vec![b'k', b'x', b'3'];
+                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::kp3(value) => {
+                let mut flat = vec![b'k', b'p', b'3'];
+                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::kc3(value) => {
+                let mut flat = vec![b'k', b'c', b'3'];
+                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::ka3(value) => {
+                let mut flat = vec![b'k', b'a', b'3'];
+                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            // ==================== MAC (MESSAGE AUTHENTICATION CODE) ====================
+            VsfType::ah3(value) => {
+                let mut flat = vec![b'a', b'h', b'3'];
+                flat.push((value.len() - 1) as u8);
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::as3(value) => {
+                let mut flat = vec![b'a', b's', b'3'];
+                flat.push((value.len() - 1) as u8);
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::ap3(value) => {
+                let mut flat = vec![b'a', b'p', b'3'];
+                flat.push((value.len() - 1) as u8);
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::ab3(value) => {
+                let mut flat = vec![b'a', b'b', b'3'];
+                flat.push((value.len() - 1) as u8);
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::ac3(value) => {
+                let mut flat = vec![b'a', b'c', b'3'];
+                flat.push((value.len() - 1) as u8);
                 flat.extend_from_slice(value);
                 flat
             }
@@ -3291,7 +3380,143 @@ impl VsfType {
             }
         }
     }
+
+    /// Calculate the byte length of this VsfType when flattened, WITHOUT actually flattening
+    ///
+    /// This is much faster than flatten().len() and doesn't allocate.
+    pub fn byte_len(&self) -> usize {
+        match self {
+            // ==================== UNSIGNED INTEGERS ====================
+            VsfType::u0(_) => 2, // 'u' + value byte
+
+            VsfType::u(value, inclusive) => {
+                if *inclusive {
+                    // Inclusive mode - would call encode_usize_inclusive()
+                    // This is complex, so for now just flatten and measure
+                    // TODO: optimize this later
+                    self.flatten().len()
+                } else {
+                    1 + encoded_usize_len(*value) // 'u' + encoded number
+                }
+            }
+
+            VsfType::u3(_) => 3,  // 'u' + '3' + byte
+            VsfType::u4(_) => 1 + encoded_u16_len(), // 'u' + encoded u16
+            VsfType::u5(_) => 1 + encoded_u32_len(), // 'u' + encoded u32
+            VsfType::u6(_) => 1 + encoded_u64_len(), // 'u' + encoded u64
+            VsfType::u7(_) => 1 + encoded_u128_len(), // 'u' + encoded u128
+
+            // ==================== SIGNED INTEGERS ====================
+            VsfType::i(value) => 1 + encoded_isize_len(*value), // 'i' + encoded number
+            VsfType::i3(_) => 3,  // 'i' + '3' + byte
+            VsfType::i4(_) => 1 + encoded_i16_len(), // 'i' + encoded i16
+            VsfType::i5(_) => 1 + encoded_i32_len(), // 'i' + encoded i32
+            VsfType::i6(_) => 1 + encoded_i64_len(), // 'i' + encoded i64
+            VsfType::i7(_) => 1 + encoded_i128_len(), // 'i' + encoded i128
+
+            // ==================== FLOATS ====================
+            VsfType::f5(_) => 6, // 'f' + '5' + 4 bytes
+            VsfType::f6(_) => 10, // 'f' + '6' + 8 bytes
+
+            // ==================== COMPLEX ====================
+            VsfType::j5(_) => 10, // 'j' + '5' + 8 bytes (2×f32)
+            VsfType::j6(_) => 18, // 'j' + '6' + 16 bytes (2×f64)
+
+            // ==================== VSF STRUCTURE ====================
+            VsfType::d(s) => {
+                // 'd' + encoded_string
+                let encoded_str = encode_text(s);
+                1 + encoded_usize_len(encoded_str.len()) + encoded_str.len()
+            }
+
+            VsfType::l(s) => {
+                // 'l' + encoded_string
+                let encoded_str = encode_text(s);
+                1 + encoded_usize_len(encoded_str.len()) + encoded_str.len()
+            }
+
+            VsfType::o(offset) => {
+                // 'o' + encoded offset (as usize)
+                1 + encoded_usize_len(*offset)
+            }
+
+            VsfType::b(size, _inclusive) => {
+                // 'b' + encoded size (as usize)
+                // Note: inclusive mode is handled by stabilization, encoding is same
+                1 + encoded_usize_len(*size)
+            }
+
+            VsfType::n(count) => {
+                // 'n' + encoded count (as usize)
+                1 + encoded_usize_len(*count)
+            }
+
+            // ==================== VERSION/COMPAT ====================
+            VsfType::z(ver) => 1 + encoded_usize_len(*ver), // 'z' + encoded version
+            VsfType::y(compat) => 1 + encoded_usize_len(*compat), // 'y' + encoded compat
+
+            // ==================== CRYPTO PRIMITIVES ====================
+            VsfType::hb3(bytes) | VsfType::hb4(bytes) => {
+                // 'h' + algo + '[' + size + ']' + data
+                1 + 1 + 1 + encoded_usize_len(bytes.len()) + 1 + bytes.len()
+            }
+
+            VsfType::ge3(bytes) => {
+                // 'g' + algo + '[' + size + ']' + data
+                1 + 1 + 1 + encoded_usize_len(bytes.len()) + 1 + bytes.len()
+            }
+
+            VsfType::kc3(bytes) => {
+                // 'k' + algo + '[' + size + ']' + data
+                1 + 1 + 1 + encoded_usize_len(bytes.len()) + 1 + bytes.len()
+            }
+
+            // For complex types, fall back to flatten().len()
+            // TODO: add optimized versions for these
+            _ => self.flatten().len(),
+        }
+    }
 }
+
+/// Helper: calculate encoded length of usize value
+fn encoded_usize_len(value: usize) -> usize {
+    if value <= u8::MAX as usize {
+        2 // '3' + 1 byte
+    } else if value <= u16::MAX as usize {
+        3 // '4' + 2 bytes
+    } else if value <= u32::MAX as usize {
+        5 // '5' + 4 bytes
+    } else if value <= u64::MAX as usize {
+        9 // '6' + 8 bytes
+    } else {
+        17 // '7' + 16 bytes
+    }
+}
+
+/// Helper: calculate encoded length of isize value
+fn encoded_isize_len(value: isize) -> usize {
+    if value >= i8::MIN as isize && value <= i8::MAX as isize {
+        2 // '3' + 1 byte
+    } else if value >= i16::MIN as isize && value <= i16::MAX as isize {
+        3 // '4' + 2 bytes
+    } else if value >= i32::MIN as isize && value <= i32::MAX as isize {
+        5 // '5' + 4 bytes
+    } else if value >= i64::MIN as isize && value <= i64::MAX as isize {
+        9 // '6' + 8 bytes
+    } else {
+        17 // '7' + 16 bytes
+    }
+}
+
+fn encoded_u16_len() -> usize { 3 } // '4' + 2 bytes
+fn encoded_u32_len() -> usize { 5 } // '5' + 4 bytes
+fn encoded_u64_len() -> usize { 9 } // '6' + 8 bytes
+fn encoded_u128_len() -> usize { 17 } // '7' + 16 bytes
+
+fn encoded_i16_len() -> usize { 3 } // '4' + 2 bytes
+fn encoded_i32_len() -> usize { 5 } // '5' + 4 bytes
+fn encoded_i64_len() -> usize { 9 } // '6' + 8 bytes
+fn encoded_i128_len() -> usize { 17 } // '7' + 16 bytes
 
 #[cfg(test)]
 mod tests {

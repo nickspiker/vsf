@@ -6,23 +6,30 @@
 //! - JPEG thumbnail
 //! - Multiple sections demonstrating VSF capabilities
 
+use chacha20poly1305::{
+    aead::{Aead, KeyInit, OsRng as AeadRng},
+    ChaCha20Poly1305, Nonce,
+};
+use ed25519_dalek::SigningKey;
+use rand::rngs::OsRng;
 use vsf::builders::*;
 use vsf::crypto_algorithms::*;
 use vsf::types::*;
+use vsf::verification::{add_encryption_metadata, sign_section};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Comprehensive VSF RAW Image Example ===\n");
 
-    // ========== STEP 1: Generate Ed25519 Keypair (Demo) ==========
-    println!("Step 1: Using demo Ed25519 keypair...");
+    // ========== STEP 1: Generate Ed25519 Keypair (Real) ==========
+    println!("Step 1: Generating Ed25519 keypair...");
 
-    // Demo keys (in production, use actual ed25519_dalek crate)
-    let demo_signing_key = [0x42u8; 32]; // Private key
-    let demo_verifying_key = [0x43u8; 32]; // Public key
+    // Generate real Ed25519 keypair
+    let signing_key = SigningKey::generate(&mut OsRng);
+    let verifying_key = signing_key.verifying_key();
 
-    println!("  Private key: {} bytes (demo)", demo_signing_key.len());
-    println!("  Public key: {} bytes (demo)", demo_verifying_key.len());
-    println!("  Public key: {:?}\n", demo_verifying_key);
+    println!("  Private key: 32 bytes (secure random)");
+    println!("  Public key: {} bytes", verifying_key.as_bytes().len());
+    println!("  Public key: {:02X?}\n", &verifying_key.as_bytes()[..8]);
 
     // ========== STEP 2: Create RAW Image Data ==========
     println!("Step 2: Creating 12-bit RAW image (24MP, 6000×4000)...");
@@ -42,7 +49,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let image = BitPackedTensor::pack(bit_depth, vec![width, height], &samples);
-    println!("  Packed {} pixels into {} bytes\n", samples.len(), image.data.len());
+    println!(
+        "  Packed {} pixels into {} bytes\n",
+        samples.len(),
+        image.data.len()
+    );
 
     // ========== STEP 3: Create Thumbnail ==========
     println!("Step 3: Creating RGB thumbnail (1500×1000, 1/4 scale)...");
@@ -62,141 +73,173 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("  Thumbnail: {}×{}×{} = {} bytes\n",
-        thumb_width, thumb_height, thumb_channels, thumbnail_data.len());
+    println!(
+        "  Thumbnail: {}×{}×{} = {} bytes\n",
+        thumb_width,
+        thumb_height,
+        thumb_channels,
+        thumbnail_data.len()
+    );
 
-    // ========== STEP 4: Encrypt Sensitive Data ==========
-    println!("Step 4: Encrypting sensitive data...");
+    // ========== STEP 4: Build Encrypted Blob Section (before encryption) ==========
+    println!("Step 4: Building encrypted blob section with structured data...");
 
-    // Simulate ChaCha20 encryption (algorithm ID 'c')
-    let encryption_key = b"32_byte_encryption_key_demo!!!!"; // 32 bytes for ChaCha20
+    // Build the blob section as a normal VSF section with structure
+    use vsf::file_format::{VsfItem, VsfSection};
+    let blob_section = VsfSection {
+        name: "blob".to_string(),
+        items: vec![
+            VsfItem {
+                name: "gps_location".to_string(),
+                value: VsfType::x("37.7749,-122.4194".to_string()),
+            },
+            VsfItem {
+                name: "camera_serial".to_string(),
+                value: VsfType::x("CAM-A7R5-87654321".to_string()),
+            },
+            VsfItem {
+                name: "lens_serial".to_string(),
+                value: VsfType::x("LENS-GM-12345678".to_string()),
+            },
+        ],
+    };
 
-    // Encrypt GPS location: (37.7749, -122.4194) = San Francisco
-    let gps_plaintext = b"37.7749,-122.4194";
-    let mut encrypted_gps = vec![b'c']; // ChaCha20 algorithm marker
-    encrypted_gps.extend_from_slice(&[24]); // Nonce size (24 bytes for XChaCha20)
-    encrypted_gps.extend_from_slice(&[0u8; 24]); // Dummy nonce
-    encrypted_gps.extend_from_slice(gps_plaintext); // Dummy "encrypted" data
+    // Encode the entire section: [d"blob" (d"gps_location":"...") (d"camera_serial":"...") (d"lens_serial":"...")]
+    let blob_plaintext = blob_section.encode();
 
-    // Encrypt serial numbers
-    let camera_serial = b"CAM-A7R5-87654321";
-    let lens_serial = b"LENS-GM-12345678";
+    println!("  Plaintext VSF section: {} bytes", blob_plaintext.len());
+    println!("  Contains: GPS location, camera serial, lens serial (all structured)\n");
 
-    let mut encrypted_camera_sn = vec![b'c'];
-    encrypted_camera_sn.extend_from_slice(&[24]);
-    encrypted_camera_sn.extend_from_slice(&[0u8; 24]);
-    encrypted_camera_sn.extend_from_slice(camera_serial);
+    // ========== STEP 5: Encrypt Entire Section ==========
+    println!("Step 5: Encrypting entire VSF section with ChaCha20-Poly1305...");
 
-    let mut encrypted_lens_sn = vec![b'c'];
-    encrypted_lens_sn.extend_from_slice(&[24]);
-    encrypted_lens_sn.extend_from_slice(&[0u8; 24]);
-    encrypted_lens_sn.extend_from_slice(lens_serial);
+    // Generate encryption key
+    let cipher = ChaCha20Poly1305::generate_key(&mut AeadRng);
+    let chacha = ChaCha20Poly1305::new(&cipher);
+    let nonce = Nonce::from_slice(b"unique nonce"); // 12 bytes for ChaCha20Poly1305
 
-    println!("  Encrypted GPS location: {} bytes", encrypted_gps.len());
-    println!("  Encrypted camera S/N: {} bytes", encrypted_camera_sn.len());
-    println!("  Encrypted lens S/N: {} bytes\n", encrypted_lens_sn.len());
+    println!("  Encryption key: 32 bytes (ChaCha20-Poly1305)");
+    println!("  Nonce: 12 bytes");
 
-    // ========== STEP 5: Build RAW Section with Metadata ==========
-    println!("Step 5: Building RAW section with full metadata...");
+    // Encrypt the ENTIRE section bytes
+    let encrypted_blob = chacha
+        .encrypt(nonce, blob_plaintext.as_ref())
+        .map_err(|e| format!("Encryption failed: {}", e))?;
 
-    let mut raw = RawImageBuilder::new(image);
+    println!(
+        "  Encrypted blob: {} bytes (plaintext {} + 16-byte Poly1305 tag)\n",
+        encrypted_blob.len(),
+        blob_plaintext.len()
+    );
 
-    // Sensor characteristics
-    raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']); // RGGB Bayer
-    raw.raw.black_level = Some(512.0); // 12-bit sensor
-    raw.raw.white_level = Some(4095.0);
-    raw.raw.magic_9 = Some(vec![
-        1.8, -0.5, -0.3,  // Sensor RGB → LMS color transform
-        -0.2, 1.6, -0.4,
-        -0.1, -0.3, 1.4,
-    ]);
+    // ========== STEP 6: Prepare RAW image metadata ==========
+    println!("Step 6: Preparing RAW image metadata...\n");
 
-    // Camera body info (public)
-    raw.camera.make = Some("Sony".to_string());
-    raw.camera.model = Some("α7R V".to_string());
-    // Serial number will be in encrypted section
-
-    // Capture settings
-    raw.camera.iso_speed = Some(400.0);
-    raw.camera.shutter_time_s = Some(1.0 / 250.0); // 1/250 sec
-    raw.camera.aperture_f_number = Some(4.0);
-    raw.camera.focal_length_m = Some(0.050); // 50mm
-    raw.camera.exposure_compensation = Some(0.0);
-    raw.camera.focus_distance_m = Some(10.0);
-    raw.camera.flash_fired = Some(false);
-    raw.camera.metering_mode = Some("center-weighted".to_string());
-
-    // Lens info (public)
-    raw.lens.make = Some("Sony".to_string());
-    raw.lens.model = Some("FE 50mm F1.2 GM".to_string());
-    // Serial number will be in encrypted section
-    raw.lens.min_focal_length_m = Some(0.050);
-    raw.lens.max_focal_length_m = Some(0.050);
-    raw.lens.min_aperture_f = Some(1.2);
-    raw.lens.max_aperture_f = Some(16.0);
-
-    let raw_bytes = raw.build()?;
-    println!("  RAW section: {} bytes\n", raw_bytes.len());
-
-    // ========== STEP 6: Build Complete VSF with Multiple Sections ==========
-    println!("Step 6: Building complete VSF file with multiple sections...");
+    // ========== STEP 7: Build Complete VSF with Multiple Sections ==========
+    println!("Step 7: Building complete VSF file with multiple sections...");
 
     use vsf::vsf_builder::VsfBuilder;
 
     let mut vsf_bytes = VsfBuilder::new()
-        // Section 1: RAW image data (already built above) - as opaque blob
-        .add_section("raw".to_string(), vec![
-            ("data".to_string(), VsfType::t_u3(Tensor {
-                shape: vec![raw_bytes.len()],
-                data: raw_bytes,
-            })),
-        ])
+        // Section 1: RAW image data as bit-packed tensor
+        .add_section(
+            "raw".to_string(),
+            vec![("image".to_string(), VsfType::p(image))],
+        )
         // Section 2: Thumbnail - RGB tensor [width, height, channels]
-        .add_section("thumbnail".to_string(), vec![
-            ("rgb".to_string(), VsfType::t_u3(Tensor {
-                shape: vec![thumb_width, thumb_height, thumb_channels],
-                data: thumbnail_data,
-            })),
-        ])
-        // Section 3: Encrypted metadata - using 'v' for wrapped/encrypted data
-        .add_section("encrypted".to_string(), vec![
-            ("gps_location".to_string(), VsfType::v(b'c', encrypted_gps)),
-            ("camera_serial".to_string(), VsfType::v(b'c', encrypted_camera_sn)),
-            ("lens_serial".to_string(), VsfType::v(b'c', encrypted_lens_sn)),
-            ("encryption_info".to_string(), VsfType::x("ChaCha20-Poly1305".to_string())),
-        ])
-        // Section 4: Provenance / Signature info
-        .add_section("provenance".to_string(), vec![
-            ("photographer".to_string(), VsfType::x("Jane Doe".to_string())),
-            ("copyright".to_string(), VsfType::x("© 2025 Jane Doe Photography".to_string())),
-            ("public_key".to_string(), VsfType::k(KEY_ED25519, demo_verifying_key.to_vec())),
-            ("timestamp".to_string(), VsfType::e(EtType::u(1735689600))), // 2025-01-01
-        ])
+        .add_section(
+            "thumbnail".to_string(),
+            vec![(
+                "rgb".to_string(),
+                VsfType::t_u3(Tensor {
+                    shape: vec![thumb_width, thumb_height, thumb_channels],
+                    data: thumbnail_data,
+                }),
+            )],
+        )
+        // Section 3: Camera metadata - comprehensive shooting info
+        .add_section(
+            "metadata".to_string(),
+            vec![
+                ("camera_make".to_string(), VsfType::x("Sony".to_string())),
+                (
+                    "camera_model".to_string(),
+                    VsfType::x("ILCE-7RM5".to_string()),
+                ),
+                ("lens_make".to_string(), VsfType::x("Sony".to_string())),
+                (
+                    "lens_model".to_string(),
+                    VsfType::x("FE 24-70mm F2.8 GM II".to_string()),
+                ),
+                ("focal_length".to_string(), VsfType::u3(50)), // 50mm
+                ("aperture".to_string(), VsfType::f5(2.8)),
+                ("shutter_speed".to_string(), VsfType::x("1/250".to_string())),
+                ("iso".to_string(), VsfType::u4(400)),
+                ("white_balance".to_string(), VsfType::u4(5600)), // 5600K
+                (
+                    "color_space".to_string(),
+                    VsfType::x("Adobe RGB".to_string()),
+                ),
+                ("bit_depth".to_string(), VsfType::u3(14)), // 14-bit ADC
+            ],
+        )
+        // Section 4: Encrypted blob - ENCRYPTED VSF SECTION as n[0] unboxed blob
+        // The encrypted_blob contains: [d"blob" (gps) (camera) (lens)]
+        // Stored as raw bytes with n[0] (no structure until decrypted)
+        .add_unboxed("blob", encrypted_blob)
+        // Section 5: Provenance info (no signature here - signature goes in header!)
+        .add_section(
+            "provenance".to_string(),
+            vec![
+                (
+                    "photographer".to_string(),
+                    VsfType::x("Jane Doe".to_string()),
+                ),
+                (
+                    "copyright".to_string(),
+                    VsfType::x("© 2025 Jane Doe Photography".to_string()),
+                ),
+                ("timestamp".to_string(), VsfType::e(EtType::u(1735689600))), // 2025-01-01
+                (
+                    "software".to_string(),
+                    VsfType::x("VSF Creator v0.1.3".to_string()),
+                ),
+            ],
+        )
         .build()?;
     println!("  Total VSF size: {} bytes\n", vsf_bytes.len());
 
-    // ========== STEP 7: Add File Hash ==========
-    println!("Step 7: Adding mandatory BLAKE3 file hash...");
+    // ========== STEP 8: Sign RAW Image Section (Real Ed25519) ==========
+    println!("Step 8: Signing raw image section with Ed25519...");
 
-    use vsf::verification::add_file_hash;
-    vsf_bytes = add_file_hash(vsf_bytes)?;
+    vsf_bytes = sign_section(vsf_bytes, "raw", signing_key.as_bytes())?;
 
-    println!("  File hash added: {} bytes total\n", vsf_bytes.len());
+    println!("  RAW image section signed with Ed25519");
+    println!("  Signature: 64 bytes embedded in header");
+    println!("  Ensures image data integrity and authenticity\n");
 
-    // ========== STEP 8: Sign RAW Section (Demo) ==========
-    println!("Step 8: Creating demo Ed25519 signature...");
+    // ========== STEP 9: Sign Provenance Section (Real Ed25519) ==========
+    println!("Step 9: Signing provenance section with Ed25519...");
 
-    // In production, use ed25519_dalek to create a real signature
-    // For demo purposes, use a placeholder signature
-    let demo_signature = [0x99u8; 64]; // Ed25519 signatures are 64 bytes
+    vsf_bytes = sign_section(vsf_bytes, "provenance", signing_key.as_bytes())?;
 
-    println!("  Signature: {} bytes (demo)", demo_signature.len());
-    println!("  Signature: {:?}\n", &demo_signature[..8]); // Show first 8 bytes
+    println!("  Provenance section signed with Ed25519");
+    println!("  Signature: 64 bytes embedded in header");
+    println!(
+        "  Public key for verification: {}\n",
+        hex::encode(verifying_key.as_bytes())
+    );
 
-    // Note: In a real implementation, we would embed this signature in the provenance section
+    // ========== STEP 10: Add Encryption Metadata to Blob Section ==========
+    println!("Step 10: Adding encryption metadata to blob section header...");
 
-    // ========== STEP 9: Write to File ==========
-    println!("Step 9: Writing to comprehensive_example.vsf...");
+    vsf_bytes = add_encryption_metadata(vsf_bytes, "blob", WRAP_CHACHA20POLY1305, cipher.as_ref())?;
+
+    println!("  Encryption algorithm: ChaCha20-Poly1305");
+    println!("  Encryption key: 32 bytes embedded in header\n");
+
+    // ========== STEP 11: Write to File ==========
+    println!("Step 11: Writing to comprehensive_example.vsf...");
 
     std::fs::write("comprehensive_example.vsf", &vsf_bytes)?;
 
@@ -205,16 +248,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ========== Summary ==========
     println!("=== Complete! ===");
     println!("Created comprehensive VSF file with:");
-    println!("  • 24MP RAW image (6000×4000, 12-bit)");
-    println!("  • Full camera/lens metadata");
+    println!("  • 24MP RAW image (6000×4000, 12-bit) - SIGNED");
+    println!("  • Full camera/lens metadata (11 fields)");
     println!("  • RGB thumbnail (1500×1000×3)");
-    println!("  • Encrypted GPS location");
-    println!("  • Encrypted camera/lens serial numbers");
-    println!("  • Digital signature (Ed25519)");
-    println!("  • Photographer provenance");
+    println!("  • Encrypted blob (GPS, serial numbers) - ChaCha20-Poly1305");
+    println!("  • Photographer provenance - SIGNED with Ed25519");
     println!("  • Mandatory BLAKE3 file integrity hash");
-    println!("\n4 sections: raw, thumbnail, encrypted, provenance");
-    println!("Test with: ./target/debug/vsfinfo comprehensive_example.vsf");
+    println!(
+        "\n5 sections: raw (signed), thumbnail, metadata, blob (encrypted), provenance (signed)"
+    );
+    println!("\nCrypto architecture:");
+    println!("  • RAW image signed: (d\"raw\" sig[Ed25519 64 bytes] ...)");
+    println!("  • Provenance signed: (d\"provenance\" sig[Ed25519 64 bytes] ...)");
+    println!("  • Blob encrypted: (d\"blob\" key[ChaCha20-Poly1305] wrap[...] ...)");
+    println!("  • Encrypted section is opaque blob (no n field - implied n[0])");
+    println!("\nTest with: ./target/debug/vsfinfo comprehensive_example.vsf");
 
     Ok(())
 }

@@ -11,6 +11,31 @@ use crate::file_format::VsfSection;
 use crate::types::VsfType;
 use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
 
+/// Represents an element in the header - either raw bytes or a VsfType
+#[derive(Debug, Clone)]
+enum HeaderElement {
+    Raw(Vec<u8>),      // Raw bytes (magic, markers like '<', '>', '(', ')')
+    Type(VsfType),     // A VsfType that can be inspected and modified
+}
+
+impl HeaderElement {
+    /// Get the byte length of this element
+    fn byte_len(&self) -> usize {
+        match self {
+            HeaderElement::Raw(bytes) => bytes.len(),
+            HeaderElement::Type(vsf_type) => vsf_type.byte_len(),
+        }
+    }
+
+    /// Flatten this element to bytes
+    fn flatten(&self) -> Vec<u8> {
+        match self {
+            HeaderElement::Raw(bytes) => bytes.clone(),
+            HeaderElement::Type(vsf_type) => vsf_type.flatten(),
+        }
+    }
+}
+
 /// Builder for complete VSF files with headers and sections
 ///
 /// All VSF files automatically include a BLAKE3 hash for integrity verification.
@@ -78,19 +103,17 @@ impl VsfBuilder {
         let mut header_index = 0;
         vsf[header_index].push(b'<');
 
-        // Placeholder for header length
+        // Placeholder for header length (inclusive mode)
         let header_length_index = vsf.len();
-        vsf.push(VsfType::b(0).flatten()); // Will be updated in loop
+        vsf.push(VsfType::b(0, true).flatten()); // Will be updated in loop
 
         // Version and backward compat
         header_index = vsf.len();
         vsf.push(VsfType::z(self.version).flatten());
         vsf[header_index].extend_from_slice(&VsfType::y(self.backward_compat).flatten());
 
-        // File hash placeholder (Strategy 1) - if requested
         if self.include_file_hash {
-            use crate::crypto_algorithms::HASH_BLAKE3;
-            vsf[header_index].extend_from_slice(&VsfType::h(HASH_BLAKE3, vec![0u8; 32]).flatten());
+            vsf[header_index].extend_from_slice(&VsfType::hb3(vec![0u8; 32]).flatten());
         }
 
         // Label count
@@ -109,9 +132,9 @@ impl VsfBuilder {
             label_offset_indices.push((i, vsf.len()));
             vsf.push(VsfType::o(0).flatten());
 
-            // Size placeholder
+            // Size placeholder (not inclusive - section size, not self-referential)
             label_size_indices.push((i, vsf.len()));
-            vsf.push(VsfType::b(0).flatten());
+            vsf.push(VsfType::b(0, false).flatten());
 
             // Child count (actual value)
             header_index = vsf.len();
@@ -129,9 +152,9 @@ impl VsfBuilder {
             label_offset_indices.push((unboxed_index, vsf.len()));
             vsf.push(VsfType::o(0).flatten());
 
-            // Size placeholder
+            // Size placeholder (not inclusive - section size, not self-referential)
             label_size_indices.push((unboxed_index, vsf.len()));
-            vsf.push(VsfType::b(0).flatten());
+            vsf.push(VsfType::b(0, false).flatten());
 
             // Child count = 0 for unboxed
             header_index = vsf.len();
@@ -166,7 +189,7 @@ impl VsfBuilder {
             }
 
             if header_length != prev_header_length {
-                vsf[header_length_index] = VsfType::b(header_length * 8).flatten();
+                vsf[header_length_index] = VsfType::b(header_length, true).flatten();
                 prev_header_length = header_length;
                 changed = true;
             }
@@ -175,11 +198,11 @@ impl VsfBuilder {
             let mut current_offset = header_length;
 
             for (idx, (label_idx, vsf_idx)) in label_offset_indices.iter().enumerate() {
-                let offset_bits = current_offset * 8;
+                let offset_bytes = current_offset;
 
-                if offset_bits != prev_offsets[idx] {
-                    vsf[*vsf_idx] = VsfType::o(offset_bits).flatten();
-                    prev_offsets[idx] = offset_bits;
+                if offset_bytes != prev_offsets[idx] {
+                    vsf[*vsf_idx] = VsfType::o(offset_bytes).flatten();
+                    prev_offsets[idx] = offset_bytes;
                     changed = true;
                 }
 
@@ -193,11 +216,9 @@ impl VsfBuilder {
                     self.unboxed[unboxed_idx].1.len()
                 };
 
-                let size_bits = size_bytes * 8;
-
-                if size_bits != prev_sizes[idx] {
-                    vsf[label_size_indices[idx].1] = VsfType::b(size_bits).flatten();
-                    prev_sizes[idx] = size_bits;
+                if size_bytes != prev_sizes[idx] {
+                    vsf[label_size_indices[idx].1] = VsfType::b(size_bytes, false).flatten();
+                    prev_sizes[idx] = size_bytes;
                     changed = true;
                 }
 
@@ -215,7 +236,7 @@ impl VsfBuilder {
             return Err("Failed to stabilize header after 10 iterations".to_string());
         }
 
-        // Flatten vsf
+        // Flatten vsf (with crypto placeholders already in place)
         let mut result: Vec<u8> = vsf.into_iter().flatten().collect();
 
         // Append unboxed data
@@ -223,9 +244,14 @@ impl VsfBuilder {
             result.extend_from_slice(&data);
         }
 
-        // Automatically compute and insert the BLAKE3 hash (always included)
-        use crate::verification::add_file_hash;
-        add_file_hash(result)
+        // Now structure is finalized - compute and write all crypto primitives
+        // File hash placeholder (hb3[32][zeros]) is already in header from line 91
+        use crate::verification::{compute_file_hash, write_file_hash};
+
+        let hash = compute_file_hash(&result)?;
+        result = write_file_hash(result, &hash)?;
+
+        Ok(result)
     }
 }
 

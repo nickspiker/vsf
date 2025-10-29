@@ -129,10 +129,26 @@ pub struct CalibrationHash(VsfType);
 
 impl CalibrationHash {
     pub fn new(algorithm: u8, hash: Vec<u8>) -> Result<Self, String> {
+        use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
+
         if hash.is_empty() {
             return Err("Hash cannot be empty".to_string());
         }
-        Ok(CalibrationHash(VsfType::h(algorithm, hash)))
+
+        let vsf_type = match algorithm {
+            HASH_BLAKE3 => {
+                if hash.len() <= 256 {
+                    VsfType::hb3(hash)
+                } else {
+                    VsfType::hb4(hash)
+                }
+            }
+            HASH_SHA256 => VsfType::h23(hash),
+            HASH_SHA512 => VsfType::h53(hash),
+            _ => return Err(format!("Unsupported hash algorithm: {}", algorithm as char)),
+        };
+
+        Ok(CalibrationHash(vsf_type))
     }
 
     pub fn to_vsf_type(self) -> VsfType {
@@ -141,9 +157,18 @@ impl CalibrationHash {
 
     pub fn from_vsf_type(vsf: VsfType) -> Result<Self, String> {
         match vsf {
-            VsfType::h(_, ref hash) if !hash.is_empty() => Ok(CalibrationHash(vsf)),
-            VsfType::h(_, _) => Err("Hash cannot be empty".to_string()),
-            _ => Err("Expected h type for calibration hash".to_string()),
+            VsfType::hb3(ref hash)
+            | VsfType::hb4(ref hash)
+            | VsfType::h23(ref hash)
+            | VsfType::h53(ref hash)
+                if !hash.is_empty() =>
+            {
+                Ok(CalibrationHash(vsf))
+            }
+            VsfType::hb3(_) | VsfType::hb4(_) | VsfType::h23(_) | VsfType::h53(_) => {
+                Err("Hash cannot be empty".to_string())
+            }
+            _ => Err("Expected hash type for calibration hash".to_string()),
         }
     }
 }
@@ -602,7 +627,10 @@ impl CameraBuilder {
         Ok(Some(CameraSettings {
             make: self.make.map(|m| Manufacturer::new(m)).transpose()?,
             model: self.model.map(|m| ModelName::new(m)).transpose()?,
-            serial_number: self.serial_number.map(|s| SerialNumber::new(s)).transpose()?,
+            serial_number: self
+                .serial_number
+                .map(|s| SerialNumber::new(s))
+                .transpose()?,
             iso_speed: self.iso_speed.map(|i| IsoSpeed::new(i)).transpose()?,
             shutter_time_s: self
                 .shutter_time_s
@@ -1085,7 +1113,7 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     let header_length_type =
         parse(data, &mut pointer).map_err(|e| format!("Failed to parse header length: {}", e))?;
     let _header_length_bits = match header_length_type {
-        VsfType::b(bits) => bits,
+        VsfType::b(bits, _) => bits,
         _ => return Err("Expected b type for header length".to_string()),
     };
 
@@ -1108,7 +1136,7 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     };
 
     // Find the "raw" label
-    let mut raw_offset_bits: Option<usize> = None;
+    let mut raw_offset_bytes: Option<usize> = None;
     let mut raw_field_count: Option<usize> = None;
 
     for _ in 0..label_count {
@@ -1127,15 +1155,15 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
 
         let offset_type =
             parse(data, &mut pointer).map_err(|e| format!("Failed to parse offset: {}", e))?;
-        let offset_bits = match offset_type {
-            VsfType::o(bits) => bits,
+        let offset_bytes = match offset_type {
+            VsfType::o(bytes) => bytes,
             _ => return Err("Expected o type for offset".to_string()),
         };
 
         let size_type =
             parse(data, &mut pointer).map_err(|e| format!("Failed to parse size: {}", e))?;
-        let _size_bits = match size_type {
-            VsfType::b(bits) => bits,
+        let _size_bytes = match size_type {
+            VsfType::b(bytes, _) => bytes,
             _ => return Err("Expected b type for size".to_string()),
         };
 
@@ -1154,7 +1182,7 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         // Store label info
         match label_name.as_str() {
             "raw" => {
-                raw_offset_bits = Some(offset_bits);
+                raw_offset_bytes = Some(offset_bytes);
                 raw_field_count = Some(field_count);
             }
             _ => {} // Ignore other labels
@@ -1162,7 +1190,7 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     }
 
     // Ensure we found the raw label
-    let (raw_offset, raw_count) = match (raw_offset_bits, raw_field_count) {
+    let (raw_offset, raw_count) = match (raw_offset_bytes, raw_field_count) {
         (Some(o), Some(c)) => (o, c),
         _ => return Err("Required 'raw' label not found".to_string()),
     };
@@ -1210,7 +1238,7 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     let mut lens_max_aperture: Option<f32> = None;
 
     // Parse the "raw" section
-    let section_start_byte = raw_offset >> 3; // Convert bits to bytes
+    let section_start_byte = raw_offset; // Offset is already in bytes
     if section_start_byte >= data.len() {
         return Err(format!(
             "Raw section offset {} exceeds file size {}",
@@ -1219,12 +1247,6 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         ));
     }
     pointer = section_start_byte;
-
-    // Parse preamble
-    use crate::decoding::parse_preamble;
-    let (_preamble_count, _preamble_size, _preamble_hash, _preamble_sig) =
-        parse_preamble(data, &mut pointer)
-            .map_err(|e| format!("Failed to parse raw preamble: {}", e))?;
 
     // Parse section start
     if data[pointer] != b'[' {
@@ -1292,28 +1314,52 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
                 }
             }
             "dark_frame_hash" => {
-                if let VsfType::h(algorithm, v) = field_value {
-                    dark_frame_hash = Some((algorithm, v));
+                use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
+                match field_value {
+                    VsfType::hb3(v) | VsfType::hb4(v) => dark_frame_hash = Some((HASH_BLAKE3, v)),
+                    VsfType::h23(v) => dark_frame_hash = Some((HASH_SHA256, v)),
+                    VsfType::h53(v) => dark_frame_hash = Some((HASH_SHA512, v)),
+                    _ => {}
                 }
             }
             "flat_field_hash" => {
-                if let VsfType::h(algorithm, v) = field_value {
-                    flat_field_hash = Some((algorithm, v));
+                use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
+                match field_value {
+                    VsfType::hb3(v) | VsfType::hb4(v) => flat_field_hash = Some((HASH_BLAKE3, v)),
+                    VsfType::h23(v) => flat_field_hash = Some((HASH_SHA256, v)),
+                    VsfType::h53(v) => flat_field_hash = Some((HASH_SHA512, v)),
+                    _ => {}
                 }
             }
             "bias_frame_hash" => {
-                if let VsfType::h(algorithm, v) = field_value {
-                    bias_frame_hash = Some((algorithm, v));
+                use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
+                match field_value {
+                    VsfType::hb3(v) | VsfType::hb4(v) => bias_frame_hash = Some((HASH_BLAKE3, v)),
+                    VsfType::h23(v) => bias_frame_hash = Some((HASH_SHA256, v)),
+                    VsfType::h53(v) => bias_frame_hash = Some((HASH_SHA512, v)),
+                    _ => {}
                 }
             }
             "vignette_correction_hash" => {
-                if let VsfType::h(algorithm, v) = field_value {
-                    vignette_correction_hash = Some((algorithm, v));
+                use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
+                match field_value {
+                    VsfType::hb3(v) | VsfType::hb4(v) => {
+                        vignette_correction_hash = Some((HASH_BLAKE3, v))
+                    }
+                    VsfType::h23(v) => vignette_correction_hash = Some((HASH_SHA256, v)),
+                    VsfType::h53(v) => vignette_correction_hash = Some((HASH_SHA512, v)),
+                    _ => {}
                 }
             }
             "distortion_correction_hash" => {
-                if let VsfType::h(algorithm, v) = field_value {
-                    distortion_correction_hash = Some((algorithm, v));
+                use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
+                match field_value {
+                    VsfType::hb3(v) | VsfType::hb4(v) => {
+                        distortion_correction_hash = Some((HASH_BLAKE3, v))
+                    }
+                    VsfType::h23(v) => distortion_correction_hash = Some((HASH_SHA256, v)),
+                    VsfType::h53(v) => distortion_correction_hash = Some((HASH_SHA512, v)),
+                    _ => {}
                 }
             }
             "magic_9" => {
@@ -1847,31 +1893,14 @@ mod tests {
         assert_eq!(&raw_bytes[0..3], "RÅ".as_bytes()); // Magic
         assert_eq!(raw_bytes[3], b'<'); // Header start
 
-        // Find the first preamble (after header)
+        // Find the first section (after header)
         let header_end = raw_bytes.iter().position(|&b| b == b'>').unwrap();
 
-        // The next byte should be '{' (preamble start)
+        // The next byte should be '[' (section start - no preamble!)
         assert_eq!(
             raw_bytes[header_end + 1],
-            b'{',
-            "Expected preamble to start immediately after header"
-        );
-
-        // Parse the preamble
-        let mut pointer = header_end + 1;
-        use crate::decoding::parse_preamble;
-        let (count, size_bits, hash, sig) = parse_preamble(&raw_bytes, &mut pointer).unwrap();
-
-        // Verify preamble contents
-        assert!(count > 0, "Preamble count should be > 0");
-        assert!(size_bits > 0, "Preamble size should be > 0");
-        assert!(hash.is_none(), "No hash should be present");
-        assert!(sig.is_none(), "No signature should be present");
-
-        // Next byte should be '[' (section start)
-        assert_eq!(
-            raw_bytes[pointer], b'[',
-            "Expected '[' immediately after preamble"
+            b'[',
+            "Expected section to start immediately after header (no preamble)"
         );
     }
 

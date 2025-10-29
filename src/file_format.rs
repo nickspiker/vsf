@@ -1,19 +1,20 @@
-//! VSF file format with headers, preambles, and hierarchical labels
+//! VSF file format with headers and hierarchical labels
 //!
 //! Binary structure (following basecalc pattern):
 //! ```text
 //! RÅ<                                    Magic + header start
-//!   b[header_length_bits]                Header length in BITS
+//!   b[header_length_bytes]               Header length in BYTES
 //!   z[version]                           Version number
 //!   y[backward_compat]                   Backward compatibility version
+//!   hb[256][hash]                        File integrity hash (BLAKE3)
 //!   n[label_count]                       Number of label definitions
 //!
-//!   (d[label_name] o[offset] b[size] n[count])  Label definition
+//!   (d[label_name] h?[hash] g?[sig] k?[key] o[offset] b[size] n[count])  Label definition
 //!   ...
 //! >                                      Header end
 //!
-//! {n[count] b[size]}                     Preamble (metadata about label set)
 //! [                                      Section start (if n > 0)
+//!   d[section_name]                      Section name
 //!   (d[field_name]:[value])              Field definition (leaf)
 //!   (d[field_name] o[offset] b[size] n[count])  Nested section (branch)
 //!   ...
@@ -116,6 +117,7 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 pub struct VsfHeader {
     pub version: usize,
     pub backward_compat: usize,
+    pub file_hash: Option<VsfType>, // Optional file-level hash (typically BLAKE3)
     pub labels: Vec<LabelDefinition>,
 }
 
@@ -123,68 +125,13 @@ pub struct VsfHeader {
 #[derive(Debug, Clone)]
 pub struct LabelDefinition {
     pub name: String,
-    pub offset_bits: usize, // Offset in BITS (not bytes!)
-    pub size_bits: usize,   // Size in BITS (not bytes!) - includes preamble
-    pub child_count: usize, // 0 = unboxed blob, N = N structured children
-}
-
-/// Preamble metadata for a label set
-///
-/// Appears before every label set as: {n[count] b[size] h?[hash] g?[sig]}
-/// Enables forensic recovery and integrity checking.
-#[derive(Debug, Clone)]
-pub struct Preamble {
-    pub count: usize,               // n: number of labels in this set
-    pub size_bits: usize,           // b: total size in BITS (includes preamble itself)
-    pub hash: Option<Vec<u8>>,      // h: optional integrity hash
-    pub signature: Option<Vec<u8>>, // g: optional authentication signature
-}
-
-impl Preamble {
-    /// Create a new preamble with count and size (no hash/signature)
-    pub fn new(count: usize, size_bits: usize) -> Self {
-        Self {
-            count,
-            size_bits,
-            hash: None,
-            signature: None,
-        }
-    }
-
-    /// Encode preamble to bytes: {n[count] b[size] h?[hash] g?[sig]}
-    pub fn encode(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-
-        // Opening brace
-        bytes.push(b'{');
-
-        // n: count
-        bytes.push(b'n');
-        bytes.extend_from_slice(&self.count.encode_number());
-
-        // b: size in bits
-        bytes.push(b'b');
-        bytes.extend_from_slice(&self.size_bits.encode_number());
-
-        // h: hash (optional)
-        if let Some(ref hash) = self.hash {
-            bytes.push(b'h');
-            bytes.extend_from_slice(&hash.len().encode_number());
-            bytes.extend_from_slice(hash);
-        }
-
-        // g: signature (optional)
-        if let Some(ref sig) = self.signature {
-            bytes.push(b'g');
-            bytes.extend_from_slice(&sig.len().encode_number());
-            bytes.extend_from_slice(sig);
-        }
-
-        // Closing brace
-        bytes.push(b'}');
-
-        bytes
-    }
+    pub hash: Option<VsfType>, // h: optional hash of section data (VsfType::h)
+    pub signature: Option<VsfType>, // g: optional signature of section data (VsfType::g)
+    pub key: Option<VsfType>,  // k: optional cryptographic key (VsfType::k)
+    pub wrap: Option<VsfType>, // v: optional wrapped/encrypted marker (VsfType::v)
+    pub offset_bytes: usize,   // Offset in bytes (byte-aligned)
+    pub size_bytes: usize,     // Size in bytes (byte-aligned)
+    pub child_count: usize,    // 0 = unboxed blob, N = N structured children
 }
 
 impl VsfHeader {
@@ -193,6 +140,7 @@ impl VsfHeader {
         Self {
             version,
             backward_compat,
+            file_hash: None,
             labels: Vec::new(),
         }
     }
@@ -212,8 +160,7 @@ impl VsfHeader {
         // Header start marker
         header.push(b'<');
 
-        // Header length placeholder (will be calculated later)
-        let header_length_placeholder = VsfType::b(0).flatten();
+        let header_length_placeholder = VsfType::b(0, true).flatten();
         header.extend_from_slice(&header_length_placeholder);
 
         // Version
@@ -221,6 +168,11 @@ impl VsfHeader {
 
         // Backward compatibility
         header.extend_from_slice(&VsfType::y(self.backward_compat).flatten());
+
+        // File hash (optional)
+        if let Some(ref hash) = self.file_hash {
+            header.extend_from_slice(&hash.flatten());
+        }
 
         // Label count
         header.extend_from_slice(&VsfType::n(self.labels.len()).flatten());
@@ -232,14 +184,36 @@ impl VsfHeader {
             // Label name
             header.extend_from_slice(&VsfType::d(label.name.clone()).flatten());
 
-            // Offset (in bits)
-            header.extend_from_slice(&VsfType::o(label.offset_bits).flatten());
+            // Optional hash (VsfType::h with algorithm)
+            if let Some(ref hash_type) = label.hash {
+                header.extend_from_slice(&hash_type.flatten());
+            }
 
-            // Size (in bits)
-            header.extend_from_slice(&VsfType::b(label.size_bits).flatten());
+            // Optional signature (VsfType::g with algorithm)
+            if let Some(ref sig_type) = label.signature {
+                header.extend_from_slice(&sig_type.flatten());
+            }
 
-            // Child count
-            header.extend_from_slice(&VsfType::n(label.child_count).flatten());
+            // Optional key (VsfType::k with algorithm)
+            if let Some(ref key_type) = label.key {
+                header.extend_from_slice(&key_type.flatten());
+            }
+
+            // Optional wrap (VsfType::v with algorithm)
+            if let Some(ref wrap_type) = label.wrap {
+                header.extend_from_slice(&wrap_type.flatten());
+            }
+
+            // Offset (in bytes)
+            header.extend_from_slice(&VsfType::o(label.offset_bytes).flatten());
+
+            // Size (in bytes)
+            header.extend_from_slice(&VsfType::b(label.size_bytes, false).flatten());
+
+            // Child count (omit if encrypted - implied to be n[0])
+            if label.wrap.is_none() {
+                header.extend_from_slice(&VsfType::n(label.child_count).flatten());
+            }
 
             header.push(b')');
         }
@@ -252,30 +226,40 @@ impl VsfHeader {
 
     /// Update header length field after knowing final size
     pub fn update_header_length(header_bytes: &mut Vec<u8>) -> Result<(), String> {
-        // Find the position after "RÅ<" (3 bytes)
-        if header_bytes.len() < 4 {
+        // Find the position after "RÅ<" (4 bytes: R=1, Å=2, <=1)
+        if header_bytes.len() < 5 {
             return Err("Header too short".to_string());
         }
 
-        // Calculate actual header length in bits
-        let header_length_bits = header_bytes.len() * 8;
-
-        // Encode the length
-        let length_encoded = VsfType::b(header_length_bits).flatten();
-
-        // Replace placeholder starting at position 3
+        // Find placeholder size
         let placeholder_len = header_bytes
             .iter()
-            .skip(3)
+            .skip(4)
             .position(|&b| b == b'z')
             .ok_or("Could not find version marker")?;
 
+        // Calculate what the header length will be AFTER we replace the placeholder
+        // Current length - placeholder + new encoding
+        // We need to iterate to find the right encoding size
+        let mut header_length_bytes = header_bytes.len();
+        let mut length_encoded = VsfType::b(header_length_bytes, true).flatten();
+
+        // Iterate until stable (in case encoding size changes)
+        loop {
+            let new_total = header_bytes.len() - placeholder_len + length_encoded.len();
+            if new_total == header_length_bytes {
+                break; // Stable!
+            }
+            header_length_bytes = new_total;
+            length_encoded = VsfType::b(header_length_bytes, true).flatten();
+        }
+
         // Remove old placeholder
-        header_bytes.drain(3..3 + placeholder_len);
+        header_bytes.drain(4..4 + placeholder_len);
 
         // Insert new length encoding
         for (i, byte) in length_encoded.iter().enumerate() {
-            header_bytes.insert(3 + i, *byte);
+            header_bytes.insert(4 + i, *byte);
         }
 
         Ok(())
@@ -323,52 +307,36 @@ impl VsfSection {
         });
     }
 
-    /// Encode section to bytes (with preamble and brackets)
+    /// Encode section to bytes (no preamble - crypto moved to header labels)
     ///
-    /// Format: {n[count] b[size]}[dsection_name(field:value)...]
+    /// Format: [dsection_name(field:value)...]
     pub fn encode(&self) -> Vec<u8> {
-        let mut section_body = Vec::new();
+        let mut bytes = Vec::new();
 
         // Section start
-        section_body.push(b'[');
+        bytes.push(b'[');
 
         // Section name (namespace for all fields)
-        section_body.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
+        bytes.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
 
         // Encode each item
         for item in &self.items {
-            section_body.push(b'(');
+            bytes.push(b'(');
 
             // Item name (simple identifier, no dots - namespace comes from section)
-            section_body.extend_from_slice(&VsfType::d(item.name.clone()).flatten());
+            bytes.extend_from_slice(&VsfType::d(item.name.clone()).flatten());
 
             // Separator
-            section_body.push(b':');
+            bytes.push(b':');
 
             // Item value
-            section_body.extend_from_slice(&item.value.flatten());
+            bytes.extend_from_slice(&item.value.flatten());
 
-            section_body.push(b')');
+            bytes.push(b')');
         }
 
         // Section end
-        section_body.push(b']');
-
-        // Create preamble with placeholder size (will be correct after we know body size)
-        let preamble = Preamble::new(self.items.len(), 0); // Placeholder size
-        let preamble_bytes = preamble.encode();
-
-        // Calculate actual total size including preamble
-        let actual_total_size_bits = (preamble_bytes.len() + section_body.len()) * 8;
-
-        // Re-encode preamble with correct size
-        let preamble_final = Preamble::new(self.items.len(), actual_total_size_bits);
-        let preamble_final_bytes = preamble_final.encode();
-
-        // Combine: {n b}[...]
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&preamble_final_bytes);
-        bytes.extend_from_slice(&section_body);
+        bytes.push(b']');
 
         bytes
     }
@@ -383,8 +351,12 @@ mod tests {
         let mut header = VsfHeader::new(1, 1);
         header.add_label(LabelDefinition {
             name: "test section".to_string(),
-            offset_bits: 512,
-            size_bits: 256,
+            hash: None,
+            signature: None,
+            key: None,
+            wrap: None,
+            offset_bytes: 512,
+            size_bytes: 256,
             child_count: 3,
         });
 
@@ -409,50 +381,14 @@ mod tests {
 
         let encoded = section.encode();
 
-        // Verify preamble (starts with '{')
-        assert_eq!(encoded[0], b'{');
-        assert!(encoded.contains(&b'n')); // count
-        assert!(encoded.contains(&b'b')); // size
-        assert!(encoded.contains(&b'}')); // closing brace
-
-        // Verify brackets
-        assert!(encoded.contains(&b'['));
+        // Verify no preamble (starts with '[')
+        assert_eq!(encoded[0], b'[');
         assert_eq!(encoded[encoded.len() - 1], b']');
 
         // Verify parentheses for items
         assert!(encoded.contains(&b'('));
         assert!(encoded.contains(&b')'));
         assert!(encoded.contains(&b':')); // Separator
-    }
-
-    #[test]
-    fn test_preamble_encoding() {
-        let preamble = Preamble::new(5, 847 * 8); // 5 items, 847 bytes = 6776 bits
-        let bytes = preamble.encode();
-
-        // Should start and end with braces
-        assert_eq!(bytes[0], b'{');
-        assert_eq!(bytes[bytes.len() - 1], b'}');
-
-        // Should contain 'n' and 'b' markers
-        assert!(bytes.contains(&b'n'));
-        assert!(bytes.contains(&b'b'));
-
-        // Should not contain hash or signature (None)
-        assert!(!bytes.contains(&b'h'));
-        assert!(!bytes.contains(&b'g'));
-    }
-
-    #[test]
-    fn test_preamble_with_hash() {
-        let mut preamble = Preamble::new(3, 500 * 8);
-        preamble.hash = Some(vec![0xAB; 32]); // 32-byte hash
-
-        let bytes = preamble.encode();
-
-        // Should contain hash marker
-        assert!(bytes.contains(&b'h'));
-        assert!(bytes.windows(32).any(|w| w == &vec![0xAB; 32][..]));
     }
 
     #[test]

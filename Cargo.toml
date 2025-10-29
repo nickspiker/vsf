@@ -20,3 +20,8 @@ num-complex = "0.4.5"
 spirix = { path = "../spirix" }
 clap = { version = "4", features = ["derive"] }
 blake3 = "1"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+chacha20poly1305 = "0.10"
+hex = "0.4"
+colored = "2"

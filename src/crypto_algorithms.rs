@@ -234,12 +234,18 @@ pub const KEY_RSA_2048: u8 = b'r';
 // Reserved key slots: a, b, c, d, f, g, h, i, j, k, l, m, n, o, q, s, t, u, v, w, y, z
 
 /// Get key algorithm name from ID
+///
+/// Note: This handles both asymmetric keys (Ed25519, X25519, etc.) and
+/// symmetric encryption keys (ChaCha20-Poly1305, AES-256-GCM, etc.)
 pub fn key_algorithm_name(id: u8) -> Option<&'static str> {
     match id {
         KEY_ED25519 => Some("Ed25519"),
         KEY_X25519 => Some("X25519"),
         KEY_P256 => Some("ECDSA-P256"),
         KEY_RSA_2048 => Some("RSA-2048"),
+        // Symmetric encryption keys (reuse wrap algorithm IDs)
+        WRAP_CHACHA20POLY1305 => Some("ChaCha20-Poly1305"),
+        WRAP_AES256_GCM => Some("AES-256-GCM"),
         _ => None,
     }
 }
@@ -251,6 +257,49 @@ pub fn key_length(id: u8) -> Option<usize> {
         KEY_X25519 => Some(32),
         KEY_P256 => None,     // Can be 33 (compressed) or 65 (uncompressed)
         KEY_RSA_2048 => None, // Variable, typically ~270 bytes
+        _ => None,
+    }
+}
+
+// ==================== WRAPPING/ENCRYPTION ALGORITHMS (v type) ====================
+
+/// ChaCha20-Poly1305 AEAD encryption - RECOMMENDED DEFAULT
+///
+/// **Algorithm:** ChaCha20 stream cipher + Poly1305 MAC
+/// **Key size:** 32 bytes
+/// **Nonce size:** 12 bytes
+/// **Tag size:** 16 bytes (Poly1305 authentication tag)
+/// **Performance:** Extremely fast, constant-time
+/// **Security:** 256-bit key strength
+/// **Use case:** General-purpose authenticated encryption
+pub const WRAP_CHACHA20POLY1305: u8 = b'c';
+
+/// AES-256-GCM encryption
+///
+/// **Algorithm:** AES-256 in Galois/Counter Mode
+/// **Key size:** 32 bytes
+/// **Nonce size:** 12 bytes
+/// **Tag size:** 16 bytes (GCM authentication tag)
+/// **Security:** 256-bit key strength
+/// **Use case:** Hardware-accelerated encryption (AES-NI)
+pub const WRAP_AES256_GCM: u8 = b'a';
+
+// Reserved wrapping slots: b, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z
+
+/// Get wrapping algorithm name from ID
+pub fn wrap_algorithm_name(id: u8) -> Option<&'static str> {
+    match id {
+        WRAP_CHACHA20POLY1305 => Some("ChaCha20-Poly1305"),
+        WRAP_AES256_GCM => Some("AES-256-GCM"),
+        _ => None,
+    }
+}
+
+/// Get expected key length for wrapping algorithm in bytes
+pub fn wrap_key_length(id: u8) -> Option<usize> {
+    match id {
+        WRAP_CHACHA20POLY1305 => Some(32),
+        WRAP_AES256_GCM => Some(32),
         _ => None,
     }
 }
