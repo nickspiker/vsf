@@ -14,8 +14,8 @@ use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
 /// Represents an element in the header - either raw bytes or a VsfType
 #[derive(Debug, Clone)]
 enum HeaderElement {
-    Raw(Vec<u8>),      // Raw bytes (magic, markers like '<', '>', '(', ')')
-    Type(VsfType),     // A VsfType that can be inspected and modified
+    Raw(Vec<u8>),  // Raw bytes (magic, markers like '<', '>', '(', ')')
+    Type(VsfType), // A VsfType that can be inspected and modified
 }
 
 impl HeaderElement {

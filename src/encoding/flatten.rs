@@ -203,6 +203,118 @@ impl VsfType {
                 flat
             }
 
+            // ==================== COLOUR TYPES ====================
+
+            // General format: r[channels_base36][depth_exp][data]
+            VsfType::r(channels, depth, data) => {
+                let mut flat = vec![b'r'];
+                // Channel count as base-36 digit
+                let channel_char = if *channels < 10 {
+                    b'0' + channels
+                } else {
+                    b'A' + (channels - 10)
+                };
+                flat.push(channel_char);
+                // Depth exponent as single digit
+                flat.push(b'0' + depth);
+                // Data bytes
+                flat.extend_from_slice(data);
+                flat
+            }
+
+            // Named shortcuts (zero-data)
+            VsfType::rb => vec![b'r', b'b'], // Blue
+            VsfType::rc => vec![b'r', b'c'], // Cyan
+            VsfType::rg => vec![b'r', b'g'], // Middle grey
+            VsfType::rj => vec![b'r', b'j'], // Magenta
+            VsfType::rk => vec![b'r', b'k'], // Black
+            VsfType::rl => vec![b'r', b'l'], // Lime
+            VsfType::rn => vec![b'r', b'n'], // Green
+            VsfType::ro => vec![b'r', b'o'], // Orange
+            VsfType::rq => vec![b'r', b'q'], // Aqua
+            VsfType::rr => vec![b'r', b'r'], // Red
+            VsfType::rv => vec![b'r', b'v'], // Violet
+            VsfType::rw => vec![b'r', b'w'], // White
+            VsfType::ry => vec![b'r', b'y'], // Yellow
+
+            // Format shortcuts with data
+            VsfType::re(grey) => vec![b'r', b'e', *grey],
+            VsfType::rx(grey) => {
+                let mut flat = vec![b'r', b'x'];
+                flat.extend_from_slice(&grey.to_be_bytes());
+                flat
+            }
+            VsfType::rz(grey) => {
+                let mut flat = vec![b'r', b'z'];
+                flat.extend_from_slice(&grey.to_be_bytes());
+                flat
+            }
+
+            // Packed RGB
+            VsfType::ri(packed) => vec![b'r', b'i', *packed],
+            VsfType::rp(packed) => {
+                let mut flat = vec![b'r', b'p'];
+                flat.extend_from_slice(&packed.to_be_bytes());
+                flat
+            }
+
+            // Standard RGB
+            VsfType::ru(rgb) => {
+                let mut flat = vec![b'r', b'u'];
+                flat.extend_from_slice(rgb);
+                flat
+            }
+            VsfType::rs(rgb) => {
+                let mut flat = vec![b'r', b's'];
+                for channel in rgb {
+                    flat.extend_from_slice(&channel.to_be_bytes());
+                }
+                flat
+            }
+            VsfType::rf(rgb) => {
+                let mut flat = vec![b'r', b'f'];
+                for channel in rgb {
+                    flat.extend_from_slice(&channel.to_be_bytes());
+                }
+                flat
+            }
+
+            // Standard RGBA
+            VsfType::ra(rgba) => {
+                let mut flat = vec![b'r', b'a'];
+                flat.extend_from_slice(rgba);
+                flat
+            }
+            VsfType::rt(rgba) => {
+                let mut flat = vec![b'r', b't'];
+                for channel in rgba {
+                    flat.extend_from_slice(&channel.to_be_bytes());
+                }
+                flat
+            }
+            VsfType::rh(rgba) => {
+                let mut flat = vec![b'r', b'h'];
+                for channel in rgba {
+                    flat.extend_from_slice(&channel.to_be_bytes());
+                }
+                flat
+            }
+
+            // Magic matrix: rm[N][M][matrix_data][gamma]
+            VsfType::rm(input_channels, output_channels, matrix, gamma) => {
+                let mut flat = vec![b'r', b'm'];
+                // Encode input and output channel counts
+                flat.extend_from_slice(&input_channels.encode_number());
+                flat.extend_from_slice(&output_channels.encode_number());
+                // Matrix data (N×M f32 values, raw bytes)
+                for value in matrix {
+                    flat.extend_from_slice(&value.to_be_bytes());
+                }
+                // Gamma (f32, raw bytes)
+                flat.extend_from_slice(&gamma.to_be_bytes());
+                flat
+            }
+
             // VSF Metadata
             VsfType::d(value) => {
                 let mut flat = Vec::new();
@@ -260,13 +372,6 @@ impl VsfType {
             VsfType::m(value) => {
                 let mut flat = Vec::new();
                 flat.push(b'm');
-                flat.extend_from_slice(&value.encode_number());
-                flat
-            }
-
-            VsfType::r(value) => {
-                let mut flat = Vec::new();
-                flat.push(b'r');
                 flat.extend_from_slice(&value.encode_number());
                 flat
             }
@@ -3400,22 +3505,22 @@ impl VsfType {
                 }
             }
 
-            VsfType::u3(_) => 3,  // 'u' + '3' + byte
-            VsfType::u4(_) => 1 + encoded_u16_len(), // 'u' + encoded u16
-            VsfType::u5(_) => 1 + encoded_u32_len(), // 'u' + encoded u32
-            VsfType::u6(_) => 1 + encoded_u64_len(), // 'u' + encoded u64
+            VsfType::u3(_) => 3,                      // 'u' + '3' + byte
+            VsfType::u4(_) => 1 + encoded_u16_len(),  // 'u' + encoded u16
+            VsfType::u5(_) => 1 + encoded_u32_len(),  // 'u' + encoded u32
+            VsfType::u6(_) => 1 + encoded_u64_len(),  // 'u' + encoded u64
             VsfType::u7(_) => 1 + encoded_u128_len(), // 'u' + encoded u128
 
             // ==================== SIGNED INTEGERS ====================
             VsfType::i(value) => 1 + encoded_isize_len(*value), // 'i' + encoded number
-            VsfType::i3(_) => 3,  // 'i' + '3' + byte
-            VsfType::i4(_) => 1 + encoded_i16_len(), // 'i' + encoded i16
-            VsfType::i5(_) => 1 + encoded_i32_len(), // 'i' + encoded i32
-            VsfType::i6(_) => 1 + encoded_i64_len(), // 'i' + encoded i64
-            VsfType::i7(_) => 1 + encoded_i128_len(), // 'i' + encoded i128
+            VsfType::i3(_) => 3,                                // 'i' + '3' + byte
+            VsfType::i4(_) => 1 + encoded_i16_len(),            // 'i' + encoded i16
+            VsfType::i5(_) => 1 + encoded_i32_len(),            // 'i' + encoded i32
+            VsfType::i6(_) => 1 + encoded_i64_len(),            // 'i' + encoded i64
+            VsfType::i7(_) => 1 + encoded_i128_len(),           // 'i' + encoded i128
 
             // ==================== FLOATS ====================
-            VsfType::f5(_) => 6, // 'f' + '5' + 4 bytes
+            VsfType::f5(_) => 6,  // 'f' + '5' + 4 bytes
             VsfType::f6(_) => 10, // 'f' + '6' + 8 bytes
 
             // ==================== COMPLEX ====================
@@ -3508,15 +3613,31 @@ fn encoded_isize_len(value: isize) -> usize {
     }
 }
 
-fn encoded_u16_len() -> usize { 3 } // '4' + 2 bytes
-fn encoded_u32_len() -> usize { 5 } // '5' + 4 bytes
-fn encoded_u64_len() -> usize { 9 } // '6' + 8 bytes
-fn encoded_u128_len() -> usize { 17 } // '7' + 16 bytes
+fn encoded_u16_len() -> usize {
+    3
+} // '4' + 2 bytes
+fn encoded_u32_len() -> usize {
+    5
+} // '5' + 4 bytes
+fn encoded_u64_len() -> usize {
+    9
+} // '6' + 8 bytes
+fn encoded_u128_len() -> usize {
+    17
+} // '7' + 16 bytes
 
-fn encoded_i16_len() -> usize { 3 } // '4' + 2 bytes
-fn encoded_i32_len() -> usize { 5 } // '5' + 4 bytes
-fn encoded_i64_len() -> usize { 9 } // '6' + 8 bytes
-fn encoded_i128_len() -> usize { 17 } // '7' + 16 bytes
+fn encoded_i16_len() -> usize {
+    3
+} // '4' + 2 bytes
+fn encoded_i32_len() -> usize {
+    5
+} // '5' + 4 bytes
+fn encoded_i64_len() -> usize {
+    9
+} // '6' + 8 bytes
+fn encoded_i128_len() -> usize {
+    17
+} // '7' + 16 bytes
 
 #[cfg(test)]
 mod tests {

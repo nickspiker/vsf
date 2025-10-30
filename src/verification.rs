@@ -236,7 +236,10 @@ fn rebuild_with_header(
         prev_header_size = new_header_size;
     }
 
-    Err(format!("Failed to stabilize header after {} iterations", MAX_ITERATIONS))
+    Err(format!(
+        "Failed to stabilize header after {} iterations",
+        MAX_ITERATIONS
+    ))
 }
 
 /// Compute BLAKE3 hash of VSF file (with hash placeholder zeroed)
@@ -278,8 +281,8 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     }
 
     // Parse hash to find position
-    let hash_type = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse hash: {}", e))?;
+    let hash_type =
+        parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse hash: {}", e))?;
 
     match hash_type {
         VsfType::hb3(hash_bytes) | VsfType::hb4(hash_bytes) => {

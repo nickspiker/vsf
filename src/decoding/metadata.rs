@@ -210,7 +210,7 @@ pub fn parse_marker_def(data: &[u8], pointer: &mut usize) -> Result<VsfType, Err
 
 pub fn parse_marker_ref(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
     let value = decode_usize(data, pointer)?;
-    Ok(VsfType::r(value))
+    Ok(VsfType::m(value))
 }
 
 pub fn parse_mac(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {

@@ -362,6 +362,103 @@ pub enum VsfType {
     e(EtType),     // Eagle Time
     w(WorldCoord), // World coordinate (Dymaxion icosahedral)
 
+    // ==================== COLOUR TYPES ====================
+    /// VSF Colour Encoding
+    ///
+    /// # Format Overview
+    ///
+    /// ## 0. General Format: `r[channels][depth][data]`
+    /// - **channels**: Single byte base-36 digit (0-9, A-Z) = 0-35 channels
+    /// - **depth**: Single byte digit (0-9) where bits_per_channel = 2^depth
+    ///   - 0 → 1 bit, 1 → 2 bits, 2 → 4 bits, 3 → 8 bits
+    ///   - 4 → 16 bits, 5 → 32 bits, 6 → 64 bits, 7 → 128 bits, 8 → 256 bits, 9 → 512 bits. Uppercase letters might be used for depths > 9 or float types in future versions.
+    /// - **data**: channel_count × (2^depth / 8) bytes
+    ///
+    /// Examples:
+    /// - `r33[3 bytes]` = 3 channels × 8 bits = RGB
+    /// - `r45[8 bytes]` = 4 channels × 32 bits = RGBA (integer)
+    /// - `rG3[16 bytes]` = 16 channels × 8 bits = multispectral
+    ///
+    /// ## 1. Named Shortcuts (zero-data, 2 bytes total)
+    /// - `rb` = Blue       - `rc` = Cyan      - `rg` = Middle grey (50%)
+    /// - `rj` = Magenta    - `rk` = Black     - `rl` = Lime
+    /// - `rn` = Green      - `ro` = Orange    - `rq` = Aqua
+    /// - `rr` = Red        - `rv` = Violet    - `rw` = White
+    /// - `ry` = Yellow
+    ///
+    /// ## 2. Format Shortcuts (with data, where {#} indicates size in Bytes)
+    /// Greyscale:
+    /// - `re{1}` = 8-bit greyscale
+    /// - `rx{2}` = 16-bit greyscale
+    /// - `rz{4}` = 32-bit float greyscale
+    ///
+    /// Packed RGB:
+    /// - `ri{1}` = 8-bit packed RGB (6×7×6): `((R*7)+G)*6+B` where R∈[0,5], G∈[0,6], B∈[0,5]
+    /// - `rp{2}` = 16-bit packed RGB (5-6-5): `RRRRR GGGGGG BBBBB` (bit-aligned)
+    ///
+    /// Standard RGB/RGBA:
+    /// - `ru{3}` = 24-bit RGB (8 bits per channel)
+    /// - `rs{6}` = 48-bit RGB (16 bits per channel)
+    /// - `rf{12}` = 96-bit RGB (32-bit float × 3)
+    /// - `ra{4}` = 32-bit RGBA (8 bits per channel)
+    /// - `rt{8}` = 64-bit RGBA (16 bits per channel)
+    /// - `rh{16}` = 128-bit RGBA (32-bit float × 4)
+    ///
+    /// ## 3. Magic Matrix: `rm[f5][N][3]{matrix_data}{gamma}`
+    /// Colour transform matrix: N input channels → 3 LMS outputs
+    /// - Format follows tensor notation: 'f' '5' [N] [3] [N×3×4 bytes matrix] [4 bytes gamma]
+    /// - Matrix: N×3 f32 values (4 bytes each)
+    /// - Gamma: Single f32 value (4 bytes), no type prefix
+    /// - Total: 2 + 2 + size(N) + size(3) + (N×3×4) + 4 bytes
+    ///
+    /// # Examples
+    /// ```ignore
+    /// // Purple using 6×7×6 packing: ri{0x83}
+    /// // RGB = (130, 0, 255) → (3, 0, 5) → ((3*7)+0)*6+5 = 131 = 0x83
+    ///
+    /// // Standard RGB red: ru{255, 0, 0}
+    /// // RGBA semi-transparent blue: ra{0, 0, 255, 128}
+    /// // 16-channel spectral: rG3[16 bytes]
+    /// ```
+    // General format colour
+    r(u8, u8, Vec<u8>), // r(channels_base36, depth_exp, data)
+
+    // Named shortcuts (zero-data)
+    rb,
+    rc,
+    rg,
+    rj,
+    rk,
+    rl,
+    rn,
+    ro,
+    rq,
+    rr,
+    rv,
+    rw,
+    ry,
+
+    // Format shortcuts (with data)
+    re(u8),       // 8-bit greyscale
+    rx(u16),      // 16-bit greyscale
+    rz(f32),      // 32-bit float greyscale
+    ri(u8),       // 8-bit packed RGB (6×7×6)
+    rp(u16),      // 16-bit packed RGB (5-6-5)
+    ru([u8; 3]),  // 24-bit RGB (8bpc)
+    rs([u16; 3]), // 48-bit RGB (16bpc)
+    rf([f32; 3]), // 96-bit RGB (32f×3)
+    ra([u8; 4]),  // 32-bit RGBA (8bpc)
+    rt([u16; 4]), // 64-bit RGBA (16bpc)
+    rh([f32; 4]), // 128-bit RGBA (32f×4)
+
+    // Magic matrix colour transform
+    rm(usize, usize, Vec<f32>, f32), // rm(input_channels, output_channels, matrix_NxM, gamma)
+    // Where:
+    // input_channels - Number of input color channels (N)
+    // output_channels - Number of output color channels (M, usually 3 for LMS)
+    // matrix_NxM - Flattened N×M matrix as Vec<f32>
+    // gamma - Gamma correction value as f32
+
     // VSF Structure
     d(String),      // Data type name
     l(String),      // Label
@@ -370,8 +467,7 @@ pub enum VsfType {
     n(usize),       // Number/count
     z(usize),       // Version
     y(usize),       // Backward version
-    m(usize),       // Marker definition
-    r(usize),       // Marker reference
+    m(usize),       // Marker
 
     // ==================== CRYPTOGRAPHIC TYPES ====================
     // Hash algorithms - store (length-1) as single byte, then data

@@ -393,14 +393,25 @@ fn format_et(et_ms: i64) -> String {
     };
 
     let month_name = match month {
-        1 => "JAN", 2 => "FEB", 3 => "MAR", 4 => "APR",
-        5 => "MAY", 6 => "JUN", 7 => "JUL", 8 => "AUG",
-        9 => "SEP", 10 => "OCT", 11 => "NOV", 12 => "DEC",
-        _ => "UNK"
+        1 => "JAN",
+        2 => "FEB",
+        3 => "MAR",
+        4 => "APR",
+        5 => "MAY",
+        6 => "JUN",
+        7 => "JUL",
+        8 => "AUG",
+        9 => "SEP",
+        10 => "OCT",
+        11 => "NOV",
+        12 => "DEC",
+        _ => "UNK",
     };
 
-    format!("{}-{}-{:02} {}:{:02}:{:02}.{:03} {}",
-        year, month_name, day, hour_12, minute, second, milliseconds, am_pm)
+    format!(
+        "{}-{}-{:02} {}:{:02}:{:02}.{:03} {}",
+        year, month_name, day, hour_12, minute, second, milliseconds, am_pm
+    )
 }
 
 fn is_leap_year(year: i64) -> bool {
@@ -502,7 +513,11 @@ fn format_value(vsf: &VsfType) -> String {
                 .map(|d| format_number(*d))
                 .collect::<Vec<_>>()
                 .join(" × ");
-            format!("{}, 8-bit tensor ({} Bytes)", shape_str, format_number(tensor.data.len()))
+            format!(
+                "{}, 8-bit tensor ({} Bytes)",
+                shape_str,
+                format_number(tensor.data.len())
+            )
         }
         VsfType::t_f5(tensor) => {
             let shape_str = tensor
@@ -766,7 +781,11 @@ fn show_info(data: &[u8]) -> Result<(), String> {
 
     // Header section
     println!("{}", "<".truecolor(128, 128, 128));
-    println!(" {} {}", "Version".cyan(), header.version.to_string().white());
+    println!(
+        " {} {}",
+        "Version".cyan(),
+        header.version.to_string().white()
+    );
     println!(
         " {} {}",
         "Backward compat".cyan(),
@@ -784,7 +803,10 @@ fn show_info(data: &[u8]) -> Result<(), String> {
     println!();
 
     // Labels section
-    println!(" {} labels", header.labels.len().to_string().yellow().bold());
+    println!(
+        " {} labels",
+        header.labels.len().to_string().yellow().bold()
+    );
 
     // Calculate max widths
     let max_size_len = header
@@ -793,7 +815,12 @@ fn show_info(data: &[u8]) -> Result<(), String> {
         .map(|l| format_bytes(l.size).len())
         .max()
         .unwrap_or(0);
-    let max_name_len = header.labels.iter().map(|l| l.name.len()).max().unwrap_or(0);
+    let max_name_len = header
+        .labels
+        .iter()
+        .map(|l| l.name.len())
+        .max()
+        .unwrap_or(0);
     let max_offset_str_len = header
         .labels
         .iter()
@@ -845,9 +872,17 @@ fn show_info(data: &[u8]) -> Result<(), String> {
         print!(" {}", "(".truecolor(128, 128, 128));
         print!("{:>width$}", size_str.bright_yellow(), width = max_size_len);
         print!("      ");
-        print!("{:<width$}", label.name.white().bold(), width = max_name_len);
+        print!(
+            "{:<width$}",
+            label.name.white().bold(),
+            width = max_name_len
+        );
         print!("    @");
-        print!("{:>width$}", offset_str.truecolor(64, 50, 255), width = max_offset_str_len);
+        print!(
+            "{:>width$}",
+            offset_str.truecolor(64, 50, 255),
+            width = max_offset_str_len
+        );
         print!("   ");
         print!("{:<15}", field_str.cyan());
         print!(" ");
@@ -864,7 +899,12 @@ fn show_info(data: &[u8]) -> Result<(), String> {
         let connector = if is_last { " └─" } else { " ├─" };
 
         // Show section (crypto is in header label now, not preamble)
-        println!("{}{}{}", connector, "[".truecolor(128, 128, 128), label.name.bold());
+        println!(
+            "{}{}{}",
+            connector,
+            "[".truecolor(128, 128, 128),
+            label.name.bold()
+        );
 
         // Parse and show fields (skip for n[0] unboxed blobs)
         if label.child_count == 0 {
@@ -902,7 +942,11 @@ fn show_info(data: &[u8]) -> Result<(), String> {
                 }
             }
         }
-        println!("{}{}", if is_last { "   " } else { " │ " }, "]".truecolor(128, 128, 128));
+        println!(
+            "{}{}",
+            if is_last { "   " } else { " │ " },
+            "]".truecolor(128, 128, 128)
+        );
         if !is_last {
             println!(" │");
         }
@@ -958,7 +1002,11 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
             let computed = blake3::hash(&temp_data);
 
             let verified = computed.as_bytes() == stored_hash.as_slice();
-            (verified, Some(stored_hash.clone()), Some(computed.as_bytes().to_vec()))
+            (
+                verified,
+                Some(stored_hash.clone()),
+                Some(computed.as_bytes().to_vec()),
+            )
         }
         _ => (false, None, None),
     };
@@ -994,7 +1042,11 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
 
     // Display hash header
     if let (Some(expected), Some(_)) = (&stored_hash, &computed_hash) {
-        println!(" {}-Byte {} file hash:", expected.len().to_string().white(), "BLAKE3".green());
+        println!(
+            " {}-Byte {} file hash:",
+            expected.len().to_string().white(),
+            "BLAKE3".green()
+        );
     }
 
     if file_hash_verified {
