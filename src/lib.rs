@@ -185,11 +185,20 @@ pub mod crypto_algorithms;
 // Verification functions for hashing and signing VSF files
 pub mod verification;
 
+// Colour constants (spectral data, matrices, etc.)
+pub mod colour_constants;
+
+// Colour conversion utilities
+pub mod colour_convert;
+
 // Re-export main types
 pub use types::{
     datetime_to_eagle_time, EagleTime, EtType, LayoutOrder, StridedTensor, Tensor, VsfType,
     WorldCoord,
 };
+
+// Re-export colour conversion types
+pub use colour_convert::{ColourFormat, Rgb8, Rgba8};
 
 // Re-export encoding traits
 pub use encoding::{EncodeNumber, EncodeNumberInclusive};

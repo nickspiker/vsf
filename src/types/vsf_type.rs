@@ -424,19 +424,19 @@ pub enum VsfType {
     r(u8, u8, Vec<u8>), // r(channels_base36, depth_exp, data)
 
     // Named shortcuts (zero-data)
-    rb,
-    rc,
-    rg,
-    rj,
-    rk,
-    rl,
-    rn,
-    ro,
-    rq,
-    rr,
-    rv,
-    rw,
-    ry,
+    rb, // Blue
+    rc, // Cyan
+    rg, // Grey
+    rj, // Magenta
+    rk, // Black
+    rl, // Lime
+    rn, // Green
+    ro, // Orange
+    rq, // Aqua
+    rr, // Red
+    rv, // Purple
+    rw, // White
+    ry, // Yellow
 
     // Format shortcuts (with data)
     re(u8),       // 8-bit greyscale
@@ -454,8 +454,8 @@ pub enum VsfType {
     // Magic matrix colour transform
     rm(usize, usize, Vec<f32>, f32), // rm(input_channels, output_channels, matrix_NxM, gamma)
     // Where:
-    // input_channels - Number of input color channels (N)
-    // output_channels - Number of output color channels (M, usually 3 for LMS)
+    // input_channels - Number of input colour channels (N)
+    // output_channels - Number of output colour channels (M, usually 3 for LMS)
     // matrix_NxM - Flattened N×M matrix as Vec<f32>
     // gamma - Gamma correction value as f32
 
