@@ -1,0 +1,10 @@
+[package]
+name = "frequency-analyzer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# For downloading corpus files
+reqwest = { version = "0.12", features = ["blocking"] }
+# For progress bars
+indicatif = "0.17"
