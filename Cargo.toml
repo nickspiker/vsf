@@ -9,13 +9,14 @@ repository = "https://github.com/nickspiker/vsf"
 keywords = ["binary", "serialization", "storage", "data-format"]
 categories = ["encoding", "data-structures"]
 exclude = [
-    "*.bin",           # Generated Huffman tables
+    "*.bin",           # Huffman frequency data - downloaded at build time from GitHub
     "*.rlib",          # Build artifacts
     "*.vsf",           # Example VSF files
-    "vsf.png",         # Logo (GitHub only, not needed in package)
+    "vsf.png",         # Logo (GitHub only, not needed in package - 1.5MB)
     "target/",         # Build directory
     "tools/",          # Code generation tools
 ]
+# frequencies.bin (8.5MB) is downloaded from GitHub during build instead of being bundled
 
 [[bin]]
 name = "vsfinfo"
@@ -34,3 +35,6 @@ chacha20poly1305 = "0.10"
 hex = "0.4"
 colored = "2"
 num-traits = "0.2.19"
+
+[build-dependencies]
+ureq = "2"
