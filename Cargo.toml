@@ -8,6 +8,14 @@ license-file = "LICENSE"
 repository = "https://github.com/nickspiker/vsf"
 keywords = ["binary", "serialization", "storage", "data-format"]
 categories = ["encoding", "data-structures"]
+exclude = [
+    "*.bin",           # Generated Huffman tables
+    "*.rlib",          # Build artifacts
+    "*.vsf",           # Example VSF files
+    "vsf.png",         # Logo (GitHub only, not needed in package)
+    "target/",         # Build directory
+    "tools/",          # Code generation tools
+]
 
 [[bin]]
 name = "vsfinfo"
