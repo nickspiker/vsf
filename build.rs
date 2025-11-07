@@ -151,11 +151,22 @@ fn main() {
 
     // 0. Download frequencies.bin from GitHub if not present
     const FREQUENCIES_URL: &str = "https://github.com/nickspiker/vsf/raw/main/frequencies.bin";
-    download_if_missing(FREQUENCIES_URL, "frequencies.bin")
-        .expect("Failed to download frequencies.bin");
 
-    // Load frequencies
-    let mut file = File::open("frequencies.bin").expect("Need frequencies.bin");
+    // Try to download, but continue without if we're in a restricted environment (e.g., docs.rs)
+    let download_result = download_if_missing(FREQUENCIES_URL, "frequencies.bin");
+
+    // Load frequencies - if download failed and file doesn't exist, skip Huffman table generation
+    let mut file = match File::open("frequencies.bin") {
+        Ok(f) => f,
+        Err(_) => {
+            eprintln!("Warning: frequencies.bin not available, skipping Huffman table generation");
+            eprintln!("Huffman text compression will not be available in this build.");
+            if download_result.is_err() {
+                eprintln!("Download failed (likely building in restricted environment like docs.rs)");
+            }
+            return; // Skip Huffman generation, library will still compile
+        }
+    };
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).unwrap();
 
