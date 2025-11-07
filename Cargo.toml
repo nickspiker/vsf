@@ -17,7 +17,7 @@ path = "src/bin/vsfinfo.rs"
 bitvec = "1.0.1"
 chrono = "0.4.38"
 num-complex = "0.4.5"
-spirix = { path = "../spirix" }
+spirix = { version = "0.0.5", path = "../spirix" }
 clap = { version = "4", features = ["derive"] }
 blake3 = "1"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
