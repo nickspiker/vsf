@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-**VSF RGB is a spectrally-defined colour space using monochromatic primaries at 703nm, 523nm, and 462nm.** These wavelengths represent the peak responses of the AGB geometric mean model derived from human cone fundamentals. Unlike legacy standards specified by xy chromaticity coordinates, VSF RGB primaries are defined by physics and remain constant regardless of observer model updates.
+**VSF RGB is a spectrally-defined colourspace using monochromatic primaries at 703nm, 523nm, and 462nm.** These wavelengths represent the peak responses of the AGB geometric mean model derived from human cone fundamentals. Unlike legacy standards specified by xy chromaticity coordinates, VSF RGB primaries are defined by physics and remain constant regardless of observer model updates.
 
 ## Why Spectral Definition Matters
 
@@ -10,7 +10,7 @@ Every colour standard you've used (sRGB, Adobe RGB, DCI-P3, Rec.709, Rec.2020) s
 
 ### 0. Observer Model Is Frozen
 
-The 1931 xy coordinates ARE the specification. You cannot update to better observer models (like CIE 2006) without changing the colour space itself. The limitations and inaccuracies of 1931 data are permanently baked into these standards.
+The 1931 xy coordinates ARE the specification. You cannot update to better observer models (like CIE 2006) without changing the colourspace itself. The limitations and inaccuracies of 1931 data are permanently baked into these standards.
 
 ### 1. Specification Is Ambiguous
 
@@ -18,7 +18,7 @@ xy coordinates describe a perceptual response, not a physical stimulus. Multiple
 
 ### 2. Accumulated Transformation Errors
 
-Converting between colour spaces requires chaining transformations thru XYZ tristimulus space, each step accumulating floating-point error and observer model inconsistencies. Rec.2020 kind of solves this by listing xy coordinates and wavelengths (630nm, 532nm, 467nm) - likely specified for hardware implementation reasons. However, their published xy coordinates don't match those wavelengths using the 2006 standard observer. Now you have two specifications that define different colours. Which one is "correct"? Nobody knows. VSF uses their wavelengths and ignores the xy coordinates.
+Converting between colourspaces requires chaining transformations thru XYZ tristimulus space, each step accumulating floating-point error and observer model inconsistencies. Rec.2020 kind of solves this by listing xy coordinates and wavelengths (630nm, 532nm, 467nm) - likely specified for hardware implementation reasons. However, their published xy coordinates don't match those wavelengths using the 2006 standard observer. Now you have two specifications that define different colours. Which one is "correct"? Nobody knows. VSF uses their wavelengths and ignores the xy coordinates.
 
 ## The Spectral Solution
 
@@ -79,24 +79,60 @@ Human vision is logarithmic response all the way to zero. Power functions are co
 
 Gamma 2 encoding/decoding provides roughly **10-20× performance improvement** over gamma 2.2/2.4 power functions while remaining mathematically continuous to zero.
 
-**Linearization:** `linear = encoded^0.5` (square root)  
+**Linearization:** `linear = encoded^0.5` (square root)
 **Encoding:** `encoded = linear*linear` (square)
 
-That's it. No branches. No arbitrary constants. No special cases. Stupidly fast.
+### Quantization: ×256 Truncation (Not 255 and Rounding)
+
+VSF uses **×256 truncation** for integer quantization, not the sRGB spec's ×255 rounding.
+
+**Symmetric Bucket Sizes (But Asymmetric Round-Trips)**
+
+×256 (VSF): Each integer represents exactly 1/256 of the range
+- `0` represents [0., 1/256)
+- `1` represents [1/256, 2/256)
+- `128` represents [128/256, 129/256)
+- `255` represents [255/256, 256/256) but clamps to 255
+- All buckets are **exactly the same width**: 1/256
+
+×255 (sRGB/Adobe RGB spec): Equal-width buckets, but asymmetric round-trips
+- Encoding: `round(value * 255)` centers each bucket on the integer
+- `0` represents [0., 0.5/255) — values [0, 0.00196)
+- `1` represents [0.5/255, 1.5/255) — values [0.00196, 0.00588)
+- `128` represents [127.5/255, 128.5/255) — values [0.4999, 0.5039)
+- `255` represents [254.5/255, 1.] — values [0.9980, 1.0]
+- All buckets **ARE the same width**: 1/255
+
+**THE HORROR:** When decoding, they use `value / 255` with **NO +0.5**
+- This returns the **LOWER EDGE** of the bucket, not the center!
+- Encode 0.502 → `round(0.502 * 255)` = 128
+- Decode 128 → `128 / 255` = 0.5019... ≠ 0.502
+- You get back the bottom of the bucket [0.5, 0.504), not the center at 0.502
+
+**Round-trip asymmetry:** Any value in bucket [0.5, 0.504) encodes to 128, but 128 decodes to 0.5019. The bucket center (0.502) does NOT round-trip to itself. Values slightly above center get pulled down on decode. Values slightly below center get pulled up less.
+
+VSF's ×256 truncation has the SAME asymmetry (128 represents [0.5, 0.50390625) but decodes to 0.5), but at least it's honest about it: truncation is truncation. No pretending with `round()` that you're doing something symmetric.
+
+**Performance difference:** 10-50× faster quantization, especially critical in video processing where you're quantizing millions of pixels per frame.
+
+**Encoding:** `u8_value = (linear_squared * 256.) as u8`
+**Decoding:** `linear = ((u8_value as f32 / 256.).sqrt())`
+
+No branches. No rounding. No arbitrary division. Just bitshifts and truncation.
 
 ## Observer Model: CIE 2006 2° Standard Observer
 
-VSF RGB currently uses the **CIE 2006 2° Standard Observer** (cone fundamentals) for all colour space conversions.
+VSF RGB currently uses the **CIE 2006 2° Standard Observer** (cone fundamentals) for all colourspace conversions.
 
 ### Why This Matters
 
-The observer model is used to establish perceptual equivalence between colour spaces: "What mixture of 703/523/462nm primaries produces the same L/M/S cone response as this input colour?"
+The observer model is used to establish perceptual equivalence between colourspaces: "What mixture of 703/523/462nm primaries produces the same L/M/S cone response as this input colour?"
 
 **Key advantage of spectral definition:** When better observer models are published, VSF RGB can adopt them immediately. The primaries (703nm, 523nm, 462nm) never change. Only the transformation matrices get recalculated with improved cone fundamentals, yielding better perceptual accuracy.
 
-Legacy standards specified in xy coordinates cannot do this - their primaries ARE those 1931 xy values. Updating the observer model would change the colour space itself.
+Legacy standards specified in xy coordinates cannot do this - their primaries ARE those 1931 xy values. Updating the observer model would change the colourspace itself.
 
-## Converting Between Colour Spaces
+## Converting Between Colourspaces
 
 All conversions go thru LMS cone space using the most recent observer model:
 

@@ -31,30 +31,36 @@ fn invert_matrix_3x3(m: &[f64; 9]) -> [f64; 9] {
 /// - out[0] = colour[0] * cmx[0] + colour[1] * cmx[1] + colour[2] * cmx[2]
 /// - out[1] = colour[0] * cmx[3] + colour[1] * cmx[4] + colour[2] * cmx[5]
 /// - out[2] = colour[0] * cmx[6] + colour[1] * cmx[7] + colour[2] * cmx[8]
+/// Apply 3×3 transformation matrix to colour vector (column-major)
+///
+/// Computes: result = matrix * colour
 fn apply_matrix_3x3(cmx: &[f64], colour: &[f64; 3]) -> [f64; 3] {
     [
-        colour[0] * cmx[0] + colour[1] * cmx[1] + colour[2] * cmx[2],
-        colour[0] * cmx[3] + colour[1] * cmx[4] + colour[2] * cmx[5],
-        colour[0] * cmx[6] + colour[1] * cmx[7] + colour[2] * cmx[8],
+        cmx[0] * colour[0] + cmx[3] * colour[1] + cmx[6] * colour[2],  // Row 0
+        cmx[1] * colour[0] + cmx[4] * colour[1] + cmx[7] * colour[2],  // Row 1
+        cmx[2] * colour[0] + cmx[5] * colour[1] + cmx[8] * colour[2],  // Row 2
     ]
 }
 
 /// Multiply two 3x3 matrices (matrix multiplication: result = a * b)
 ///
-/// Matrices are in column-major format
-fn convert_matrix_3x3(b: &[f64], a: &[f64]) -> [f64; 9] {
+/// Multiply two 3×3 matrices: C = A * B (column-major)
+///
+/// Column j of C = A * column j of B
+fn convert_matrix_3x3(a: &[f64], b: &[f64]) -> [f64; 9] {
     [
-        a[0] * b[0] + a[1] * b[3] + a[2] * b[6],
-        a[0] * b[1] + a[1] * b[4] + a[2] * b[7],
-        a[0] * b[2] + a[1] * b[5] + a[2] * b[8],
-        //
-        a[3] * b[0] + a[4] * b[3] + a[5] * b[6],
-        a[3] * b[1] + a[4] * b[4] + a[5] * b[7],
-        a[3] * b[2] + a[4] * b[5] + a[5] * b[8],
-        //
-        a[6] * b[0] + a[7] * b[3] + a[8] * b[6],
-        a[6] * b[1] + a[7] * b[4] + a[8] * b[7],
-        a[6] * b[2] + a[7] * b[5] + a[8] * b[8],
+        // Column 0 of result = A * column 0 of B
+        a[0]*b[0] + a[3]*b[1] + a[6]*b[2],  // C[0]
+        a[1]*b[0] + a[4]*b[1] + a[7]*b[2],  // C[1]
+        a[2]*b[0] + a[5]*b[1] + a[8]*b[2],  // C[2]
+        // Column 1 of result = A * column 1 of B
+        a[0]*b[3] + a[3]*b[4] + a[6]*b[5],  // C[3]
+        a[1]*b[3] + a[4]*b[4] + a[7]*b[5],  // C[4]
+        a[2]*b[3] + a[5]*b[4] + a[8]*b[5],  // C[5]
+        // Column 2 of result = A * column 2 of B
+        a[0]*b[6] + a[3]*b[7] + a[6]*b[8],  // C[6]
+        a[1]*b[6] + a[4]*b[7] + a[7]*b[8],  // C[7]
+        a[2]*b[6] + a[5]*b[7] + a[8]*b[8],  // C[8]
     ]
 }
 
@@ -62,6 +68,23 @@ fn convert_matrix_3x3(b: &[f64], a: &[f64]) -> [f64; 9] {
 const VSF_RED_NM: f64 = 703.0;
 const VSF_GREEN_NM: f64 = 523.0;
 const VSF_BLUE_NM: f64 = 462.0;
+
+/// Rec.2020 primaries (wavelengths in nm)
+/// ITU-R BT.2020 specifies these monochromatic primaries
+const REC2020_RED_NM: f64 = 630.0;
+const REC2020_GREEN_NM: f64 = 532.0;
+const REC2020_BLUE_NM: f64 = 467.0;
+
+/// sRGB primaries (CIE xy chromaticity coordinates with D65 white point)
+/// These are the standard sRGB primaries from IEC 61966-2-1:1999
+const SRGB_RED_XY: [f64; 2] = [0.6400, 0.3300];
+const SRGB_GREEN_XY: [f64; 2] = [0.3000, 0.6000];
+const SRGB_BLUE_XY: [f64; 2] = [0.1500, 0.0600];
+
+/// Adobe RGB (1998) primaries (CIE xy chromaticity coordinates with D65 white point)
+const ADOBE_RGB_RED_XY: [f64; 2] = [0.6400, 0.3300];
+const ADOBE_RGB_GREEN_XY: [f64; 2] = [0.2100, 0.7100];
+const ADOBE_RGB_BLUE_XY: [f64; 2] = [0.1500, 0.0600];
 
 /// Stockman & Sharpe 2000 10° data parameters
 const SS2000_START_NM: f64 = 390.0;
@@ -416,17 +439,17 @@ fn build_vsf_to_lms_matrix(lms_1nm: &[f64]) -> [f64; 9] {
              red_lms[0] + red_lms[1] + red_lms[2] + green_lms[0] + green_lms[1] + green_lms[2] + blue_lms[0] + blue_lms[1] + blue_lms[2]);
 
     // Build unscaled matrix in column-major format
-    // Each column is a primary's contribution to [L, M, S]
+    // Each column is a primary's full [L, M, S] response
     let unscaled = [
-        red_lms[0], green_lms[0], blue_lms[0],      // Column 0: L channel from [red, green, blue]
-        red_lms[1], green_lms[1], blue_lms[1],      // Column 1: M channel from [red, green, blue]
-        red_lms[2], green_lms[2], blue_lms[2],      // Column 2: S channel from [red, green, blue]
+        red_lms[0], red_lms[1], red_lms[2],         // Column 0: Red primary's [L, M, S]
+        green_lms[0], green_lms[1], green_lms[2],   // Column 1: Green primary's [L, M, S]
+        blue_lms[0], blue_lms[1], blue_lms[2],      // Column 2: Blue primary's [L, M, S]
     ];
 
     // Invert the matrix
     let unscaled_inv = invert_matrix_3x3(&unscaled);
 
-    // Multiply our target Illuminant E [1,1,1] through the INVERSE
+    // Multiply our target Illuminant E [1,1,1] thru the INVERSE
     // This tells us what RGB input we need to produce lms=[1,1,1]
     let illum_e = [1.0, 1.0, 1.0];
     let rgb_scale_factors = apply_matrix_3x3(&unscaled_inv, &illum_e);
@@ -436,17 +459,17 @@ fn build_vsf_to_lms_matrix(lms_1nm: &[f64]) -> [f64; 9] {
 
     // Scale each column (primary) by MULTIPLYING by the corresponding RGB scaling factor
     // This ensures equal brightness primaries (RGB=[1,1,1]) produce Illuminant E
-    // Matrix is in column-major format, so each group of 3 values is a CHANNEL, not a primary
+    // Matrix is in column-major format, so each group of 3 values is a PRIMARY's full LMS response
     let scaled = [
-        red_lms[0] * rgb_scale_factors[0], green_lms[0] * rgb_scale_factors[1], blue_lms[0] * rgb_scale_factors[2],  // L channel scaled
-        red_lms[1] * rgb_scale_factors[0], green_lms[1] * rgb_scale_factors[1], blue_lms[1] * rgb_scale_factors[2],  // M channel scaled
-        red_lms[2] * rgb_scale_factors[0], green_lms[2] * rgb_scale_factors[1], blue_lms[2] * rgb_scale_factors[2],  // S channel scaled
+        red_lms[0] * rgb_scale_factors[0], red_lms[1] * rgb_scale_factors[0], red_lms[2] * rgb_scale_factors[0],        // Red primary scaled
+        green_lms[0] * rgb_scale_factors[1], green_lms[1] * rgb_scale_factors[1], green_lms[2] * rgb_scale_factors[1],  // Green primary scaled
+        blue_lms[0] * rgb_scale_factors[2], blue_lms[1] * rgb_scale_factors[2], blue_lms[2] * rgb_scale_factors[2],     // Blue primary scaled
     ];
 
     // Verify the scaled matrix
     let rgb_white = [1.0, 1.0, 1.0];
     let scaled_white = apply_matrix_3x3(&scaled, &rgb_white);
-    println!("// Verification - RGB=[1,1,1] through scaled matrix:");
+    println!("// Verification - RGB=[1,1,1] thru scaled matrix:");
     println!("//   lms = [{}, {}, {}]", scaled_white[0], scaled_white[1], scaled_white[2]);
 
     scaled
@@ -498,15 +521,15 @@ fn build_vsf_to_xyz_matrix(xyz_1nm: &[f64]) -> [f64; 9] {
 
     // Build unscaled matrix with each primary as a COLUMN (column-major format)
     let unscaled = [
-        red_xyz[0], green_xyz[0], blue_xyz[0],      // Column 0: x channel from [red, green, blue]
-        red_xyz[1], green_xyz[1], blue_xyz[1],      // Column 1: y channel from [red, green, blue]
-        red_xyz[2], green_xyz[2], blue_xyz[2],      // Column 2: z channel from [red, green, blue]
+        red_xyz[0], red_xyz[1], red_xyz[2],         // Column 0: red primary's [X,Y,Z] contribution
+        green_xyz[0], green_xyz[1], green_xyz[2],   // Column 1: green primary's [X,Y,Z] contribution
+        blue_xyz[0], blue_xyz[1], blue_xyz[2],      // Column 2: blue primary's [X,Y,Z] contribution
     ];
 
     // Invert the matrix
     let unscaled_inv = invert_matrix_3x3(&unscaled);
 
-    // Multiply our target Illuminant E [1,1,1] through the INVERSE
+    // Multiply our target Illuminant E [1,1,1] thru the INVERSE
     // This tells us what RGB input we need to produce XYZ=[1,1,1]
     let illum_e = [1.0, 1.0, 1.0];
     let rgb_scale_factors = apply_matrix_3x3(&unscaled_inv, &illum_e);
@@ -515,18 +538,146 @@ fn build_vsf_to_xyz_matrix(xyz_1nm: &[f64]) -> [f64; 9] {
     println!("//   RGB = [{}, {}, {}]", rgb_scale_factors[0], rgb_scale_factors[1], rgb_scale_factors[2]);
 
     // Scale each column (primary) by multiplying by the corresponding RGB scaling factor
-    // Matrix is in column-major format, so each group of 3 values is a CHANNEL, not a primary
+    // Matrix is in column-major format, so each column (group of 3 consecutive values) is a PRIMARY
     let scaled = [
-        red_xyz[0] * rgb_scale_factors[0], green_xyz[0] * rgb_scale_factors[1], blue_xyz[0] * rgb_scale_factors[2],  // X channel scaled
-        red_xyz[1] * rgb_scale_factors[0], green_xyz[1] * rgb_scale_factors[1], blue_xyz[1] * rgb_scale_factors[2],  // Y channel scaled
-        red_xyz[2] * rgb_scale_factors[0], green_xyz[2] * rgb_scale_factors[1], blue_xyz[2] * rgb_scale_factors[2],  // Z channel scaled
+        red_xyz[0] * rgb_scale_factors[0], red_xyz[1] * rgb_scale_factors[0], red_xyz[2] * rgb_scale_factors[0],  // Red column scaled
+        green_xyz[0] * rgb_scale_factors[1], green_xyz[1] * rgb_scale_factors[1], green_xyz[2] * rgb_scale_factors[1],  // Green column scaled
+        blue_xyz[0] * rgb_scale_factors[2], blue_xyz[1] * rgb_scale_factors[2], blue_xyz[2] * rgb_scale_factors[2],  // Blue column scaled
     ];
 
     // Verify the scaled matrix
     let rgb_white = [1.0, 1.0, 1.0];
     let scaled_white = apply_matrix_3x3(&scaled, &rgb_white);
-    println!("// Verification - RGB=[1,1,1] through scaled XYZ matrix:");
+    println!("// Verification - RGB=[1,1,1] thru scaled XYZ matrix:");
     println!("//   XYZ = [{}, {}, {}]", scaled_white[0], scaled_white[1], scaled_white[2]);
+
+    scaled
+}
+
+/// Build RGB → XYZ transformation matrix from xy chromaticity coordinates
+/// Uses CIE xy coordinates with D65 white point
+fn build_rgb_from_xy_to_xyz_matrix(
+    red_xy: [f64; 2],
+    green_xy: [f64; 2],
+    blue_xy: [f64; 2],
+    space_name: &str,
+) -> [f64; 9] {
+    // Convert xy to XYZ (assume Y=1 for each primary)
+    // X = x * Y / y
+    // Y = Y (normalized to 1)
+    // Z = (1 - x - y) * Y / y
+
+    let red_XYZ = [red_xy[0] / red_xy[1], 1.0, (1.0 - red_xy[0] - red_xy[1]) / red_xy[1]];
+    let green_XYZ = [green_xy[0] / green_xy[1], 1.0, (1.0 - green_xy[0] - green_xy[1]) / green_xy[1]];
+    let blue_XYZ = [blue_xy[0] / blue_xy[1], 1.0, (1.0 - blue_xy[0] - blue_xy[1]) / blue_xy[1]];
+
+    println!("// {} primaries - CIE xy chromaticity:", space_name);
+    println!("//   Red:   x={:.4}, y={:.4}", red_xy[0], red_xy[1]);
+    println!("//   Green: x={:.4}, y={:.4}", green_xy[0], green_xy[1]);
+    println!("//   Blue:  x={:.4}, y={:.4}", blue_xy[0], blue_xy[1]);
+
+    println!("// {} primaries - XYZ (Y=1 normalized):", space_name);
+    println!("//   Red:   X={}, Y={}, Z={}", red_XYZ[0], red_XYZ[1], red_XYZ[2]);
+    println!("//   Green: X={}, Y={}, Z={}", green_XYZ[0], green_XYZ[1], green_XYZ[2]);
+    println!("//   Blue:  X={}, Y={}, Z={}", blue_XYZ[0], blue_XYZ[1], blue_XYZ[2]);
+
+    // Build unscaled matrix with each primary as a COLUMN (column-major format)
+    let unscaled = [
+        red_XYZ[0], red_XYZ[1], red_XYZ[2],         // Column 0: red primary's [X,Y,Z] contribution
+        green_XYZ[0], green_XYZ[1], green_XYZ[2],   // Column 1: green primary's [X,Y,Z] contribution
+        blue_XYZ[0], blue_XYZ[1], blue_XYZ[2],      // Column 2: blue primary's [X,Y,Z] contribution
+    ];
+
+    // Invert the matrix
+    let unscaled_inv = invert_matrix_3x3(&unscaled);
+
+    // D65 white point in XYZ (normalized so Y=1.0)
+    let d65_xyz = [0.95047, 1.0, 1.08883];
+    let rgb_scale_factors = apply_matrix_3x3(&unscaled_inv, &d65_xyz);
+
+    println!("// RGB brightness needed to produce D65 white point in XYZ:");
+    println!("//   RGB = [{}, {}, {}]", rgb_scale_factors[0], rgb_scale_factors[1], rgb_scale_factors[2]);
+
+    // Scale each column (primary) by multiplying by the corresponding RGB scaling factor
+    // Matrix is in column-major format, so each column (group of 3 consecutive values) is a PRIMARY
+    let scaled = [
+        red_XYZ[0] * rgb_scale_factors[0], red_XYZ[1] * rgb_scale_factors[0], red_XYZ[2] * rgb_scale_factors[0],  // Red column scaled
+        green_XYZ[0] * rgb_scale_factors[1], green_XYZ[1] * rgb_scale_factors[1], green_XYZ[2] * rgb_scale_factors[1],  // Green column scaled
+        blue_XYZ[0] * rgb_scale_factors[2], blue_XYZ[1] * rgb_scale_factors[2], blue_XYZ[2] * rgb_scale_factors[2],  // Blue column scaled
+    ];
+
+    // Verify the scaled matrix
+    let rgb_white = [1.0, 1.0, 1.0];
+    let scaled_white = apply_matrix_3x3(&scaled, &rgb_white);
+    println!("// Verification - {} RGB=[1,1,1] thru scaled XYZ matrix:", space_name);
+    println!("//   XYZ = [{}, {}, {}] (should be D65)", scaled_white[0], scaled_white[1], scaled_white[2]);
+
+    scaled
+}
+
+/// Build Rec.2020 RGB → XYZ transformation matrix
+/// Uses monochromatic primaries (630nm, 532nm, 467nm) with D65 white point
+fn build_rec2020_to_xyz_matrix(xyz_1nm: &[f64]) -> [f64; 9] {
+    // Extract XYZ values at Rec.2020 primaries from 1nm data
+    // Data starts at 380nm, so index = wavelength - 380
+    let red_idx = (REC2020_RED_NM as usize - 380) * 3;
+    let green_idx = (REC2020_GREEN_NM as usize - 380) * 3;
+    let blue_idx = (REC2020_BLUE_NM as usize - 380) * 3;
+
+    let red_XYZ = [xyz_1nm[red_idx], xyz_1nm[red_idx + 1], xyz_1nm[red_idx + 2]];
+    let green_XYZ = [xyz_1nm[green_idx], xyz_1nm[green_idx + 1], xyz_1nm[green_idx + 2]];
+    let blue_XYZ = [xyz_1nm[blue_idx], xyz_1nm[blue_idx + 1], xyz_1nm[blue_idx + 2]];
+
+    // Normalize to sum=1.0 for each primary
+    let red_sum = red_XYZ[0] + red_XYZ[1] + red_XYZ[2];
+    let green_sum = green_XYZ[0] + green_XYZ[1] + green_XYZ[2];
+    let blue_sum = blue_XYZ[0] + blue_XYZ[1] + blue_XYZ[2];
+
+    let red_xyz = [red_XYZ[0] / red_sum, red_XYZ[1] / red_sum, red_XYZ[2] / red_sum];
+    let green_xyz = [green_XYZ[0] / green_sum, green_XYZ[1] / green_sum, green_XYZ[2] / green_sum];
+    let blue_xyz = [blue_XYZ[0] / blue_sum, blue_XYZ[1] / blue_sum, blue_XYZ[2] / blue_sum];
+
+    println!("// Rec.2020 primaries - uppercase XYZ (raw CIE 1931 values):");
+    println!("//   Red (630nm):   X={}, Y={}, Z={}", red_XYZ[0], red_XYZ[1], red_XYZ[2]);
+    println!("//   Green (532nm): X={}, Y={}, Z={}", green_XYZ[0], green_XYZ[1], green_XYZ[2]);
+    println!("//   Blue (467nm):  X={}, Y={}, Z={}", blue_XYZ[0], blue_XYZ[1], blue_XYZ[2]);
+
+    println!("// Rec.2020 primaries - lowercase xyz (sum normalized):");
+    println!("//   Red (630nm):   x={}, y={}, z={} (sum={})", red_xyz[0], red_xyz[1], red_xyz[2], red_xyz[0] + red_xyz[1] + red_xyz[2]);
+    println!("//   Green (532nm): x={}, y={}, z={} (sum={})", green_xyz[0], green_xyz[1], green_xyz[2], green_xyz[0] + green_xyz[1] + green_xyz[2]);
+    println!("//   Blue (467nm):  x={}, y={}, z={} (sum={})", blue_xyz[0], blue_xyz[1], blue_xyz[2], blue_xyz[0] + blue_xyz[1] + blue_xyz[2]);
+
+    // Build unscaled matrix with each primary as a COLUMN (column-major format)
+    let unscaled = [
+        red_xyz[0], red_xyz[1], red_xyz[2],         // Column 0: red primary's [X,Y,Z] contribution
+        green_xyz[0], green_xyz[1], green_xyz[2],   // Column 1: green primary's [X,Y,Z] contribution
+        blue_xyz[0], blue_xyz[1], blue_xyz[2],      // Column 2: blue primary's [X,Y,Z] contribution
+    ];
+
+    // Invert the matrix
+    let unscaled_inv = invert_matrix_3x3(&unscaled);
+
+    // D65 white point in XYZ (normalized so Y=1.0)
+    // CIE Standard Illuminant D65
+    let d65_xyz = [0.95047, 1.0, 1.08883];
+    let rgb_scale_factors = apply_matrix_3x3(&unscaled_inv, &d65_xyz);
+
+    println!("// RGB brightness needed to produce D65 white point in XYZ:");
+    println!("//   RGB = [{}, {}, {}]", rgb_scale_factors[0], rgb_scale_factors[1], rgb_scale_factors[2]);
+
+    // Scale each column (primary) by multiplying by the corresponding RGB scaling factor
+    // Matrix is in column-major format, so each column (group of 3 consecutive values) is a PRIMARY
+    let scaled = [
+        red_xyz[0] * rgb_scale_factors[0], red_xyz[1] * rgb_scale_factors[0], red_xyz[2] * rgb_scale_factors[0],  // Red column scaled
+        green_xyz[0] * rgb_scale_factors[1], green_xyz[1] * rgb_scale_factors[1], green_xyz[2] * rgb_scale_factors[1],  // Green column scaled
+        blue_xyz[0] * rgb_scale_factors[2], blue_xyz[1] * rgb_scale_factors[2], blue_xyz[2] * rgb_scale_factors[2],  // Blue column scaled
+    ];
+
+    // Verify the scaled matrix
+    let rgb_white = [1.0, 1.0, 1.0];
+    let scaled_white = apply_matrix_3x3(&scaled, &rgb_white);
+    println!("// Verification - Rec.2020 RGB=[1,1,1] thru scaled XYZ matrix:");
+    println!("//   XYZ = [{}, {}, {}] (should be D65)", scaled_white[0], scaled_white[1], scaled_white[2]);
 
     scaled
 }
@@ -678,9 +829,9 @@ use crate::colour::spectrum::ConstSpectrum;
 /// scaling so that RGB=[1,1,1] maps to Illuminant E (equal energy spectrum).
 ///
 /// Matrix layout (column-major):
-/// - Indices 0-2: l channel contributions from [red, green, blue]
-/// - Indices 3-5: m channel contributions from [red, green, blue]
-/// - Indices 6-8: s channel contributions from [red, green, blue]
+/// - Indices 0-2: Red primary's [L, M, S] cone responses
+/// - Indices 3-5: Green primary's [L, M, S] cone responses
+/// - Indices 6-8: Blue primary's [L, M, S] cone responses
 {}
 
 /// lms → VSF RGB transformation matrix
@@ -698,22 +849,8 @@ pub const LMS2PHOTOPIC: [f32; 3] = [
     0.0,  // s cone weight (S-cones don't contribute to photopic luminance)
 ];
 
-/// Rec.2020 → VSF RGB transformation matrix (placeholder)
-///
-/// Both Rec.2020 (630nm, 532nm, 467nm) and VSF RGB are spectrally defined.
-/// Matrix will be derived from their respective lms transformations.
-pub const REC20202VSF_RGB: [f32; 9] = [
-    1.0, 0.0, 0.0,
-    0.0, 1.0, 0.0,
-    0.0, 0.0, 1.0,
-];
-
-/// VSF RGB → Rec.2020 transformation matrix (placeholder)
-pub const VSF_RGB2REC2020: [f32; 9] = [
-    1.0, 0.0, 0.0,
-    0.0, 1.0, 0.0,
-    0.0, 0.0, 1.0,
-];
+// Rec.2020 transformation matrices are now in the rec2020 module
+// See: src/colour/rec2020/constants.rs
 "#,
         format_lms_1nm_array(lms_1nm),
         format_matrix(vsf_to_lms, "VSF_RGB2LMS"),
@@ -758,15 +895,35 @@ fn format_xyz_1nm_array(data: &[f64]) -> String {
     output
 }
 
-fn write_xyz_constants(vsf_to_xyz: &[f64; 9], xyz_to_vsf: &[f64; 9], xyz_1nm: &[f64]) -> std::io::Result<()> {
+fn write_xyz_constants(
+    vsf_to_xyz: &[f64; 9],
+    xyz_to_vsf: &[f64; 9],
+    vsf_to_srgb: &[f64; 9],
+    srgb_to_vsf: &[f64; 9],
+    vsf_to_adobe_rgb: &[f64; 9],
+    adobe_rgb_to_vsf: &[f64; 9],
+    xyz_1nm: &[f64],
+) -> std::io::Result<()> {
     let content = format!(
 r#"//! Legacy colourspace transformation matrices and constants
 //!
 //! **Auto-generated - do not edit directly!**
 //! Generated by tools/src/bin/generate_constants.rs
 //!
-//! All matrices in this module are defined using CIE 1931 xy chromaticity coordinates
-//! and are permanently bound to the 1931 Standard Observer.
+//! # ⚠️ Legacy Warning
+//!
+//! **All matrices in this module are defined using CIE 1931 xy chromaticity coordinates and are permanently bound to the 1931 2° Standard Observer.**
+//!
+//! The CIE 1931 XYZ system is based on colour matching experiments from the 1920s with only ~17 observers. It has known flaws and introduces accumulated errors thru multiple transformation steps.
+//!
+//! **VSF prefers spectral/wavelength-based definitions** (see `spectral` module) which use modern Stockman & Sharpe 2000 10° cone fundamentals and avoid CIE 1931 entirely.
+//!
+//! ## When to use this module
+//!
+//! - **sRGB/Rec.709/Adobe 1998**: Required for compatibility (primaries defined in xy)
+//! - **XYZ conversions**: Only when absolutely necessary for legacy workflows (DNG)
+//!
+//! For new colour work, use spectral definitions (Rec.2020, VSF RGB) whenever possible.
 
 use crate::colour::spectrum::ConstSpectrum;
 
@@ -778,9 +935,7 @@ use crate::colour::spectrum::ConstSpectrum;
 {}
 /// VSF RGB → XYZ transformation matrix
 ///
-/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries) to CIE 1931 XYZ colour space.
-/// Derived from CIE 1931 2° Standard Observer colour matching functions with white point
-/// scaling so that RGB=[1,1,1] maps to Illuminant E (equal energy spectrum).
+/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries) to CIE 1931 XYZ colourspace. Derived from CIE 1931 2° Standard Observer colour matching functions with white point scaling so that RGB=[1,1,1] maps to Illuminant E (equal energy spectrum).
 ///
 /// Matrix layout (column-major):
 /// - Indices 0-2: X channel contributions from [red, green, blue]
@@ -790,21 +945,97 @@ use crate::colour::spectrum::ConstSpectrum;
 
 /// XYZ → VSF RGB transformation matrix
 ///
-/// Converts CIE 1931 XYZ colour space to linear VSF RGB.
+/// Converts CIE 1931 XYZ colourspace to linear VSF RGB.
 /// Inverse of VSF_RGB2XYZ.
+{}
+
+/// VSF RGB → sRGB transformation matrix
+///
+/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear sRGB (IEC 61966-2-1:1999 primaries, D65 white point).
+///
+/// Matrix layout (column-major):
+/// - Indices 0-2: Red channel contributions from [red, green, blue]
+/// - Indices 3-5: Green channel contributions from [red, green, blue]
+/// - Indices 6-8: Blue channel contributions from [red, green, blue]
+{}
+
+/// sRGB → VSF RGB transformation matrix
+///
+/// Converts linear sRGB to linear VSF RGB.
+/// Inverse of VSF_RGB2SRGB.
+{}
+
+/// VSF RGB → Adobe RGB (1998) transformation matrix
+///
+/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear Adobe RGB (1998 specification primaries, D65 white point).
+///
+/// Matrix layout (column-major):
+/// - Indices 0-2: Red channel contributions from [red, green, blue]
+/// - Indices 3-5: Green channel contributions from [red, green, blue]
+/// - Indices 6-8: Blue channel contributions from [red, green, blue]
+{}
+
+/// Adobe RGB (1998) → VSF RGB transformation matrix
+///
+/// Converts linear Adobe RGB (1998) to linear VSF RGB.
+/// Inverse of VSF_RGB2ADOBE_RGB.
 {}
 "#,
         format_xyz_1nm_array(xyz_1nm),
         format_matrix(vsf_to_xyz, "VSF_RGB2XYZ"),
-        format_matrix(xyz_to_vsf, "XYZ2VSF_RGB")
+        format_matrix(xyz_to_vsf, "XYZ2VSF_RGB"),
+        format_matrix(vsf_to_srgb, "VSF_RGB2SRGB"),
+        format_matrix(srgb_to_vsf, "SRGB2VSF_RGB"),
+        format_matrix(vsf_to_adobe_rgb, "VSF_RGB2ADOBE_RGB"),
+        format_matrix(adobe_rgb_to_vsf, "ADOBE_RGB2VSF_RGB")
     );
 
     let path = Path::new("../src/colour/legacy/constants.rs");
     fs::write(path, content)?;
-    println!("Wrote XYZ constants to {}", path.display());
+    println!("Wrote XYZ and RGB constants to {}", path.display());
     Ok(())
 }
 
+fn write_rec2020_constants(vsf_to_rec2020: &[f64; 9], rec2020_to_vsf: &[f64; 9]) -> std::io::Result<()> {
+    let content = format!(
+r#"//! Rec.2020 colourspace transformation matrices
+//!
+//! **Auto-generated - do not edit directly!**
+//! Generated by tools/src/bin/generate_constants.rs
+//!
+//! ITU-R BT.2020 (Rec.2020) is a wide colour gamut standard for UHDTV.
+//! These matrices use monochromatic primaries (630nm, 532nm, 467nm) with D65 white point.
+
+/// VSF RGB → Rec.2020 transformation matrix
+///
+/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white)
+/// to linear Rec.2020 RGB (630nm, 532nm, 467nm primaries, D65 white point).
+///
+/// Matrix layout (column-major):
+/// - Indices 0-2: Red channel contributions from [red, green, blue]
+/// - Indices 3-5: Green channel contributions from [red, green, blue]
+/// - Indices 6-8: Blue channel contributions from [red, green, blue]
+{}
+
+/// Rec.2020 → VSF RGB transformation matrix
+///
+/// Converts linear Rec.2020 RGB to linear VSF RGB.
+/// Inverse of VSF_RGB2REC2020.
+{}
+"#,
+        format_matrix(vsf_to_rec2020, "VSF_RGB2REC2020"),
+        format_matrix(rec2020_to_vsf, "REC2020_2VSF_RGB")
+    );
+
+    let path = Path::new("../src/colour/rec2020/constants.rs");
+    // Create directory if it doesn't exist
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, content)?;
+    println!("Wrote Rec.2020 constants to {}", path.display());
+    Ok(())
+}
 
 fn main() -> std::io::Result<()> {
     println!("VSF RGB ↔ lms/XYZ transformation matrices");
@@ -837,9 +1068,52 @@ fn main() -> std::io::Result<()> {
     // Invert to get XYZ → VSF
     let xyz_to_vsf = invert_matrix_3x3(&vsf_to_xyz);
 
+    // Build Rec.2020 → XYZ matrix
+    println!();
+    println!("// Building Rec.2020 matrices...");
+    let rec2020_to_xyz = build_rec2020_to_xyz_matrix(&xyz_1nm);
+    let xyz_to_rec2020 = invert_matrix_3x3(&rec2020_to_xyz);
+
+    // Compose VSF → Rec.2020 transformation (VSF → XYZ → Rec.2020)
+    let vsf_to_rec2020 = convert_matrix_3x3(&xyz_to_rec2020, &vsf_to_xyz);
+    let rec2020_to_vsf = invert_matrix_3x3(&vsf_to_rec2020);
+
+    println!();
+    println!("// VSF → Rec.2020 composed transformation:");
+    println!("//   VSF RGB → XYZ → Rec.2020 RGB");
+
+    // Build sRGB → XYZ matrix
+    println!();
+    println!("// Building sRGB matrices...");
+    let srgb_to_xyz = build_rgb_from_xy_to_xyz_matrix(SRGB_RED_XY, SRGB_GREEN_XY, SRGB_BLUE_XY, "sRGB");
+    let xyz_to_srgb = invert_matrix_3x3(&srgb_to_xyz);
+
+    // Compose VSF → sRGB transformation (VSF → XYZ → sRGB)
+    let vsf_to_srgb = convert_matrix_3x3(&xyz_to_srgb, &vsf_to_xyz);
+    let srgb_to_vsf = invert_matrix_3x3(&vsf_to_srgb);
+
+    println!();
+    println!("// VSF → sRGB composed transformation:");
+    println!("//   VSF RGB → XYZ → sRGB");
+
+    // Build Adobe RGB → XYZ matrix
+    println!();
+    println!("// Building Adobe RGB matrices...");
+    let adobe_rgb_to_xyz = build_rgb_from_xy_to_xyz_matrix(ADOBE_RGB_RED_XY, ADOBE_RGB_GREEN_XY, ADOBE_RGB_BLUE_XY, "Adobe RGB");
+    let xyz_to_adobe_rgb = invert_matrix_3x3(&adobe_rgb_to_xyz);
+
+    // Compose VSF → Adobe RGB transformation (VSF → XYZ → Adobe RGB)
+    let vsf_to_adobe_rgb = convert_matrix_3x3(&xyz_to_adobe_rgb, &vsf_to_xyz);
+    let adobe_rgb_to_vsf = invert_matrix_3x3(&vsf_to_adobe_rgb);
+
+    println!();
+    println!("// VSF → Adobe RGB composed transformation:");
+    println!("//   VSF RGB → XYZ → Adobe RGB");
+
     // Write files
     write_spectral_constants(&vsf_to_lms, &lms_to_vsf, &lms_1nm)?;
-    write_xyz_constants(&vsf_to_xyz, &xyz_to_vsf, &xyz_1nm)?;
+    write_xyz_constants(&vsf_to_xyz, &xyz_to_vsf, &vsf_to_srgb, &srgb_to_vsf, &vsf_to_adobe_rgb, &adobe_rgb_to_vsf, &xyz_1nm)?;
+    write_rec2020_constants(&vsf_to_rec2020, &rec2020_to_vsf)?;
 
     println!();
     println!("Generation complete!");

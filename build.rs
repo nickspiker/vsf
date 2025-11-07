@@ -115,6 +115,19 @@ fn generate_codes(tree: &Node) -> HashMap<char, (u32, u8)> {
 fn main() {
     println!("cargo:rerun-if-changed=frequencies.bin");
 
+    // Skip if output is already newer than input
+    if let (Ok(out_meta), Ok(in_meta)) = (
+        std::fs::metadata("huffman_codes.bin"),
+        std::fs::metadata("frequencies.bin"),
+    ) {
+        if let (Ok(out_time), Ok(in_time)) = (out_meta.modified(), in_meta.modified()) {
+            if out_time > in_time {
+                // Output is newer, skip regeneration
+                return;
+            }
+        }
+    }
+
     // 0. Load frequencies
     let mut file = File::open("frequencies.bin").expect("Need frequencies.bin");
     let mut bytes = Vec::new();

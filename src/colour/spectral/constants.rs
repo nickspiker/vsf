@@ -481,13 +481,13 @@ pub const LMS_2000_10DEG_1NM: ConstSpectrum = ConstSpectrum {
 /// scaling so that RGB=[1,1,1] maps to Illuminant E (equal energy spectrum).
 ///
 /// Matrix layout (column-major):
-/// - Indices 0-2: l channel contributions from [red, green, blue]
-/// - Indices 3-5: m channel contributions from [red, green, blue]
-/// - Indices 6-8: s channel contributions from [red, green, blue]
+/// - Indices 0-2: Red primary's [L, M, S] cone responses
+/// - Indices 3-5: Green primary's [L, M, S] cone responses
+/// - Indices 6-8: Blue primary's [L, M, S] cone responses
 pub const VSF_RGB2LMS: [f32; 9] = [
-    0.3585627730258688f32, 0.5597626587997186f32, 0.08167456817441252f32,
-    0.024773109965167937f32, 0.8091802165631982f32, 0.1660466734716338f32,
-    0.0000004271654958787667f32, 0.018622710471211223f32, 0.9813768623632928f32,
+    0.3585627730258688f32, 0.024773109965167937f32, 0.0000004271654958787667f32,
+    0.5597626587997186f32, 0.8091802165631982f32, 0.018622710471211223f32,
+    0.08167456817441252f32, 0.1660466734716338f32, 0.9813768623632928f32,
 ];
 
 /// lms → VSF RGB transformation matrix
@@ -495,9 +495,9 @@ pub const VSF_RGB2LMS: [f32; 9] = [
 /// Converts normalized lms cone space to linear VSF RGB.
 /// Inverse of VSF_RGB2LMS.
 pub const LMS2VSF_RGB: [f32; 9] = [
-    2.9290617319840306f32, -2.0285115407929117f32, 0.09944980880888085f32,
-    -0.09002372111378136f32, 1.3029953082259165f32, -0.212971587112135f32,
-    0.0017070246548320017f32, -0.02472489294466092f32, 1.023017868289829f32,
+    2.9290617319840315f32, -0.09002372111378139f32, 0.001707024654832002f32,
+    -2.028511540792912f32, 1.302995308225917f32, -0.024724892944660928f32,
+    0.09944980880888088f32, -0.21297158711213507f32, 1.0230178682898294f32,
 ];
 
 /// lms → Photopic luminance weights
@@ -509,19 +509,5 @@ pub const LMS2PHOTOPIC: [f32; 3] = [
     0.0,  // s cone weight (S-cones don't contribute to photopic luminance)
 ];
 
-/// Rec.2020 → VSF RGB transformation matrix (placeholder)
-///
-/// Both Rec.2020 (630nm, 532nm, 467nm) and VSF RGB are spectrally defined.
-/// Matrix will be derived from their respective lms transformations.
-pub const REC20202VSF_RGB: [f32; 9] = [
-    1.0, 0.0, 0.0,
-    0.0, 1.0, 0.0,
-    0.0, 0.0, 1.0,
-];
-
-/// VSF RGB → Rec.2020 transformation matrix (placeholder)
-pub const VSF_RGB2REC2020: [f32; 9] = [
-    1.0, 0.0, 0.0,
-    0.0, 1.0, 0.0,
-    0.0, 0.0, 1.0,
-];
+// Rec.2020 transformation matrices are now in the rec2020 module
+// See: src/colour/rec2020/constants.rs
