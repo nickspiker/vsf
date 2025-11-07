@@ -57,11 +57,12 @@
 //!   - Uses proper D65 spectral power distribution, not xy-derived "D65"
 //!   - Transfer function: Rec.709 OETF for encoding
 
+#[allow(deprecated)] // Need legacy functions for backward compatibility conversions
 use crate::colour::legacy::{
-    delinearize_srgb, delinearize_srgb_u8, encode_bt709, linearize_bt709, linearize_srgb,
-    linearize_srgb_u16, linearize_srgb_u8,
+    delinearize_srgb, delinearize_srgb_u8, encode_bt709, linearize_bt709,
+    linearize_srgb, linearize_srgb_u16, linearize_srgb_u8,
 };
-use crate::colour::rec2020::{REC2020_2VSF_RGB, VSF_RGB2REC2020};
+use crate::colour::rec2020::REC2020_2VSF_RGB;
 use crate::colour::{
     LMS2PHOTOPIC,
     VSF_RGB2LMS,

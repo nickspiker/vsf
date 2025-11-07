@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="vsf.png" alt="VSF Logo" width="400"/>
+</p>
+
 # VSF (Versatile Storage Format)
 
 A self-describing binary format designed for optimal integer encoding, mathematical correctness, and type safety.

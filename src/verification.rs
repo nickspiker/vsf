@@ -9,12 +9,12 @@
 //!
 //! - Hash/signature stored in label definition
 //! - Signs only specific sections (e.g., lock image data, allow metadata edits)
-//! - Use `add_section_hash()` or `sign_section()` functions
+//! - Use `sign_section()` function
 //!
 //! # Example
 //! ```ignore
 //! use vsf::builders::RawImageBuilder;
-//! use vsf::verification::{add_file_hash, add_section_hash, sign_section};
+//! use vsf::verification::sign_section;
 //!
 //! // Build the VSF
 //! let bytes = raw.build()?;
@@ -22,9 +22,7 @@
 //! // Add verification as needed
 //! ```
 
-use crate::crypto_algorithms::HASH_BLAKE3;
 use crate::decoding::parse;
-use crate::encoding::traits::EncodeNumber;
 use crate::file_format::LabelDefinition;
 use crate::types::VsfType;
 
@@ -387,33 +385,11 @@ fn find_hash_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize
 
 ///
 /// This function:
-/// 1. Finds the specified section in the header
-/// 2. Rebuilds the label definition with `hb3[32][zeros]` if not present
-/// 3. Hashes the `{preamble}[section]` bytes only
-/// 4. Writes the computed hash into the label definition
-///
-/// # Arguments
-/// * `vsf_bytes` - Complete VSF file bytes
-/// * `section` - Name of the section to hash (e.g., "raw")
-///
-/// # Returns
-/// Modified VSF bytes with section hash in label definition
-///
-/// # Example
-/// ```ignore
-/// let bytes = add_section_hash(bytes, "raw")?;
-/// ```
-pub fn add_section_hash(vsf_bytes: Vec<u8>, section: &str) -> Result<Vec<u8>, String> {
-    Err("add_section_hash not yet implemented".to_string())
-}
-
-///
-/// This function:
-/// 1. Finds the specified section in the header
-/// 2. Extracts the section data bytes `[d"name" (fields...)]`
-/// 3. Signs those bytes with Ed25519
-/// 4. Rebuilds the header with signature in label definition
-/// 5. Recomputes file hash
+/// 0. Finds the specified section in the header
+/// 1. Extracts the section data bytes `[d"name" (fields...)]`
+/// 2. Signs those bytes with Ed25519
+/// 3. Rebuilds the header with signature in label definition
+/// 4. Recomputes file hash
 ///
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file bytes
@@ -436,7 +412,6 @@ pub fn sign_section(
     section_name: &str,
     signing_key: &[u8],
 ) -> Result<Vec<u8>, String> {
-    use crate::crypto_algorithms::SIG_ED25519;
     use ed25519_dalek::{Signer, SigningKey};
 
     // Parse signing key
@@ -493,10 +468,10 @@ pub fn sign_section(
 /// Add encryption metadata to a section's header label
 ///
 /// This function:
-/// 1. Finds the specified section in the header
-/// 2. Adds encryption algorithm (v) and key (k) to the label
-/// 3. Rebuilds the file with updated header
-/// 4. Updates file hash
+/// 0. Finds the specified section in the header
+/// 1. Adds encryption algorithm (v) and key (k) to the label
+/// 2. Rebuilds the file with updated header
+/// 3. Updates file hash
 ///
 /// data BEFORE building the VSF file. This just adds metadata to the header.
 ///

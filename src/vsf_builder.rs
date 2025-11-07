@@ -11,31 +11,6 @@ use crate::file_format::VsfSection;
 use crate::types::VsfType;
 use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
 
-/// Represents an element in the header - either raw bytes or a VsfType
-#[derive(Debug, Clone)]
-enum HeaderElement {
-    Raw(Vec<u8>),  // Raw bytes (magic, markers like '<', '>', '(', ')')
-    Type(VsfType), // A VsfType that can be inspected and modified
-}
-
-impl HeaderElement {
-    /// Get the byte length of this element
-    fn byte_len(&self) -> usize {
-        match self {
-            HeaderElement::Raw(bytes) => bytes.len(),
-            HeaderElement::Type(vsf_type) => vsf_type.byte_len(),
-        }
-    }
-
-    /// Flatten this element to bytes
-    fn flatten(&self) -> Vec<u8> {
-        match self {
-            HeaderElement::Raw(bytes) => bytes.clone(),
-            HeaderElement::Type(vsf_type) => vsf_type.flatten(),
-        }
-    }
-}
-
 /// Builder for complete VSF files with headers and sections
 ///
 /// All VSF files automatically include a BLAKE3 hash for integrity verification.
