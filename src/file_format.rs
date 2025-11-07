@@ -23,7 +23,6 @@
 //! [raw_bytes...]                         Unboxed data (if n = 0)
 //! ```
 
-use crate::encoding::traits::EncodeNumber;
 use crate::types::VsfType;
 
 /// Validate VSF section or field name
