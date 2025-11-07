@@ -66,33 +66,46 @@ impl BitVec {
 }
 
 /// Load pre-computed Huffman codes from build-time generated file
+///
+/// Returns empty HashMap if huffman_codes.bin is not available (e.g., docs.rs builds)
 fn load_huffman_codes() -> HashMap<char, BitPattern> {
-    const DATA: &[u8] = include_bytes!("../huffman_codes.bin");
+    // Only include the file if it exists at build time
+    // This allows docs.rs builds to succeed even when Huffman tables aren't generated
+    #[cfg(huffman_available)]
+    {
+        const DATA: &[u8] = include_bytes!("../huffman_codes.bin");
 
-    // Parse header
-    if &DATA[0..4] != b"HUFF" {
-        panic!("Invalid Huffman codes file");
+        // Parse header
+        if &DATA[0..4] != b"HUFF" {
+            panic!("Invalid Huffman codes file");
+        }
+
+        let count = u32::from_le_bytes(DATA[8..12].try_into().unwrap()) as usize;
+        let mut codes = HashMap::with_capacity(count);
+
+        // Parse entries
+        for i in 0..count {
+            let offset = 12 + i * 8;
+            let codepoint = u32::from_le_bytes(DATA[offset..offset + 4].try_into().unwrap());
+            let packed = u32::from_le_bytes(DATA[offset + 4..offset + 8].try_into().unwrap());
+
+            let ch = char::from_u32(codepoint).unwrap();
+            let pattern = BitPattern {
+                bits: packed & 0x00FFFFFF,
+                length: ((packed >> 24) & 0x1F) as u8,
+            };
+
+            codes.insert(ch, pattern);
+        }
+
+        codes
     }
 
-    let count = u32::from_le_bytes(DATA[8..12].try_into().unwrap()) as usize;
-    let mut codes = HashMap::with_capacity(count);
-
-    // Parse entries
-    for i in 0..count {
-        let offset = 12 + i * 8;
-        let codepoint = u32::from_le_bytes(DATA[offset..offset + 4].try_into().unwrap());
-        let packed = u32::from_le_bytes(DATA[offset + 4..offset + 8].try_into().unwrap());
-
-        let ch = char::from_u32(codepoint).unwrap();
-        let pattern = BitPattern {
-            bits: packed & 0x00FFFFFF,
-            length: ((packed >> 24) & 0x1F) as u8,
-        };
-
-        codes.insert(ch, pattern);
+    #[cfg(not(huffman_available))]
+    {
+        // Return empty HashMap - text encoding will panic with helpful message
+        HashMap::new()
     }
-
-    codes
 }
 
 // Lazy-load codes at first use

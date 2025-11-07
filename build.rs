@@ -221,4 +221,7 @@ fn main() {
         "cargo:warning=Generated huffman_codes.bin: {} entries",
         codes.len()
     );
+
+    // Emit cfg flag so text_encoding.rs knows the file is available
+    println!("cargo:rustc-cfg=huffman_available");
 }
