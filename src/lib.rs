@@ -185,7 +185,7 @@ pub mod crypto_algorithms;
 // Verification functions for hashing and signing VSF files
 pub mod verification;
 
-// Colour system (spectral and legacy colour spaces)
+// Colour system (spectral and legacy colourspaces)
 pub mod colour;
 
 // Re-export main types
