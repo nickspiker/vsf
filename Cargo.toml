@@ -1,6 +1,6 @@
 [package]
 name = "vsf"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Nick Spiker <nick@verichrome.cc>"]
 description = "Versatile Storage Format"
