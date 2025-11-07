@@ -4,6 +4,27 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::fs::File;
 use std::io::{Read, Write};
+use std::path::Path;
+
+/// Download a file from a URL if it doesn't exist locally
+fn download_if_missing(url: &str, path: &str) -> std::io::Result<()> {
+    if Path::new(path).exists() {
+        return Ok(());
+    }
+
+    eprintln!("Downloading {} from GitHub...", path);
+
+    let response = ureq::get(url)
+        .call()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+    let mut file = File::create(path)?;
+    let mut reader = response.into_reader();
+    std::io::copy(&mut reader, &mut file)?;
+
+    eprintln!("Downloaded {} successfully", path);
+    Ok(())
+}
 
 #[derive(Debug)]
 struct Node {
@@ -128,7 +149,12 @@ fn main() {
         }
     }
 
-    // 0. Load frequencies
+    // 0. Download frequencies.bin from GitHub if not present
+    const FREQUENCIES_URL: &str = "https://github.com/nickspiker/vsf/raw/main/frequencies.bin";
+    download_if_missing(FREQUENCIES_URL, "frequencies.bin")
+        .expect("Failed to download frequencies.bin");
+
+    // Load frequencies
     let mut file = File::open("frequencies.bin").expect("Need frequencies.bin");
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).unwrap();
