@@ -1,37 +1,15 @@
-//! # VSF (Versatile Storage Format) - Version 2
+//! # VSF (Versatile Storage Format)
 //!
-//! A self-describing binary format for hierarchical, typed, cryptographically-signed data storage.
-//! VSF is designed to be truly versatile: medical records, RAW images, geographic maps, databases,
-//! video files, and more - all with the same format.
+//! Self-describing binary format with hierarchical structure, strong typing, and cryptographic primitives.
 //!
-//! ## What Makes VSF Different
+//! ## Features
 //!
-//! Unlike existing formats, VSF combines:
-//! - **Self-describing structure**: No external schema files needed
-//! - **Hierarchical organization**: Unlimited nesting with offset-based seeking
-//! - **Type safety**: Strongly-typed primitives, tensors, and Spirix types
-//! - **Cryptographic primitives**: Built-in signatures and hashes
-//! - **Temporal anchoring**: Eagle Time timestamps for precise time tracking
-//! - **Zero-copy sections**: Unboxed bulk data for performance-critical paths
-//! - **Mathematical correctness**: Spirix types for precise arithmetic
-//!
-//! ## Quick Start
-//!
-//! ```ignore
-//! use vsf::{VsfType, Tensor};
-//!
-//! // Create a 2D image tensor (4096×3072 pixels, 16-bit)
-//! let raw_image = Tensor::new(
-//!     vec![4096, 3072],
-//!     raw_pixel_data
-//! );
-//!
-//! // Encode as VSF
-//! let vsf_data = VsfType::t_u4(raw_image).flatten();
-//!
-//! // Parse it back
-//! let parsed = vsf::parse(&vsf_data)?;
-//! ```
+//! - **Self-describing**: Type markers embedded in the data stream
+//! - **Hierarchical**: Offset-based seeking, unlimited nesting depth
+//! - **Strongly-typed**: Primitives (u0-u7, i3-i7, f32, f64, complex), tensors, Spirix arithmetic
+//! - **Cryptographic**: Built-in BLAKE3 hashing and Ed25519 signing
+//! - **Eagle Time**: universal timestamps
+//! - **Huffman text compression**: ~2× compression over UTF-8 for strings
 //!
 //! ## Core Type System
 //!
@@ -47,7 +25,7 @@
 //!
 //! ### Metadata
 //! - `x`: Unicode text strings
-//! - `e`: Eagle Time (time since lunar landing)
+//! - `e`: Eagle Time (seconds since lunar landing)
 //! - `d`: Data type labels
 //! - `l`: User-defined labels
 //! - `o`: Byte offsets (for hierarchical structure)
@@ -72,84 +50,47 @@
 //! [Section data at offsets...]     Actual data (structured or unboxed)
 //! ```
 //!
-//! ## Use Cases
+//! ## Quick Start
 //!
-//! ### Lumis RAW Images
-//! ```ignore
-//! // 12-bit Bayer sensor data with metadata
-//! VsfBuilder::new("lumis_raw_v1")
-//!     .metadata("iso_speed", 1600)
-//!     .metadata("shutter_time_ns", 166_666_667)
-//!     .data(Tensor::new(vec![4096, 3072], pixels))
-//!     .sign(&device_key)
-//!     .build()
 //! ```
+//! use vsf::{VsfType, VsfBuilder, Tensor, parse};
 //!
-//! ### Medical Records
-//! ```ignore
-//! // Patient record with nested exam history
-//! VsfBuilder::new("patient_record")
-//!     .nest("demographics", |b| {
-//!         b.field("family_name", "Doe")
-//!          .field("given_name", "John")
-//!          .field("dob", eagle_time)
-//!     })
-//!     .nest("xrays", xray_section)
-//!     .nest("lab_results", lab_section)
+//! // Encode a tensor
+//! let tensor = Tensor::new(vec![3, 4], vec![1u16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+//! let encoded = VsfType::t_u4(tensor).flatten();
+//!
+//! // Decode it back
+//! let mut ptr = 0;
+//! let decoded = parse(&encoded, &mut ptr).unwrap();
+//!
+//! // Build a complete VSF file with header
+//! let vsf_file = VsfBuilder::new()
+//!     .add_section("metadata", vec![
+//!         ("width".to_string(), VsfType::u(1920, false)),
+//!         ("height".to_string(), VsfType::u(1080, false)),
+//!     ])
+//!     .add_unboxed("pixels", vec![0xFF; 1024])
 //!     .build()
+//!     .unwrap();
 //! ```
-//!
-//! ### Geographic Maps
-//! ```ignore
-//! // Hierarchical map with multiple layers
-//! VsfBuilder::new("world_map")
-//!     .nest("continents", continents_data)
-//!     .nest("countries", countries_data)
-//!     .nest("cities", cities_data)
-//!     .unboxed_section("elevation_raster", elevation_blob)
-//!     .build()
-//! ```
-//!
-//! ## Version 2 Breaking Changes
-//!
-//! If upgrading from VSF v1:
-//! - Arrays → Tensors: `au5` becomes `t1u5`, `as6` becomes `t1i6`
-//! - Complex: `i6`/`i7` → `j5`/`j6` (freed `i` for signed integers)
-//! - Eagle Time: `et` → `e` (shortened for consistency)
-//! - Count: `c` → `n` (freed `c` for Spirix Circle types)
-//!
-//! ## Features
-//!
-//! - **Seekable**: Jump directly to sections via offsets
-//! - **Streamable**: Progressive loading of large files
-//! - **Versionable**: Forward and backward compatibility tracking
-//! - **Signable**: Cryptographic authentication built-in
-//! - **Extensible**: Add new types without breaking old parsers
 //!
 //! ## Eagle Time
 //!
-//! VSF uses Eagle Time (ET) as its standard time representation:
-//! - Epoch: 1969-07-20 20:17:40 UTC (Eagle lunar landing)
-//! - Universal, non-political time reference
-//! - Integrates with TOKEN system
+//! Eagle Time counts seconds (or fractional seconds) since 1969-07-20 20:17:40 UTC (lunar landing).
+//! Always coordinated, no timezones, no daylight saving. Just one single unabiguous time standard.
 //!
-//! ## Architecture
+//! ## Module Structure
 //!
-//! ```text
-//! vsf/
-//! ├── types/           Core type definitions
-//! ├── encoding/        Binary serialization
-//! ├── decoding/        Binary parsing
-//! ├── registry/        Metadata key registry (coming soon)
-//! └── utils/           Helper functions and builders
-//! ```
+//! - `types` - Core type definitions (VsfType, Tensor, EagleTime, WorldCoord)
+//! - `encoding` - Binary serialization (exponential-width integers, flatten)
+//! - `decoding` - Binary parsing
+//! - `file_format` - VSF file headers and sections
+//! - `vsf_builder` - High-level builder for complete files
+//! - `verification` - Cryptographic hashing and signing
+//! - `text_encoding` - Huffman compression for Unicode strings
+//! - `colour` - Colourspace conversions (VSF RGB, Rec.2020, sRGB, XYZ)
+//! - `builders` - Domain-specific builders (RAW images)
 //!
-//! ## Related Projects
-//!
-//! - **TOKEN**: Cryptographic identity and trust system (uses VSF)
-//! - **Spirix**: Two's complement floating-point arithmetic
-//! - **Lumis**: Manual RAW camera app (stores in VSF)
-//! - **Ferros**: Kill-switch ready mobile OS (uses VSF for config)
 
 // VSF format version constants
 /// Current VSF format version
