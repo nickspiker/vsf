@@ -136,15 +136,8 @@ impl CalibrationHash {
         }
 
         let vsf_type = match algorithm {
-            HASH_BLAKE3 => {
-                if hash.len() <= 256 {
-                    VsfType::hb3(hash)
-                } else {
-                    VsfType::hb4(hash)
-                }
-            }
-            HASH_SHA256 => VsfType::h23(hash),
-            HASH_SHA512 => VsfType::h53(hash),
+            HASH_BLAKE3 => VsfType::hb(hash),
+            HASH_SHA256 | HASH_SHA512 => VsfType::hs(hash),
             _ => return Err(format!("Unsupported hash algorithm: {}", algorithm as char)),
         };
 
@@ -157,17 +150,10 @@ impl CalibrationHash {
 
     pub fn from_vsf_type(vsf: VsfType) -> Result<Self, String> {
         match vsf {
-            VsfType::hb3(ref hash)
-            | VsfType::hb4(ref hash)
-            | VsfType::h23(ref hash)
-            | VsfType::h53(ref hash)
-                if !hash.is_empty() =>
-            {
+            VsfType::hb(ref hash) | VsfType::hs(ref hash) if !hash.is_empty() => {
                 Ok(CalibrationHash(vsf))
             }
-            VsfType::hb3(_) | VsfType::hb4(_) | VsfType::h23(_) | VsfType::h53(_) => {
-                Err("Hash cannot be empty".to_string())
-            }
+            VsfType::hb(_) | VsfType::hs(_) => Err("Hash cannot be empty".to_string()),
             _ => Err("Expected hash type for calibration hash".to_string()),
         }
     }
@@ -1316,49 +1302,76 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
             "dark_frame_hash" => {
                 use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
                 match field_value {
-                    VsfType::hb3(v) | VsfType::hb4(v) => dark_frame_hash = Some((HASH_BLAKE3, v)),
-                    VsfType::h23(v) => dark_frame_hash = Some((HASH_SHA256, v)),
-                    VsfType::h53(v) => dark_frame_hash = Some((HASH_SHA512, v)),
+                    VsfType::hb(v) => dark_frame_hash = Some((HASH_BLAKE3, v)),
+                    VsfType::hs(v) => {
+                        // For hs, we need to determine if it's SHA-256 or SHA-512 based on length
+                        let algo = if v.len() == 32 {
+                            HASH_SHA256
+                        } else {
+                            HASH_SHA512
+                        };
+                        dark_frame_hash = Some((algo, v))
+                    }
                     _ => {}
                 }
             }
             "flat_field_hash" => {
                 use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
                 match field_value {
-                    VsfType::hb3(v) | VsfType::hb4(v) => flat_field_hash = Some((HASH_BLAKE3, v)),
-                    VsfType::h23(v) => flat_field_hash = Some((HASH_SHA256, v)),
-                    VsfType::h53(v) => flat_field_hash = Some((HASH_SHA512, v)),
+                    VsfType::hb(v) => flat_field_hash = Some((HASH_BLAKE3, v)),
+                    VsfType::hs(v) => {
+                        let algo = if v.len() == 32 {
+                            HASH_SHA256
+                        } else {
+                            HASH_SHA512
+                        };
+                        flat_field_hash = Some((algo, v))
+                    }
                     _ => {}
                 }
             }
             "bias_frame_hash" => {
                 use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
                 match field_value {
-                    VsfType::hb3(v) | VsfType::hb4(v) => bias_frame_hash = Some((HASH_BLAKE3, v)),
-                    VsfType::h23(v) => bias_frame_hash = Some((HASH_SHA256, v)),
-                    VsfType::h53(v) => bias_frame_hash = Some((HASH_SHA512, v)),
+                    VsfType::hb(v) => bias_frame_hash = Some((HASH_BLAKE3, v)),
+                    VsfType::hs(v) => {
+                        let algo = if v.len() == 32 {
+                            HASH_SHA256
+                        } else {
+                            HASH_SHA512
+                        };
+                        bias_frame_hash = Some((algo, v))
+                    }
                     _ => {}
                 }
             }
             "vignette_correction_hash" => {
                 use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
                 match field_value {
-                    VsfType::hb3(v) | VsfType::hb4(v) => {
-                        vignette_correction_hash = Some((HASH_BLAKE3, v))
+                    VsfType::hb(v) => vignette_correction_hash = Some((HASH_BLAKE3, v)),
+                    VsfType::hs(v) => {
+                        let algo = if v.len() == 32 {
+                            HASH_SHA256
+                        } else {
+                            HASH_SHA512
+                        };
+                        vignette_correction_hash = Some((algo, v))
                     }
-                    VsfType::h23(v) => vignette_correction_hash = Some((HASH_SHA256, v)),
-                    VsfType::h53(v) => vignette_correction_hash = Some((HASH_SHA512, v)),
                     _ => {}
                 }
             }
             "distortion_correction_hash" => {
                 use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
                 match field_value {
-                    VsfType::hb3(v) | VsfType::hb4(v) => {
-                        distortion_correction_hash = Some((HASH_BLAKE3, v))
+                    VsfType::hb(v) => distortion_correction_hash = Some((HASH_BLAKE3, v)),
+                    VsfType::hs(v) => {
+                        let algo = if v.len() == 32 {
+                            HASH_SHA256
+                        } else {
+                            HASH_SHA512
+                        };
+                        distortion_correction_hash = Some((algo, v))
                     }
-                    VsfType::h23(v) => distortion_correction_hash = Some((HASH_SHA256, v)),
-                    VsfType::h53(v) => distortion_correction_hash = Some((HASH_SHA512, v)),
                     _ => {}
                 }
             }

@@ -88,7 +88,7 @@ impl VsfBuilder {
         vsf[header_index].extend_from_slice(&VsfType::y(self.backward_compat).flatten());
 
         if self.include_file_hash {
-            vsf[header_index].extend_from_slice(&VsfType::hb3(vec![0u8; 32]).flatten());
+            vsf[header_index].extend_from_slice(&VsfType::hb(vec![0u8; 32]).flatten());
         }
 
         // Label count
@@ -220,7 +220,7 @@ impl VsfBuilder {
         }
 
         // Now structure is finalized - compute and write all crypto primitives
-        // File hash placeholder (hb3[32][zeros]) is already in header from line 91
+        // File hash placeholder (hb[32][zeros]) is already in header from line 91
         use crate::verification::{compute_file_hash, write_file_hash};
 
         let hash = compute_file_hash(&result)?;
