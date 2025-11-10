@@ -102,17 +102,13 @@ fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
             let crypto_type = parse(data, &mut pointer)
                 .map_err(|e| format!("Failed to parse crypto field: {}", e))?;
             match crypto_type {
-                VsfType::hb3(_) | VsfType::hb4(_) | VsfType::h23(_) | VsfType::h53(_) => {
-                    hash = Some(crypto_type)
-                }
-                VsfType::ge3(_) | VsfType::gp3(_) | VsfType::gr4(_) => {
-                    signature = Some(crypto_type)
-                }
-                VsfType::ke3(_)
-                | VsfType::kx3(_)
-                | VsfType::kp3(_)
-                | VsfType::kc3(_)
-                | VsfType::ka3(_) => key = Some(crypto_type),
+                VsfType::hb(_) | VsfType::hs(_) => hash = Some(crypto_type),
+                VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => signature = Some(crypto_type),
+                VsfType::ke(_)
+                | VsfType::kx(_)
+                | VsfType::kp(_)
+                | VsfType::kc(_)
+                | VsfType::ka(_) => key = Some(crypto_type),
                 VsfType::v(_, _) => wrap = Some(crypto_type),
                 _ => {}
             }
@@ -197,7 +193,7 @@ fn rebuild_with_header(
     for _iteration in 0..MAX_ITERATIONS {
         // Calculate what the new header size will be
         let mut test_header = VsfHeader::new(version, backward_compat);
-        test_header.file_hash = Some(VsfType::hb3(vec![0u8; 32]));
+        test_header.file_hash = Some(VsfType::hb(vec![0u8; 32]));
         for label in &labels {
             test_header.add_label(label.clone());
         }
@@ -209,7 +205,7 @@ fn rebuild_with_header(
         if new_header_size == prev_header_size {
             // Build final header with these offsets
             let mut final_header = VsfHeader::new(version, backward_compat);
-            final_header.file_hash = Some(VsfType::hb3(vec![0u8; 32]));
+            final_header.file_hash = Some(VsfType::hb(vec![0u8; 32]));
             for label in labels {
                 final_header.add_label(label);
             }
@@ -243,7 +239,7 @@ fn rebuild_with_header(
 /// Compute BLAKE3 hash of VSF file (with hash placeholder zeroed)
 ///
 /// This function computes the file hash WITHOUT modifying the input.
-/// It expects the file to already have a hash placeholder (hb3[32][zeros]).
+/// It expects the file to already have a hash placeholder (hb[32][zeros]).
 ///
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file bytes with hash placeholder
@@ -283,7 +279,7 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
         parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse hash: {}", e))?;
 
     match hash_type {
-        VsfType::hb3(hash_bytes) | VsfType::hb4(hash_bytes) => {
+        VsfType::hb(hash_bytes) => {
             if hash_bytes.len() != 32 {
                 return Err(format!(
                     "Invalid hash size: expected 32 bytes, found {}",
@@ -303,7 +299,7 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
             let computed_hash = blake3::hash(&temp_bytes);
             Ok(*computed_hash.as_bytes())
         }
-        _ => Err("Expected BLAKE3 hash (hb3 or hb4)".to_string()),
+        _ => Err("Expected BLAKE3 hash (hb)".to_string()),
     }
 }
 
@@ -373,13 +369,13 @@ fn find_hash_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize
     })?;
 
     match hash_type {
-        VsfType::hb3(hash_bytes) | VsfType::hb4(hash_bytes) => {
+        VsfType::hb(hash_bytes) => {
             // pos now points AFTER the hash
             // Calculate where the hash bytes started
             let hash_start = pos - hash_bytes.len();
             Ok(hash_start)
         }
-        _ => Err("Expected BLAKE3 hash type (hb3 or hb4)".to_string()),
+        _ => Err("Expected BLAKE3 hash type (hb)".to_string()),
     }
 }
 
@@ -444,7 +440,7 @@ pub fn sign_section(
     let signature = signing_key.sign(section_bytes);
 
     // Create signature VsfType (Ed25519 signature is always 64 bytes)
-    let sig_vsf = VsfType::ge3(signature.to_bytes().to_vec());
+    let sig_vsf = VsfType::ge(signature.to_bytes().to_vec());
 
     // Update labels - add signature to target section
     let mut new_labels = header.labels.clone();
@@ -519,8 +515,8 @@ pub fn add_encryption_metadata(
 
             // Add encryption key based on algorithm
             let key_vsf = match algorithm {
-                WRAP_CHACHA20POLY1305 => VsfType::kc3(encryption_key.to_vec()),
-                WRAP_AES256_GCM => VsfType::ka3(encryption_key.to_vec()),
+                WRAP_CHACHA20POLY1305 => VsfType::kc(encryption_key.to_vec()),
+                WRAP_AES256_GCM => VsfType::ka(encryption_key.to_vec()),
                 _ => {
                     return Err(format!(
                         "Unsupported encryption algorithm: {}",
@@ -591,7 +587,7 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
         parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse hash: {}", e))?;
 
     let stored_hash = match hash_type {
-        VsfType::hb3(hash_bytes) | VsfType::hb4(hash_bytes) => {
+        VsfType::hb(hash_bytes) => {
             if hash_bytes.len() != 32 {
                 return Err(format!(
                     "Invalid hash size: expected 32 bytes, found {}",
@@ -600,7 +596,7 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
             }
             hash_bytes
         }
-        _ => return Err("Expected BLAKE3 hash type (hb3 or hb4) in header".to_string()),
+        _ => return Err("Expected BLAKE3 hash type (hb) in header".to_string()),
     };
 
     // Create a copy with zeroed hash

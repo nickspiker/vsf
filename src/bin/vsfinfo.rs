@@ -166,17 +166,17 @@ impl VsfHeader {
                 let next_type = parse(data, &mut pointer)
                     .map_err(|e| format!("Failed to parse label crypto field: {}", e))?;
                 match next_type {
-                    VsfType::hb3(_) | VsfType::hb4(_) | VsfType::h23(_) | VsfType::h53(_) => {
+                    VsfType::hb(_) | VsfType::hs(_) => {
                         hash = Some(next_type)
                     }
-                    VsfType::ge3(_) | VsfType::gp3(_) | VsfType::gr4(_) => {
+                    VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => {
                         signature = Some(next_type)
                     }
-                    VsfType::ke3(_)
-                    | VsfType::kx3(_)
-                    | VsfType::kp3(_)
-                    | VsfType::kc3(_)
-                    | VsfType::ka3(_) => key = Some(next_type),
+                    VsfType::ke(_)
+                    | VsfType::kx(_)
+                    | VsfType::kp(_)
+                    | VsfType::kc(_)
+                    | VsfType::ka(_) => key = Some(next_type),
                     VsfType::v(_, _) => wrap = Some(next_type),
                     _ => {
                         return Err(format!(
@@ -453,7 +453,7 @@ fn verify_file_hash(data: &[u8]) -> bool {
     };
 
     let stored_hash = match hash_type {
-        VsfType::hb3(hash) | VsfType::hb4(hash) => hash,
+        VsfType::hb(hash) => hash,
         _ => return false,
     };
 
@@ -548,62 +548,60 @@ fn format_value(vsf: &VsfType) -> String {
             };
             format_et(et_ms)
         }
-        VsfType::hb3(hash) => format!("hb3[BLAKE3 {} Bytes] {}...", hash.len(), hex_preview(hash)),
-        VsfType::hb4(hash) => format!("hb4[BLAKE3 {} Bytes] {}...", hash.len(), hex_preview(hash)),
-        VsfType::h23(hash) => format!("h23[SHA-256 {} Bytes] {}...", hash.len(), hex_preview(hash)),
-        VsfType::h53(hash) => format!("h53[SHA-512 {} Bytes] {}...", hash.len(), hex_preview(hash)),
+        VsfType::hb(hash) => format!("hb[BLAKE3 {} Bytes] {}...", hash.len(), hex_preview(hash)),
+        VsfType::hs(hash) => format!("hs[SHA-2 {} Bytes] {}...", hash.len(), hex_preview(hash)),
 
-        VsfType::ge3(sig) => format!("ge3[Ed25519 {} Bytes] {}...", sig.len(), hex_preview(sig)),
-        VsfType::gp3(sig) => format!(
-            "gp3[ECDSA-P256 {} Bytes] {}...",
+        VsfType::ge(sig) => format!("ge[Ed25519 {} Bytes] {}...", sig.len(), hex_preview(sig)),
+        VsfType::gp(sig) => format!(
+            "gp[ECDSA-P256 {} Bytes] {}...",
             sig.len(),
             hex_preview(sig)
         ),
-        VsfType::gr4(sig) => format!("gr4[RSA-2048 {} Bytes] {}...", sig.len(), hex_preview(sig)),
+        VsfType::gr(sig) => format!("gr[RSA {} Bytes] {}...", sig.len(), hex_preview(sig)),
 
-        VsfType::ke3(key) => format!(
-            "ke3[Ed25519 key {} Bytes] {}...",
+        VsfType::ke(key) => format!(
+            "ke[Ed25519 key {} Bytes] {}...",
             key.len(),
             hex_preview(key)
         ),
-        VsfType::kx3(key) => format!(
-            "kx3[X25519 key {} Bytes] {}...",
+        VsfType::kx(key) => format!(
+            "kx[X25519 key {} Bytes] {}...",
             key.len(),
             hex_preview(key)
         ),
-        VsfType::kp3(key) => format!(
-            "kp3[ECDSA-P256 key {} Bytes] {}...",
+        VsfType::kp(key) => format!(
+            "kp[ECDSA-P256 key {} Bytes] {}...",
             key.len(),
             hex_preview(key)
         ),
-        VsfType::kc3(key) => format!(
-            "kc3[ChaCha20-Poly1305 key {} Bytes] {}...",
+        VsfType::kc(key) => format!(
+            "kc[ChaCha20-Poly1305 key {} Bytes] {}...",
             key.len(),
             hex_preview(key)
         ),
-        VsfType::ka3(key) => format!(
-            "ka3[AES-256-GCM key {} Bytes] {}...",
+        VsfType::ka(key) => format!(
+            "ka[AES-256-GCM key {} Bytes] {}...",
             key.len(),
             hex_preview(key)
         ),
 
-        VsfType::ah3(mac) => format!(
-            "ah3[HMAC-SHA256 {} Bytes] {}...",
+        VsfType::ah(mac) => format!(
+            "ah[HMAC-SHA256 {} Bytes] {}...",
             mac.len(),
             hex_preview(mac)
         ),
-        VsfType::as3(mac) => format!(
-            "as3[HMAC-SHA512 {} Bytes] {}...",
+        VsfType::as_(mac) => format!(
+            "as_[HMAC-SHA512 {} Bytes] {}...",
             mac.len(),
             hex_preview(mac)
         ),
-        VsfType::ap3(mac) => format!("ap3[Poly1305 {} Bytes] {}...", mac.len(), hex_preview(mac)),
-        VsfType::ab3(mac) => format!(
-            "ab3[BLAKE3-keyed {} Bytes] {}...",
+        VsfType::ap(mac) => format!("ap[Poly1305 {} Bytes] {}...", mac.len(), hex_preview(mac)),
+        VsfType::ab(mac) => format!(
+            "ab[BLAKE3-keyed {} Bytes] {}...",
             mac.len(),
             hex_preview(mac)
         ),
-        VsfType::ac3(mac) => format!("ac3[CMAC-AES {} Bytes] {}...", mac.len(), hex_preview(mac)),
+        VsfType::ac(mac) => format!("ac[CMAC-AES {} Bytes] {}...", mac.len(), hex_preview(mac)),
 
         VsfType::v(algo, data) => {
             use vsf::crypto_algorithms::wrap_algorithm_name;
@@ -836,19 +834,19 @@ fn show_info(data: &[u8]) -> Result<(), String> {
         let mut crypto_parts = Vec::new();
         if let Some(ref sig) = label.signature {
             match sig {
-                VsfType::ge3(_) => crypto_parts.push("Signed with Ed25519".to_string()),
-                VsfType::gp3(_) => crypto_parts.push("Signed with ECDSA-P256".to_string()),
-                VsfType::gr4(_) => crypto_parts.push("Signed with RSA-2048".to_string()),
+                VsfType::ge(_) => crypto_parts.push("Signed with Ed25519".to_string()),
+                VsfType::gp(_) => crypto_parts.push("Signed with ECDSA-P256".to_string()),
+                VsfType::gr(_) => crypto_parts.push("Signed with RSA".to_string()),
                 _ => {}
             }
         }
         if let Some(ref _w) = label.wrap {
             if let Some(ref key) = label.key {
                 match key {
-                    VsfType::kc3(_) => {
+                    VsfType::kc(_) => {
                         crypto_parts.push("Encrypted with ChaCha20-Poly1305".to_string())
                     }
-                    VsfType::ka3(_) => crypto_parts.push("Encrypted with AES-256-GCM".to_string()),
+                    VsfType::ka(_) => crypto_parts.push("Encrypted with AES-256-GCM".to_string()),
                     _ => {}
                 }
             }
@@ -973,7 +971,7 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
         parse(data, &mut pointer).map_err(|e| format!("Failed to parse file hash: {}", e))?;
 
     let (file_hash_verified, stored_hash, computed_hash) = match file_hash_type {
-        VsfType::hb3(stored_hash) | VsfType::hb4(stored_hash) => {
+        VsfType::hb(stored_hash) => {
             // The hash is computed over the entire file with the hash bytes zeroed out
             // Find where the hash bytes start (after 'h', algo byte, and size encoding)
             let mut hash_field_start = 4; // After "RÅ<"
@@ -1021,10 +1019,8 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
             // Hash is now in the label, not preamble
             if let Some(ref hash_vsf) = label.hash {
                 let hash_bytes = match hash_vsf {
-                    VsfType::hb3(ref bytes)
-                    | VsfType::hb4(ref bytes)
-                    | VsfType::h23(ref bytes)
-                    | VsfType::h53(ref bytes) => bytes,
+                    VsfType::hb(ref bytes)
+                    | VsfType::hs(ref bytes) => bytes,
                     _ => continue,
                 };
 
@@ -1116,10 +1112,8 @@ fn verify_file(data: &[u8]) -> Result<(), String> {
         // Check section hash (now in label, not preamble)
         if let Some(ref hash_vsf) = label.hash {
             let hash_bytes = match hash_vsf {
-                VsfType::hb3(ref bytes)
-                | VsfType::hb4(ref bytes)
-                | VsfType::h23(ref bytes)
-                | VsfType::h53(ref bytes) => bytes,
+                VsfType::hb(ref bytes)
+                | VsfType::hs(ref bytes) => bytes,
                 _ => continue,
             };
 

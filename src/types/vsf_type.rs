@@ -470,30 +470,29 @@ pub enum VsfType {
     m(usize),       // Marker
 
     // ==================== CRYPTOGRAPHIC TYPES ====================
-    // Hash algorithms - store (length-1) as single byte, then data
-    hb3(Vec<u8>), // BLAKE3 hash (u3 length: 1-256 Bytes)
-    hb4(Vec<u8>), // BLAKE3 hash (u4 length: 257-65536 Bytes)
-    h23(Vec<u8>), // SHA-256 hash (u3 length: always 32 Bytes)
-    h53(Vec<u8>), // SHA-512 hash (u3 length: always 64 Bytes)
+    // Hash algorithms
+    hb(Vec<u8>), // BLAKE3 hash
+    hs(Vec<u8>), // SHA hash (SHA-256, SHA-512, etc.)
 
-    // Signature algorithms - store (length-1) as single byte, then data
-    ge3(Vec<u8>), // Ed25519 signature (u3 length: always 64 Bytes)
-    gp3(Vec<u8>), // ECDSA-P256 signature (u3 length: always 64 Bytes)
-    gr4(Vec<u8>), // RSA-2048 signature (u4 length: always 256 Bytes)
+    // Signature algorithms
+    ge(Vec<u8>), // Ed25519 signature
+    gp(Vec<u8>), // ECDSA-P256 signature
+    #[deprecated(since = "0.1.7", note = "RSA is legacy - prefer Ed25519 for new applications")]
+    gr(Vec<u8>), // RSA signature (deprecated)
 
-    // Cryptographic keys - store (length-1) as single byte, then data
-    ke3(Vec<u8>), // Ed25519 public key (u3 length: always 32 Bytes)
-    kx3(Vec<u8>), // X25519 key (u3 length: always 32 Bytes)
-    kp3(Vec<u8>), // ECDSA-P256 key (u3 length: always 32 Bytes)
-    kc3(Vec<u8>), // ChaCha20-Poly1305 key (u3 length: always 32 Bytes)
-    ka3(Vec<u8>), // AES-256-GCM key (u3 length: always 32 Bytes)
+    // Cryptographic keys
+    ke(Vec<u8>), // Ed25519 public key
+    kx(Vec<u8>), // X25519 key
+    kp(Vec<u8>), // ECDSA-P256 key
+    kc(Vec<u8>), // ChaCha20-Poly1305 key
+    ka(Vec<u8>), // AES-256-GCM key
 
-    // MAC (Message Authentication Code) - store (length-1) as single byte, then data
-    ah3(Vec<u8>), // HMAC-SHA256 (u3 length: always 32 Bytes)
-    as3(Vec<u8>), // HMAC-SHA512 (u3 length: always 64 Bytes)
-    ap3(Vec<u8>), // Poly1305 (u3 length: always 16 Bytes)
-    ab3(Vec<u8>), // BLAKE3-keyed (u3 length: 1-256 Bytes, default 32)
-    ac3(Vec<u8>), // CMAC-AES (u3 length: always 16 Bytes)
+    // MAC (Message Authentication Code)
+    ah(Vec<u8>),  // HMAC-SHA256
+    as_(Vec<u8>), // HMAC-SHA512
+    ap(Vec<u8>),  // Poly1305
+    ab(Vec<u8>),  // BLAKE3-keyed
+    ac(Vec<u8>),  // CMAC-AES
 
     // ==================== WRAPPED/ENCODED DATA (OPTIONAL) ====================
     /// Wrapped/encoded VSF data with compression, error correction, or encryption

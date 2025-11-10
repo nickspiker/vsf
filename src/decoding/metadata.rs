@@ -224,63 +224,35 @@ pub fn parse_mac(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
     let algo = data[*pointer];
     *pointer += 1;
 
-    // Read size marker (3 for u3, etc.)
-    if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for MAC size marker",
-        ));
-    }
-    let size_marker = data[*pointer];
-    *pointer += 1;
-
-    // Read length (stored as len-1)
-    let length_bytes = match size_marker {
-        b'3' => {
-            if *pointer >= data.len() {
-                return Err(Error::new(
-                    ErrorKind::UnexpectedEof,
-                    "Not enough data for MAC length",
-                ));
-            }
-            let len = data[*pointer] as usize + 1;
-            *pointer += 1;
-            len
-        }
-        _ => {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Invalid MAC size marker: {}", size_marker as char),
-            ))
-        }
-    };
+    // Read length (stored as len-1) using standard VSF variable-length encoding
+    let length = decode_usize(data, pointer)? + 1; // Add 1 back
 
     // Read MAC tag data
-    if *pointer + length_bytes > data.len() {
+    if *pointer + length > data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
             "Not enough data for MAC tag",
         ));
     }
-    let mac_tag = data[*pointer..*pointer + length_bytes].to_vec();
-    *pointer += length_bytes;
+    let mac_tag = data[*pointer..*pointer + length].to_vec();
+    *pointer += length;
 
-    // Return appropriate MAC type based on algorithm and size marker
-    match (algo, size_marker) {
-        (b'h', b'3') => Ok(VsfType::ah3(mac_tag)),
-        (b's', b'3') => Ok(VsfType::as3(mac_tag)),
-        (b'p', b'3') => Ok(VsfType::ap3(mac_tag)),
-        (b'b', b'3') => Ok(VsfType::ab3(mac_tag)),
-        (b'c', b'3') => Ok(VsfType::ac3(mac_tag)),
+    // Return appropriate MAC type based on algorithm
+    match algo {
+        b'h' => Ok(VsfType::ah(mac_tag)),
+        b's' => Ok(VsfType::as_(mac_tag)),
+        b'p' => Ok(VsfType::ap(mac_tag)),
+        b'b' => Ok(VsfType::ab(mac_tag)),
+        b'c' => Ok(VsfType::ac(mac_tag)),
         _ => Err(Error::new(
             ErrorKind::InvalidData,
-            format!("Unknown MAC type: a{}{}", algo as char, size_marker as char),
+            format!("Unknown MAC algorithm: {}", algo as char),
         )),
     }
 }
 
 pub fn parse_hash(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
-    // Read algorithm byte (b for BLAKE3, 2 for SHA-256, etc.)
+    // Read algorithm byte (b for BLAKE3, s for SHA)
     if *pointer >= data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
@@ -290,70 +262,26 @@ pub fn parse_hash(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
     let algo = data[*pointer];
     *pointer += 1;
 
-    // Read size marker (3 for u3, 4 for u4, etc.)
-    if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for hash size marker",
-        ));
-    }
-    let size_marker = data[*pointer];
-    *pointer += 1;
-
-    // Read length (stored as len-1)
-    let length_bytes = match size_marker {
-        b'3' => {
-            if *pointer >= data.len() {
-                return Err(Error::new(
-                    ErrorKind::UnexpectedEof,
-                    "Not enough data for u3 length",
-                ));
-            }
-            let len = data[*pointer] as usize + 1; // Add 1 back
-            *pointer += 1;
-            len
-        }
-        b'4' => {
-            if *pointer + 1 >= data.len() {
-                return Err(Error::new(
-                    ErrorKind::UnexpectedEof,
-                    "Not enough data for u4 length",
-                ));
-            }
-            let len = u16::from_be_bytes([data[*pointer], data[*pointer + 1]]) as usize + 1;
-            *pointer += 2;
-            len
-        }
-        _ => {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Invalid hash size marker",
-            ))
-        }
-    };
+    // Read length (stored as len-1) using standard VSF variable-length encoding
+    let length = decode_usize(data, pointer)? + 1; // Add 1 back
 
     // Read hash data
-    if *pointer + length_bytes > data.len() {
+    if *pointer + length > data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
             "Not enough data for hash",
         ));
     }
-    let hash = data[*pointer..*pointer + length_bytes].to_vec();
-    *pointer += length_bytes;
+    let hash = data[*pointer..*pointer + length].to_vec();
+    *pointer += length;
 
-    // Return appropriate hash type based on algorithm and size marker
-    match (algo, size_marker) {
-        (b'b', b'3') => Ok(VsfType::hb3(hash)),
-        (b'b', b'4') => Ok(VsfType::hb4(hash)),
-        (b'2', b'3') => Ok(VsfType::h23(hash)),
-        (b'5', b'3') => Ok(VsfType::h53(hash)),
+    // Return appropriate hash type based on algorithm
+    match algo {
+        b'b' => Ok(VsfType::hb(hash)),
+        b's' => Ok(VsfType::hs(hash)),
         _ => Err(Error::new(
             ErrorKind::InvalidData,
-            format!(
-                "Unknown hash type: h{}{}",
-                algo as char, size_marker as char
-            ),
+            format!("Unknown hash algorithm: {}", algo as char),
         )),
     }
 }
@@ -369,69 +297,27 @@ pub fn parse_signature(data: &[u8], pointer: &mut usize) -> Result<VsfType, Erro
     let algo = data[*pointer];
     *pointer += 1;
 
-    // Read size marker (3 for u3, 4 for u4)
-    if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for signature size marker",
-        ));
-    }
-    let size_marker = data[*pointer];
-    *pointer += 1;
-
-    // Read length (stored as len-1)
-    let length_bytes = match size_marker {
-        b'3' => {
-            if *pointer >= data.len() {
-                return Err(Error::new(
-                    ErrorKind::UnexpectedEof,
-                    "Not enough data for u3 length",
-                ));
-            }
-            let len = data[*pointer] as usize + 1;
-            *pointer += 1;
-            len
-        }
-        b'4' => {
-            if *pointer + 1 >= data.len() {
-                return Err(Error::new(
-                    ErrorKind::UnexpectedEof,
-                    "Not enough data for u4 length",
-                ));
-            }
-            let len = u16::from_be_bytes([data[*pointer], data[*pointer + 1]]) as usize + 1;
-            *pointer += 2;
-            len
-        }
-        _ => {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Invalid signature size marker",
-            ))
-        }
-    };
+    // Read length (stored as len-1) using standard VSF variable-length encoding
+    let length = decode_usize(data, pointer)? + 1; // Add 1 back
 
     // Read signature data
-    if *pointer + length_bytes > data.len() {
+    if *pointer + length > data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
             "Not enough data for signature",
         ));
     }
-    let sig = data[*pointer..*pointer + length_bytes].to_vec();
-    *pointer += length_bytes;
+    let sig = data[*pointer..*pointer + length].to_vec();
+    *pointer += length;
 
     // Return appropriate signature type
-    match (algo, size_marker) {
-        (b'e', b'3') => Ok(VsfType::ge3(sig)),
-        (b'p', b'3') => Ok(VsfType::gp3(sig)),
-        (b'r', b'4') => Ok(VsfType::gr4(sig)),
+    match algo {
+        b'e' => Ok(VsfType::ge(sig)),
+        b'p' => Ok(VsfType::gp(sig)),
+        b'r' => Ok(VsfType::gr(sig)),
         _ => Err(Error::new(
             ErrorKind::InvalidData,
-            format!(
-                "Unknown signature type: g{}{}",
-                algo as char, size_marker as char
-            ),
+            format!("Unknown signature algorithm: {}", algo as char),
         )),
     }
 }
@@ -447,57 +333,29 @@ pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
     let algo = data[*pointer];
     *pointer += 1;
 
-    // Read size marker (3 for u3)
-    if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for key size marker",
-        ));
-    }
-    let size_marker = data[*pointer];
-    *pointer += 1;
-
-    // Read length (stored as len-1)
-    let length_bytes = match size_marker {
-        b'3' => {
-            if *pointer >= data.len() {
-                return Err(Error::new(
-                    ErrorKind::UnexpectedEof,
-                    "Not enough data for u3 length",
-                ));
-            }
-            let len = data[*pointer] as usize + 1;
-            *pointer += 1;
-            len
-        }
-        _ => {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Invalid key size marker",
-            ))
-        }
-    };
+    // Read length (stored as len-1) using standard VSF variable-length encoding
+    let length = decode_usize(data, pointer)? + 1; // Add 1 back
 
     // Read key data
-    if *pointer + length_bytes > data.len() {
+    if *pointer + length > data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
             "Not enough data for key",
         ));
     }
-    let key = data[*pointer..*pointer + length_bytes].to_vec();
-    *pointer += length_bytes;
+    let key = data[*pointer..*pointer + length].to_vec();
+    *pointer += length;
 
     // Return appropriate key type
-    match (algo, size_marker) {
-        (b'e', b'3') => Ok(VsfType::ke3(key)),
-        (b'x', b'3') => Ok(VsfType::kx3(key)),
-        (b'p', b'3') => Ok(VsfType::kp3(key)),
-        (b'c', b'3') => Ok(VsfType::kc3(key)),
-        (b'a', b'3') => Ok(VsfType::ka3(key)),
+    match algo {
+        b'e' => Ok(VsfType::ke(key)),
+        b'x' => Ok(VsfType::kx(key)),
+        b'p' => Ok(VsfType::kp(key)),
+        b'c' => Ok(VsfType::kc(key)),
+        b'a' => Ok(VsfType::ka(key)),
         _ => Err(Error::new(
             ErrorKind::InvalidData,
-            format!("Unknown key type: k{}{}", algo as char, size_marker as char),
+            format!("Unknown key algorithm: {}", algo as char),
         )),
     }
 }

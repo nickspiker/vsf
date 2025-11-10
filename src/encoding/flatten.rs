@@ -377,124 +377,110 @@ impl VsfType {
             }
 
             // ==================== HASHES ====================
-            VsfType::hb3(value) => {
-                let mut flat = vec![b'h', b'b', b'3'];
-                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+            VsfType::hb(value) => {
+                let mut flat = vec![b'h', b'b'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::hb4(value) => {
-                let mut flat = vec![b'h', b'b', b'4'];
-                flat.extend_from_slice(&((value.len() - 1) as u16).to_be_bytes()); // Store (len-1) as u16
-                flat.extend_from_slice(value);
-                flat
-            }
-
-            VsfType::h23(value) => {
-                let mut flat = vec![b'h', b'2', b'3'];
-                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
-                flat.extend_from_slice(value);
-                flat
-            }
-
-            VsfType::h53(value) => {
-                let mut flat = vec![b'h', b'5', b'3'];
-                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+            VsfType::hs(value) => {
+                let mut flat = vec![b'h', b's'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
             // ==================== SIGNATURES ====================
-            VsfType::ge3(value) => {
-                let mut flat = vec![b'g', b'e', b'3'];
-                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+            VsfType::ge(value) => {
+                let mut flat = vec![b'g', b'e'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::gp3(value) => {
-                let mut flat = vec![b'g', b'p', b'3'];
-                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+            VsfType::gp(value) => {
+                let mut flat = vec![b'g', b'p'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::gr4(value) => {
-                let mut flat = vec![b'g', b'r', b'4'];
-                flat.extend_from_slice(&((value.len() - 1) as u16).to_be_bytes()); // Store (len-1) as u16
+            VsfType::gr(value) => {
+                let mut flat = vec![b'g', b'r'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
             // ==================== KEYS ====================
-            VsfType::ke3(value) => {
-                let mut flat = vec![b'k', b'e', b'3'];
-                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+            VsfType::ke(value) => {
+                let mut flat = vec![b'k', b'e'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::kx3(value) => {
-                let mut flat = vec![b'k', b'x', b'3'];
-                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+            VsfType::kx(value) => {
+                let mut flat = vec![b'k', b'x'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::kp3(value) => {
-                let mut flat = vec![b'k', b'p', b'3'];
-                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+            VsfType::kp(value) => {
+                let mut flat = vec![b'k', b'p'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::kc3(value) => {
-                let mut flat = vec![b'k', b'c', b'3'];
-                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+            VsfType::kc(value) => {
+                let mut flat = vec![b'k', b'c'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::ka3(value) => {
-                let mut flat = vec![b'k', b'a', b'3'];
-                flat.push((value.len() - 1) as u8); // Store (len-1) as single byte
+            VsfType::ka(value) => {
+                let mut flat = vec![b'k', b'a'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
             // ==================== MAC (MESSAGE AUTHENTICATION CODE) ====================
-            VsfType::ah3(value) => {
-                let mut flat = vec![b'a', b'h', b'3'];
-                flat.push((value.len() - 1) as u8);
+            VsfType::ah(value) => {
+                let mut flat = vec![b'a', b'h'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::as3(value) => {
-                let mut flat = vec![b'a', b's', b'3'];
-                flat.push((value.len() - 1) as u8);
+            VsfType::as_(value) => {
+                let mut flat = vec![b'a', b's'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::ap3(value) => {
-                let mut flat = vec![b'a', b'p', b'3'];
-                flat.push((value.len() - 1) as u8);
+            VsfType::ap(value) => {
+                let mut flat = vec![b'a', b'p'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::ab3(value) => {
-                let mut flat = vec![b'a', b'b', b'3'];
-                flat.push((value.len() - 1) as u8);
+            VsfType::ab(value) => {
+                let mut flat = vec![b'a', b'b'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::ac3(value) => {
-                let mut flat = vec![b'a', b'c', b'3'];
-                flat.push((value.len() - 1) as u8);
+            VsfType::ac(value) => {
+                let mut flat = vec![b'a', b'c'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
@@ -3561,19 +3547,32 @@ impl VsfType {
             VsfType::y(compat) => 1 + encoded_usize_len(*compat), // 'y' + encoded compat
 
             // ==================== CRYPTO PRIMITIVES ====================
-            VsfType::hb3(bytes) | VsfType::hb4(bytes) => {
-                // 'h' + algo + '[' + size + ']' + data
-                1 + 1 + 1 + encoded_usize_len(bytes.len()) + 1 + bytes.len()
+            VsfType::hb(bytes) | VsfType::hs(bytes) => {
+                // prefix + encoded_length + data
+                2 + encoded_usize_len(bytes.len()) + bytes.len()
             }
 
-            VsfType::ge3(bytes) => {
-                // 'g' + algo + '[' + size + ']' + data
-                1 + 1 + 1 + encoded_usize_len(bytes.len()) + 1 + bytes.len()
+            VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) => {
+                // prefix + encoded_length + data
+                2 + encoded_usize_len(bytes.len()) + bytes.len()
             }
 
-            VsfType::kc3(bytes) => {
-                // 'k' + algo + '[' + size + ']' + data
-                1 + 1 + 1 + encoded_usize_len(bytes.len()) + 1 + bytes.len()
+            VsfType::ke(bytes)
+            | VsfType::kx(bytes)
+            | VsfType::kp(bytes)
+            | VsfType::kc(bytes)
+            | VsfType::ka(bytes) => {
+                // prefix + encoded_length + data
+                2 + encoded_usize_len(bytes.len()) + bytes.len()
+            }
+
+            VsfType::ah(bytes)
+            | VsfType::as_(bytes)
+            | VsfType::ap(bytes)
+            | VsfType::ab(bytes)
+            | VsfType::ac(bytes) => {
+                // prefix + encoded_length + data
+                2 + encoded_usize_len(bytes.len()) + bytes.len()
             }
 
             // For complex types, fall back to flatten().len()
