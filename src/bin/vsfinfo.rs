@@ -3,6 +3,7 @@
 //! Similar to exiftool for images, vsfinfo provides detailed inspection of VSF files
 //! including metadata, structure verification, and field extraction.
 
+use chrono::{Datelike, Timelike};
 use clap::{Parser, Subcommand};
 use colored::*;
 use std::fs;
@@ -317,69 +318,24 @@ fn format_number(n: usize) -> String {
 }
 
 /// Format Eagle Time (ET) in human-readable format: 2025-OCT-29 6:42:21.813 PM
-fn format_et(et_ms: i64) -> String {
-    // ET is milliseconds since Unix epoch (1970-01-01 00:00:00 UTC)
-    let seconds = et_ms / 1000;
-    let milliseconds = (et_ms % 1000).abs();
+fn format_et(et: &vsf::types::EtType) -> String {
+    // Convert EtType to EagleTime and then to DateTime using chrono
+    let eagle_time = vsf::types::EagleTime::new(et.clone());
+    let dt = eagle_time.to_datetime();
 
-    // Calculate date/time components
-    let mut days_since_epoch = seconds / 86400;
-    let mut seconds_in_day = (seconds % 86400).abs();
-
-    // Handle negative times (before epoch)
-    if seconds < 0 && seconds_in_day != 0 {
-        days_since_epoch -= 1;
-        seconds_in_day = 86400 - seconds_in_day;
-    }
-
-    // Calculate year, month, day
-    let mut year = 1970;
-    let mut remaining_days = days_since_epoch;
-
-    // Handle negative years
-    if days_since_epoch < 0 {
-        remaining_days = -days_since_epoch;
-        while remaining_days > 365 {
-            let days_in_year = if is_leap_year(year - 1) { 366 } else { 365 };
-            remaining_days -= days_in_year;
-            year -= 1;
-        }
-        year -= 1;
-        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
-        remaining_days = days_in_year - remaining_days;
-    } else {
-        loop {
-            let days_in_year = if is_leap_year(year) { 366 } else { 365 };
-            if remaining_days < days_in_year {
-                break;
-            }
-            remaining_days -= days_in_year;
-            year += 1;
-        }
-    }
-
-    // Find month and day
-    let is_leap = is_leap_year(year);
-    let days_in_months = if is_leap {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    // Extract milliseconds from fractional seconds if available
+    let milliseconds = match et {
+        vsf::types::EtType::f5(v) => ((v.fract().abs() * 1000.0) as u32) % 1000,
+        vsf::types::EtType::f6(v) => ((v.fract().abs() * 1000.0) as u32) % 1000,
+        _ => 0,
     };
 
-    let mut month = 0;
-    let mut day = remaining_days + 1;
-    for (i, &days_in_month) in days_in_months.iter().enumerate() {
-        if day <= days_in_month {
-            month = i + 1;
-            break;
-        }
-        day -= days_in_month;
-    }
-
-    // Calculate time
-    let hour = (seconds_in_day / 3600) as i32;
-    let minute = ((seconds_in_day % 3600) / 60) as i32;
-    let second = (seconds_in_day % 60) as i32;
+    let year = dt.year();
+    let month = dt.month();
+    let day = dt.day();
+    let hour = dt.hour();
+    let minute = dt.minute();
+    let second = dt.second();
 
     // Convert to 12-hour format
     let (hour_12, am_pm) = if hour == 0 {
@@ -412,10 +368,6 @@ fn format_et(et_ms: i64) -> String {
         "{}-{}-{:02} {}:{:02}:{:02}.{:03} {}",
         year, month_name, day, hour_12, minute, second, milliseconds, am_pm
     )
-}
-
-fn is_leap_year(year: i64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }
 
 /// Quick file hash verification
@@ -532,22 +484,7 @@ fn format_value(vsf: &VsfType) -> String {
             let (lat, lon) = coord.to_lat_lon();
             format!("({:.4}°N, {:.4}°W)", lat, lon)
         }
-        VsfType::e(et) => {
-            // Format EtType based on its variant - ET is always in seconds, convert to milliseconds
-            let et_ms = match et {
-                vsf::types::EtType::u(v) => (*v as i64) * 1000,
-                vsf::types::EtType::u5(v) => (*v as i64) * 1000,
-                vsf::types::EtType::u6(v) => (*v as i64) * 1000,
-                vsf::types::EtType::u7(v) => (*v as i64) * 1000,
-                vsf::types::EtType::i(v) => (*v as i64) * 1000,
-                vsf::types::EtType::i5(v) => (*v as i64) * 1000,
-                vsf::types::EtType::i6(v) => (*v as i64) * 1000,
-                vsf::types::EtType::i7(v) => (*v as i64) * 1000,
-                vsf::types::EtType::f5(v) => (*v * 1000.0) as i64,
-                vsf::types::EtType::f6(v) => (*v * 1000.0) as i64,
-            };
-            format_et(et_ms)
-        }
+        VsfType::e(et) => format_et(et),
         VsfType::hb(hash) => format!("hb[BLAKE3 {} Bytes] {}...", hash.len(), hex_preview(hash)),
         VsfType::hs(hash) => format!("hs[SHA-2 {} Bytes] {}...", hash.len(), hex_preview(hash)),
 

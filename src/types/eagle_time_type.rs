@@ -10,13 +10,7 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 #[allow(non_camel_case_types)]
 pub enum EtType {
     u(usize), // Auto-sized unsigned
-    u5(u32),  // 32-bit unsigned
-    u6(u64),  // 64-bit unsigned
-    u7(u128), // 128-bit unsigned
     i(isize), // Auto-sized signed
-    i5(i32),  // 32-bit signed
-    i6(i64),  // 64-bit signed
-    i7(i128), // 128-bit signed
     f5(f32),  // 32-bit float
     f6(f64),  // 64-bit float
 }
@@ -38,15 +32,18 @@ impl EagleTime {
         use crate::types::VsfType;
 
         let et_seconds = match value {
+            VsfType::f5(v) => EtType::f5(v),
             VsfType::f6(v) => EtType::f6(v),
             VsfType::u(v, false) => EtType::u(v),
-            VsfType::u5(v) => EtType::u5(v),
-            VsfType::u6(v) => EtType::u6(v),
-            VsfType::u7(v) => EtType::u7(v),
+            VsfType::u3(v) => EtType::u(v as usize),
+            VsfType::u4(v) => EtType::u(v as usize),
+            VsfType::u5(v) => EtType::u(v as usize),
+            VsfType::u6(v) => EtType::u(v as usize),
             VsfType::i(v) => EtType::i(v),
-            VsfType::i5(v) => EtType::i5(v),
-            VsfType::i6(v) => EtType::i6(v),
-            VsfType::i7(v) => EtType::i7(v),
+            VsfType::i3(v) => EtType::i(v as isize),
+            VsfType::i4(v) => EtType::i(v as isize),
+            VsfType::i5(v) => EtType::i(v as isize),
+            VsfType::i6(v) => EtType::i(v as isize),
             _ => panic!("EagleTime must be created with a valid numeric VsfType variant"),
         };
         EagleTime { et_seconds }
@@ -62,16 +59,10 @@ impl EagleTime {
         use crate::types::VsfType;
 
         match self.et_seconds {
+            EtType::f5(v) => VsfType::f5(v),
             EtType::f6(v) => VsfType::f6(v),
             EtType::u(v) => VsfType::u(v, false),
-            EtType::u5(v) => VsfType::u5(v),
-            EtType::u6(v) => VsfType::u6(v),
-            EtType::u7(v) => VsfType::u7(v),
             EtType::i(v) => VsfType::i(v),
-            EtType::i5(v) => VsfType::i5(v),
-            EtType::i6(v) => VsfType::i6(v),
-            EtType::i7(v) => VsfType::i7(v),
-            _ => panic!("Unexpected EtType variant"),
         }
     }
 
@@ -79,17 +70,12 @@ impl EagleTime {
     pub fn to_datetime(&self) -> DateTime<Utc> {
         let eagle_epoch = Utc.with_ymd_and_hms(1969, 7, 20, 20, 17, 40).unwrap();
         let duration: Duration = match self.et_seconds {
+            EtType::f5(v) => Duration::from_std(std::time::Duration::from_secs_f64(v as f64))
+                .unwrap_or_else(|_| panic!("Invalid duration")),
             EtType::f6(v) => Duration::from_std(std::time::Duration::from_secs_f64(v))
                 .unwrap_or_else(|_| panic!("Invalid duration")),
             EtType::u(v) => Duration::seconds(v as i64),
-            EtType::u5(v) => Duration::seconds(v as i64),
-            EtType::u6(v) => Duration::seconds(v as i64),
-            EtType::u7(v) => Duration::seconds(v as i64),
             EtType::i(v) => Duration::seconds(v as i64),
-            EtType::i5(v) => Duration::seconds(v as i64),
-            EtType::i6(v) => Duration::seconds(v),
-            EtType::i7(v) => Duration::seconds(v as i64),
-            _ => panic!("Unexpected EtType variant"),
         };
         eagle_epoch + duration
     }
@@ -97,6 +83,38 @@ impl EagleTime {
     /// Get a reference to the underlying EtType
     pub fn et_type(&self) -> &EtType {
         &self.et_seconds
+    }
+
+    /// Converts the EtType to f64 for comparison purposes
+    fn to_f64(&self) -> f64 {
+        match self.et_seconds {
+            EtType::f5(v) => v as f64,
+            EtType::f6(v) => v,
+            EtType::u(v) => v as f64,
+            EtType::i(v) => v as f64,
+        }
+    }
+}
+
+impl PartialEq for EagleTime {
+    fn eq(&self, other: &Self) -> bool {
+        self.to_f64() == other.to_f64()
+    }
+}
+
+impl Eq for EagleTime {}
+
+impl PartialOrd for EagleTime {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.to_f64().partial_cmp(&other.to_f64())
+    }
+}
+
+impl Ord for EagleTime {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // For Ord, we need total ordering. f64 has NaN which breaks this,
+        // but for time values we shouldn't have NaN, so we can unwrap.
+        self.partial_cmp(other).unwrap_or(std::cmp::Ordering::Equal)
     }
 }
 
@@ -127,5 +145,41 @@ mod tests {
         let back = et.to_datetime();
         // Allow small floating point error
         assert!((future - back).num_seconds().abs() < 2);
+    }
+
+    #[test]
+    fn test_eagle_time_comparison() {
+        let time1 = EagleTime::new(EtType::u(1000));
+        let time2 = EagleTime::new(EtType::u(2000));
+        let time3 = EagleTime::new(EtType::f6(1000.0));
+
+        // Test ordering
+        assert!(time1 < time2);
+        assert!(time2 > time1);
+
+        // Test equality across different types (u vs f6)
+        assert_eq!(time1, time3);
+
+        // Test with mixed types
+        let time_f5 = EagleTime::new(EtType::f5(1500.0));
+        assert!(time1 < time_f5);
+        assert!(time_f5 < time2);
+    }
+
+    #[test]
+    fn test_eagle_time_sorting() {
+        let mut times = vec![
+            EagleTime::new(EtType::u(3000)),
+            EagleTime::new(EtType::f6(1000.0)),
+            EagleTime::new(EtType::i(2000)),
+            EagleTime::new(EtType::f5(500.0)),
+        ];
+
+        times.sort();
+
+        assert_eq!(times[0].to_f64(), 500.0);
+        assert_eq!(times[1].to_f64(), 1000.0);
+        assert_eq!(times[2].to_f64(), 2000.0);
+        assert_eq!(times[3].to_f64(), 3000.0);
     }
 }
