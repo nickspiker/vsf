@@ -148,37 +148,7 @@ impl VsfType {
                         flat.push(b'u');
                         flat.extend_from_slice(&value.encode_number());
                     }
-                    EtType::u5(value) => {
-                        flat.push(b'e');
-                        flat.push(b'u');
-                        flat.extend_from_slice(&value.encode_number());
-                    }
-                    EtType::u6(value) => {
-                        flat.push(b'e');
-                        flat.push(b'u');
-                        flat.extend_from_slice(&value.encode_number());
-                    }
-                    EtType::u7(value) => {
-                        flat.push(b'e');
-                        flat.push(b'u');
-                        flat.extend_from_slice(&value.encode_number());
-                    }
                     EtType::i(value) => {
-                        flat.push(b'e');
-                        flat.push(b'i');
-                        flat.extend_from_slice(&value.encode_number());
-                    }
-                    EtType::i5(value) => {
-                        flat.push(b'e');
-                        flat.push(b'i');
-                        flat.extend_from_slice(&value.encode_number());
-                    }
-                    EtType::i6(value) => {
-                        flat.push(b'e');
-                        flat.push(b'i');
-                        flat.extend_from_slice(&value.encode_number());
-                    }
-                    EtType::i7(value) => {
                         flat.push(b'e');
                         flat.push(b'i');
                         flat.extend_from_slice(&value.encode_number());

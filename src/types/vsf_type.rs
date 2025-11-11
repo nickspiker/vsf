@@ -494,7 +494,7 @@ pub enum VsfType {
     ab(Vec<u8>),  // BLAKE3-keyed
     ac(Vec<u8>),  // CMAC-AES
 
-    // ==================== WRAPPED/ENCODED DATA (OPTIONAL) ====================
+    // ==================== WRAPPED/ENCODED DATA ====================
     /// Wrapped/encoded VSF data with compression, error correction, or encryption
     ///
     /// Format: v[algorithm][encoded_data]
@@ -517,7 +517,6 @@ pub enum VsfType {
     /// let outer = VsfType::v(b'r', reed_solomon_encode(&inner.flatten()));
     /// ```
     ///
-    /// This is OPTIONAL - core VSF doesn't require it.
     /// Use when your application needs compression, error correction, or encryption.
     v(u8, Vec<u8>), // Wrapped data (algorithm byte, encoded Bytes)
 }
