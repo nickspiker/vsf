@@ -156,11 +156,13 @@ impl VsfType {
                     EtType::f5(value) => {
                         flat.push(b'e');
                         flat.push(b'f');
+                        flat.push(b'5');
                         flat.extend_from_slice(&value.to_be_bytes());
                     }
                     EtType::f6(value) => {
                         flat.push(b'e');
                         flat.push(b'f');
+                        flat.push(b'6');
                         flat.extend_from_slice(&value.to_be_bytes());
                     }
                 }
@@ -347,6 +349,13 @@ impl VsfType {
             }
 
             // ==================== HASHES ====================
+            VsfType::hp(value) => {
+                let mut flat = vec![b'h', b'p'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
+                flat.extend_from_slice(value);
+                flat
+            }
+
             VsfType::hb(value) => {
                 let mut flat = vec![b'h', b'b'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
