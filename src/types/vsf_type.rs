@@ -461,7 +461,7 @@ pub enum VsfType {
 
     // VSF Structure
     d(String),      // Data type name
-    l(String),      // Label
+    l(String),      // Label text
     o(usize),       // Offset in Bytes
     b(usize, bool), // Length in Bytes (value, inclusive_mode)
     n(usize),       // Number/count

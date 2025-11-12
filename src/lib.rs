@@ -23,11 +23,18 @@
 //! - **Contiguous** (`t`): Row-major multi-dimensional arrays (1D-4D)
 //! - **Strided** (`q`): Non-contiguous views with explicit stride
 //!
-//! ### Metadata
+//! ### Metadata and Labels
+//!
+//! VSF uses labels within sections for metadata:
+//!
+//! - `l`: Label text - identifies a field within a section (e.g., "shutter_speed", "author")
+//! - Section fields can contain multiple values: `(label:value1,value2,value3)`
+//! - Sections can contain hierarchical fields: `[dImaging (lshutter_speed:f6{0.01})(laperture:f5{2.8})]`
+//!
+//! **Other Metadata Types:**
 //! - `x`: Unicode text strings
 //! - `e`: Eagle Time (seconds since lunar landing)
-//! - `d`: Data type labels
-//! - `l`: User-defined labels
+//! - `d`: Data type identifier
 //! - `o`: Byte offsets (for hierarchical structure)
 //! - `b`: Byte lengths
 //! - `n`: Counts
@@ -39,15 +46,111 @@
 //! VSF files follow a hierarchical structure:
 //!
 //! ```text
-//! RÅ<                              Magic number + header start
-//!   b[header_length]               Header size
-//!   z[version] y[backward_version] Version info
-//!   n[label_count]                 Number of data sections
-//!   (label: o[offset] b[size] n[count])  Section definitions
+//! RÅ<                                  Magic number + header start
+//!   b?{header_length}                  Header size
+//!   z?{version}                        Format version
+//!   y?{backward_version}               Backward compatibility version
+//!   ef5{creation_time}                 Eagle Time creation timestamp (f32, ~2min precision)
+//!   hs{256}{content_hash}              Static: hash of immutable content (never changes)
+//!   hb{256}{file_hash}                 Rolling: current file state (includes History)
+//!   ge{64}{file_signature}             File-level Ed25519 signature over hs (optional)
+//!   k?{key}                            File-level encryption key (optional)
+//!   n?{label_count}                    Number of label records
+//!   (dRAW:h?{hash},g?{sig},k?{key},o?{offset},b?{size},n?{count})     Label record
+//!   (dThumbnail:h?{hash},g?{sig},k?{key},o?{offset},b?{size},n?{count})
+//!   (dHistory:h?{hash},o?{offset},b?{size},n?{count})                 History tracking
 //!   ...
-//! >                                Header end
+//! >                                    Header end
 //!
-//! [Section data at offsets...]     Actual data (structured or unboxed)
+//! [dRAW (section_fields...)]           Section data at offset
+//! [dThumbnail (section_fields...)]
+//! [dHistory (history_entries...)]
+//! ```
+//!
+//! **Hash Strategy:**
+//! - **hs** (static hash): Content identity - computed once from immutable sections (RAW, original metadata). 
+//!   Typically never changes, but users/applications may update for substantial modifications.
+//! - **hb** (rolling hash): File integrity - includes all sections including History. Updates when History updates.
+//! - **ge** (signature): Signs hs to authenticate original content.
+//!
+//! **Terminology:**
+//! - **Header**: Everything between `RÅ<` and `>`
+//! - **Header field**: Individual entries like `b?{length}`, `z?{version}`
+//! - **Label record**: The `(d"name":h,g,k,o,b,n)` entries that point to sections
+//! - **Section**: Actual data blocks after the header, located at specified offsets
+//! - **Section field**: Individual `(field)` entries within a section's data
+//! - **? and {}**: ? indicates length (ASCII 0-Z), {} indicates binary data
+//!
+//! The `:` and `,` separators in label records make the format human-readable in hex editors
+//! and aid in forensics and corruption analysis with minimal overhead.
+//!
+//! ## Section Flattening Example
+//!
+//! A section with hierarchical fields for camera metadata:
+//!
+//! ```text
+//! [dImaging
+//!   (lshutter_speed:f6{0.01})      // 1/100s as f64
+//!   (laperture:f5{2.8})            // f/2.8 as f32
+//!   (liso:u4{400})                 // ISO 400
+//! ]
+//! ```
+//!
+//! Which flattens to:
+//!
+//! ```text
+//! '[' + 'd' + '3' + {7u8} + "Imaging" +
+//! '(' + 'l' + '3' + {13u8} + "shutter_speed" + ':' + 'f' + '6' + {0.01f64} + ')' +
+//! '(' + 'l' + '3' + {8u8} + "aperture"      + ':' + 'f' + '5' + {2.8f32} + ')' +
+//! '(' + 'l' + '3' + {3u8} + "iso" + ':' + 'u' + '4'+ {400u16} + ')' +
+//! ']'
+//! ```
+//!
+//! Where 'char' indicates a single byte character, and "string" indicates ASCII text bytes.
+//!
+//! And the final flattened byte stream is:
+//!
+//! ```text
+//! [d3{0x07}Imaging(l3{0x0D}shutter_speed:f6{0x7B 14 AE 47 E1 7A 84 3F})(l3{0x08}aperture:f5{0x33 33 33 40})(l3{0x03}iso:u4{0x01 90})]
+//! ```
+//!
+//! Each section field is enclosed by `()`'s and always starts with a text identifier (`l` marker + ASCII string), 
+//! followed by `:` and its value(s) separated by `,`. Section fields are flattened sequentially, creating a 
+//! self-describing stream.
+//!
+//! ## Optional History Section (Will change heavily as design matures)
+//!
+//! For applications requiring detailed tracking beyond the immutable creation timestamp:
+//!
+//! ```text
+//! [dHistory
+//!  (ef6{1234567890.5},ltool:x{Lumis},lversion:z{0.1.2},lhost:x{workstation-sea})
+//!  (ef6{1234567920.3},ltool:x{Photon},laction:x{modified},lhost:x{laptop-pdx})
+//!  (ef6{1234567950.1},laction:x{accessed},lhost:x{phone-mobile})
+//! ]
+//! ```
+//!
+//! Which flattens to:
+//!
+//! ```text
+//! '[' + 'd' + '1' + {7u8} + "History" +
+//! '(' + 'e' + 'f' + '6' + {1234567890.5f64} + ',' + 
+//!       'l' + '1' + {4u8} + "tool" + ':' + 'x' + '1' + {5u8} + "Lumis" + ',' +
+//!       'l' + '1' + {7u8} + "version" + ':' + 'z' + '1' + {5u8} + "0.1.2" + ',' +
+//!       'l' + '1' + {4u8} + "host" + ':' + 'x' + '2' + {15u8} + "workstation-sea" + ')' +
+//! '(' + 'e' + 'f' + '6' + {1234567920.3f64} + ',' +
+//!       'l' + '1' + {4u8} + "tool" + ':' + 'x' + '1' + {6u8} + "Photon" + ',' +
+//!       'l' + '1' + {6u8} + "action" + ':' + 'x' + '1' + {8u8} + "modified" + ',' +
+//!       'l' + '1' + {4u8} + "host" + ':' + 'x' + '1' + {10u8} + "laptop-pdx" + ')' +
+//! '(' + 'e' + 'f' + '6' + {1234567950.1f64} + ',' +
+//!       'l' + '1' + {6u8} + "action" + ':' + 'x' + '1' + {8u8} + "accessed" + ',' +
+//!       'l' + '1' + {4u8} + "host" + ':' + 'x' + '1' + {12u8} + "phone-mobile" + ')' +
+//! ']'
+//! ```
+//!
+//! Each history entry is a complete event enclosed in `()`'s with timestamp, tool, action, and context.
+//! The History section has its own hash in the header label record for integrity verification, but is
+//! NOT included in `hs` (static content hash). It IS included in `hb` (rolling file hash).
 //! ```
 //!
 //! ## Quick Start
@@ -77,7 +180,7 @@
 //! ## Eagle Time
 //!
 //! Eagle Time counts seconds (or fractional seconds) since 1969-07-20 20:17:40 UTC (lunar landing).
-//! Always coordinated, no timezones, no daylight saving. Just one single unabiguous time standard.
+//! Always coordinated, no timezones, no daylight saving. Just one single unambiguous time standard.
 //!
 //! ## Module Structure
 //!

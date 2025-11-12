@@ -17,6 +17,7 @@ use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
 pub struct VsfBuilder {
     version: usize,
     backward_compat: usize,
+    creation_time: VsfType, // Creation timestamp (ef5 for ~2min precision)
     sections: Vec<VsfSection>,
     unboxed: Vec<(String, Vec<u8>)>,
     include_file_hash: bool, // Always true - BLAKE3 hash is mandatory for all VSF files
@@ -25,12 +26,27 @@ pub struct VsfBuilder {
 impl VsfBuilder {
     /// Create a new VSF file builder
     ///
-    /// **Note:** Every VSF file automatically includes a BLAKE3 hash in the header
-    /// for integrity verification. This is computed transparently during `build()`.
+    /// **Note:** Every VSF file automatically includes:
+    /// - Creation timestamp (current time as ef5, ~2min precision)
+    /// - BLAKE3 hash for integrity verification (computed during `build()`)
     pub fn new() -> Self {
+        use crate::types::EtType;
+        use chrono::Utc;
+
+        // Get current time and convert to Eagle Time f32
+        let now = Utc::now();
+        let et = crate::datetime_to_eagle_time(now);
+        let et_f32 = match et.et_type() {
+            EtType::f6(v) => *v as f32,
+            EtType::f5(v) => *v,
+            EtType::u(v) => *v as f32,
+            EtType::i(v) => *v as f32,
+        };
+
         Self {
             version: VSF_VERSION,
             backward_compat: VSF_BACKWARD_COMPAT,
+            creation_time: VsfType::e(EtType::f5(et_f32)),
             sections: Vec::new(),
             unboxed: Vec::new(),
             include_file_hash: true, // Always hash - required for all VSF files
@@ -86,6 +102,9 @@ impl VsfBuilder {
         header_index = vsf.len();
         vsf.push(VsfType::z(self.version).flatten());
         vsf[header_index].extend_from_slice(&VsfType::y(self.backward_compat).flatten());
+
+        // Creation time
+        vsf[header_index].extend_from_slice(&self.creation_time.flatten());
 
         if self.include_file_hash {
             vsf[header_index].extend_from_slice(&VsfType::hb(vec![0u8; 32]).flatten());
@@ -146,7 +165,7 @@ impl VsfBuilder {
             vsf.push(section_bytes);
         }
 
-        // Stabilization loop (like basecalc)
+        // Stabilization loop
         let mut prev_header_length = 0;
         let mut prev_offsets = vec![0; label_offset_indices.len()];
         let mut prev_sizes = vec![0; label_size_indices.len()];
@@ -211,7 +230,7 @@ impl VsfBuilder {
             return Err("Failed to stabilize header after 10 iterations".to_string());
         }
 
-        // Flatten vsf (with crypto placeholders already in place)
+        // Flatten vsf
         let mut result: Vec<u8> = vsf.into_iter().flatten().collect();
 
         // Append unboxed data
@@ -220,7 +239,6 @@ impl VsfBuilder {
         }
 
         // Now structure is finalized - compute and write all crypto primitives
-        // File hash placeholder (hb[32][zeros]) is already in header from line 91
         use crate::verification::{compute_file_hash, write_file_hash};
 
         let hash = compute_file_hash(&result)?;
@@ -252,8 +270,7 @@ mod tests {
             )
             .build();
 
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
+        let bytes = result.expect("Failed to build VSF file");
 
         // Verify magic number (RÅ is 3 bytes in UTF-8)
         assert_eq!(&bytes[0..3], "RÅ".as_bytes());
