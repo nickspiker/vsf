@@ -53,51 +53,60 @@ pub fn parse_eagle_time(data: &[u8], pointer: &mut usize) -> Result<VsfType, Err
             Ok(VsfType::e(EtType::i(value)))
         }
         b'f' => {
-            // Eagle Time floats: [e][f][4 or 8 bytes]
-            // Determine f5 vs f6 by looking at available bytes
-            let remaining = data.len() - *pointer;
-
-            if remaining >= 8 {
-                // f64 (f6)
-                if *pointer + 8 > data.len() {
-                    return Err(Error::new(
-                        ErrorKind::UnexpectedEof,
-                        "Not enough data for f6",
-                    ));
-                }
-                let value = f64::from_be_bytes([
-                    data[*pointer],
-                    data[*pointer + 1],
-                    data[*pointer + 2],
-                    data[*pointer + 3],
-                    data[*pointer + 4],
-                    data[*pointer + 5],
-                    data[*pointer + 6],
-                    data[*pointer + 7],
-                ]);
-                *pointer += 8;
-                Ok(VsfType::e(EtType::f6(value)))
-            } else if remaining >= 4 {
-                // f32 (f5)
-                if *pointer + 4 > data.len() {
-                    return Err(Error::new(
-                        ErrorKind::UnexpectedEof,
-                        "Not enough data for f5",
-                    ));
-                }
-                let value = f32::from_be_bytes([
-                    data[*pointer],
-                    data[*pointer + 1],
-                    data[*pointer + 2],
-                    data[*pointer + 3],
-                ]);
-                *pointer += 4;
-                Ok(VsfType::e(EtType::f5(value)))
-            } else {
-                Err(Error::new(
+            // Eagle Time floats: [e][f][5 or 6][bytes]
+            if *pointer >= data.len() {
+                return Err(Error::new(
                     ErrorKind::UnexpectedEof,
-                    "Not enough data for eagle time float",
-                ))
+                    "Not enough data for float precision marker",
+                ));
+            }
+
+            let precision = data[*pointer];
+            *pointer += 1;
+
+            match precision {
+                b'5' => {
+                    // f32 (f5)
+                    if *pointer + 4 > data.len() {
+                        return Err(Error::new(
+                            ErrorKind::UnexpectedEof,
+                            "Not enough data for f5",
+                        ));
+                    }
+                    let value = f32::from_be_bytes([
+                        data[*pointer],
+                        data[*pointer + 1],
+                        data[*pointer + 2],
+                        data[*pointer + 3],
+                    ]);
+                    *pointer += 4;
+                    Ok(VsfType::e(EtType::f5(value)))
+                }
+                b'6' => {
+                    // f64 (f6)
+                    if *pointer + 8 > data.len() {
+                        return Err(Error::new(
+                            ErrorKind::UnexpectedEof,
+                            "Not enough data for f6",
+                        ));
+                    }
+                    let value = f64::from_be_bytes([
+                        data[*pointer],
+                        data[*pointer + 1],
+                        data[*pointer + 2],
+                        data[*pointer + 3],
+                        data[*pointer + 4],
+                        data[*pointer + 5],
+                        data[*pointer + 6],
+                        data[*pointer + 7],
+                    ]);
+                    *pointer += 8;
+                    Ok(VsfType::e(EtType::f6(value)))
+                }
+                _ => Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Invalid Eagle Time float precision marker: {}", precision as char),
+                )),
             }
         }
         _ => Err(Error::new(
@@ -277,6 +286,7 @@ pub fn parse_hash(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
 
     // Return appropriate hash type based on algorithm
     match algo {
+        b'p' => Ok(VsfType::hp(hash)),
         b'b' => Ok(VsfType::hb(hash)),
         b's' => Ok(VsfType::hs(hash)),
         _ => Err(Error::new(

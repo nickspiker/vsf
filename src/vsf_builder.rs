@@ -106,6 +106,10 @@ impl VsfBuilder {
         // Creation time
         vsf[header_index].extend_from_slice(&self.creation_time.flatten());
 
+        // Provenance hash placeholder (required, always BLAKE3)
+        vsf[header_index].extend_from_slice(&VsfType::hp(vec![0u8; 32]).flatten());
+
+        // Rolling hash placeholder (optional, default enabled)
         if self.include_file_hash {
             vsf[header_index].extend_from_slice(&VsfType::hb(vec![0u8; 32]).flatten());
         }

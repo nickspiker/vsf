@@ -6,7 +6,7 @@
 //!
 //! - **Self-describing**: Type markers embedded in the data stream
 //! - **Hierarchical**: Offset-based seeking, unlimited nesting depth
-//! - **Strongly-typed**: Primitives (u0-u7, i3-i7, f32, f64, complex), tensors, Spirix arithmetic
+//! - **Strongly-typed**: Primitives (u0-u7, i3-i7, f32, f64, complex), tensors, Spirix Scalars and Circles
 //! - **Cryptographic**: Built-in BLAKE3 hashing and Ed25519 signing
 //! - **Eagle Time**: universal timestamps
 //! - **Huffman text compression**: ~2× compression over UTF-8 for strings
@@ -35,7 +35,7 @@
 //! - `x`: Unicode text strings
 //! - `e`: Eagle Time (seconds since lunar landing)
 //! - `d`: Data type identifier
-//! - `o`: Byte offsets (for hierarchical structure)
+//! - `o`: Byte offsets
 //! - `b`: Byte lengths
 //! - `n`: Counts
 //! - `g`: Cryptographic signatures
@@ -51,9 +51,9 @@
 //!   z?{version}                        Format version
 //!   y?{backward_version}               Backward compatibility version
 //!   ef5{creation_time}                 Eagle Time creation timestamp (f32, ~2min precision)
-//!   hs{256}{content_hash}              Static: hash of immutable content (never changes)
-//!   hb{256}{file_hash}                 Rolling: current file state (includes History)
-//!   ge{64}{file_signature}             File-level Ed25519 signature over hs (optional)
+//!   hp{31}{provenance_hash}            Provenance: BLAKE3 hash of content (required, always 32 bytes)
+//!   ge{64}{signature}                  Ed25519 signature over hp (optional)
+//!   hb{31}{rolling_hash}               Rolling: BLAKE3 of current state with History (optional)
 //!   k?{key}                            File-level encryption key (optional)
 //!   n?{label_count}                    Number of label records
 //!   (dRAW:h?{hash},g?{sig},k?{key},o?{offset},b?{size},n?{count})     Label record
@@ -67,11 +67,16 @@
 //! [dHistory (history_entries...)]
 //! ```
 //!
-//! **Hash Strategy:**
-//! - **hs** (static hash): Content identity - computed once from immutable sections (RAW, original metadata). 
-//!   Typically never changes, but users/applications may update for substantial modifications.
-//! - **hb** (rolling hash): File integrity - includes all sections including History. Updates when History updates.
-//! - **ge** (signature): Signs hs to authenticate original content.
+//! **Hash Strategy (Always BLAKE3):**
+//! - **hp** (hash provenance): Content identity - BLAKE3 hash of immutable content. Required.
+//!   Computed with hp field as zeros, then filled in. Creates stable identifier for original content.
+//! - **ge** (signature): Optional Ed25519 signature over hp. Signs the computed hash to verify creator.
+//! - **hb** (hash rolling): Current file state - Optional BLAKE3 hash including History section.
+//!   Updates when History updates. Useful for tracking mutable file evolution.
+//!
+//! **Provenance Verification:**
+//! To verify a file's provenance, zero the hp field and compute BLAKE3 - it should match the stored hp.
+//! If present, verify the ge signature against hp to authenticate the creator.
 //!
 //! **Terminology:**
 //! - **Header**: Everything between `RÅ<` and `>`
@@ -79,7 +84,7 @@
 //! - **Label record**: The `(d"name":h,g,k,o,b,n)` entries that point to sections
 //! - **Section**: Actual data blocks after the header, located at specified offsets
 //! - **Section field**: Individual `(field)` entries within a section's data
-//! - **? and {}**: ? indicates length (ASCII 0-Z), {} indicates binary data
+//! - **`?` and `{}`**: `?` indicates length (ASCII 0-Z), `{}` indicates binary data
 //!
 //! The `:` and `,` separators in label records make the format human-readable in hex editors
 //! and aid in forensics and corruption analysis with minimal overhead.
@@ -102,8 +107,7 @@
 //! '[' + 'd' + '3' + {7u8} + "Imaging" +
 //! '(' + 'l' + '3' + {13u8} + "shutter_speed" + ':' + 'f' + '6' + {0.01f64} + ')' +
 //! '(' + 'l' + '3' + {8u8} + "aperture"      + ':' + 'f' + '5' + {2.8f32} + ')' +
-//! '(' + 'l' + '3' + {3u8} + "iso" + ':' + 'u' + '4'+ {400u16} + ')' +
-//! ']'
+//! '(' + 'l' + '3' + {3u8} + "iso" + ':' + 'u' + '4'+ {400u16} + ')' + ']'
 //! ```
 //!
 //! Where 'char' indicates a single byte character, and "string" indicates ASCII text bytes.
@@ -124,28 +128,34 @@
 //!
 //! ```text
 //! [dHistory
-//!  (ef6{1234567890.5},ltool:x{Lumis},lversion:z{0.1.2},lhost:x{workstation-sea})
-//!  (ef6{1234567920.3},ltool:x{Photon},laction:x{modified},lhost:x{laptop-pdx})
-//!  (ef6{1234567950.1},laction:x{accessed},lhost:x{phone-mobile})
+//!  (ef6{1234567890.5},hb{256}{hash_at_creation},ltool:x{Lumis},lversion:z{0.1.2},lhost:x{workstation-sea})
+//!  (ef6{1234567920.3},hb{256}{hash_after_modify},ltool:x{Photon},laction:x{modified},lhost:x{laptop-pdx})
+//!  (ef6{1234567950.1},hb{256}{hash_after_access},laction:x{accessed},lhost:x{phone-mobile})
 //! ]
 //! ```
+//!
+//! Each history entry records the file's `hb` hash at that point in time, creating a verifiable
+//! chain of file states. To verify history integrity, recompute `hb` for each historical state
+//! by truncating the History section to that entry.
 //!
 //! Which flattens to:
 //!
 //! ```text
 //! '[' + 'd' + '1' + {7u8} + "History" +
-//! '(' + 'e' + 'f' + '6' + {1234567890.5f64} + ',' + 
+//! '(' + 'e' + 'f' + '6' + {1234567890.5f64} + ',' +
+//!       'h' + 'b' + '3' + {32u8} + {32 bytes BLAKE3 hash} + ',' +
 //!       'l' + '1' + {4u8} + "tool" + ':' + 'x' + '1' + {5u8} + "Lumis" + ',' +
 //!       'l' + '1' + {7u8} + "version" + ':' + 'z' + '1' + {5u8} + "0.1.2" + ',' +
 //!       'l' + '1' + {4u8} + "host" + ':' + 'x' + '2' + {15u8} + "workstation-sea" + ')' +
 //! '(' + 'e' + 'f' + '6' + {1234567920.3f64} + ',' +
+//!       'h' + 'b' + '3' + {32u8} + {32 bytes BLAKE3 hash} + ',' +
 //!       'l' + '1' + {4u8} + "tool" + ':' + 'x' + '1' + {6u8} + "Photon" + ',' +
 //!       'l' + '1' + {6u8} + "action" + ':' + 'x' + '1' + {8u8} + "modified" + ',' +
 //!       'l' + '1' + {4u8} + "host" + ':' + 'x' + '1' + {10u8} + "laptop-pdx" + ')' +
 //! '(' + 'e' + 'f' + '6' + {1234567950.1f64} + ',' +
+//!       'h' + 'b' + '3' + {32u8} + {32 bytes BLAKE3 hash} + ',' +
 //!       'l' + '1' + {6u8} + "action" + ':' + 'x' + '1' + {8u8} + "accessed" + ',' +
-//!       'l' + '1' + {4u8} + "host" + ':' + 'x' + '1' + {12u8} + "phone-mobile" + ')' +
-//! ']'
+//!       'l' + '1' + {4u8} + "host" + ':' + 'x' + '1' + {12u8} + "mobile" + ')' + ']'
 //! ```
 //!
 //! Each history entry is a complete event enclosed in `()`'s with timestamp, tool, action, and context.

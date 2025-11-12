@@ -116,8 +116,9 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 pub struct VsfHeader {
     pub version: usize,
     pub backward_compat: usize,
-    pub creation_time: VsfType,         // Creation timestamp (ef5 for ~2min precision)
-    pub file_hash: Option<VsfType>,     // Optional file-level hash (typically BLAKE3)
+    pub creation_time: VsfType,           // Creation timestamp (ef5 for ~2min precision)
+    pub provenance_hash: VsfType,         // Required: BLAKE3 hash of immutable content (hp)
+    pub rolling_hash: Option<VsfType>,    // Optional: BLAKE3 hash of current state (hb)
     pub labels: Vec<LabelDefinition>,
 }
 
@@ -154,7 +155,8 @@ impl VsfHeader {
             version,
             backward_compat,
             creation_time: VsfType::e(EtType::f5(et_f32)),
-            file_hash: None,
+            provenance_hash: VsfType::hp(vec![0u8; 32]), // Placeholder, filled during build
+            rolling_hash: None,
             labels: Vec::new(),
         }
     }
@@ -186,8 +188,11 @@ impl VsfHeader {
         // Creation time (always present)
         header.extend_from_slice(&self.creation_time.flatten());
 
-        // File hash (optional)
-        if let Some(ref hash) = self.file_hash {
+        // Provenance hash (always present)
+        header.extend_from_slice(&self.provenance_hash.flatten());
+
+        // Rolling hash (optional)
+        if let Some(ref hash) = self.rolling_hash {
             header.extend_from_slice(&hash.flatten());
         }
 

@@ -471,7 +471,8 @@ pub enum VsfType {
 
     // ==================== CRYPTOGRAPHIC TYPES ====================
     // Hash algorithms
-    hb(Vec<u8>), // BLAKE3 hash
+    hp(Vec<u8>), // BLAKE3 provenance hash (immutable content identity)
+    hb(Vec<u8>), // BLAKE3 rolling hash (current file state)
     hs(Vec<u8>), // SHA hash (SHA-256, SHA-512, etc.)
 
     // Signature algorithms
