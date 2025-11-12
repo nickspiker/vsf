@@ -116,7 +116,8 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 pub struct VsfHeader {
     pub version: usize,
     pub backward_compat: usize,
-    pub file_hash: Option<VsfType>, // Optional file-level hash (typically BLAKE3)
+    pub creation_time: VsfType,         // Creation timestamp (ef5 for ~2min precision)
+    pub file_hash: Option<VsfType>,     // Optional file-level hash (typically BLAKE3)
     pub labels: Vec<LabelDefinition>,
 }
 
@@ -134,11 +135,25 @@ pub struct LabelDefinition {
 }
 
 impl VsfHeader {
-    /// Create new header
+    /// Create new header with current timestamp
     pub fn new(version: usize, backward_compat: usize) -> Self {
+        use crate::types::EtType;
+        use chrono::Utc;
+
+        // Get current time and convert to Eagle Time f32
+        let now = Utc::now();
+        let et = crate::datetime_to_eagle_time(now);
+        let et_f32 = match et.et_type() {
+            EtType::f6(v) => *v as f32,
+            EtType::f5(v) => *v,
+            EtType::u(v) => *v as f32,
+            EtType::i(v) => *v as f32,
+        };
+
         Self {
             version,
             backward_compat,
+            creation_time: VsfType::e(EtType::f5(et_f32)),
             file_hash: None,
             labels: Vec::new(),
         }
@@ -167,6 +182,9 @@ impl VsfHeader {
 
         // Backward compatibility
         header.extend_from_slice(&VsfType::y(self.backward_compat).flatten());
+
+        // Creation time (always present)
+        header.extend_from_slice(&self.creation_time.flatten());
 
         // File hash (optional)
         if let Some(ref hash) = self.file_hash {

@@ -268,10 +268,24 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     let _backward = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
 
+    // Skip optional creation time (ef5)
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'e' {
+        let _creation_time = parse(vsf_bytes, &mut pointer)
+            .map_err(|e| format!("Failed to parse creation time: {}", e))?;
+    }
+
     // Find hash placeholder
     let hash_position = pointer;
-    if pointer >= vsf_bytes.len() || vsf_bytes[pointer] != b'h' {
-        return Err("No file hash placeholder found".to_string());
+    if pointer >= vsf_bytes.len() {
+        return Err(format!("Pointer {} beyond file size {}", pointer, vsf_bytes.len()));
+    }
+    if vsf_bytes[pointer] != b'h' {
+        return Err(format!(
+            "No file hash placeholder found at position {}. Found byte: 0x{:02X} ('{}')",
+            pointer,
+            vsf_bytes[pointer],
+            vsf_bytes[pointer] as char
+        ));
     }
 
     // Parse hash to find position
@@ -329,10 +343,24 @@ pub fn write_file_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<Vec<u8
     let _backward = parse(&vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
 
+    // Skip optional creation time (ef5)
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'e' {
+        let _creation_time = parse(&vsf_bytes, &mut pointer)
+            .map_err(|e| format!("Failed to parse creation time: {}", e))?;
+    }
+
     // Find hash placeholder position
     let hash_position = pointer;
-    if pointer >= vsf_bytes.len() || vsf_bytes[pointer] != b'h' {
-        return Err("No file hash placeholder found".to_string());
+    if pointer >= vsf_bytes.len() {
+        return Err(format!("Pointer {} beyond file size {}", pointer, vsf_bytes.len()));
+    }
+    if vsf_bytes[pointer] != b'h' {
+        return Err(format!(
+            "No file hash placeholder found at position {}. Found byte: 0x{:02X} ('{}')",
+            pointer,
+            vsf_bytes[pointer],
+            vsf_bytes[pointer] as char
+        ));
     }
 
     // Find the hash value bytes position

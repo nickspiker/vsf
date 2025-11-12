@@ -74,6 +74,7 @@ fn main() {
 struct VsfHeader {
     version: usize,
     backward_compat: usize,
+    creation_time: Option<VsfType>, // ef5 creation timestamp
     file_hash: Option<VsfType>,
     labels: Vec<LabelInfo>,
 }
@@ -122,6 +123,15 @@ impl VsfHeader {
         let backward_compat = match backward_type {
             VsfType::y(v) => v,
             _ => return Err("Expected y type for backward compat".to_string()),
+        };
+
+        // Parse creation time (optional for backward compatibility)
+        let creation_time = if pointer < data.len() && data[pointer] == b'e' {
+            let time_type = parse(data, &mut pointer)
+                .map_err(|e| format!("Failed to parse creation time: {}", e))?;
+            Some(time_type)
+        } else {
+            None
         };
 
         // Parse file hash (optional)
@@ -235,6 +245,7 @@ impl VsfHeader {
         Ok(VsfHeader {
             version,
             backward_compat,
+            creation_time,
             file_hash,
             labels,
         })
@@ -726,6 +737,18 @@ fn show_info(data: &[u8]) -> Result<(), String> {
         "Backward compat".cyan(),
         header.backward_compat.to_string().white()
     );
+
+    // Display creation time if present
+    if let Some(ref creation) = header.creation_time {
+        if let VsfType::e(ref et) = creation {
+            println!(
+                " {} {}",
+                "Created".cyan(),
+                format_et(et).white()
+            );
+        }
+    }
+
     println!(
         " {} {} Bytes",
         "Header size:".cyan(),
