@@ -193,7 +193,7 @@ fn rebuild_with_header(
     for _iteration in 0..MAX_ITERATIONS {
         // Calculate what the new header size will be
         let mut test_header = VsfHeader::new(version, backward_compat);
-        test_header.file_hash = Some(VsfType::hb(vec![0u8; 32]));
+        test_header.rolling_hash = Some(VsfType::hb(vec![0u8; 32]));
         for label in &labels {
             test_header.add_label(label.clone());
         }
@@ -205,7 +205,7 @@ fn rebuild_with_header(
         if new_header_size == prev_header_size {
             // Build final header with these offsets
             let mut final_header = VsfHeader::new(version, backward_compat);
-            final_header.file_hash = Some(VsfType::hb(vec![0u8; 32]));
+            final_header.rolling_hash = Some(VsfType::hb(vec![0u8; 32]));
             for label in labels {
                 final_header.add_label(label);
             }
@@ -268,11 +268,9 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     let _backward = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
 
-    // Skip optional creation time (ef5)
-    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'e' {
-        let _creation_time = parse(vsf_bytes, &mut pointer)
-            .map_err(|e| format!("Failed to parse creation time: {}", e))?;
-    }
+    // Skip creation time (ef5 - always present in version 2+)
+    let _creation_time = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse creation time: {}", e))?;
 
     // Find hash placeholder
     let hash_position = pointer;
@@ -343,11 +341,9 @@ pub fn write_file_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<Vec<u8
     let _backward = parse(&vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
 
-    // Skip optional creation time (ef5)
-    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'e' {
-        let _creation_time = parse(&vsf_bytes, &mut pointer)
-            .map_err(|e| format!("Failed to parse creation time: {}", e))?;
-    }
+    // Skip creation time (ef5 - always present in version 2+)
+    let _creation_time = parse(&vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse creation time: {}", e))?;
 
     // Find hash placeholder position
     let hash_position = pointer;
