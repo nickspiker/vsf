@@ -74,8 +74,10 @@ fn main() {
 struct VsfHeader {
     version: usize,
     backward_compat: usize,
-    creation_time: Option<VsfType>, // ef5 creation timestamp
-    file_hash: Option<VsfType>,
+    creation_time: Option<VsfType>,     // ef5 creation timestamp
+    provenance_hash: Option<VsfType>,    // hp: BLAKE3 provenance hash (required in v3+)
+    signature: Option<VsfType>,          // ge: Ed25519 signature (optional)
+    rolling_hash: Option<VsfType>,       // hb: BLAKE3 rolling hash (optional)
     labels: Vec<LabelInfo>,
 }
 
@@ -134,10 +136,43 @@ impl VsfHeader {
             None
         };
 
-        // Parse file hash (optional)
-        let file_hash = if pointer < data.len() && data[pointer] == b'h' {
+        // Parse provenance hash (hp - required in v3+, optional in v2)
+        let provenance_hash = if pointer < data.len() && data[pointer] == b'h' {
             let hash_type = parse(data, &mut pointer)
-                .map_err(|e| format!("Failed to parse file hash: {}", e))?;
+                .map_err(|e| format!("Failed to parse provenance hash: {}", e))?;
+            match hash_type {
+                VsfType::hp(_) => Some(hash_type),
+                VsfType::hb(_) => {
+                    // Old v2 file - this is the rolling hash, not provenance
+                    return Ok(Self {
+                        version,
+                        backward_compat,
+                        creation_time,
+                        provenance_hash: None,
+                        signature: None,
+                        rolling_hash: Some(hash_type),
+                        labels: Self::parse_labels(data, &mut pointer)?,
+                    });
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        // Parse optional signature (ge - version 3+)
+        let signature = if pointer < data.len() && data[pointer] == b'g' {
+            let sig_type = parse(data, &mut pointer)
+                .map_err(|e| format!("Failed to parse signature: {}", e))?;
+            Some(sig_type)
+        } else {
+            None
+        };
+
+        // Parse optional rolling hash (hb - version 3+)
+        let rolling_hash = if pointer < data.len() && data[pointer] == b'h' {
+            let hash_type = parse(data, &mut pointer)
+                .map_err(|e| format!("Failed to parse rolling hash: {}", e))?;
             Some(hash_type)
         } else {
             None
@@ -246,9 +281,105 @@ impl VsfHeader {
             version,
             backward_compat,
             creation_time,
-            file_hash,
+            provenance_hash,
+            signature,
+            rolling_hash,
             labels,
         })
+    }
+
+    fn parse_labels(data: &[u8], pointer: &mut usize) -> Result<Vec<LabelInfo>, String> {
+        // Parse label count
+        let label_count_type =
+            parse(data, pointer).map_err(|e| format!("Failed to parse label count: {}", e))?;
+        let label_count = match label_count_type {
+            VsfType::n(count) => count,
+            _ => return Err("Expected n type for label count".to_string()),
+        };
+
+        let mut labels = Vec::new();
+        for _ in 0..label_count {
+            if data[*pointer] != b'(' {
+                return Err("Expected '(' for label definition".to_string());
+            }
+            *pointer += 1;
+
+            let label_name_type = parse(data, pointer)
+                .map_err(|e| format!("Failed to parse label name: {}", e))?;
+            let label_name = match label_name_type {
+                VsfType::d(name) => name,
+                _ => return Err("Expected d type for label name".to_string()),
+            };
+
+            // Parse optional crypto fields (h, g, k, v)
+            let mut hash = None;
+            let mut signature = None;
+            let mut key = None;
+            let mut wrap = None;
+
+            while *pointer < data.len() && data[*pointer] != b'o' && data[*pointer] != b')' {
+                let next_type = parse(data, pointer)
+                    .map_err(|e| format!("Failed to parse label crypto field: {}", e))?;
+                match next_type {
+                    VsfType::hp(_) | VsfType::hb(_) | VsfType::hs(_) => hash = Some(next_type),
+                    VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => signature = Some(next_type),
+                    VsfType::ke(_)
+                    | VsfType::kx(_)
+                    | VsfType::kp(_)
+                    | VsfType::kc(_)
+                    | VsfType::ka(_) => key = Some(next_type),
+                    VsfType::v(_, _) => wrap = Some(next_type),
+                    _ => {
+                        return Err(format!(
+                            "Unexpected type in label definition, expected h/g/k/v or o"
+                        ))
+                    }
+                }
+            }
+
+            let offset_type =
+                parse(data, pointer).map_err(|e| format!("Failed to parse offset: {}", e))?;
+            let offset_bytes = match offset_type {
+                VsfType::o(bytes) => bytes,
+                _ => return Err("Expected o type for offset".to_string()),
+            };
+
+            let size_type =
+                parse(data, pointer).map_err(|e| format!("Failed to parse size: {}", e))?;
+            let size_bytes = match size_type {
+                VsfType::b(bytes, _) => bytes,
+                _ => return Err("Expected b type for size".to_string()),
+            };
+
+            let field_count = if wrap.is_some() {
+                0
+            } else {
+                let field_count_type = parse(data, pointer)
+                    .map_err(|e| format!("Failed to parse field count: {}", e))?;
+                match field_count_type {
+                    VsfType::n(count) => count,
+                    _ => return Err("Expected n type for field count".to_string()),
+                }
+            };
+
+            if data[*pointer] != b')' {
+                return Err("Expected ')' after label definition".to_string());
+            }
+            *pointer += 1;
+
+            labels.push(LabelInfo {
+                name: label_name,
+                hash,
+                signature,
+                key,
+                wrap,
+                offset: offset_bytes,
+                size: size_bytes,
+                child_count: field_count,
+            });
+        }
+
+        Ok(labels)
     }
 }
 
@@ -496,7 +627,8 @@ fn format_value(vsf: &VsfType) -> String {
             format!("({:.4}°N, {:.4}°W)", lat, lon)
         }
         VsfType::e(et) => format_et(et),
-        VsfType::hb(hash) => format!("hb[BLAKE3 {} Bytes] {}...", hash.len(), hex_preview(hash)),
+        VsfType::hp(hash) => format!("hp[BLAKE3 Provenance {} Bytes] {}...", hash.len(), hex_preview(hash)),
+        VsfType::hb(hash) => format!("hb[BLAKE3 Rolling {} Bytes] {}...", hash.len(), hex_preview(hash)),
         VsfType::hs(hash) => format!("hs[SHA-2 {} Bytes] {}...", hash.len(), hex_preview(hash)),
 
         VsfType::ge(sig) => format!("ge[Ed25519 {} Bytes] {}...", sig.len(), hex_preview(sig)),
@@ -915,58 +1047,72 @@ fn show_info(data: &[u8]) -> Result<(), String> {
 
 /// Quick integrity summary (used by show_info)
 fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), String> {
-    // First, verify the file-level BLAKE3 hash
-    let mut pointer = 4; // After "RÅ<"
+    // Display and verify provenance hash (hp)
+    if let Some(ref hp) = header.provenance_hash {
+        match hp {
+            VsfType::hp(stored_hash) => {
+                let computed = vsf::verification::compute_provenance_hash(data)
+                    .unwrap_or_else(|_| [0u8; 32]);
+                let verified = computed.as_slice() == stored_hash.as_slice();
 
-    // Skip header length
-    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse header: {}", e))?;
-    // Skip version
-    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
-    // Skip backward compat
-    let _ =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse backward compat: {}", e))?;
-
-    // Parse file hash
-    let file_hash_type =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse file hash: {}", e))?;
-
-    let (file_hash_verified, stored_hash, computed_hash) = match file_hash_type {
-        VsfType::hb(stored_hash) => {
-            // The hash is computed over the entire file with the hash bytes zeroed out
-            // Find where the hash bytes start (after 'h', algo byte, and size encoding)
-            let mut hash_field_start = 4; // After "RÅ<"
-            let _ = parse(data, &mut hash_field_start)
-                .map_err(|e| format!("Failed to skip header length: {}", e))?;
-            let _ = parse(data, &mut hash_field_start)
-                .map_err(|e| format!("Failed to skip version: {}", e))?;
-            let _ = parse(data, &mut hash_field_start)
-                .map_err(|e| format!("Failed to skip backward compat: {}", e))?;
-
-            // Parse the hash again to find where the actual hash bytes are
-            let mut temp_pointer = hash_field_start;
-            let _hash_reparsed = parse(data, &mut temp_pointer)
-                .map_err(|e| format!("Failed to reparse hash: {}", e))?;
-
-            // Hash bytes are at the end of the hash field
-            let hash_bytes_start = temp_pointer - stored_hash.len();
-
-            // Create a copy with hash bytes zeroed
-            let mut temp_data = data.to_vec();
-            for i in 0..stored_hash.len() {
-                temp_data[hash_bytes_start + i] = 0;
+                println!(
+                    " {}-Byte {} {}:",
+                    stored_hash.len().to_string().white(),
+                    "BLAKE3".green(),
+                    "provenance hash".cyan()
+                );
+                print!(" {} ", "0x".truecolor(64, 50, 255));
+                for byte in stored_hash.iter() {
+                    print!("{:02X}", byte);
+                }
+                println!();
+                print!(" {} ", "Verification:".cyan());
+                if verified {
+                    println!("{}", "PASS".truecolor(0, 255, 0));
+                } else {
+                    println!("{}", "FAIL".truecolor(255, 0, 0));
+                }
             }
-
-            // Compute hash over entire file with zeroed hash bytes
-            let computed = blake3::hash(&temp_data);
-
-            let verified = computed.as_bytes() == stored_hash.as_slice();
-            (
-                verified,
-                Some(stored_hash.clone()),
-                Some(computed.as_bytes().to_vec()),
-            )
+            _ => {}
         }
-        _ => (false, None, None),
+    }
+
+    // Display and verify optional signature (ge)
+    if let Some(ref sig) = header.signature {
+        match sig {
+            VsfType::ge(sig_bytes) => {
+                println!(
+                    " {}-Byte {} {}:",
+                    sig_bytes.len().to_string().white(),
+                    "Ed25519".green(),
+                    "signature".cyan()
+                );
+                print!(" {} ", "0x".truecolor(64, 50, 255));
+                for byte in sig_bytes.iter().take(32) {
+                    print!("{:02X}", byte);
+                }
+                if sig_bytes.len() > 32 {
+                    print!("...");
+                }
+                println!();
+            }
+            _ => {}
+        }
+    }
+
+    // Display and verify rolling hash (hb)
+    let (file_hash_verified, stored_hash, computed_hash) = if let Some(ref hb) = header.rolling_hash {
+        match hb {
+            VsfType::hb(stored_hash) => {
+                let computed = vsf::verification::compute_file_hash(data)
+                    .unwrap_or_else(|_| [0u8; 32]);
+                let verified = computed.as_slice() == stored_hash.as_slice();
+                (verified, Some(stored_hash.clone()), Some(computed.to_vec()))
+            }
+            _ => (false, None, None),
+        }
+    } else {
+        (false, None, None)
     };
 
     // Check section-level hashes
@@ -979,7 +1125,8 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
             // Hash is now in the label, not preamble
             if let Some(ref hash_vsf) = label.hash {
                 let hash_bytes = match hash_vsf {
-                    VsfType::hb(ref bytes)
+                    VsfType::hp(ref bytes)
+                    | VsfType::hb(ref bytes)
                     | VsfType::hs(ref bytes) => bytes,
                     _ => continue,
                 };
@@ -996,12 +1143,13 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
         }
     }
 
-    // Display hash header
-    if let (Some(expected), Some(_)) = (&stored_hash, &computed_hash) {
+    // Display rolling hash (hb) if present
+    if stored_hash.is_some() {
         println!(
-            " {}-Byte {} file hash:",
-            expected.len().to_string().white(),
-            "BLAKE3".green()
+            " {}-Byte {} {}:",
+            32.to_string().white(),
+            "BLAKE3".green(),
+            "rolling hash".cyan()
         );
     }
 
@@ -1014,9 +1162,9 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
             }
             println!();
         }
-        print!(" {} ", "Integrity check:".cyan());
+        print!(" {} ", "Verification:".cyan());
         println!("{}", "PASS".truecolor(0, 255, 0));
-    } else {
+    } else if stored_hash.is_some() {
         // Show both expected and computed hashes on failure
         if let (Some(expected), Some(computed)) = (stored_hash, computed_hash) {
             print!(" {} {} ", "Expected:".cyan(), "0x".truecolor(64, 50, 255));
@@ -1030,7 +1178,7 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
             }
             println!();
         }
-        print!(" {} ", "Integrity check:".cyan());
+        print!(" {} ", "Verification:".cyan());
         println!("{}", "FAIL".truecolor(255, 0, 0));
     }
 

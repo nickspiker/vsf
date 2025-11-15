@@ -207,7 +207,7 @@
 
 // VSF format version constants
 /// Current VSF format version
-pub const VSF_VERSION: usize = 2;
+pub const VSF_VERSION: usize = 3;
 
 /// Backward compatibility version (oldest version this implementation can read)
 pub const VSF_BACKWARD_COMPAT: usize = 2;

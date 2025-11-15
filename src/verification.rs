@@ -65,8 +65,21 @@ fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
         _ => return Err("Expected y type for backward compat".to_string()),
     };
 
-    // Skip file hash
-    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse file hash: {}", e))?;
+    // Skip creation time (ef5 - always present in version 3+)
+    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse creation time: {}", e))?;
+
+    // Skip provenance hash (hp - always present in version 3+)
+    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse provenance hash: {}", e))?;
+
+    // Skip optional signature (ge - may be present)
+    if pointer < data.len() && data[pointer] == b'g' {
+        let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse signature: {}", e))?;
+    }
+
+    // Skip optional rolling hash (hb - may be present)
+    if pointer < data.len() && data[pointer] == b'h' {
+        let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse rolling hash: {}", e))?;
+    }
 
     // Parse label count
     let label_count_type =
@@ -193,6 +206,7 @@ fn rebuild_with_header(
     for _iteration in 0..MAX_ITERATIONS {
         // Calculate what the new header size will be
         let mut test_header = VsfHeader::new(version, backward_compat);
+        test_header.provenance_hash = VsfType::hp(vec![0u8; 32]);
         test_header.rolling_hash = Some(VsfType::hb(vec![0u8; 32]));
         for label in &labels {
             test_header.add_label(label.clone());
@@ -205,6 +219,7 @@ fn rebuild_with_header(
         if new_header_size == prev_header_size {
             // Build final header with these offsets
             let mut final_header = VsfHeader::new(version, backward_compat);
+            final_header.provenance_hash = VsfType::hp(vec![0u8; 32]);
             final_header.rolling_hash = Some(VsfType::hb(vec![0u8; 32]));
             for label in labels {
                 final_header.add_label(label);
@@ -215,9 +230,13 @@ fn rebuild_with_header(
             // Append section data
             new_file.extend_from_slice(&old_data[old_header_end..]);
 
-            // Compute and write file hash
-            let hash = compute_file_hash(&new_file)?;
-            return write_file_hash(new_file, &hash);
+            // Compute and write provenance hash (hp)
+            let hp_hash = compute_provenance_hash(&new_file)?;
+            new_file = write_provenance_hash(new_file, &hp_hash)?;
+
+            // Compute and write rolling hash (hb)
+            let hb_hash = compute_file_hash(&new_file)?;
+            return write_file_hash(new_file, &hb_hash);
         }
 
         // Adjust offsets for next iteration
@@ -236,13 +255,171 @@ fn rebuild_with_header(
     ))
 }
 
-/// Compute BLAKE3 hash of VSF file (with hash placeholder zeroed)
+/// Compute BLAKE3 provenance hash (hp) of VSF file
 ///
-/// This function computes the file hash WITHOUT modifying the input.
-/// It expects the file to already have a hash placeholder (hb[32][zeros]).
+/// This computes the provenance hash with hp field as zeros.
+/// The provenance hash is computed BEFORE any optional signature (ge),
+/// so it represents the immutable content identity.
 ///
 /// # Arguments
-/// * `vsf_bytes` - Complete VSF file bytes with hash placeholder
+/// * `vsf_bytes` - Complete VSF file bytes with hp placeholder
+///
+/// # Returns
+/// 32-byte BLAKE3 hash
+///
+pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
+    // Verify magic number
+    if vsf_bytes.len() < 4 {
+        return Err("File too small to be valid VSF".to_string());
+    }
+    if &vsf_bytes[0..3] != "RÅ".as_bytes() || vsf_bytes[3] != b'<' {
+        return Err("Invalid VSF magic number".to_string());
+    }
+
+    let mut pointer = 4; // Skip "RÅ<"
+
+    // Parse header length
+    let _header_length_type = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse header length: {}", e))?;
+
+    // Parse version and backward compat
+    let _version =
+        parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
+    let _backward = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+
+    // Skip creation time (ef5 - always present in version 3+)
+    let _creation_time = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse creation time: {}", e))?;
+
+    // Find hp hash placeholder
+    let hash_position = pointer;
+    if pointer >= vsf_bytes.len() {
+        return Err(format!("Pointer {} beyond file size {}", pointer, vsf_bytes.len()));
+    }
+    if vsf_bytes[pointer] != b'h' {
+        return Err(format!(
+            "No provenance hash placeholder found at position {}. Found byte: 0x{:02X} ('{}')",
+            pointer,
+            vsf_bytes[pointer],
+            vsf_bytes[pointer] as char
+        ));
+    }
+
+    // Parse hash to find position
+    let hash_type =
+        parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse hash: {}", e))?;
+
+    match hash_type {
+        VsfType::hp(hash_bytes) => {
+            if hash_bytes.len() != 32 {
+                return Err(format!(
+                    "Invalid hash size: expected 32 bytes, found {}",
+                    hash_bytes.len()
+                ));
+            }
+
+            // Clone file and zero out the hash bytes
+            let mut temp_bytes = vsf_bytes.to_vec();
+            let hash_start = find_hp_value_position(&temp_bytes, hash_position)?;
+
+            for i in 0..32 {
+                temp_bytes[hash_start + i] = 0;
+            }
+
+            // Compute BLAKE3 hash of entire file
+            let computed_hash = blake3::hash(&temp_bytes);
+            Ok(*computed_hash.as_bytes())
+        }
+        _ => Err("Expected BLAKE3 provenance hash (hp)".to_string()),
+    }
+}
+
+/// Write computed provenance hash (hp) into the placeholder
+///
+/// # Arguments
+/// * `vsf_bytes` - Complete VSF file bytes with hp placeholder
+/// * `hash` - 32-byte BLAKE3 hash to write
+///
+/// # Returns
+/// Modified VSF bytes with hp hash written
+///
+pub fn write_provenance_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<Vec<u8>, String> {
+    if vsf_bytes.len() < 4 {
+        return Err("File too small to be valid VSF".to_string());
+    }
+
+    let mut pointer = 4; // Skip "RÅ<"
+
+    // Parse header length
+    let _header_length_type = parse(&vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse header length: {}", e))?;
+
+    // Parse version and backward compat
+    let _version =
+        parse(&vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
+    let _backward = parse(&vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+
+    // Skip creation time (ef5 - always present in version 3+)
+    let _creation_time = parse(&vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse creation time: {}", e))?;
+
+    // Find hash placeholder position
+    let hash_position = pointer;
+    if pointer >= vsf_bytes.len() {
+        return Err(format!("Pointer {} beyond file size {}", pointer, vsf_bytes.len()));
+    }
+    if vsf_bytes[pointer] != b'h' {
+        return Err(format!(
+            "No provenance hash placeholder found at position {}. Found byte: 0x{:02X} ('{}')",
+            pointer,
+            vsf_bytes[pointer],
+            vsf_bytes[pointer] as char
+        ));
+    }
+
+    // Find the hash value bytes position
+    let hash_start = find_hp_value_position(&vsf_bytes, hash_position)?;
+
+    // Write hash into the placeholder
+    vsf_bytes[hash_start..hash_start + 32].copy_from_slice(hash);
+
+    Ok(vsf_bytes)
+}
+
+/// Find the position of hp hash value bytes within the encoded hash type
+fn find_hp_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize, String> {
+    // Re-parse the hash to find where the value bytes start
+    let mut pos = hash_marker_pos;
+
+    // Parse the hash using the decode function
+    let hash_type = parse(data, &mut pos).map_err(|e| {
+        format!(
+            "Failed to parse hp hash at position {}: {}",
+            hash_marker_pos, e
+        )
+    })?;
+
+    match hash_type {
+        VsfType::hp(hash_bytes) => {
+            // pos now points AFTER the hash
+            // Calculate where the hash bytes started
+            let hash_start = pos - hash_bytes.len();
+            Ok(hash_start)
+        }
+        _ => Err("Expected BLAKE3 provenance hash type (hp)".to_string()),
+    }
+}
+
+/// Compute BLAKE3 rolling hash (hb) of VSF file
+///
+/// This function computes the rolling hash with hb field as zeros.
+/// It expects the file to already have a hash placeholder (hb[32][zeros]).
+/// This is computed AFTER hp and optional ge, so it can catch changes.
+///
+/// # Arguments
+/// * `vsf_bytes` - Complete VSF file bytes with hb placeholder
 ///
 /// # Returns
 /// 32-byte BLAKE3 hash
@@ -268,18 +445,28 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     let _backward = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
 
-    // Skip creation time (ef5 - always present in version 2+)
+    // Skip creation time (ef5 - always present in version 3+)
     let _creation_time = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse creation time: {}", e))?;
 
-    // Find hash placeholder
+    // Skip hp (always present in version 3+)
+    let _hp = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse provenance hash: {}", e))?;
+
+    // Skip optional signature (ge)
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'g' {
+        let _sig = parse(vsf_bytes, &mut pointer)
+            .map_err(|e| format!("Failed to parse signature: {}", e))?;
+    }
+
+    // Find rolling hash (hb) placeholder
     let hash_position = pointer;
     if pointer >= vsf_bytes.len() {
         return Err(format!("Pointer {} beyond file size {}", pointer, vsf_bytes.len()));
     }
     if vsf_bytes[pointer] != b'h' {
         return Err(format!(
-            "No file hash placeholder found at position {}. Found byte: 0x{:02X} ('{}')",
+            "No rolling hash placeholder found at position {}. Found byte: 0x{:02X} ('{}')",
             pointer,
             vsf_bytes[pointer],
             vsf_bytes[pointer] as char
@@ -311,7 +498,7 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
             let computed_hash = blake3::hash(&temp_bytes);
             Ok(*computed_hash.as_bytes())
         }
-        _ => Err("Expected BLAKE3 hash (hb)".to_string()),
+        _ => Err("Expected BLAKE3 rolling hash (hb)".to_string()),
     }
 }
 
@@ -341,18 +528,28 @@ pub fn write_file_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<Vec<u8
     let _backward = parse(&vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
 
-    // Skip creation time (ef5 - always present in version 2+)
+    // Skip creation time (ef5 - always present in version 3+)
     let _creation_time = parse(&vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse creation time: {}", e))?;
 
-    // Find hash placeholder position
+    // Skip hp (always present in version 3+)
+    let _hp = parse(&vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse provenance hash: {}", e))?;
+
+    // Skip optional signature (ge)
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'g' {
+        let _sig = parse(&vsf_bytes, &mut pointer)
+            .map_err(|e| format!("Failed to parse signature: {}", e))?;
+    }
+
+    // Find rolling hash (hb) placeholder position
     let hash_position = pointer;
     if pointer >= vsf_bytes.len() {
         return Err(format!("Pointer {} beyond file size {}", pointer, vsf_bytes.len()));
     }
     if vsf_bytes[pointer] != b'h' {
         return Err(format!(
-            "No file hash placeholder found at position {}. Found byte: 0x{:02X} ('{}')",
+            "No rolling hash placeholder found at position {}. Found byte: 0x{:02X} ('{}')",
             pointer,
             vsf_bytes[pointer],
             vsf_bytes[pointer] as char
@@ -568,7 +765,52 @@ pub fn add_encryption_metadata(
     )
 }
 
-/// Verify the full-file hash in a VSF header
+/// Verify the provenance hash (hp) in a VSF header
+///
+/// # Arguments
+/// * `vsf_bytes` - Complete VSF file bytes
+///
+/// # Returns
+/// `Ok(())` if hash is valid, `Err` with description if invalid or missing
+pub fn verify_provenance_hash(vsf_bytes: &[u8]) -> Result<(), String> {
+    let computed_hash = compute_provenance_hash(vsf_bytes)?;
+
+    // Parse to get stored hash
+    let mut pointer = 4; // Skip "RÅ<"
+
+    let _header_length = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse header length: {}", e))?;
+    let _version = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse version: {}", e))?;
+    let _backward = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+    let _creation_time = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse creation time: {}", e))?;
+
+    let hash_type = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse provenance hash: {}", e))?;
+
+    let stored_hash = match hash_type {
+        VsfType::hp(hash_bytes) => {
+            if hash_bytes.len() != 32 {
+                return Err(format!(
+                    "Invalid hash size: expected 32 bytes, found {}",
+                    hash_bytes.len()
+                ));
+            }
+            hash_bytes
+        }
+        _ => return Err("Expected BLAKE3 provenance hash type (hp) in header".to_string()),
+    };
+
+    if computed_hash.as_slice() == stored_hash.as_slice() {
+        Ok(())
+    } else {
+        Err("Provenance hash verification failed: computed hash does not match stored hash".to_string())
+    }
+}
+
+/// Verify the rolling hash (hb) in a VSF header
 ///
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file bytes
@@ -576,39 +818,30 @@ pub fn add_encryption_metadata(
 /// # Returns
 /// `Ok(())` if hash is valid, `Err` with description if invalid or missing
 pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
-    // Verify magic number
-    if vsf_bytes.len() < 4 {
-        return Err("File too small to be valid VSF".to_string());
-    }
-    if &vsf_bytes[0..3] != "RÅ".as_bytes() || vsf_bytes[3] != b'<' {
-        return Err("Invalid VSF magic number".to_string());
-    }
+    let computed_hash = compute_file_hash(vsf_bytes)?;
 
+    // Parse to get stored hash
     let mut pointer = 4; // Skip "RÅ<"
 
-    // Parse header length
-    let header_length_type = parse(vsf_bytes, &mut pointer)
+    let _header_length = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse header length: {}", e))?;
-    let _header_length_bits = match header_length_type {
-        VsfType::b(bits, _) => bits,
-        _ => return Err("Expected b type for header length".to_string()),
-    };
-
-    // Parse version and backward compat
-    let _version =
-        parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
+    let _version = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse version: {}", e))?;
     let _backward = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+    let _creation_time = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse creation time: {}", e))?;
+    let _hp = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse provenance hash: {}", e))?;
 
-    // Check if file hash exists
-    let hash_position = pointer;
-    if pointer >= vsf_bytes.len() || vsf_bytes[pointer] != b'h' {
-        return Err("No file hash found in header".to_string());
+    // Skip optional signature
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'g' {
+        let _sig = parse(vsf_bytes, &mut pointer)
+            .map_err(|e| format!("Failed to parse signature: {}", e))?;
     }
 
-    // Parse the hash
-    let hash_type =
-        parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse hash: {}", e))?;
+    let hash_type = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse rolling hash: {}", e))?;
 
     let stored_hash = match hash_type {
         VsfType::hb(hash_bytes) => {
@@ -620,26 +853,13 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
             }
             hash_bytes
         }
-        _ => return Err("Expected BLAKE3 hash type (hb) in header".to_string()),
+        _ => return Err("Expected BLAKE3 rolling hash type (hb) in header".to_string()),
     };
 
-    // Create a copy with zeroed hash
-    let mut temp_bytes = vsf_bytes.to_vec();
-    let hash_start = find_hash_value_position(&temp_bytes, hash_position)?;
-
-    // Zero out the 32 hash bytes
-    for i in 0..32 {
-        temp_bytes[hash_start + i] = 0;
-    }
-
-    // Compute BLAKE3 hash of entire file
-    let computed_hash = blake3::hash(&temp_bytes);
-
-    // Compare
-    if computed_hash.as_bytes() == stored_hash.as_slice() {
+    if computed_hash.as_slice() == stored_hash.as_slice() {
         Ok(())
     } else {
-        Err("File hash verification failed: computed hash does not match stored hash".to_string())
+        Err("Rolling hash verification failed: computed hash does not match stored hash".to_string())
     }
 }
 
