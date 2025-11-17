@@ -47,9 +47,9 @@
 //!
 //! ```text
 //! RÅ<                                  Magic number + header start
-//!   b?{header_length}                  Header size
-//!   z?{version}                        Format version
+//!   z?{version}                        Format version (FIRST - determines encoding)
 //!   y?{backward_version}               Backward compatibility version
+//!   b?{header_length}                  Header size (now we know how to encode it!)
 //!   ef5{creation_time}                 Eagle Time creation timestamp (f32, ~2min precision)
 //!   hp{31}{provenance_hash}            Provenance: BLAKE3 hash of content (required, always 32 bytes)
 //!   ge{64}{signature}                  Ed25519 signature over hp (optional)
@@ -70,7 +70,7 @@
 //! **Hash Strategy (Always BLAKE3):**
 //! - **hp** (hash provenance): Content identity - BLAKE3 hash of immutable content. Required.
 //!   Computed with hp field as zeros, then filled in. Creates stable identifier for original content.
-//! - **ge** (signature): Optional Ed25519 signature over hp. Signs the computed hash to verify creator.
+//! - **ge** (signature): Optional Ed25519 signature. When signing, compute hp, sign it, then **replace** hp bytes with ge signature.
 //! - **hb** (hash rolling): Current file state - Optional BLAKE3 hash including History section.
 //!   Updates when History updates. Useful for tracking mutable file evolution.
 //!
@@ -80,10 +80,10 @@
 //!
 //! **Terminology:**
 //! - **Header**: Everything between `RÅ<` and `>`
-//! - **Header field**: Individual entries like `b?{length}`, `z?{version}`
-//! - **Label record**: The `(d"name":h,g,k,o,b,n)` entries that point to sections
+//! - **Provenance primitives**: Version, timestamp, hash, signature (NOT wrapped in `()`)
+//! - **Header field**: Section pointer `(d"name" o b n)` with POSITIONAL values (no `:` or `,`)
 //! - **Section**: Actual data blocks after the header, located at specified offsets
-//! - **Section field**: Individual `(field)` entries within a section's data
+//! - **Section field**: Individual `(field:value)` or `(field:v1,v2)` entries within a section
 //! - **`?` and `{}`**: `?` indicates length (ASCII 0-Z), `{}` indicates binary data
 //!
 //! The `:` and `,` separators in label records make the format human-readable in hex editors
@@ -207,7 +207,7 @@
 
 // VSF format version constants
 /// Current VSF format version
-pub const VSF_VERSION: usize = 3;
+pub const VSF_VERSION: usize = 4;
 
 /// Backward compatibility version (oldest version this implementation can read)
 pub const VSF_BACKWARD_COMPAT: usize = 2;
@@ -258,7 +258,7 @@ pub use encoding::{EncodeNumber, EncodeNumberInclusive};
 pub use decoding::parse;
 
 // Re-export file format and builder
-pub use file_format::{validate_name, LabelDefinition, VsfHeader, VsfSection};
+pub use file_format::{validate_name, HeaderField, VsfHeader, VsfSection};
 pub use vsf_builder::VsfBuilder;
 
 // RAW image builders and parser

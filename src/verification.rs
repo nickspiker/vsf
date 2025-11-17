@@ -7,7 +7,7 @@
 //! - Simple integrity check for archives
 //! - Use `add_file_hash()` function
 //!
-//! - Hash/signature stored in label definition
+//! - Hash/signature stored in header field definition
 //! - Signs only specific sections (e.g., lock image data, allow metadata edits)
 //! - Use `sign_section()` function
 //!
@@ -23,18 +23,19 @@
 //! ```
 
 use crate::decoding::parse;
-use crate::file_format::LabelDefinition;
+use crate::file_format::HeaderField;
 use crate::types::VsfType;
 
 /// Helper struct for complete header information
 struct ParsedHeader {
     version: usize,
     backward_compat: usize,
-    labels: Vec<LabelDefinition>,
+    fields: Vec<HeaderField>,
     header_end: usize, // Byte position where header ends (after '>')
 }
 
-/// Parse complete VSF header including all label crypto fields
+/// Parse complete VSF header including all header field crypto metadata
+/// Robust, order-independent parser using existing VSF tools
 fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     if data.len() < 4 {
         return Err("File too small".to_string());
@@ -43,154 +44,155 @@ fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
         return Err("Invalid magic number".to_string());
     }
 
-    let mut pointer = 4; // Skip "RÅ<"
+    let mut ptr = 4; // Skip "RÅ<"
 
-    // Parse header length (we'll recalculate this when rebuilding)
-    let _ =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse header length: {}", e))?;
-
-    // Parse version
-    let version_type =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
-    let version = match version_type {
+    // Parse version FIRST (determines all encoding decisions)
+    let version = match parse(data, &mut ptr).map_err(|e| format!("Failed to parse version: {}", e))? {
         VsfType::z(v) => v,
         _ => return Err("Expected z type for version".to_string()),
     };
 
     // Parse backward compat
-    let backward_type =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse backward compat: {}", e))?;
-    let backward_compat = match backward_type {
+    let backward_compat = match parse(data, &mut ptr).map_err(|e| format!("Failed to parse backward compat: {}", e))? {
         VsfType::y(v) => v,
         _ => return Err("Expected y type for backward compat".to_string()),
     };
 
-    // Skip creation time (ef5 - always present in version 3+)
-    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse creation time: {}", e))?;
+    // Parse header length (now we know how to decode it!)
+    let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse header length: {}", e))?;
 
-    // Skip provenance hash (hp - always present in version 3+)
-    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse provenance hash: {}", e))?;
+    // Skip creation time (required in v4+)
+    let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse creation time: {}", e))?;
 
-    // Skip optional signature (ge - may be present)
-    if pointer < data.len() && data[pointer] == b'g' {
-        let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse signature: {}", e))?;
+    // Parse provenance primitives in FIXED order (version determines format)
+    // Always: hp (provenance hash) - may be replaced by ge (signature)
+    // Optional: hb (rolling hash)
+
+    // Parse hp or ge (required - one must be present)
+    let prov_type = parse(data, &mut ptr).map_err(|e| format!("Failed to parse provenance hash/sig: {}", e))?;
+    match prov_type {
+        VsfType::hp(_) => {}, // Provenance hash
+        VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => {}, // Signature (replaces hp)
+        _ => return Err(format!("Expected hp or ge after creation time, got: {:?}", prov_type)),
     }
 
-    // Skip optional rolling hash (hb - may be present)
-    if pointer < data.len() && data[pointer] == b'h' {
-        let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse rolling hash: {}", e))?;
+    // Optional: hb (rolling hash) - only if next byte is 'h'
+    if ptr < data.len() && data[ptr] == b'h' {
+        let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse rolling hash: {}", e))?;
     }
 
-    // Parse label count
-    let label_count_type =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse label count: {}", e))?;
-    let label_count = match label_count_type {
+    // Parse header field count
+    let field_count = match parse(data, &mut ptr).map_err(|e| format!("Failed to parse field count: {}", e))? {
         VsfType::n(count) => count,
-        _ => return Err("Expected n type for label count".to_string()),
+        _ => return Err("Expected n type for field count".to_string()),
     };
 
-    // Parse each label
-    let mut labels = Vec::new();
-    for _ in 0..label_count {
-        if data[pointer] != b'(' {
-            return Err("Expected '(' for label".to_string());
-        }
-        pointer += 1;
-
-        // Parse name
-        let name_type =
-            parse(data, &mut pointer).map_err(|e| format!("Failed to parse label name: {}", e))?;
-        let name = match name_type {
-            VsfType::d(n) => n,
-            _ => return Err("Expected d type for label name".to_string()),
-        };
-
-        // Parse optional crypto fields
-        let mut hash = None;
-        let mut signature = None;
-        let mut key = None;
-        let mut wrap = None;
-
-        while pointer < data.len() && matches!(data[pointer], b'h' | b'g' | b'k' | b'v') {
-            let crypto_type = parse(data, &mut pointer)
-                .map_err(|e| format!("Failed to parse crypto field: {}", e))?;
-            match crypto_type {
-                VsfType::hb(_) | VsfType::hs(_) => hash = Some(crypto_type),
-                VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => signature = Some(crypto_type),
-                VsfType::ke(_)
-                | VsfType::kx(_)
-                | VsfType::kp(_)
-                | VsfType::kc(_)
-                | VsfType::ka(_) => key = Some(crypto_type),
-                VsfType::v(_, _) => wrap = Some(crypto_type),
-                _ => {}
-            }
-        }
-
-        // Parse offset, size, count
-        let offset_type =
-            parse(data, &mut pointer).map_err(|e| format!("Failed to parse offset: {}", e))?;
-        let offset_bytes = match offset_type {
-            VsfType::o(bytes) => bytes,
-            _ => return Err("Expected o type for offset".to_string()),
-        };
-
-        let size_type =
-            parse(data, &mut pointer).map_err(|e| format!("Failed to parse size: {}", e))?;
-        let size_bytes = match size_type {
-            VsfType::b(bytes, _) => bytes,
-            _ => return Err("Expected b type for size".to_string()),
-        };
-
-        // Child count is optional if encrypted (has wrap field)
-        let child_count = if wrap.is_some() {
-            // Encrypted blobs have no child count (implied n[0])
-            0
-        } else {
-            // Parse child count
-            let count_type =
-                parse(data, &mut pointer).map_err(|e| format!("Failed to parse count: {}", e))?;
-            match count_type {
-                VsfType::n(count) => count,
-                _ => return Err("Expected n type for child count".to_string()),
-            }
-        };
-
-        if data[pointer] != b')' {
-            return Err("Expected ')' after label".to_string());
-        }
-        pointer += 1;
-
-        labels.push(LabelDefinition {
-            name,
-            hash,
-            signature,
-            key,
-            wrap,
-            offset_bytes,
-            size_bytes,
-            child_count,
-        });
+    // Parse each header field using helper function
+    let mut fields = Vec::with_capacity(field_count);
+    for _ in 0..field_count {
+        fields.push(parse_header_field(data, &mut ptr)?);
     }
 
-    // Find header end '>'
-    if data[pointer] != b'>' {
+    // Find header end
+    if data[ptr] != b'>' {
         return Err("Expected '>' at end of header".to_string());
     }
-    let header_end = pointer + 1;
+    ptr += 1;
 
     Ok(ParsedHeader {
         version,
         backward_compat,
-        labels,
-        header_end,
+        fields,
+        header_end: ptr,
     })
 }
 
-/// Rebuild VSF file with modified header labels
+/// Parse a single header field with validation
+/// Uses existing tools and validation functions for robustness
+fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, String> {
+    use crate::file_format::validate_name;
+
+    if data[*ptr] != b'(' {
+        return Err("Expected '(' for header field".to_string());
+    }
+    *ptr += 1;
+
+    // Parse name (required)
+    let name = match parse(data, ptr).map_err(|e| format!("Failed to parse field name: {}", e))? {
+        VsfType::d(n) => {
+            validate_name(&n)?; // Use existing validation!
+            n
+        }
+        _ => return Err("Expected d type for field name".to_string()),
+    };
+
+    // Parse optional crypto fields (order-independent!)
+    // Keep parsing until we hit 'o' (offset marker)
+    let mut hash = None;
+    let mut signature = None;
+    let mut key = None;
+    let mut wrap = None;
+
+    while *ptr < data.len() && data[*ptr] != b'o' {
+        let field = parse(data, ptr).map_err(|e| format!("Failed to parse crypto field: {}", e))?;
+
+        match field {
+            VsfType::hb(_) | VsfType::hs(_) => hash = Some(field),
+            VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => signature = Some(field),
+            VsfType::ke(_) | VsfType::kx(_) | VsfType::kp(_)
+            | VsfType::kc(_) | VsfType::ka(_) => key = Some(field),
+            VsfType::v(_, _) => wrap = Some(field),
+            _ => {
+                // Forward compatibility: ignore unknown types
+                // This allows future extensions without breaking old parsers
+            }
+        }
+    }
+
+    // Parse offset (required, marks start of positional fields)
+    let offset_bytes = match parse(data, ptr).map_err(|e| format!("Failed to parse offset: {}", e))? {
+        VsfType::o(bytes) => bytes,
+        _ => return Err("Expected o type for offset".to_string()),
+    };
+
+    // Parse size (required)
+    let size_bytes = match parse(data, ptr).map_err(|e| format!("Failed to parse size: {}", e))? {
+        VsfType::b(bytes, _) => bytes,
+        _ => return Err("Expected b type for size".to_string()),
+    };
+
+    // Parse child count (optional if encrypted)
+    let child_count = if wrap.is_some() {
+        // Encrypted sections have implied n[0]
+        0
+    } else {
+        match parse(data, ptr).map_err(|e| format!("Failed to parse child count: {}", e))? {
+            VsfType::n(count) => count,
+            _ => return Err("Expected n type for child count".to_string()),
+        }
+    };
+
+    if data[*ptr] != b')' {
+        return Err("Expected ')' after header field".to_string());
+    }
+    *ptr += 1;
+
+    Ok(HeaderField {
+        name,
+        hash,
+        signature,
+        key,
+        wrap,
+        offset_bytes,
+        size_bytes,
+        child_count,
+    })
+}
+
+/// Rebuild VSF file with modified header fields
 fn rebuild_with_header(
     old_data: &[u8],
-    mut labels: Vec<LabelDefinition>,
+    mut fields: Vec<HeaderField>,
     version: usize,
     backward_compat: usize,
     old_header_end: usize,
@@ -208,8 +210,8 @@ fn rebuild_with_header(
         let mut test_header = VsfHeader::new(version, backward_compat);
         test_header.provenance_hash = VsfType::hp(vec![0u8; 32]);
         test_header.rolling_hash = Some(VsfType::hb(vec![0u8; 32]));
-        for label in &labels {
-            test_header.add_label(label.clone());
+        for field in &fields {
+            test_header.add_field(field.clone());
         }
         let mut test_encoded = test_header.encode()?;
         VsfHeader::update_header_length(&mut test_encoded)?;
@@ -221,8 +223,8 @@ fn rebuild_with_header(
             let mut final_header = VsfHeader::new(version, backward_compat);
             final_header.provenance_hash = VsfType::hp(vec![0u8; 32]);
             final_header.rolling_hash = Some(VsfType::hb(vec![0u8; 32]));
-            for label in labels {
-                final_header.add_label(label);
+            for field in fields {
+                final_header.add_field(field);
             }
             let mut new_file = final_header.encode()?;
             VsfHeader::update_header_length(&mut new_file)?;
@@ -242,8 +244,8 @@ fn rebuild_with_header(
         // Adjust offsets for next iteration
         let offset_adjustment = new_header_size as isize - prev_header_size as isize;
 
-        for label in &mut labels {
-            label.offset_bytes = ((label.offset_bytes as isize) + offset_adjustment) as usize;
+        for field in &mut fields {
+            field.offset_bytes = ((field.offset_bytes as isize) + offset_adjustment) as usize;
         }
 
         prev_header_size = new_header_size;
@@ -605,7 +607,7 @@ fn find_hash_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize
 /// 0. Finds the specified section in the header
 /// 1. Extracts the section data bytes `[d"name" (fields...)]`
 /// 2. Signs those bytes with Ed25519
-/// 3. Rebuilds the header with signature in label definition
+/// 3. Rebuilds the header with signature in header field definition
 /// 4. Recomputes file hash
 ///
 /// # Arguments
@@ -614,7 +616,7 @@ fn find_hash_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize
 /// * `signing_key` - Ed25519 signing key bytes (must be valid SigningKey)
 ///
 /// # Returns
-/// Modified VSF bytes with section signature in label definition
+/// Modified VSF bytes with section signature in header field definition
 ///
 /// # Example
 /// ```ignore
@@ -644,14 +646,14 @@ pub fn sign_section(
     let header = parse_full_header(&vsf_bytes)?;
 
     // Find target section
-    let section_label = header
-        .labels
+    let section_field = header
+        .fields
         .iter()
-        .find(|l| l.name == section_name)
+        .find(|f| f.name == section_name)
         .ok_or_else(|| format!("Section '{}' not found", section_name))?;
 
-    let section_offset = section_label.offset_bytes;
-    let section_size = section_label.size_bytes;
+    let section_offset = section_field.offset_bytes;
+    let section_size = section_field.size_bytes;
 
     // Extract and sign section bytes
     if section_offset + section_size > vsf_bytes.len() {
@@ -663,11 +665,11 @@ pub fn sign_section(
     // Create signature VsfType (Ed25519 signature is always 64 bytes)
     let sig_vsf = VsfType::ge(signature.to_bytes().to_vec());
 
-    // Update labels - add signature to target section
-    let mut new_labels = header.labels.clone();
-    for label in &mut new_labels {
-        if label.name == section_name {
-            label.signature = Some(sig_vsf);
+    // Update header fields - add signature to target section
+    let mut new_fields = header.fields.clone();
+    for field in &mut new_fields {
+        if field.name == section_name {
+            field.signature = Some(sig_vsf);
             break;
         }
     }
@@ -675,18 +677,18 @@ pub fn sign_section(
     // Rebuild file with modified header
     rebuild_with_header(
         &vsf_bytes,
-        new_labels,
+        new_fields,
         header.version,
         header.backward_compat,
         header.header_end,
     )
 }
 
-/// Add encryption metadata to a section's header label
+/// Add encryption metadata to a section's header field
 ///
 /// This function:
 /// 0. Finds the specified section in the header
-/// 1. Adds encryption algorithm (v) and key (k) to the label
+/// 1. Adds encryption algorithm (v) and key (k) to the header field
 /// 2. Rebuilds the file with updated header
 /// 3. Updates file hash
 ///
@@ -699,7 +701,7 @@ pub fn sign_section(
 /// * `encryption_key` - Encryption key bytes
 ///
 /// # Returns
-/// Modified VSF bytes with encryption metadata in label
+/// Modified VSF bytes with encryption metadata in header field
 ///
 /// # Example
 /// ```ignore
@@ -724,15 +726,15 @@ pub fn add_encryption_metadata(
     let header = parse_full_header(&vsf_bytes)?;
 
     // Find target section and add encryption metadata
-    let mut new_labels = header.labels.clone();
+    let mut new_fields = header.fields.clone();
     let mut found = false;
 
-    for label in &mut new_labels {
-        if label.name == section_name {
+    for field in &mut new_fields {
+        if field.name == section_name {
             use crate::crypto_algorithms::{WRAP_AES256_GCM, WRAP_CHACHA20POLY1305};
 
             // Add wrapped/encrypted marker (v)
-            label.wrap = Some(VsfType::v(algorithm, vec![])); // Empty vec, just marks as encrypted
+            field.wrap = Some(VsfType::v(algorithm, vec![])); // Empty vec, just marks as encrypted
 
             // Add encryption key based on algorithm
             let key_vsf = match algorithm {
@@ -745,7 +747,7 @@ pub fn add_encryption_metadata(
                     ))
                 }
             };
-            label.key = Some(key_vsf);
+            field.key = Some(key_vsf);
             found = true;
             break;
         }
@@ -758,7 +760,7 @@ pub fn add_encryption_metadata(
     // Rebuild file with modified header
     rebuild_with_header(
         &vsf_bytes,
-        new_labels,
+        new_fields,
         header.version,
         header.backward_compat,
         header.header_end,
@@ -876,7 +878,7 @@ mod tests {
 
         // Create a simple VSF file (hash is automatic now)
         let mut section = VsfSection::new("test");
-        section.add_item("value", VsfType::u(42, false));
+        section.add_field("value", VsfType::u(42, false));
 
         let builder = VsfBuilder::new()
             .add_section("test", vec![("value".to_string(), VsfType::u(42, false))]);

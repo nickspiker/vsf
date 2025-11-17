@@ -272,7 +272,7 @@ pub enum VsfType {
     t_c76(Tensor<CircleF7E6>),
     t_c77(Tensor<CircleF7E7>),
 
-    // ==================== STRIDED TENSORS (WITH STRIDE) ====================
+    // ==================== STRIDED TENSORS ====================
     // Primitive element types
     q_u0(StridedTensor<bool>),
     q_u3(StridedTensor<u8>),
@@ -496,15 +496,16 @@ pub enum VsfType {
     ac(Vec<u8>),  // CMAC-AES
 
     // ==================== WRAPPED/ENCODED DATA ====================
-    /// Wrapped/encoded VSF data with compression, error correction, or encryption
+    /// Wrapped/encoded VSF data with compression, error correction, encryption, units or other encoding
     ///
-    /// Format: v[algorithm][encoded_data]
+    /// Format: v[encoding][encoded_data]
     ///
-    /// Algorithm identifiers (single ASCII character):
+    /// Encoding identifiers (single ASCII character):
     /// - 'z' = zstd compression
     /// - 'r' = Reed-Solomon error correction
     /// - 'x' = XZ/LZMA compression
     /// - 'e' = Encryption (algorithm-specific)
+    /// - 'u' = Measurement in specified units
     ///
     /// Example usage:
     /// ```ignore
@@ -518,6 +519,6 @@ pub enum VsfType {
     /// let outer = VsfType::v(b'r', reed_solomon_encode(&inner.flatten()));
     /// ```
     ///
-    /// Use when your application needs compression, error correction, or encryption.
-    v(u8, Vec<u8>), // Wrapped data (algorithm byte, encoded Bytes)
+    /// Use when your application needs compression, error correction, encryption, units or other encoding.
+    v(u8, Vec<u8>), // Wrapped data (encoding byte, encoded Bytes)
 }
