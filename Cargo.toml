@@ -1,6 +1,6 @@
 [package]
 name = "vsf"
-version = "0.1.8"
+version = "0.1.10"
 edition = "2021"
 authors = ["Nick Spiker <nick@verichrome.cc>"]
 description = "Versatile Storage Format"
@@ -26,7 +26,7 @@ path = "src/bin/vsfinfo.rs"
 bitvec = "1.0.1"
 chrono = "0.4.38"
 num-complex = "0.4.5"
-spirix = { version = "0.0.5", path = "../spirix" }
+spirix = { version = "0.0.6", path = "../spirix" }
 clap = { version = "4", features = ["derive"] }
 blake3 = "1"
 ed25519-dalek = { version = "2", features = ["rand_core"] }

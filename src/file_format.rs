@@ -1,4 +1,4 @@
-//! VSF file format with headers and hierarchical labels
+//! VSF file format with headers and hierarchical fields
 //!
 //! Binary structure (following basecalc pattern):
 //! ```text
@@ -7,9 +7,9 @@
 //!   z[version]                           Version number
 //!   y[backward_compat]                   Backward compatibility version
 //!   hb[256][hash]                        File integrity hash (BLAKE3)
-//!   n[label_count]                       Number of label definitions
+//!   n[field_count]                       Number of header field definitions
 //!
-//!   (d[label_name] h?[hash] g?[sig] k?[key] o[offset] b[size] n[count])  Label definition
+//!   (d[section_name] h?[hash] g?[sig] k?[key] o[offset] b[size] n[count])  Header field (section pointer)
 //!   ...
 //! >                                      Header end
 //!
@@ -119,12 +119,14 @@ pub struct VsfHeader {
     pub creation_time: VsfType,           // Creation timestamp (ef5 for ~2min precision)
     pub provenance_hash: VsfType,         // Required: BLAKE3 hash of immutable content (hp)
     pub rolling_hash: Option<VsfType>,    // Optional: BLAKE3 hash of current state (hb)
-    pub labels: Vec<LabelDefinition>,
+    pub fields: Vec<HeaderField>,
 }
 
-/// Label definition in header
+/// Header field definition (section pointer with positional values)
+/// Format: (d[section_name] o[offset] b[size] n[count])
+/// Note: Header fields use POSITIONAL values (no colons or commas)
 #[derive(Debug, Clone)]
-pub struct LabelDefinition {
+pub struct HeaderField {
     pub name: String,
     pub hash: Option<VsfType>, // h: optional hash of section data (VsfType::h)
     pub signature: Option<VsfType>, // g: optional signature of section data (VsfType::g)
@@ -157,13 +159,13 @@ impl VsfHeader {
             creation_time: VsfType::e(EtType::f5(et_f32)),
             provenance_hash: VsfType::hp(vec![0u8; 32]), // Placeholder, filled during build
             rolling_hash: None,
-            labels: Vec::new(),
+            fields: Vec::new(),
         }
     }
 
-    /// Add a label definition
-    pub fn add_label(&mut self, label: LabelDefinition) {
-        self.labels.push(label);
+    /// Add a header field definition (section pointer)
+    pub fn add_field(&mut self, field: HeaderField) {
+        self.fields.push(field);
     }
 
     /// Encode header to bytes (following basecalc pattern)
@@ -196,45 +198,45 @@ impl VsfHeader {
             header.extend_from_slice(&hash.flatten());
         }
 
-        // Label count
-        header.extend_from_slice(&VsfType::n(self.labels.len()).flatten());
+        // Header field count (number of section pointers)
+        header.extend_from_slice(&VsfType::n(self.fields.len()).flatten());
 
-        // Label definitions
-        for label in &self.labels {
+        // Header field definitions (section pointers with POSITIONAL values)
+        for field in &self.fields {
             header.push(b'(');
 
-            // Label name
-            header.extend_from_slice(&VsfType::d(label.name.clone()).flatten());
+            // Section name
+            header.extend_from_slice(&VsfType::d(field.name.clone()).flatten());
 
             // Optional hash (VsfType::h with algorithm)
-            if let Some(ref hash_type) = label.hash {
+            if let Some(ref hash_type) = field.hash {
                 header.extend_from_slice(&hash_type.flatten());
             }
 
             // Optional signature (VsfType::g with algorithm)
-            if let Some(ref sig_type) = label.signature {
+            if let Some(ref sig_type) = field.signature {
                 header.extend_from_slice(&sig_type.flatten());
             }
 
             // Optional key (VsfType::k with algorithm)
-            if let Some(ref key_type) = label.key {
+            if let Some(ref key_type) = field.key {
                 header.extend_from_slice(&key_type.flatten());
             }
 
             // Optional wrap (VsfType::v with algorithm)
-            if let Some(ref wrap_type) = label.wrap {
+            if let Some(ref wrap_type) = field.wrap {
                 header.extend_from_slice(&wrap_type.flatten());
             }
 
-            // Offset (in bytes)
-            header.extend_from_slice(&VsfType::o(label.offset_bytes).flatten());
+            // Offset (in bytes) - POSITIONAL (no colon)
+            header.extend_from_slice(&VsfType::o(field.offset_bytes).flatten());
 
-            // Size (in bytes)
-            header.extend_from_slice(&VsfType::b(label.size_bytes, false).flatten());
+            // Size (in bytes) - POSITIONAL (no colon)
+            header.extend_from_slice(&VsfType::b(field.size_bytes, false).flatten());
 
-            // Child count (omit if encrypted - implied to be n[0])
-            if label.wrap.is_none() {
-                header.extend_from_slice(&VsfType::n(label.child_count).flatten());
+            // Child count - POSITIONAL (no colon), omit if encrypted - implied to be n[0]
+            if field.wrap.is_none() {
+                header.extend_from_slice(&VsfType::n(field.child_count).flatten());
             }
 
             header.push(b')');
@@ -292,14 +294,14 @@ impl VsfHeader {
 #[derive(Debug, Clone)]
 pub struct VsfSection {
     pub name: String,
-    pub items: Vec<VsfItem>,
+    pub fields: Vec<VsfField>,
 }
 
-/// Single item in a section
+/// Single field in a section
 #[derive(Debug, Clone)]
-pub struct VsfItem {
+pub struct VsfField {
     pub name: String,
-    pub value: VsfType,
+    pub values: Vec<VsfType>, // Empty vec = flag, 1 elem = single value, N elems = multi-value
 }
 
 impl VsfSection {
@@ -312,26 +314,115 @@ impl VsfSection {
         validate_name(&name_str).unwrap_or_else(|e| panic!("Invalid section name: {}", e));
         Self {
             name: name_str,
-            items: Vec::new(),
+            fields: Vec::new(),
         }
     }
 
-    /// Add an item to the section with validated field name
+    /// Add a field to the section with validated field name (single value)
     ///
     /// # Panics
     /// Panics if the field name contains invalid characters
-    pub fn add_item(&mut self, name: impl Into<String>, value: VsfType) {
+    pub fn add_field(&mut self, name: impl Into<String>, value: VsfType) {
         let name_str = name.into();
         validate_name(&name_str).unwrap_or_else(|e| panic!("Invalid field name: {}", e));
-        self.items.push(VsfItem {
+        self.fields.push(VsfField {
             name: name_str,
-            value,
+            values: vec![value],
         });
+    }
+
+    /// Add a flag/marker field with no values
+    ///
+    /// # Panics
+    /// Panics if the field name contains invalid characters
+    pub fn add_flag(&mut self, name: impl Into<String>) {
+        let name_str = name.into();
+        validate_name(&name_str).unwrap_or_else(|e| panic!("Invalid field name: {}", e));
+        self.fields.push(VsfField {
+            name: name_str,
+            values: vec![],
+        });
+    }
+
+    /// Add a field with multiple values
+    ///
+    /// # Panics
+    /// Panics if the field name contains invalid characters
+    pub fn add_field_multi(&mut self, name: impl Into<String>, values: Vec<VsfType>) {
+        let name_str = name.into();
+        validate_name(&name_str).unwrap_or_else(|e| panic!("Invalid field name: {}", e));
+        self.fields.push(VsfField {
+            name: name_str,
+            values,
+        });
+    }
+
+    /// Add a field to the section (builder pattern)
+    ///
+    /// Returns self for method chaining
+    ///
+    /// # Panics
+    /// Panics if the field name contains invalid characters
+    ///
+    /// # Example
+    /// ```ignore
+    /// let section = VsfSection::new("metadata")
+    ///     .field("width", VsfType::u(1920, false))
+    ///     .field("height", VsfType::u(1080, false));
+    /// ```
+    pub fn field(mut self, name: impl Into<String>, value: VsfType) -> Self {
+        self.add_field(name, value);
+        self
+    }
+
+    /// Add an optional field to the section (builder pattern)
+    ///
+    /// Only adds the field if the Option is Some. Returns self for method chaining.
+    ///
+    /// # Panics
+    /// Panics if the field name contains invalid characters
+    ///
+    /// # Example
+    /// ```ignore
+    /// let section = VsfSection::new("metadata")
+    ///     .field("width", VsfType::u(1920, false))
+    ///     .field_opt("description", description_opt);  // Only added if Some
+    /// ```
+    pub fn field_opt(mut self, name: impl Into<String>, value: Option<VsfType>) -> Self {
+        if let Some(v) = value {
+            self.add_field(name, v);
+        }
+        self
+    }
+
+    /// Add multiple fields from a vector (builder pattern)
+    ///
+    /// Returns self for method chaining
+    ///
+    /// # Panics
+    /// Panics if any field name contains invalid characters
+    ///
+    /// # Example
+    /// ```ignore
+    /// let fields = vec![
+    ///     ("width".to_string(), VsfType::u(1920, false)),
+    ///     ("height".to_string(), VsfType::u(1080, false)),
+    /// ];
+    /// let section = VsfSection::new("metadata").fields(fields);
+    /// ```
+    pub fn fields(mut self, fields: Vec<(String, VsfType)>) -> Self {
+        for (name, value) in fields {
+            self.add_field(name, value);
+        }
+        self
     }
 
     /// Encode section to bytes (no preamble - crypto moved to header labels)
     ///
     /// Format: [dsection_name(field:value)...]
+    /// - Empty values: (dfield)
+    /// - Single value: (dfield:value)
+    /// - Multi-value: (dfield:v1,v2,v3)
     pub fn encode(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -341,18 +432,26 @@ impl VsfSection {
         // Section name (namespace for all fields)
         bytes.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
 
-        // Encode each item
-        for item in &self.items {
+        // Encode each field
+        for field in &self.fields {
             bytes.push(b'(');
 
-            // Item name (simple identifier, no dots - namespace comes from section)
-            bytes.extend_from_slice(&VsfType::d(item.name.clone()).flatten());
+            // Field name (simple identifier, no dots - namespace comes from section)
+            bytes.extend_from_slice(&VsfType::d(field.name.clone()).flatten());
 
-            // Separator
-            bytes.push(b':');
+            // Handle values based on count
+            if !field.values.is_empty() {
+                // Add separator only if there are values
+                bytes.push(b':');
 
-            // Item value
-            bytes.extend_from_slice(&item.value.flatten());
+                // Encode values with comma separators
+                for (i, value) in field.values.iter().enumerate() {
+                    if i > 0 {
+                        bytes.push(b',');
+                    }
+                    bytes.extend_from_slice(&value.flatten());
+                }
+            }
 
             bytes.push(b')');
         }
@@ -371,7 +470,7 @@ mod tests {
     #[test]
     fn test_header_encoding() {
         let mut header = VsfHeader::new(1, 1);
-        header.add_label(LabelDefinition {
+        header.add_field(HeaderField {
             name: "test section".to_string(),
             hash: None,
             signature: None,
@@ -398,8 +497,8 @@ mod tests {
     #[test]
     fn test_section_encoding() {
         let mut section = VsfSection::new("test");
-        section.add_item("width", VsfType::u(4096, false));
-        section.add_item("height", VsfType::u(3072, false));
+        section.add_field("width", VsfType::u(4096, false));
+        section.add_field("height", VsfType::u(3072, false));
 
         let encoded = section.encode();
 
@@ -407,10 +506,43 @@ mod tests {
         assert_eq!(encoded[0], b'[');
         assert_eq!(encoded[encoded.len() - 1], b']');
 
-        // Verify parentheses for items
+        // Verify parentheses for fields
         assert!(encoded.contains(&b'('));
         assert!(encoded.contains(&b')'));
         assert!(encoded.contains(&b':')); // Separator
+    }
+
+    #[test]
+    fn test_field_syntax_variations() {
+        let mut section = VsfSection::new("test");
+
+        // Test flag/marker (no values, no colon)
+        section.add_flag("enabled");
+
+        // Test single value (colon + value)
+        section.add_field("width", VsfType::u(1920, false));
+
+        // Test multi-value (colon + comma-separated values)
+        section.add_field_multi("resolution", vec![
+            VsfType::u(1920, false),
+            VsfType::u(1080, false),
+        ]);
+
+        let encoded = section.encode();
+        let encoded_str = String::from_utf8_lossy(&encoded);
+
+        // Flag should have no colon: (d"enabled")
+        assert!(encoded_str.contains("enabled"));
+        // Find the enabled field and verify no colon after it
+        let enabled_pos = encoded_str.find("enabled").unwrap();
+        let after_enabled = &encoded_str[enabled_pos + 7..enabled_pos + 8];
+        assert_eq!(after_enabled, ")"); // Should close immediately, no colon
+
+        // Single value should have colon
+        assert!(encoded_str.contains("width"));
+
+        // Multi-value should have comma
+        assert!(encoded.contains(&b','));
     }
 
     #[test]
@@ -473,6 +605,6 @@ mod tests {
     #[should_panic(expected = "Invalid field name")]
     fn test_field_name_validation_panics() {
         let mut section = VsfSection::new("camera");
-        section.add_item("ISO Speed", VsfType::f5(800.0)); // uppercase and space
+        section.add_field("ISO Speed", VsfType::f5(800.0)); // uppercase and space
     }
 }

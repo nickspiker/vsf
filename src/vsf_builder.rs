@@ -1,9 +1,9 @@
 //! High-level builder for VSF files
 //!
-//! Uses the Vec<Vec<u8>> pattern from basecalc with stabilization loop
+//! Uses the Vec<Vec<u8>> pattern with stabilization loop
 //! to handle the chicken-and-egg problem of header size calculation.
 //!
-//! **Note:** Every VSF file automatically includes a BLAKE3 hash in the header
+//! **Note:** Every VSF file requires and automatically includes a BLAKE3 hash in the header
 //! for integrity verification. This is computed transparently during `build()`.
 //! No manual hashing required - just call `builder.build()` and you're done!
 
@@ -61,10 +61,10 @@ impl VsfBuilder {
     }
 
     /// Add a structured section with name and items
-    pub fn add_section(mut self, name: impl Into<String>, items: Vec<(String, VsfType)>) -> Self {
+    pub fn add_section(mut self, name: impl Into<String>, fields: Vec<(String, VsfType)>) -> Self {
         let mut section = VsfSection::new(name);
-        for (item_name, value) in items {
-            section.add_item(item_name, value);
+        for (field_name, value) in fields {
+            section.add_field(field_name, value);
         }
         self.sections.push(section);
         self
@@ -94,49 +94,54 @@ impl VsfBuilder {
         let mut header_index = 0;
         vsf[header_index].push(b'<');
 
-        // Placeholder for header length (inclusive mode)
+        // Version (FIRST - determines all encoding decisions)
+        header_index = vsf.len();
+        vsf.push(VsfType::z(self.version).flatten());
+
+        // Backward compat version
+        vsf[header_index].extend_from_slice(&VsfType::y(self.backward_compat).flatten());
+
+        // Placeholder for header length (now we know how to encode it!)
         let header_length_index = vsf.len();
         vsf.push(VsfType::b(0, true).flatten()); // Will be updated in loop
 
-        // Version and backward compat
-        header_index = vsf.len();
-        vsf.push(VsfType::z(self.version).flatten());
-        vsf[header_index].extend_from_slice(&VsfType::y(self.backward_compat).flatten());
-
         // Creation time
-        vsf[header_index].extend_from_slice(&self.creation_time.flatten());
+        header_index = vsf.len();
+        vsf.push(self.creation_time.flatten());
 
         // Provenance hash placeholder (required, always BLAKE3)
         vsf[header_index].extend_from_slice(&VsfType::hp(vec![0u8; 32]).flatten());
 
-        // Rolling hash placeholder (optional, default enabled)
+        // Rolling hash placeholder OR signature placeholder (optional, default enabled)
         if self.include_file_hash {
             vsf[header_index].extend_from_slice(&VsfType::hb(vec![0u8; 32]).flatten());
         }
 
-        // Label count
-        let total_labels = self.sections.len() + self.unboxed.len();
-        vsf[header_index].extend_from_slice(&VsfType::n(total_labels).flatten());
+        // If signed, signature would replace hp bytes here (ge replaces hp)
 
-        // Create label definitions with placeholders
-        let mut label_offset_indices = Vec::new();
-        let mut label_size_indices = Vec::new();
+        // Header field count (number of section pointers)
+        let total_fields = self.sections.len() + self.unboxed.len();
+        vsf[header_index].extend_from_slice(&VsfType::n(total_fields).flatten());
+
+        // Create header field definitions (section pointers) with placeholders
+        let mut field_offset_indices = Vec::new();
+        let mut field_size_indices = Vec::new();
 
         for (i, section) in self.sections.iter().enumerate() {
             vsf[header_index].push(b'(');
             vsf[header_index].extend_from_slice(&VsfType::d(section.name.clone()).flatten());
 
-            // Offset placeholder
-            label_offset_indices.push((i, vsf.len()));
+            // Offset placeholder (POSITIONAL - no colon)
+            field_offset_indices.push((i, vsf.len()));
             vsf.push(VsfType::o(0).flatten());
 
-            // Size placeholder (not inclusive - section size, not self-referential)
-            label_size_indices.push((i, vsf.len()));
+            // Size placeholder (POSITIONAL - no colon, not inclusive - section size, not self-referential)
+            field_size_indices.push((i, vsf.len()));
             vsf.push(VsfType::b(0, false).flatten());
 
-            // Child count (actual value)
+            // Child count (POSITIONAL - no colon, actual value)
             header_index = vsf.len();
-            vsf.push(VsfType::n(section.items.len()).flatten());
+            vsf.push(VsfType::n(section.fields.len()).flatten());
             vsf[header_index].push(b')');
         }
 
@@ -145,16 +150,16 @@ impl VsfBuilder {
             vsf[header_index].push(b'(');
             vsf[header_index].extend_from_slice(&VsfType::d(name.clone()).flatten());
 
-            // Offset placeholder
+            // Offset placeholder (POSITIONAL - no colon)
             let unboxed_index = self.sections.len() + i;
-            label_offset_indices.push((unboxed_index, vsf.len()));
+            field_offset_indices.push((unboxed_index, vsf.len()));
             vsf.push(VsfType::o(0).flatten());
 
-            // Size placeholder (not inclusive - section size, not self-referential)
-            label_size_indices.push((unboxed_index, vsf.len()));
+            // Size placeholder (POSITIONAL - no colon, not inclusive - section size, not self-referential)
+            field_size_indices.push((unboxed_index, vsf.len()));
             vsf.push(VsfType::b(0, false).flatten());
 
-            // Child count = 0 for unboxed
+            // Child count = 0 for unboxed (POSITIONAL - no colon)
             header_index = vsf.len();
             vsf.push(VsfType::n(0).flatten());
             vsf[header_index].push(b')');
@@ -171,8 +176,8 @@ impl VsfBuilder {
 
         // Stabilization loop
         let mut prev_header_length = 0;
-        let mut prev_offsets = vec![0; label_offset_indices.len()];
-        let mut prev_sizes = vec![0; label_size_indices.len()];
+        let mut prev_offsets = vec![0; field_offset_indices.len()];
+        let mut prev_sizes = vec![0; field_size_indices.len()];
 
         let mut iteration = 0;
         const MAX_ITERATIONS: usize = 10;
@@ -195,7 +200,7 @@ impl VsfBuilder {
             // Calculate offsets and sizes for sections
             let mut current_offset = header_length;
 
-            for (idx, (label_idx, vsf_idx)) in label_offset_indices.iter().enumerate() {
+            for (idx, (field_idx, vsf_idx)) in field_offset_indices.iter().enumerate() {
                 let offset_bytes = current_offset;
 
                 if offset_bytes != prev_offsets[idx] {
@@ -205,17 +210,17 @@ impl VsfBuilder {
                 }
 
                 // Calculate size
-                let size_bytes = if *label_idx < self.sections.len() {
+                let size_bytes = if *field_idx < self.sections.len() {
                     // Structured section
-                    vsf[header_end_index + label_idx].len()
+                    vsf[header_end_index + field_idx].len()
                 } else {
                     // Unboxed section
-                    let unboxed_idx = label_idx - self.sections.len();
+                    let unboxed_idx = field_idx - self.sections.len();
                     self.unboxed[unboxed_idx].1.len()
                 };
 
                 if size_bytes != prev_sizes[idx] {
-                    vsf[label_size_indices[idx].1] = VsfType::b(size_bytes, false).flatten();
+                    vsf[field_size_indices[idx].1] = VsfType::b(size_bytes, false).flatten();
                     prev_sizes[idx] = size_bytes;
                     changed = true;
                 }
@@ -247,6 +252,8 @@ impl VsfBuilder {
 
         let hash = compute_file_hash(&result)?;
         result = write_file_hash(result, &hash)?;
+
+        // If signed, signature would get computed and written here
 
         Ok(result)
     }
