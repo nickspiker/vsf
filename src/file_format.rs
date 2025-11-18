@@ -178,14 +178,15 @@ impl VsfHeader {
         // Header start marker
         header.push(b'<');
 
-        let header_length_placeholder = VsfType::b(0, true).flatten();
-        header.extend_from_slice(&header_length_placeholder);
-
-        // Version
+        // Version (MUST come first to determine encoding)
         header.extend_from_slice(&VsfType::z(self.version).flatten());
 
         // Backward compatibility
         header.extend_from_slice(&VsfType::y(self.backward_compat).flatten());
+
+        // Header length placeholder (after version/backward_compat)
+        let header_length_placeholder = VsfType::b(0, true).flatten();
+        header.extend_from_slice(&header_length_placeholder);
 
         // Creation time (always present)
         header.extend_from_slice(&self.creation_time.flatten());
@@ -248,6 +249,211 @@ impl VsfHeader {
         Ok(header)
     }
 
+    /// Decode a VSF header from bytes
+    ///
+    /// Parses the binary header structure and returns a VsfHeader instance.
+    /// Returns the parsed header and the number of bytes consumed.
+    ///
+    /// # Format
+    /// ```text
+    /// RÅ<                          Magic + header start
+    ///   z[version]                 Version number
+    ///   y[backward_compat]         Backward compatibility version
+    ///   b[header_length_bytes]     Header length in BYTES
+    ///   e[creation_time]           Creation timestamp (ef5/ef6)
+    ///   hp[hash]                   Provenance hash (BLAKE3)
+    ///   hb[hash]?                  Optional rolling hash (BLAKE3)
+    ///   n[field_count]             Number of header fields
+    ///   (...)                      Header fields
+    /// >                            Header end
+    /// ```
+    pub fn decode(data: &[u8]) -> Result<(Self, usize), String> {
+        use crate::decoding::parse::parse;
+
+        // Check magic number "RÅ<" (R=0x52, Å=0xC3,0x85)
+        if data.len() < 4 {
+            return Err("Data too short for VSF header".to_string());
+        }
+        if &data[0..3] != "RÅ".as_bytes() || data[3] != b'<' {
+            return Err(format!(
+                "Invalid VSF magic number (expected 'RÅ<', found '{}{}{}')",
+                data[0] as char, data[1] as char, data[2] as char
+            ));
+        }
+
+        let mut ptr = 4; // After "RÅ<"
+
+        // Parse version (z)
+        let version_type = parse(data, &mut ptr)
+            .map_err(|e| format!("Failed to parse version: {}", e))?;
+        let version = match version_type {
+            VsfType::z(v) => v,
+            _ => return Err(format!("Expected version (z), got {:?}", version_type)),
+        };
+
+        // Parse backward compatibility (y)
+        let backward_compat_type = parse(data, &mut ptr)
+            .map_err(|e| format!("Failed to parse backward_compat: {}", e))?;
+        let backward_compat = match backward_compat_type {
+            VsfType::y(v) => v,
+            _ => return Err(format!("Expected backward_compat (y), got {:?}", backward_compat_type)),
+        };
+
+        // Parse header length (b) - we validate but don't use it for parsing
+        let header_length_type = parse(data, &mut ptr)
+            .map_err(|e| format!("Failed to parse header_length: {}", e))?;
+        let _header_length = match header_length_type {
+            VsfType::b(len, _) => len,
+            _ => return Err(format!("Expected header_length (b), got {:?}", header_length_type)),
+        };
+
+        // Parse creation time (e)
+        let creation_time = parse(data, &mut ptr)
+            .map_err(|e| format!("Failed to parse creation_time: {}", e))?;
+        if !matches!(creation_time, VsfType::e(_)) {
+            return Err(format!("Expected creation_time (e), got {:?}", creation_time));
+        }
+
+        // Parse provenance hash (hp)
+        let provenance_hash = parse(data, &mut ptr)
+            .map_err(|e| format!("Failed to parse provenance_hash: {}", e))?;
+        if !matches!(provenance_hash, VsfType::hp(_)) {
+            return Err(format!("Expected provenance_hash (hp), got {:?}", provenance_hash));
+        }
+
+        // Check for optional rolling hash (hb) or field count (n)
+        let mut rolling_hash = None;
+        let field_count_type = if ptr < data.len() && data[ptr] == b'h' {
+            // Optional rolling hash present
+            rolling_hash = Some(parse(data, &mut ptr)
+                .map_err(|e| format!("Failed to parse rolling_hash: {}", e))?);
+
+            // Now parse field count
+            parse(data, &mut ptr)
+                .map_err(|e| format!("Failed to parse field_count after rolling_hash: {}", e))?
+        } else {
+            // No rolling hash, parse field count directly
+            parse(data, &mut ptr)
+                .map_err(|e| format!("Failed to parse field_count: {}", e))?
+        };
+
+        let field_count = match field_count_type {
+            VsfType::n(count) => count,
+            _ => return Err(format!("Expected field_count (n), got {:?}", field_count_type)),
+        };
+
+        // Parse header fields (section pointers)
+        let mut fields = Vec::with_capacity(field_count);
+        for i in 0..field_count {
+            // Expect opening '('
+            if ptr >= data.len() || data[ptr] != b'(' {
+                return Err(format!("Expected '(' for header field {}, found {:?}", i, data.get(ptr)));
+            }
+            ptr += 1;
+
+            // Parse section name (d)
+            let name_type = parse(data, &mut ptr)
+                .map_err(|e| format!("Failed to parse field {} name: {}", i, e))?;
+            let name = match name_type {
+                VsfType::d(n) => n,
+                _ => return Err(format!("Expected section name (d) for field {}, got {:?}", i, name_type)),
+            };
+
+            // Parse optional hash, signature, key, wrap
+            let mut hash = None;
+            let mut signature = None;
+            let mut key = None;
+            let mut wrap = None;
+
+            // Parse optional crypto fields until we hit 'o' (offset)
+            while ptr < data.len() && data[ptr] != b'o' {
+                match data[ptr] {
+                    b'h' => {
+                        hash = Some(parse(data, &mut ptr)
+                            .map_err(|e| format!("Failed to parse hash for field {}: {}", i, e))?);
+                    }
+                    b'g' => {
+                        signature = Some(parse(data, &mut ptr)
+                            .map_err(|e| format!("Failed to parse signature for field {}: {}", i, e))?);
+                    }
+                    b'k' => {
+                        key = Some(parse(data, &mut ptr)
+                            .map_err(|e| format!("Failed to parse key for field {}: {}", i, e))?);
+                    }
+                    b'v' => {
+                        wrap = Some(parse(data, &mut ptr)
+                            .map_err(|e| format!("Failed to parse wrap for field {}: {}", i, e))?);
+                    }
+                    b')' => break, // End of field
+                    _ => return Err(format!("Unexpected byte '{}' in header field {}", data[ptr] as char, i)),
+                }
+            }
+
+            // Parse offset (o)
+            let offset_type = parse(data, &mut ptr)
+                .map_err(|e| format!("Failed to parse offset for field {}: {}", i, e))?;
+            let offset_bytes = match offset_type {
+                VsfType::o(offset) => offset,
+                _ => return Err(format!("Expected offset (o) for field {}, got {:?}", i, offset_type)),
+            };
+
+            // Parse size (b)
+            let size_type = parse(data, &mut ptr)
+                .map_err(|e| format!("Failed to parse size for field {}: {}", i, e))?;
+            let size_bytes = match size_type {
+                VsfType::b(size, _) => size,
+                _ => return Err(format!("Expected size (b) for field {}, got {:?}", i, size_type)),
+            };
+
+            // Parse child count (n) - optional if encrypted (wrap present)
+            let child_count = if wrap.is_some() {
+                0 // Encrypted sections have implicit n[0]
+            } else {
+                let count_type = parse(data, &mut ptr)
+                    .map_err(|e| format!("Failed to parse count for field {}: {}", i, e))?;
+                match count_type {
+                    VsfType::n(count) => count,
+                    _ => return Err(format!("Expected count (n) for field {}, got {:?}", i, count_type)),
+                }
+            };
+
+            // Expect closing ')'
+            if ptr >= data.len() || data[ptr] != b')' {
+                return Err(format!("Expected ')' for header field {}, found {:?}", i, data.get(ptr)));
+            }
+            ptr += 1;
+
+            fields.push(HeaderField {
+                name,
+                hash,
+                signature,
+                key,
+                wrap,
+                offset_bytes,
+                size_bytes,
+                child_count,
+            });
+        }
+
+        // Expect closing '>'
+        if ptr >= data.len() || data[ptr] != b'>' {
+            return Err(format!("Expected '>' to close header, found {:?}", data.get(ptr)));
+        }
+        ptr += 1;
+
+        Ok((
+            VsfHeader {
+                version,
+                backward_compat,
+                creation_time,
+                provenance_hash,
+                rolling_hash,
+                fields,
+            },
+            ptr, // Return number of bytes consumed
+        ))
+    }
+
     /// Update header length field after knowing final size
     pub fn update_header_length(header_bytes: &mut Vec<u8>) -> Result<(), String> {
         // Find the position after "RÅ<" (4 bytes: R=1, Å=2, <=1)
@@ -255,22 +461,50 @@ impl VsfHeader {
             return Err("Header too short".to_string());
         }
 
-        // Find placeholder size
-        let placeholder_len = header_bytes
-            .iter()
-            .skip(4)
-            .position(|&b| b == b'z')
-            .ok_or("Could not find version marker")?;
+        // Structure is now: RÅ< z y b ... (version, backward_compat, then header length)
+        // Skip past z (version) and y (backward_compat) to find b (header length)
+        let mut ptr = 4; // After "RÅ<"
+
+        // Skip version (z) field
+        if ptr >= header_bytes.len() || header_bytes[ptr] != b'z' {
+            return Err("Expected 'z' (version) marker after header start".to_string());
+        }
+        ptr += 1;
+        while ptr < header_bytes.len() && header_bytes[ptr] != b'y' {
+            ptr += 1;
+        }
+
+        // Skip backward_compat (y) field
+        if ptr >= header_bytes.len() || header_bytes[ptr] != b'y' {
+            return Err("Expected 'y' (backward compat) marker after version".to_string());
+        }
+        ptr += 1;
+        while ptr < header_bytes.len() && header_bytes[ptr] != b'b' {
+            ptr += 1;
+        }
+
+        // Now at b (header length) field
+        if ptr >= header_bytes.len() || header_bytes[ptr] != b'b' {
+            return Err("Expected 'b' (header length) marker after backward compat".to_string());
+        }
+
+        let _b_start = ptr;
+        ptr += 1; // Skip 'b'
+
+        // Find end of b field (next field marker)
+        let value_start = ptr;
+        while ptr < header_bytes.len() && header_bytes[ptr] != b'e' && header_bytes[ptr] != b'h' {
+            ptr += 1;
+        }
+        let placeholder_len = ptr - value_start;
 
         // Calculate what the header length will be AFTER we replace the placeholder
-        // Current length - placeholder + new encoding
-        // We need to iterate to find the right encoding size
         let mut header_length_bytes = header_bytes.len();
         let mut length_encoded = VsfType::b(header_length_bytes, true).flatten();
 
         // Iterate until stable (in case encoding size changes)
         loop {
-            let new_total = header_bytes.len() - placeholder_len + length_encoded.len();
+            let new_total = header_bytes.len() - placeholder_len + (length_encoded.len() - 1); // -1 for 'b' marker
             if new_total == header_length_bytes {
                 break; // Stable!
             }
@@ -278,12 +512,12 @@ impl VsfHeader {
             length_encoded = VsfType::b(header_length_bytes, true).flatten();
         }
 
-        // Remove old placeholder
-        header_bytes.drain(4..4 + placeholder_len);
+        // Remove old b field value (keep the 'b' marker)
+        header_bytes.drain(value_start..value_start + placeholder_len);
 
-        // Insert new length encoding
-        for (i, byte) in length_encoded.iter().enumerate() {
-            header_bytes.insert(4 + i, *byte);
+        // Insert new length encoding value (skip first 'b' since it's already there)
+        for (i, byte) in length_encoded.iter().skip(1).enumerate() {
+            header_bytes.insert(value_start + i, *byte);
         }
 
         Ok(())
@@ -606,5 +840,86 @@ mod tests {
     fn test_field_name_validation_panics() {
         let mut section = VsfSection::new("camera");
         section.add_field("ISO Speed", VsfType::f5(800.0)); // uppercase and space
+    }
+
+    #[test]
+    fn test_header_decode_basic() {
+        // Create a simple header
+        let mut header = VsfHeader::new(1, 1);
+        header.add_field(HeaderField {
+            name: "test_section".to_string(),
+            hash: None,
+            signature: None,
+            key: None,
+            wrap: None,
+            offset_bytes: 256,
+            size_bytes: 128,
+            child_count: 2,
+        });
+
+        // Encode it
+        let encoded = header.encode().unwrap();
+
+        // Decode it
+        let (decoded, bytes_consumed) = VsfHeader::decode(&encoded).unwrap();
+
+        // Verify decoded matches original
+        assert_eq!(decoded.version, 1);
+        assert_eq!(decoded.backward_compat, 1);
+        assert_eq!(decoded.fields.len(), 1);
+        assert_eq!(decoded.fields[0].name, "test_section");
+        assert_eq!(decoded.fields[0].offset_bytes, 256);
+        assert_eq!(decoded.fields[0].size_bytes, 128);
+        assert_eq!(decoded.fields[0].child_count, 2);
+        assert_eq!(bytes_consumed, encoded.len());
+    }
+
+    #[test]
+    fn test_header_decode_with_crypto() {
+        // Create a header with crypto fields
+        let mut header = VsfHeader::new(1, 1);
+        header.add_field(HeaderField {
+            name: "encrypted_section".to_string(),
+            hash: Some(VsfType::hb(vec![0u8; 32])),  // BLAKE3 rolling hash
+            signature: Some(VsfType::ge(vec![0u8; 64])),  // Ed25519 signature
+            key: Some(VsfType::kx(vec![0u8; 32])),  // X25519 key
+            wrap: Some(VsfType::v(0, vec![0u8; 0])),  // Encrypted marker
+            offset_bytes: 512,
+            size_bytes: 1024,
+            child_count: 0,  // Encrypted sections have n[0]
+        });
+
+        // Encode it
+        let encoded = header.encode().unwrap();
+
+        // Decode it
+        let (decoded, bytes_consumed) = VsfHeader::decode(&encoded).unwrap();
+
+        // Verify decoded matches original
+        assert_eq!(decoded.version, 1);
+        assert_eq!(decoded.fields.len(), 1);
+        assert_eq!(decoded.fields[0].name, "encrypted_section");
+        assert!(decoded.fields[0].hash.is_some());
+        assert!(decoded.fields[0].signature.is_some());
+        assert!(decoded.fields[0].key.is_some());
+        assert!(decoded.fields[0].wrap.is_some());
+        assert_eq!(decoded.fields[0].child_count, 0);
+        assert_eq!(bytes_consumed, encoded.len());
+    }
+
+    #[test]
+    fn test_header_decode_invalid_magic() {
+        let invalid = b"WRONG<";
+        let result = VsfHeader::decode(invalid);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid VSF magic number"));
+    }
+
+    #[test]
+    fn test_header_decode_too_short() {
+        let invalid = b"RA";
+        let result = VsfHeader::decode(invalid);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Data too short"));
     }
 }
