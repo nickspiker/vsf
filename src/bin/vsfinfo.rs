@@ -887,7 +887,7 @@ fn show_info(data: &[u8]) -> Result<(), String> {
     );
 
     // Integrity check (includes hash display)
-    verify_integrity_summary(data, &header)?;
+    let integrity_ok = verify_integrity_summary(data, &header)?;
 
     println!();
 
@@ -982,6 +982,9 @@ fn show_info(data: &[u8]) -> Result<(), String> {
     print!("{}", ">".truecolor(128, 128, 128));
     println!("{}", "┐".white());
 
+    // Track validation errors
+    let mut has_errors = false;
+
     // Show sections with their actual structure
     for (i, label) in header.labels.iter().enumerate() {
         let is_last = i == header.labels.len() - 1;
@@ -1000,9 +1003,15 @@ fn show_info(data: &[u8]) -> Result<(), String> {
         let registry = SchemaRegistry::global();
         if let Ok(schema) = registry.get(&label.name) {
             if let Some(ref desc) = schema.description {
-                println!("{}  {} {}", field_prefix, "Schema:".cyan(), desc.truecolor(200, 200, 200));
+                println!(
+                    "{}  {} {}",
+                    field_prefix,
+                    "Schema:".cyan(),
+                    desc.truecolor(200, 200, 200)
+                );
             }
-            println!("{}  {} {} fields defined",
+            println!(
+                "{}  {} {} fields defined",
                 field_prefix,
                 "✓".truecolor(0, 255, 0),
                 schema.fields.len()
@@ -1040,6 +1049,7 @@ fn show_info(data: &[u8]) -> Result<(), String> {
                     }
                 }
                 Err(e) => {
+                    has_errors = true;
                     let field_prefix = if is_last { "   " } else { " │ " };
                     println!("{}  <error parsing: {}>", field_prefix, e);
                 }
@@ -1055,11 +1065,19 @@ fn show_info(data: &[u8]) -> Result<(), String> {
         }
     }
 
+    // Print validation status if no errors found
+    if !has_errors && integrity_ok {
+        println!();
+        println!("{}", "Valid".truecolor(0, 255, 0).bold());
+    }
+
     Ok(())
 }
 
 /// Quick integrity summary (used by show_info)
-fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), String> {
+/// Returns true if all integrity checks pass
+fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<bool, String> {
+    let mut all_checks_pass = true;
     // Display and verify provenance hash (hp)
     if let Some(ref hp) = header.provenance_hash {
         match hp {
@@ -1083,11 +1101,14 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
                 if verified {
                     println!("{}", "PASS".truecolor(0, 255, 0));
                 } else {
+                    all_checks_pass = false;
                     println!("{}", "FAIL".truecolor(255, 0, 0));
                 }
-                println!(" {} {}",
+                println!(
+                    " {} {}",
                     "Semantics:".cyan(),
-                    "Content identifier, links challenge → response in FGTW protocol".truecolor(200, 200, 200)
+                    "Content identifier, links challenge → response in FGTW protocol"
+                        .truecolor(200, 200, 200)
                 );
             }
             _ => {}
@@ -1184,6 +1205,7 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
         println!("{}", "PASS".truecolor(0, 255, 0));
     } else if stored_hash.is_some() {
         // Show both expected and computed hashes on failure
+        all_checks_pass = false;
         if let (Some(expected), Some(computed)) = (stored_hash, computed_hash) {
             print!(" {} {} ", "Expected:".cyan(), "0x".truecolor(64, 50, 255));
             for byte in expected.iter() {
@@ -1200,7 +1222,7 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
         println!("{}", "FAIL".truecolor(255, 0, 0));
     }
 
-    Ok(())
+    Ok(all_checks_pass)
 }
 
 /// Verify file integrity

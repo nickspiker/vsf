@@ -5,8 +5,8 @@
 //! pattern-based constraints that can match categories, specific types, or
 //! apply custom validation logic.
 
-use crate::types::{EtType, VsfType};
 use super::validate::{ValidationError, ValidationResult};
+use crate::types::{EtType, VsfType};
 use std::fmt;
 use std::sync::Arc;
 
@@ -40,6 +40,12 @@ pub enum TypeConstraint {
     // === STRING TYPES ===
     /// Any string type (x, d, l)
     AnyString,
+    /// UTF-8 text (x) - User-facing Unicode text
+    Utf8Text,
+    /// Dictionary key (d) - Internal naming (section names, field names, keys)
+    DictKey,
+    /// ASCII text (l) - User-facing ASCII-only text
+    AsciiText,
 
     // === HASH TYPES ===
     /// Any hash type (hp, hb, hs)
@@ -134,26 +140,34 @@ impl TypeConstraint {
         match self {
             TypeConstraint::AnyUnsigned => matches!(
                 value,
-                VsfType::u0(_) | VsfType::u(_, _) | VsfType::u3(_)
-                | VsfType::u4(_) | VsfType::u5(_) | VsfType::u6(_) | VsfType::u7(_)
+                VsfType::u0(_)
+                    | VsfType::u(_, _)
+                    | VsfType::u3(_)
+                    | VsfType::u4(_)
+                    | VsfType::u5(_)
+                    | VsfType::u6(_)
+                    | VsfType::u7(_)
             ),
 
             TypeConstraint::AnySigned => matches!(
                 value,
-                VsfType::i(_) | VsfType::i3(_) | VsfType::i4(_)
-                | VsfType::i5(_) | VsfType::i6(_) | VsfType::i7(_)
+                VsfType::i(_)
+                    | VsfType::i3(_)
+                    | VsfType::i4(_)
+                    | VsfType::i5(_)
+                    | VsfType::i6(_)
+                    | VsfType::i7(_)
             ),
 
             TypeConstraint::AnyInteger => {
                 TypeConstraint::AnyUnsigned.matches(value)
-                || TypeConstraint::AnySigned.matches(value)
+                    || TypeConstraint::AnySigned.matches(value)
             }
 
             TypeConstraint::AnyFloat => matches!(value, VsfType::f5(_) | VsfType::f6(_)),
 
             TypeConstraint::AnyNumeric => {
-                TypeConstraint::AnyInteger.matches(value)
-                || TypeConstraint::AnyFloat.matches(value)
+                TypeConstraint::AnyInteger.matches(value) || TypeConstraint::AnyFloat.matches(value)
             }
 
             TypeConstraint::AnyComplex => matches!(value, VsfType::j5(_) | VsfType::j6(_)),
@@ -173,15 +187,17 @@ impl TypeConstraint {
                 }
             }
 
-            TypeConstraint::AnyString => matches!(
-                value,
-                VsfType::x(_) | VsfType::d(_) | VsfType::l(_)
-            ),
+            TypeConstraint::AnyString => {
+                matches!(value, VsfType::x(_) | VsfType::d(_) | VsfType::l(_))
+            }
 
-            TypeConstraint::AnyHash => matches!(
-                value,
-                VsfType::hp(_) | VsfType::hb(_) | VsfType::hs(_)
-            ),
+            TypeConstraint::Utf8Text => matches!(value, VsfType::x(_)),
+            TypeConstraint::DictKey => matches!(value, VsfType::d(_)),
+            TypeConstraint::AsciiText => matches!(value, VsfType::l(_)),
+
+            TypeConstraint::AnyHash => {
+                matches!(value, VsfType::hp(_) | VsfType::hb(_) | VsfType::hs(_))
+            }
 
             TypeConstraint::Blake3Provenance => matches!(value, VsfType::hp(_)),
             TypeConstraint::Blake3Rolling => matches!(value, VsfType::hb(_)),
@@ -189,8 +205,7 @@ impl TypeConstraint {
 
             TypeConstraint::AnyKey => matches!(
                 value,
-                VsfType::ke(_) | VsfType::kx(_) | VsfType::kp(_)
-                | VsfType::kc(_) | VsfType::ka(_)
+                VsfType::ke(_) | VsfType::kx(_) | VsfType::kp(_) | VsfType::kc(_) | VsfType::ka(_)
             ),
 
             TypeConstraint::Ed25519Key => matches!(value, VsfType::ke(_)),
@@ -199,10 +214,7 @@ impl TypeConstraint {
             TypeConstraint::Curve25519Key => matches!(value, VsfType::kc(_)),
             TypeConstraint::AesKey => matches!(value, VsfType::ka(_)),
 
-            TypeConstraint::AnySignature => matches!(
-                value,
-                VsfType::ge(_) | VsfType::gp(_)
-            ),
+            TypeConstraint::AnySignature => matches!(value, VsfType::ge(_) | VsfType::gp(_)),
 
             TypeConstraint::Ed25519Sig => matches!(value, VsfType::ge(_)),
             TypeConstraint::EcdsaP256Sig => matches!(value, VsfType::gp(_)),
@@ -212,12 +224,21 @@ impl TypeConstraint {
                 // TODO: Also validate element type with elem_constraint
                 matches!(
                     value,
-                    VsfType::t_u0(_) | VsfType::t_u3(_) | VsfType::t_u4(_)
-                    | VsfType::t_u5(_) | VsfType::t_u6(_) | VsfType::t_u7(_)
-                    | VsfType::t_i3(_) | VsfType::t_i4(_)
-                    | VsfType::t_i5(_) | VsfType::t_i6(_) | VsfType::t_i7(_)
-                    | VsfType::t_f5(_) | VsfType::t_f6(_)
-                    | VsfType::t_j5(_) | VsfType::t_j6(_)
+                    VsfType::t_u0(_)
+                        | VsfType::t_u3(_)
+                        | VsfType::t_u4(_)
+                        | VsfType::t_u5(_)
+                        | VsfType::t_u6(_)
+                        | VsfType::t_u7(_)
+                        | VsfType::t_i3(_)
+                        | VsfType::t_i4(_)
+                        | VsfType::t_i5(_)
+                        | VsfType::t_i6(_)
+                        | VsfType::t_i7(_)
+                        | VsfType::t_f5(_)
+                        | VsfType::t_f6(_)
+                        | VsfType::t_j5(_)
+                        | VsfType::t_j6(_)
                 )
             }
 
@@ -225,12 +246,21 @@ impl TypeConstraint {
                 // Check if it's any q_* variant
                 matches!(
                     value,
-                    VsfType::q_u0(_) | VsfType::q_u3(_) | VsfType::q_u4(_)
-                    | VsfType::q_u5(_) | VsfType::q_u6(_) | VsfType::q_u7(_)
-                    | VsfType::q_i3(_) | VsfType::q_i4(_)
-                    | VsfType::q_i5(_) | VsfType::q_i6(_) | VsfType::q_i7(_)
-                    | VsfType::q_f5(_) | VsfType::q_f6(_)
-                    | VsfType::q_j5(_) | VsfType::q_j6(_)
+                    VsfType::q_u0(_)
+                        | VsfType::q_u3(_)
+                        | VsfType::q_u4(_)
+                        | VsfType::q_u5(_)
+                        | VsfType::q_u6(_)
+                        | VsfType::q_u7(_)
+                        | VsfType::q_i3(_)
+                        | VsfType::q_i4(_)
+                        | VsfType::q_i5(_)
+                        | VsfType::q_i6(_)
+                        | VsfType::q_i7(_)
+                        | VsfType::q_f5(_)
+                        | VsfType::q_f6(_)
+                        | VsfType::q_j5(_)
+                        | VsfType::q_j6(_)
                 )
             }
 
@@ -238,11 +268,31 @@ impl TypeConstraint {
             TypeConstraint::AnyScalar => {
                 matches!(
                     value,
-                    VsfType::s33(_) | VsfType::s34(_) | VsfType::s35(_) | VsfType::s36(_) | VsfType::s37(_)
-                    | VsfType::s43(_) | VsfType::s44(_) | VsfType::s45(_) | VsfType::s46(_) | VsfType::s47(_)
-                    | VsfType::s53(_) | VsfType::s54(_) | VsfType::s55(_) | VsfType::s56(_) | VsfType::s57(_)
-                    | VsfType::s63(_) | VsfType::s64(_) | VsfType::s65(_) | VsfType::s66(_) | VsfType::s67(_)
-                    | VsfType::s73(_) | VsfType::s74(_) | VsfType::s75(_) | VsfType::s76(_) | VsfType::s77(_)
+                    VsfType::s33(_)
+                        | VsfType::s34(_)
+                        | VsfType::s35(_)
+                        | VsfType::s36(_)
+                        | VsfType::s37(_)
+                        | VsfType::s43(_)
+                        | VsfType::s44(_)
+                        | VsfType::s45(_)
+                        | VsfType::s46(_)
+                        | VsfType::s47(_)
+                        | VsfType::s53(_)
+                        | VsfType::s54(_)
+                        | VsfType::s55(_)
+                        | VsfType::s56(_)
+                        | VsfType::s57(_)
+                        | VsfType::s63(_)
+                        | VsfType::s64(_)
+                        | VsfType::s65(_)
+                        | VsfType::s66(_)
+                        | VsfType::s67(_)
+                        | VsfType::s73(_)
+                        | VsfType::s74(_)
+                        | VsfType::s75(_)
+                        | VsfType::s76(_)
+                        | VsfType::s77(_)
                 )
             }
 
@@ -250,17 +300,35 @@ impl TypeConstraint {
             TypeConstraint::AnyCircle => {
                 matches!(
                     value,
-                    VsfType::c33(_) | VsfType::c34(_) | VsfType::c35(_) | VsfType::c36(_) | VsfType::c37(_)
-                    | VsfType::c43(_) | VsfType::c44(_) | VsfType::c45(_) | VsfType::c46(_) | VsfType::c47(_)
-                    | VsfType::c53(_) | VsfType::c54(_) | VsfType::c55(_) | VsfType::c56(_) | VsfType::c57(_)
-                    | VsfType::c63(_) | VsfType::c64(_) | VsfType::c65(_) | VsfType::c66(_) | VsfType::c67(_)
-                    | VsfType::c73(_) | VsfType::c74(_) | VsfType::c75(_) | VsfType::c76(_) | VsfType::c77(_)
+                    VsfType::c33(_)
+                        | VsfType::c34(_)
+                        | VsfType::c35(_)
+                        | VsfType::c36(_)
+                        | VsfType::c37(_)
+                        | VsfType::c43(_)
+                        | VsfType::c44(_)
+                        | VsfType::c45(_)
+                        | VsfType::c46(_)
+                        | VsfType::c47(_)
+                        | VsfType::c53(_)
+                        | VsfType::c54(_)
+                        | VsfType::c55(_)
+                        | VsfType::c56(_)
+                        | VsfType::c57(_)
+                        | VsfType::c63(_)
+                        | VsfType::c64(_)
+                        | VsfType::c65(_)
+                        | VsfType::c66(_)
+                        | VsfType::c67(_)
+                        | VsfType::c73(_)
+                        | VsfType::c74(_)
+                        | VsfType::c75(_)
+                        | VsfType::c76(_)
+                        | VsfType::c77(_)
                 )
             }
 
-            TypeConstraint::AnyColour => {
-                vsf_type_name(value).starts_with('r')
-            }
+            TypeConstraint::AnyColour => vsf_type_name(value).starts_with('r'),
 
             TypeConstraint::Wrapped(encoding) => {
                 if let VsfType::v(enc, _) = value {
@@ -272,13 +340,9 @@ impl TypeConstraint {
 
             TypeConstraint::AnyWrapped => matches!(value, VsfType::v(_, _)),
 
-            TypeConstraint::OneOf(constraints) => {
-                constraints.iter().any(|c| c.matches(value))
-            }
+            TypeConstraint::OneOf(constraints) => constraints.iter().any(|c| c.matches(value)),
 
-            TypeConstraint::AllOf(constraints) => {
-                constraints.iter().all(|c| c.matches(value))
-            }
+            TypeConstraint::AllOf(constraints) => constraints.iter().all(|c| c.matches(value)),
 
             TypeConstraint::Custom { validator, .. } => validator(value),
 
@@ -300,6 +364,9 @@ impl TypeConstraint {
                 format!("Eagle Time with {} backing", inner.description())
             }
             TypeConstraint::AnyString => "any string (x/d/l)".into(),
+            TypeConstraint::Utf8Text => "UTF-8 text (x)".into(),
+            TypeConstraint::DictKey => "dictionary key (d)".into(),
+            TypeConstraint::AsciiText => "ASCII text (l)".into(),
             TypeConstraint::AnyHash => "any hash type".into(),
             TypeConstraint::Blake3Provenance => "BLAKE3 provenance hash (hp)".into(),
             TypeConstraint::Blake3Rolling => "BLAKE3 rolling hash (hb)".into(),
@@ -314,7 +381,9 @@ impl TypeConstraint {
             TypeConstraint::Ed25519Sig => "Ed25519 signature (ge)".into(),
             TypeConstraint::EcdsaP256Sig => "ECDSA P-256 signature (gp)".into(),
             TypeConstraint::Tensor(inner) => format!("tensor of {}", inner.description()),
-            TypeConstraint::StridedTensor(inner) => format!("strided tensor of {}", inner.description()),
+            TypeConstraint::StridedTensor(inner) => {
+                format!("strided tensor of {}", inner.description())
+            }
             #[cfg(feature = "spirix")]
             TypeConstraint::AnyScalar => "any Spirix scalar".into(),
             #[cfg(feature = "spirix")]
@@ -400,10 +469,8 @@ mod tests {
 
     #[test]
     fn test_one_of_constraint() {
-        let constraint = TypeConstraint::OneOf(vec![
-            TypeConstraint::AnyUnsigned,
-            TypeConstraint::AnyString,
-        ]);
+        let constraint =
+            TypeConstraint::OneOf(vec![TypeConstraint::AnyUnsigned, TypeConstraint::AnyString]);
 
         assert!(constraint.matches(&VsfType::u5(42)));
         assert!(constraint.matches(&VsfType::x("hello".to_string())));
@@ -431,5 +498,9 @@ pub fn vsf_type_name(vsf: &VsfType) -> String {
     // Use Debug formatting and extract variant name
     let debug_str = format!("{:?}", vsf);
     // Extract variant name (everything before '(' or end of string)
-    debug_str.split('(').next().unwrap_or(&debug_str).to_string()
+    debug_str
+        .split('(')
+        .next()
+        .unwrap_or(&debug_str)
+        .to_string()
 }

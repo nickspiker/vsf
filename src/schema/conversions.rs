@@ -62,9 +62,9 @@
 //! assert!(result.is_err());  // 1000 doesn't fit in u8
 //! ```
 
-use crate::types::{EtType, VsfType};
-use super::validate::{ValidationError, ValidationResult};
 use super::constraint::vsf_type_name;
+use super::validate::{ValidationError, ValidationResult};
+use crate::types::VsfType;
 
 /// Convert Rust types to VsfType
 ///
@@ -96,9 +96,10 @@ impl FromVsfType for u8 {
             VsfType::u3(v) => Ok(*v),
             VsfType::u(v, _) if *v <= u8::MAX as usize => Ok(*v as u8),
             VsfType::u0(v) => Ok(if *v { 1 } else { 0 }),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to u8", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to u8",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -116,9 +117,10 @@ impl FromVsfType for u16 {
             VsfType::u3(v) => Ok(*v as u16),
             VsfType::u(v, _) if *v <= u16::MAX as usize => Ok(*v as u16),
             VsfType::u0(v) => Ok(if *v { 1 } else { 0 }),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to u16", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to u16",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -137,9 +139,10 @@ impl FromVsfType for u32 {
             VsfType::u4(v) => Ok(*v as u32),
             VsfType::u(v, _) if *v <= u32::MAX as usize => Ok(*v as u32),
             VsfType::u0(v) => Ok(if *v { 1 } else { 0 }),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to u32", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to u32",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -159,9 +162,10 @@ impl FromVsfType for u64 {
             VsfType::u5(v) => Ok(*v as u64),
             VsfType::u(v, _) => Ok(*v as u64),
             VsfType::u0(v) => Ok(if *v { 1 } else { 0 }),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to u64", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to u64",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -181,9 +185,10 @@ impl FromVsfType for usize {
             VsfType::u5(v) => Ok(*v as usize),
             VsfType::u6(v) => Ok(*v as usize),
             VsfType::u0(v) => Ok(if *v { 1 } else { 0 }),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to usize", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to usize",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -200,9 +205,10 @@ impl FromVsfType for bool {
             VsfType::u0(v) => Ok(*v),
             VsfType::u3(v) => Ok(*v != 0),
             VsfType::u(v, _) => Ok(*v != 0),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to bool", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to bool",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -220,9 +226,10 @@ impl FromVsfType for i8 {
         match vsf {
             VsfType::i3(v) => Ok(*v),
             VsfType::i(v) if *v >= i8::MIN as isize && *v <= i8::MAX as isize => Ok(*v as i8),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to i8", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to i8",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -239,9 +246,10 @@ impl FromVsfType for i16 {
             VsfType::i4(v) => Ok(*v),
             VsfType::i3(v) => Ok(*v as i16),
             VsfType::i(v) if *v >= i16::MIN as isize && *v <= i16::MAX as isize => Ok(*v as i16),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to i16", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to i16",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -259,9 +267,10 @@ impl FromVsfType for i32 {
             VsfType::i3(v) => Ok(*v as i32),
             VsfType::i4(v) => Ok(*v as i32),
             VsfType::i(v) if *v >= i32::MIN as isize && *v <= i32::MAX as isize => Ok(*v as i32),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to i32", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to i32",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -280,9 +289,10 @@ impl FromVsfType for i64 {
             VsfType::i4(v) => Ok(*v as i64),
             VsfType::i5(v) => Ok(*v as i64),
             VsfType::i(v) => Ok(*v as i64),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to i64", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to i64",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -301,9 +311,10 @@ impl FromVsfType for isize {
             VsfType::i4(v) => Ok(*v as isize),
             VsfType::i5(v) => Ok(*v as isize),
             VsfType::i6(v) => Ok(*v as isize),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to isize", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to isize",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -321,9 +332,10 @@ impl FromVsfType for f32 {
         match vsf {
             VsfType::f5(v) => Ok(*v),
             VsfType::f6(v) => Ok(*v as f32),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to f32", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to f32",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -339,9 +351,10 @@ impl FromVsfType for f64 {
         match vsf {
             VsfType::f6(v) => Ok(*v),
             VsfType::f5(v) => Ok(*v as f64),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to f64", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to f64",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -360,9 +373,10 @@ impl FromVsfType for String {
             VsfType::x(s) => Ok(s.clone()),
             VsfType::d(s) => Ok(s.clone()),
             VsfType::l(s) => Ok(s.clone()),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to String", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to String",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }
@@ -373,11 +387,83 @@ impl<'a> IntoVsfType for &'a str {
     }
 }
 
+/// Wrapper type for ASCII text (VsfType::l)
+///
+/// Use this type when you want to explicitly create ASCII-only text
+/// instead of UTF-8 Unicode text. This is useful for applications
+/// that need ASCII-only mode or when interoperating with systems
+/// that only support ASCII.
+///
+/// # Example
+/// ```
+/// use vsf::schema::{AsciiText, IntoVsfType};
+/// use vsf::VsfType;
+///
+/// // Create ASCII text explicitly
+/// let ascii = AsciiText::new("hello");
+/// let vsf_value = ascii.into_vsf_type();  // VsfType::l("hello")
+///
+/// // Use in schema builder
+/// # use vsf::schema::{SectionSchema, FieldSchema, TypeConstraint};
+/// # let schema = SectionSchema::new("test")
+/// #     .add_field(FieldSchema::new("name", TypeConstraint::AsciiText));
+/// let section = schema.builder()
+///     .set("name", AsciiText::new("nick"))?
+///     .build()?;
+/// # Ok::<(), vsf::schema::ValidationError>(())
+/// ```
+///
+/// Contrast with regular strings that create UTF-8 text:
+/// ```
+/// use vsf::schema::IntoVsfType;
+/// use vsf::VsfType;
+///
+/// let utf8 = "hello".into_vsf_type();     // VsfType::x("hello")
+/// let ascii = vsf::schema::AsciiText::new("hello").into_vsf_type();  // VsfType::l("hello")
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AsciiText(pub String);
+
+impl AsciiText {
+    /// Create a new ASCII text value
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    /// Get the inner string as a string slice
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Consume and return the inner string
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl IntoVsfType for AsciiText {
+    fn into_vsf_type(self) -> VsfType {
+        VsfType::l(self.0)
+    }
+}
+
+impl FromVsfType for AsciiText {
+    fn from_vsf_type(vsf: &VsfType) -> ValidationResult<Self> {
+        match vsf {
+            VsfType::l(s) => Ok(AsciiText(s.clone())),
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to AsciiText (expected l type)",
+                vsf_type_name(vsf)
+            ))),
+        }
+    }
+}
+
 // === BYTES ===
 
 impl IntoVsfType for Vec<u8> {
     fn into_vsf_type(self) -> VsfType {
-        VsfType::hb(self)  // Default to rolling hash for raw bytes
+        VsfType::hb(self) // Default to rolling hash for raw bytes
     }
 }
 
@@ -395,9 +481,10 @@ impl FromVsfType for Vec<u8> {
             VsfType::ge(bytes) => Ok(bytes.clone()),
             VsfType::gp(bytes) => Ok(bytes.clone()),
             VsfType::v(_, bytes) => Ok(bytes.clone()),
-            _ => Err(ValidationError::Custom(
-                format!("Cannot convert {} to Vec<u8>", vsf_type_name(vsf))
-            ))
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to Vec<u8>",
+                vsf_type_name(vsf)
+            ))),
         }
     }
 }

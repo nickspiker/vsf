@@ -50,7 +50,7 @@ pub mod section;
 pub mod validate;
 
 pub use constraint::TypeConstraint;
-pub use conversions::{FromVsfType, IntoVsfType};
+pub use conversions::{AsciiText, FromVsfType, IntoVsfType};
 pub use field::FieldSchema;
 pub use official::register_official_schemas;
 pub use registry::{SchemaRegistry, UserRegistry};
@@ -60,7 +60,7 @@ pub use validate::{ValidationError, ValidationResult};
 /// Prelude for common schema operations
 pub mod prelude {
     pub use super::constraint::TypeConstraint;
-    pub use super::conversions::{FromVsfType, IntoVsfType};
+    pub use super::conversions::{AsciiText, FromVsfType, IntoVsfType};
     pub use super::field::FieldSchema;
     pub use super::registry::{SchemaRegistry, UserRegistry};
     pub use super::section::{FieldValue, SectionBuilder, SectionSchema};
