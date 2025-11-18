@@ -82,11 +82,21 @@ use super::world_coord::WorldCoord;
 /// - Primitives: u0, u3-u7, i3-i7, f5-f6, j5-j6
 /// - Spirix: s33-s77, c33-c77 (common types)
 ///
-/// ## Metadata
-/// - `x`: Unicode string
+/// ## Text Types
+/// VSF provides three distinct text types for different use cases:
+///
+/// - `d`: Dictionary key - Internal naming (section names, field names, dictionary keys)
+/// - `x`: UTF-8 text - User-facing text with full Unicode support
+/// - `l`: ASCII text - User-facing text restricted to ASCII characters
+///
+/// Example usage in named fields:
+/// ```text
+/// (d"name":l"nick")      // Field name uses 'd', ASCII value uses 'l'
+/// (d"greeting":x"Hello 世界")  // Field name uses 'd', Unicode value uses 'x'
+/// ```
+///
+/// ## Other Metadata
 /// - `e`: Eagle Time
-/// - `d`: Data type name
-/// - `l`: Label
 /// - `o`: Offset in bits
 /// - `b`: Length in bits
 /// - `n`: Number/count
@@ -510,7 +520,7 @@ pub enum VsfType {
     p(BitPackedTensor), // Bitpacked tensor (1-256 bits per sample)
 
     // ==================== METADATA & SPECIAL TYPES ====================
-    x(String),     // Unicode text
+    x(String),     // UTF-8 text (Unicode, user-facing)
     e(EtType),     // Eagle Time
     w(WorldCoord), // World coordinate (Dymaxion icosahedral)
 
@@ -612,8 +622,8 @@ pub enum VsfType {
     // gamma - Gamma correction value as f32
 
     // VSF Structure
-    d(String),      // Data type name
-    l(String),      // ASCII label/descriptor for fields and sections or non unicode text
+    d(String),      // Dictionary key (internal naming: section names, field names, keys)
+    l(String),      // ASCII text (user-facing, ASCII-only alternative to x)
     o(usize),       // Offset in Bytes
     b(usize, bool), // Length in Bytes (value, inclusive_mode)
     n(usize),       // Number/count
