@@ -56,15 +56,13 @@
 //!   hb{31}{rolling_hash}               Rolling: BLAKE3 of current state with History (optional)
 //!   k?{key}                            File-level encryption key (optional)
 //!   n?{label_count}                    Number of label records
-//!   (dRAW:h?{hash},g?{sig},k?{key},o?{offset},b?{size},n?{count})     Label record
-//!   (dThumbnail:h?{hash},g?{sig},k?{key},o?{offset},b?{size},n?{count})
-//!   (dHistory:h?{hash},o?{offset},b?{size},n?{count})                 History tracking
+//!   (draw_image:h?{hash},g?{sig},k?{key},o?{offset},b?{size},n?{count})     Label record
+//!   (dthumbnail:h?{hash},g?{sig},k?{key},o?{offset},b?{size},n?{count})
 //!   ...
 //! >                                    Header end
 //!
-//! [dRAW (section_fields...)]           Section data at offset
-//! [dThumbnail (section_fields...)]
-//! [dHistory (history_entries...)]
+//! [draw_image (section_fields...)]           Section data at offset
+//! [dthumbnail (section_fields...)]
 //! ```
 //!
 //! **Hash Strategy (Always BLAKE3):**
@@ -187,18 +185,47 @@
 //!     .unwrap();
 //! ```
 //!
-//! ## Eagle Time
+//! ## Eagle Time Formats
 //!
-//! Eagle Time counts seconds (or fractional seconds) since 1969-07-20 20:17:40 UTC (lunar landing).
-//! Always coordinated, no timezones, no daylight saving. Just one single unambiguous time standard.
+//! Eagle Time counts seconds since 1969-07-20 20:17:40 UTC (Apollo 11 lunar landing).
+//! Always coordinated, no timezones, no daylight saving. One universal time standard.
+//!
+//! - **ef5**: 32-bit float (`f32`) - ~2 minute precision, compact for most uses
+//! - **ef6**: 64-bit float (`f64`) - microsecond precision, for high-accuracy timestamps
+//!
+//! The format version doesn't change the epoch or duration of seconds - both use SI seconds
+//! counted from the same lunar landing moment. Only the precision differs.
+//!
+//! ## Parsing and Encoding
+//!
+//! **Element-level parsing:**
+//! ```ignore
+//! use vsf::parse;
+//! let data = vec![b'u', b'3', 42];
+//! let mut ptr = 0;
+//! let value = parse(&data, &mut ptr)?;  // Parses one VsfType element
+//! ```
+//!
+//! **Header encoding (VsfHeader):**
+//! ```ignore
+//! use vsf::file_format::VsfHeader;
+//! let mut header = VsfHeader::new(version, backward_compat);
+//! header.add_field(field);
+//! let bytes = header.encode()?;  // Encodes header to bytes
+//! ```
+//!
+//! **Note:** `VsfHeader::decode()` is not yet implemented. To parse headers, use element-level
+//! `parse()` to read individual fields. A future schema system will provide type-safe
+//! header and section parsing with automatic validation.
 //!
 //! ## Module Structure
 //!
 //! - `types` - Core type definitions (VsfType, Tensor, EagleTime, WorldCoord)
 //! - `encoding` - Binary serialization (exponential-width integers, flatten)
-//! - `decoding` - Binary parsing
-//! - `file_format` - VSF file headers and sections
+//! - `decoding` - Binary parsing with `parse()` function
+//! - `file_format` - VSF file headers and sections (VsfHeader)
 //! - `vsf_builder` - High-level builder for complete files
+//! - `schema` - **(Coming soon)** Type-safe section schemas with field validation
 //! - `verification` - Cryptographic hashing and signing
 //! - `text_encoding` - Huffman compression for Unicode strings
 //! - `colour` - Colourspace conversions (VSF RGB, Rec.2020, sRGB, XYZ)
@@ -225,6 +252,7 @@ pub mod decoding;
 pub mod builders;
 
 // Huffman text encoding for `x` marker
+#[cfg(feature = "text")]
 pub mod text_encoding;
 
 // VSF file format with headers and labels
@@ -232,6 +260,9 @@ pub mod file_format;
 
 // VSF file builder
 pub mod vsf_builder;
+
+// Schema system for type-safe sections (experimental)
+pub mod schema;
 
 // Cryptographic algorithm identifiers (h, g, k types)
 pub mod crypto_algorithms;
@@ -583,6 +614,206 @@ mod tests {
             assert_eq!(t.data, data);
         } else {
             panic!("Expected t_i5 tensor");
+        }
+    }
+
+    // ==================== 1D VECTOR OPTIMIZATION TESTS ====================
+
+    #[test]
+    fn test_1d_vector_optimization_unsigned() {
+        // Test all unsigned types with 1D vector optimization
+        // u8 vector
+        let data_u8 = vec![1u8, 2, 3, 4, 5, 10, 20, 30, 40, 50, 100, 200];
+        let tensor_u8 = Tensor::new(vec![12], data_u8.clone());
+        let val_u8 = VsfType::t_u3(tensor_u8);
+        let flat_u8 = val_u8.flatten();
+
+        // Check that it uses 'n' format (compact)
+        assert_eq!(flat_u8[0], b't');
+        assert_eq!(flat_u8[1], b'n'); // Should use 'n' for 1D
+
+        let mut ptr = 0;
+        let parsed_u8 = parse(&flat_u8, &mut ptr).unwrap();
+        if let VsfType::t_u3(t) = parsed_u8 {
+            assert_eq!(t.shape, vec![12]);
+            assert_eq!(t.data, data_u8);
+            assert_eq!(ptr, flat_u8.len());
+        } else {
+            panic!("Expected t_u3 tensor");
+        }
+
+        // u16 vector
+        let data_u16 = vec![100u16, 200, 300, 400, 500, 1000, 2000, 3000];
+        let tensor_u16 = Tensor::new(vec![8], data_u16.clone());
+        let val_u16 = VsfType::t_u4(tensor_u16);
+        let flat_u16 = val_u16.flatten();
+
+        assert_eq!(flat_u16[0], b't');
+        assert_eq!(flat_u16[1], b'n'); // Should use 'n' for 1D
+
+        let mut ptr = 0;
+        let parsed_u16 = parse(&flat_u16, &mut ptr).unwrap();
+        if let VsfType::t_u4(t) = parsed_u16 {
+            assert_eq!(t.shape, vec![8]);
+            assert_eq!(t.data, data_u16);
+        } else {
+            panic!("Expected t_u4 tensor");
+        }
+
+        // u32 vector
+        let data_u32 = vec![100000u32, 200000, 300000, 400000, 500000];
+        let tensor_u32 = Tensor::new(vec![5], data_u32.clone());
+        let val_u32 = VsfType::t_u5(tensor_u32);
+        let flat_u32 = val_u32.flatten();
+
+        assert_eq!(flat_u32[0], b't');
+        assert_eq!(flat_u32[1], b'n'); // Should use 'n' for 1D
+
+        let mut ptr = 0;
+        let parsed_u32 = parse(&flat_u32, &mut ptr).unwrap();
+        if let VsfType::t_u5(t) = parsed_u32 {
+            assert_eq!(t.shape, vec![5]);
+            assert_eq!(t.data, data_u32);
+        } else {
+            panic!("Expected t_u5 tensor");
+        }
+
+        // u64 vector
+        let data_u64 = vec![1_000_000_000u64, 2_000_000_000, 3_000_000_000];
+        let tensor_u64 = Tensor::new(vec![3], data_u64.clone());
+        let val_u64 = VsfType::t_u6(tensor_u64);
+        let flat_u64 = val_u64.flatten();
+
+        assert_eq!(flat_u64[0], b't');
+        assert_eq!(flat_u64[1], b'n'); // Should use 'n' for 1D
+
+        let mut ptr = 0;
+        let parsed_u64 = parse(&flat_u64, &mut ptr).unwrap();
+        if let VsfType::t_u6(t) = parsed_u64 {
+            assert_eq!(t.shape, vec![3]);
+            assert_eq!(t.data, data_u64);
+        } else {
+            panic!("Expected t_u6 tensor");
+        }
+    }
+
+    #[test]
+    fn test_1d_vector_optimization_signed() {
+        // Test all signed types with 1D vector optimization
+        // i8 vector
+        let data_i8 = vec![-10i8, -5, 0, 5, 10, 20, -20, 30];
+        let tensor_i8 = Tensor::new(vec![8], data_i8.clone());
+        let val_i8 = VsfType::t_i3(tensor_i8);
+        let flat_i8 = val_i8.flatten();
+
+        assert_eq!(flat_i8[0], b't');
+        assert_eq!(flat_i8[1], b'n'); // Should use 'n' for 1D
+
+        let mut ptr = 0;
+        let parsed_i8 = parse(&flat_i8, &mut ptr).unwrap();
+        if let VsfType::t_i3(t) = parsed_i8 {
+            assert_eq!(t.shape, vec![8]);
+            assert_eq!(t.data, data_i8);
+        } else {
+            panic!("Expected t_i3 tensor");
+        }
+
+        // i16 vector
+        let data_i16 = vec![-1000i16, -500, 0, 500, 1000];
+        let tensor_i16 = Tensor::new(vec![5], data_i16.clone());
+        let val_i16 = VsfType::t_i4(tensor_i16);
+        let flat_i16 = val_i16.flatten();
+
+        assert_eq!(flat_i16[0], b't');
+        assert_eq!(flat_i16[1], b'n'); // Should use 'n' for 1D
+
+        let mut ptr = 0;
+        let parsed_i16 = parse(&flat_i16, &mut ptr).unwrap();
+        if let VsfType::t_i4(t) = parsed_i16 {
+            assert_eq!(t.shape, vec![5]);
+            assert_eq!(t.data, data_i16);
+        } else {
+            panic!("Expected t_i4 tensor");
+        }
+
+        // i32 vector
+        let data_i32 = vec![-100000i32, 0, 100000, 200000, -50000];
+        let tensor_i32 = Tensor::new(vec![5], data_i32.clone());
+        let val_i32 = VsfType::t_i5(tensor_i32);
+        let flat_i32 = val_i32.flatten();
+
+        assert_eq!(flat_i32[0], b't');
+        assert_eq!(flat_i32[1], b'n'); // Should use 'n' for 1D
+
+        let mut ptr = 0;
+        let parsed_i32 = parse(&flat_i32, &mut ptr).unwrap();
+        if let VsfType::t_i5(t) = parsed_i32 {
+            assert_eq!(t.shape, vec![5]);
+            assert_eq!(t.data, data_i32);
+        } else {
+            panic!("Expected t_i5 tensor");
+        }
+    }
+
+    #[test]
+    fn test_1d_vector_vs_multi_dim_encoding() {
+        // Verify that 1D uses compact format while multi-dim uses full format
+
+        // 1D vector
+        let data_1d = vec![1u16, 2, 3, 4, 5];
+        let tensor_1d = Tensor::new(vec![5], data_1d.clone());
+        let val_1d = VsfType::t_u4(tensor_1d);
+        let flat_1d = val_1d.flatten();
+
+        // 2D tensor
+        let data_2d = vec![1u16, 2, 3, 4, 5, 6];
+        let tensor_2d = Tensor::new(vec![2, 3], data_2d.clone());
+        let val_2d = VsfType::t_u4(tensor_2d);
+        let flat_2d = val_2d.flatten();
+
+        // 1D should use 'n' format
+        assert_eq!(flat_1d[0], b't');
+        assert_eq!(flat_1d[1], b'n');
+
+        // 2D should use 'u' (ndim) format
+        assert_eq!(flat_2d[0], b't');
+        assert_ne!(flat_2d[1], b'n'); // Should NOT be 'n'
+
+        // 1D should be more compact
+        // Format comparison:
+        // 1D: t n <count> u 4 <data>
+        // 2D: t <ndim> u 4 <shape[0]> <shape[1]> <data>
+        // For small shapes, 1D should save bytes
+        assert!(flat_1d.len() <= flat_2d.len());
+    }
+
+    #[test]
+    fn test_1d_vector_large() {
+        // Test with a larger vector (FGTW use case: 32-byte hashes)
+        let hash_data = vec![
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
+        ];
+
+        let tensor = Tensor::new(vec![32], hash_data.clone());
+        let val = VsfType::t_u3(tensor);
+        let flat = val.flatten();
+
+        // Verify compact format
+        assert_eq!(flat[0], b't');
+        assert_eq!(flat[1], b'n');
+
+        // Round-trip
+        let mut ptr = 0;
+        let parsed = parse(&flat, &mut ptr).unwrap();
+        if let VsfType::t_u3(t) = parsed {
+            assert_eq!(t.shape, vec![32]);
+            assert_eq!(t.data, hash_data);
+            assert_eq!(ptr, flat.len());
+        } else {
+            panic!("Expected t_u3 tensor");
         }
     }
 
