@@ -43,9 +43,11 @@ fn main() {
     }
 
     println!();
-    println!("Total: 'vsf' would use {} bits ({} bytes with overhead)",
-        chars_found.get(&'v').unwrap().1 +
-        chars_found.get(&'s').unwrap().1 +
-        chars_found.get(&'f').unwrap().1,
-        3);
+    println!(
+        "Total: 'vsf' would use {} bits ({} bytes with overhead)",
+        chars_found.get(&'v').unwrap().1
+            + chars_found.get(&'s').unwrap().1
+            + chars_found.get(&'f').unwrap().1,
+        3
+    );
 }

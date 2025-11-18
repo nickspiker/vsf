@@ -1924,7 +1924,10 @@ mod tests {
             .iter()
             .position(|&b| b == b'[')
             .expect("Expected to find section start '['");
-        assert!(section_start < 200, "Section should start soon after header");
+        assert!(
+            section_start < 200,
+            "Section should start soon after header"
+        );
     }
 
     #[test]

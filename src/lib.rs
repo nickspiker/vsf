@@ -32,7 +32,7 @@
 //! - Sections can contain hierarchical fields: `[dImaging (lshutter_speed:f6{0.01})(laperture:f5{2.8})]`
 //!
 //! **Other Metadata Types:**
-//! - `x`: Unicode text strings
+//! - `x`: Huffman compressed Unicode text strings
 //! - `e`: Eagle Time (seconds since lunar landing)
 //! - `d`: Data type identifier
 //! - `o`: Byte offsets
@@ -116,8 +116,8 @@
 //! [d3{0x07}Imaging(l3{0x0D}shutter_speed:f6{0x7B 14 AE 47 E1 7A 84 3F})(l3{0x08}aperture:f5{0x33 33 33 40})(l3{0x03}iso:u4{0x01 90})]
 //! ```
 //!
-//! Each section field is enclosed by `()`'s and always starts with a text identifier (`l` marker + ASCII string), 
-//! followed by `:` and its value(s) separated by `,`. Section fields are flattened sequentially, creating a 
+//! Each section field is enclosed by `()`'s and always starts with a text identifier (`l` marker + ASCII string),
+//! followed by `:` and its value(s) separated by `,`. Section fields are flattened sequentially, creating a
 //! self-describing stream.
 //!
 //! ## Optional History Section (Will change heavily as design matures)
@@ -791,10 +791,9 @@ mod tests {
     fn test_1d_vector_large() {
         // Test with a larger vector (FGTW use case: 32-byte hashes)
         let hash_data = vec![
-            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
-            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
-            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
-            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB,
+            0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67,
+            0x89, 0xAB, 0xCD, 0xEF,
         ];
 
         let tensor = Tensor::new(vec![32], hash_data.clone());
@@ -839,6 +838,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "spirix")]
     fn test_roundtrip_spirix_f4e3() {
         use spirix::{CircleF4E3, ScalarF4E3};
 

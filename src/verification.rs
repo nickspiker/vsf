@@ -47,13 +47,16 @@ fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     let mut ptr = 4; // Skip "RÅ<"
 
     // Parse version FIRST (determines all encoding decisions)
-    let version = match parse(data, &mut ptr).map_err(|e| format!("Failed to parse version: {}", e))? {
-        VsfType::z(v) => v,
-        _ => return Err("Expected z type for version".to_string()),
-    };
+    let version =
+        match parse(data, &mut ptr).map_err(|e| format!("Failed to parse version: {}", e))? {
+            VsfType::z(v) => v,
+            _ => return Err("Expected z type for version".to_string()),
+        };
 
     // Parse backward compat
-    let backward_compat = match parse(data, &mut ptr).map_err(|e| format!("Failed to parse backward compat: {}", e))? {
+    let backward_compat = match parse(data, &mut ptr)
+        .map_err(|e| format!("Failed to parse backward compat: {}", e))?
+    {
         VsfType::y(v) => v,
         _ => return Err("Expected y type for backward compat".to_string()),
     };
@@ -69,23 +72,31 @@ fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     // Optional: hb (rolling hash)
 
     // Parse hp or ge (required - one must be present)
-    let prov_type = parse(data, &mut ptr).map_err(|e| format!("Failed to parse provenance hash/sig: {}", e))?;
+    let prov_type =
+        parse(data, &mut ptr).map_err(|e| format!("Failed to parse provenance hash/sig: {}", e))?;
     match prov_type {
-        VsfType::hp(_) => {}, // Provenance hash
-        VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => {}, // Signature (replaces hp)
-        _ => return Err(format!("Expected hp or ge after creation time, got: {:?}", prov_type)),
+        VsfType::hp(_) => {}                                   // Provenance hash
+        VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => {} // Signature (replaces hp)
+        _ => {
+            return Err(format!(
+                "Expected hp or ge after creation time, got: {:?}",
+                prov_type
+            ))
+        }
     }
 
     // Optional: hb (rolling hash) - only if next byte is 'h'
     if ptr < data.len() && data[ptr] == b'h' {
-        let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse rolling hash: {}", e))?;
+        let _ =
+            parse(data, &mut ptr).map_err(|e| format!("Failed to parse rolling hash: {}", e))?;
     }
 
     // Parse header field count
-    let field_count = match parse(data, &mut ptr).map_err(|e| format!("Failed to parse field count: {}", e))? {
-        VsfType::n(count) => count,
-        _ => return Err("Expected n type for field count".to_string()),
-    };
+    let field_count =
+        match parse(data, &mut ptr).map_err(|e| format!("Failed to parse field count: {}", e))? {
+            VsfType::n(count) => count,
+            _ => return Err("Expected n type for field count".to_string()),
+        };
 
     // Parse each header field using helper function
     let mut fields = Vec::with_capacity(field_count);
@@ -139,8 +150,9 @@ fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, Strin
         match field {
             VsfType::hb(_) | VsfType::hs(_) => hash = Some(field),
             VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => signature = Some(field),
-            VsfType::ke(_) | VsfType::kx(_) | VsfType::kp(_)
-            | VsfType::kc(_) | VsfType::ka(_) => key = Some(field),
+            VsfType::ke(_) | VsfType::kx(_) | VsfType::kp(_) | VsfType::kc(_) | VsfType::ka(_) => {
+                key = Some(field)
+            }
             VsfType::v(_, _) => wrap = Some(field),
             _ => {
                 // Forward compatibility: ignore unknown types
@@ -150,10 +162,11 @@ fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, Strin
     }
 
     // Parse offset (required, marks start of positional fields)
-    let offset_bytes = match parse(data, ptr).map_err(|e| format!("Failed to parse offset: {}", e))? {
-        VsfType::o(bytes) => bytes,
-        _ => return Err("Expected o type for offset".to_string()),
-    };
+    let offset_bytes =
+        match parse(data, ptr).map_err(|e| format!("Failed to parse offset: {}", e))? {
+            VsfType::o(bytes) => bytes,
+            _ => return Err("Expected o type for offset".to_string()),
+        };
 
     // Parse size (required)
     let size_bytes = match parse(data, ptr).map_err(|e| format!("Failed to parse size: {}", e))? {
@@ -265,7 +278,10 @@ fn rebuild_with_header(
 
             // DEBUG: Check if signature is in bytes
             if new_file.len() > 120 {
-                eprintln!("DEBUG rebuild_with_header: Bytes 0x70-0x7F = {:02X?}", &new_file[0x70..0x80]);
+                eprintln!(
+                    "DEBUG rebuild_with_header: Bytes 0x70-0x7F = {:02X?}",
+                    &new_file[0x70..0x80]
+                );
             }
 
             return Ok(new_file);
@@ -327,14 +343,16 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     // Find hp hash placeholder
     let hash_position = pointer;
     if pointer >= vsf_bytes.len() {
-        return Err(format!("Pointer {} beyond file size {}", pointer, vsf_bytes.len()));
+        return Err(format!(
+            "Pointer {} beyond file size {}",
+            pointer,
+            vsf_bytes.len()
+        ));
     }
     if vsf_bytes[pointer] != b'h' {
         return Err(format!(
             "No provenance hash placeholder found at position {}. Found byte: 0x{:02X} ('{}')",
-            pointer,
-            vsf_bytes[pointer],
-            vsf_bytes[pointer] as char
+            pointer, vsf_bytes[pointer], vsf_bytes[pointer] as char
         ));
     }
 
@@ -395,7 +413,11 @@ fn zero_all_signatures(vsf_bytes: &mut Vec<u8>) -> Result<(), String> {
     let mut ptr = 0;
     while ptr < vsf_bytes.len() - 1 {
         // Look for signature markers: ge, gp, gr
-        if vsf_bytes[ptr] == b'g' && (vsf_bytes[ptr+1] == b'e' || vsf_bytes[ptr+1] == b'p' || vsf_bytes[ptr+1] == b'r') {
+        if vsf_bytes[ptr] == b'g'
+            && (vsf_bytes[ptr + 1] == b'e'
+                || vsf_bytes[ptr + 1] == b'p'
+                || vsf_bytes[ptr + 1] == b'r')
+        {
             let sig_position = ptr;
             let sig_type = match parse(vsf_bytes, &mut ptr) {
                 Ok(t) => t,
@@ -408,7 +430,9 @@ fn zero_all_signatures(vsf_bytes: &mut Vec<u8>) -> Result<(), String> {
             match sig_type {
                 VsfType::ge(sig_bytes) | VsfType::gp(sig_bytes) | VsfType::gr(sig_bytes) => {
                     let sig_len = sig_bytes.len();
-                    if let Ok(sig_start) = find_signature_value_position(vsf_bytes, sig_position, sig_len) {
+                    if let Ok(sig_start) =
+                        find_signature_value_position(vsf_bytes, sig_position, sig_len)
+                    {
                         // Zero out signature
                         for i in 0..sig_len {
                             vsf_bytes[sig_start + i] = 0;
@@ -425,9 +449,14 @@ fn zero_all_signatures(vsf_bytes: &mut Vec<u8>) -> Result<(), String> {
 }
 
 /// Find the position of signature value bytes within the encoded signature type
-fn find_signature_value_position(data: &[u8], sig_marker_pos: usize, sig_len: usize) -> Result<usize, String> {
+fn find_signature_value_position(
+    data: &[u8],
+    sig_marker_pos: usize,
+    sig_len: usize,
+) -> Result<usize, String> {
     let mut pos = sig_marker_pos;
-    let sig_type = parse(data, &mut pos).map_err(|e| format!("Failed to parse signature: {}", e))?;
+    let sig_type =
+        parse(data, &mut pos).map_err(|e| format!("Failed to parse signature: {}", e))?;
 
     match sig_type {
         VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) => {
@@ -473,14 +502,16 @@ pub fn write_provenance_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<
     // Find hash placeholder position
     let hash_position = pointer;
     if pointer >= vsf_bytes.len() {
-        return Err(format!("Pointer {} beyond file size {}", pointer, vsf_bytes.len()));
+        return Err(format!(
+            "Pointer {} beyond file size {}",
+            pointer,
+            vsf_bytes.len()
+        ));
     }
     if vsf_bytes[pointer] != b'h' {
         return Err(format!(
             "No provenance hash placeholder found at position {}. Found byte: 0x{:02X} ('{}')",
-            pointer,
-            vsf_bytes[pointer],
-            vsf_bytes[pointer] as char
+            pointer, vsf_bytes[pointer], vsf_bytes[pointer] as char
         ));
     }
 
@@ -567,14 +598,16 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     // Find rolling hash (hb) placeholder
     let hash_position = pointer;
     if pointer >= vsf_bytes.len() {
-        return Err(format!("Pointer {} beyond file size {}", pointer, vsf_bytes.len()));
+        return Err(format!(
+            "Pointer {} beyond file size {}",
+            pointer,
+            vsf_bytes.len()
+        ));
     }
     if vsf_bytes[pointer] != b'h' {
         return Err(format!(
             "No rolling hash placeholder found at position {}. Found byte: 0x{:02X} ('{}')",
-            pointer,
-            vsf_bytes[pointer],
-            vsf_bytes[pointer] as char
+            pointer, vsf_bytes[pointer], vsf_bytes[pointer] as char
         ));
     }
 
@@ -650,14 +683,16 @@ pub fn write_file_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<Vec<u8
     // Find rolling hash (hb) placeholder position
     let hash_position = pointer;
     if pointer >= vsf_bytes.len() {
-        return Err(format!("Pointer {} beyond file size {}", pointer, vsf_bytes.len()));
+        return Err(format!(
+            "Pointer {} beyond file size {}",
+            pointer,
+            vsf_bytes.len()
+        ));
     }
     if vsf_bytes[pointer] != b'h' {
         return Err(format!(
             "No rolling hash placeholder found at position {}. Found byte: 0x{:02X} ('{}')",
-            pointer,
-            vsf_bytes[pointer],
-            vsf_bytes[pointer] as char
+            pointer, vsf_bytes[pointer], vsf_bytes[pointer] as char
         ));
     }
 
@@ -717,8 +752,14 @@ fn find_hash_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize
 /// Modified VSF bytes with actual signature values written
 /// Write header field signatures from a provided list (instead of parsing)
 /// This is used when we already have the signature bytes extracted before flattening
-fn write_header_field_signatures_from_list(mut vsf_bytes: Vec<u8>, field_signatures: Vec<Option<VsfType>>) -> Result<Vec<u8>, String> {
-    eprintln!("DEBUG write_from_list: Called with {} field signatures", field_signatures.len());
+fn write_header_field_signatures_from_list(
+    mut vsf_bytes: Vec<u8>,
+    field_signatures: Vec<Option<VsfType>>,
+) -> Result<Vec<u8>, String> {
+    eprintln!(
+        "DEBUG write_from_list: Called with {} field signatures",
+        field_signatures.len()
+    );
 
     // Parse the header just to get header_end (don't extract signatures from it)
     let header = parse_full_header(&vsf_bytes)?;
@@ -733,11 +774,22 @@ fn write_header_field_signatures_from_list(mut vsf_bytes: Vec<u8>, field_signatu
                 VsfType::gr(bytes) => bytes,
                 _ => continue,
             };
-            eprintln!("DEBUG write_from_list: Extracted signature {} bytes, first 4: {:02X?}", sig_bytes.len(), if sig_bytes.len() >= 4 { &sig_bytes[0..4] } else { &sig_bytes[..] });
+            eprintln!(
+                "DEBUG write_from_list: Extracted signature {} bytes, first 4: {:02X?}",
+                sig_bytes.len(),
+                if sig_bytes.len() >= 4 {
+                    &sig_bytes[0..4]
+                } else {
+                    &sig_bytes[..]
+                }
+            );
             signatures.push(sig_bytes);
         }
     }
-    eprintln!("DEBUG write_from_list: Total signatures to write: {}", signatures.len());
+    eprintln!(
+        "DEBUG write_from_list: Total signatures to write: {}",
+        signatures.len()
+    );
 
     // Now scan header for signature placeholders and write them
     // We scan only up to header_end
@@ -747,25 +799,41 @@ fn write_header_field_signatures_from_list(mut vsf_bytes: Vec<u8>, field_signatu
 
     let mut pos = 0;
     while pos < header_end - 1 && sig_index < signatures.len() {
-        if vsf_bytes[pos] == b'g' &&
-           (vsf_bytes[pos+1] == b'e' || vsf_bytes[pos+1] == b'p' || vsf_bytes[pos+1] == b'r') {
+        if vsf_bytes[pos] == b'g'
+            && (vsf_bytes[pos + 1] == b'e'
+                || vsf_bytes[pos + 1] == b'p'
+                || vsf_bytes[pos + 1] == b'r')
+        {
             // Found potential signature marker
-            eprintln!("DEBUG write_from_list: Found signature marker at pos {}", pos);
+            eprintln!(
+                "DEBUG write_from_list: Found signature marker at pos {}",
+                pos
+            );
             let mut test_ptr = pos;
             if let Ok(sig_type) = parse(&vsf_bytes, &mut test_ptr) {
                 match sig_type {
                     VsfType::ge(test_bytes) | VsfType::gp(test_bytes) | VsfType::gr(test_bytes) => {
-                        eprintln!("DEBUG write_from_list: Parsed signature, {} bytes, all zeros: {}", test_bytes.len(), test_bytes.iter().all(|&b| b == 0));
+                        eprintln!(
+                            "DEBUG write_from_list: Parsed signature, {} bytes, all zeros: {}",
+                            test_bytes.len(),
+                            test_bytes.iter().all(|&b| b == 0)
+                        );
                         // Check if this is all zeros (placeholder)
-                        if test_bytes.iter().all(|&b| b == 0) && test_bytes.len() == signatures[sig_index].len() {
+                        if test_bytes.iter().all(|&b| b == 0)
+                            && test_bytes.len() == signatures[sig_index].len()
+                        {
                             // Found a placeholder - write the signature
                             let sig_start = test_ptr - test_bytes.len();
                             eprintln!("DEBUG write_from_list: Writing signature at byte {}, first 4 bytes: {:02X?}", sig_start, &signatures[sig_index][0..4]);
-                            vsf_bytes[sig_start..sig_start + signatures[sig_index].len()].copy_from_slice(&signatures[sig_index]);
-                            eprintln!("DEBUG write_from_list: After write, bytes at sig_start: {:02X?}", &vsf_bytes[sig_start..sig_start+4]);
+                            vsf_bytes[sig_start..sig_start + signatures[sig_index].len()]
+                                .copy_from_slice(&signatures[sig_index]);
+                            eprintln!(
+                                "DEBUG write_from_list: After write, bytes at sig_start: {:02X?}",
+                                &vsf_bytes[sig_start..sig_start + 4]
+                            );
                             sig_index += 1;
                         }
-                        pos = test_ptr;  // Continue after this signature
+                        pos = test_ptr; // Continue after this signature
                     }
                     _ => {
                         pos += 1;
@@ -778,7 +846,10 @@ fn write_header_field_signatures_from_list(mut vsf_bytes: Vec<u8>, field_signatu
             pos += 1;
         }
     }
-    eprintln!("DEBUG write_from_list: Finished scanning, wrote {} signatures", sig_index);
+    eprintln!(
+        "DEBUG write_from_list: Finished scanning, wrote {} signatures",
+        sig_index
+    );
 
     Ok(vsf_bytes)
 }
@@ -797,7 +868,10 @@ fn write_header_field_signatures(mut vsf_bytes: Vec<u8>) -> Result<Vec<u8>, Stri
                 VsfType::gr(bytes) => bytes.clone(),
                 _ => continue,
             };
-            eprintln!("DEBUG: Found signature in header field, {} bytes", sig_bytes.len());
+            eprintln!(
+                "DEBUG: Found signature in header field, {} bytes",
+                sig_bytes.len()
+            );
             signatures.push(sig_bytes);
         }
     }
@@ -811,27 +885,51 @@ fn write_header_field_signatures(mut vsf_bytes: Vec<u8>) -> Result<Vec<u8>, Stri
 
     let mut pos = 0;
     while pos < header_end - 1 && sig_index < signatures.len() {
-        if vsf_bytes[pos] == b'g' &&
-           (vsf_bytes[pos+1] == b'e' || vsf_bytes[pos+1] == b'p' || vsf_bytes[pos+1] == b'r') {
+        if vsf_bytes[pos] == b'g'
+            && (vsf_bytes[pos + 1] == b'e'
+                || vsf_bytes[pos + 1] == b'p'
+                || vsf_bytes[pos + 1] == b'r')
+        {
             // Found potential signature marker
             eprintln!("DEBUG: Found signature marker at pos {}", pos);
             let mut test_ptr = pos;
             if let Ok(sig_type) = parse(&vsf_bytes, &mut test_ptr) {
                 match sig_type {
                     VsfType::ge(test_bytes) | VsfType::gp(test_bytes) | VsfType::gr(test_bytes) => {
-                        eprintln!("DEBUG: Parsed signature, {} bytes, all zeros: {}", test_bytes.len(), test_bytes.iter().all(|&b| b == 0));
+                        eprintln!(
+                            "DEBUG: Parsed signature, {} bytes, all zeros: {}",
+                            test_bytes.len(),
+                            test_bytes.iter().all(|&b| b == 0)
+                        );
                         // Check if this is all zeros (placeholder)
-                        if test_bytes.iter().all(|&b| b == 0) && test_bytes.len() == signatures[sig_index].len() {
+                        if test_bytes.iter().all(|&b| b == 0)
+                            && test_bytes.len() == signatures[sig_index].len()
+                        {
                             // Found a placeholder - write the signature
                             let sig_start = test_ptr - test_bytes.len();
-                            eprintln!("DEBUG: test_ptr={}, test_bytes.len()={}, sig_start={}", test_ptr, test_bytes.len(), sig_start);
-                            eprintln!("DEBUG: Byte at sig_start (before write): 0x{:02X}", vsf_bytes[sig_start]);
-                            eprintln!("DEBUG: First 4 signature bytes: {:02X?}", &signatures[sig_index][0..4]);
-                            vsf_bytes[sig_start..sig_start + signatures[sig_index].len()].copy_from_slice(&signatures[sig_index]);
-                            eprintln!("DEBUG: Byte at sig_start (after write): 0x{:02X}", vsf_bytes[sig_start]);
+                            eprintln!(
+                                "DEBUG: test_ptr={}, test_bytes.len()={}, sig_start={}",
+                                test_ptr,
+                                test_bytes.len(),
+                                sig_start
+                            );
+                            eprintln!(
+                                "DEBUG: Byte at sig_start (before write): 0x{:02X}",
+                                vsf_bytes[sig_start]
+                            );
+                            eprintln!(
+                                "DEBUG: First 4 signature bytes: {:02X?}",
+                                &signatures[sig_index][0..4]
+                            );
+                            vsf_bytes[sig_start..sig_start + signatures[sig_index].len()]
+                                .copy_from_slice(&signatures[sig_index]);
+                            eprintln!(
+                                "DEBUG: Byte at sig_start (after write): 0x{:02X}",
+                                vsf_bytes[sig_start]
+                            );
                             sig_index += 1;
                         }
-                        pos = test_ptr;  // Continue after this signature
+                        pos = test_ptr; // Continue after this signature
                     }
                     _ => {
                         pos += 1;
@@ -912,7 +1010,10 @@ pub fn sign_section(
 
     // Create signature VsfType (Ed25519 signature is always 64 bytes)
     let sig_bytes = signature.to_bytes().to_vec();
-    eprintln!("DEBUG sign_section: Generated signature, first 4 bytes: {:02X?}", &sig_bytes[0..4]);
+    eprintln!(
+        "DEBUG sign_section: Generated signature, first 4 bytes: {:02X?}",
+        &sig_bytes[0..4]
+    );
     let sig_vsf = VsfType::ge(sig_bytes);
 
     // Update header fields - add signature to target section
@@ -1032,8 +1133,8 @@ pub fn verify_provenance_hash(vsf_bytes: &[u8]) -> Result<(), String> {
 
     let _header_length = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse header length: {}", e))?;
-    let _version = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse version: {}", e))?;
+    let _version =
+        parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
     let _backward = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
     let _creation_time = parse(vsf_bytes, &mut pointer)
@@ -1058,7 +1159,10 @@ pub fn verify_provenance_hash(vsf_bytes: &[u8]) -> Result<(), String> {
     if computed_hash.as_slice() == stored_hash.as_slice() {
         Ok(())
     } else {
-        Err("Provenance hash verification failed: computed hash does not match stored hash".to_string())
+        Err(
+            "Provenance hash verification failed: computed hash does not match stored hash"
+                .to_string(),
+        )
     }
 }
 
@@ -1077,8 +1181,8 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
 
     let _header_length = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse header length: {}", e))?;
-    let _version = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse version: {}", e))?;
+    let _version =
+        parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
     let _backward = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
     let _creation_time = parse(vsf_bytes, &mut pointer)
@@ -1111,7 +1215,10 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
     if computed_hash.as_slice() == stored_hash.as_slice() {
         Ok(())
     } else {
-        Err("Rolling hash verification failed: computed hash does not match stored hash".to_string())
+        Err(
+            "Rolling hash verification failed: computed hash does not match stored hash"
+                .to_string(),
+        )
     }
 }
 

@@ -127,7 +127,10 @@ pub fn parse_eagle_time(data: &[u8], pointer: &mut usize) -> Result<VsfType, Err
                 }
                 _ => Err(Error::new(
                     ErrorKind::InvalidData,
-                    format!("Invalid Eagle Time float precision marker: {}", precision as char),
+                    format!(
+                        "Invalid Eagle Time float precision marker: {}",
+                        precision as char
+                    ),
                 )),
             }
         }

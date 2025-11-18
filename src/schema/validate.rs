@@ -84,7 +84,11 @@ impl fmt::Display for ValidationError {
                 write!(f, "Unknown section type '{}'", name)
             }
             ValidationError::TypeConstraintViolation { constraint, got } => {
-                write!(f, "Type constraint violation: expected {}, got {}", constraint, got)
+                write!(
+                    f,
+                    "Type constraint violation: expected {}, got {}",
+                    constraint, got
+                )
             }
             ValidationError::Custom(msg) => write!(f, "{}", msg),
         }

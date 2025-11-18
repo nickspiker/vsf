@@ -4048,6 +4048,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "spirix")]
     fn test_flatten_spirix_scalar() {
         use spirix::ScalarF6E4;
 
@@ -4062,6 +4063,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "spirix")]
     fn test_flatten_spirix_circle() {
         use spirix::CircleF6E4;
 
@@ -4076,6 +4078,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "spirix")]
     fn test_flatten_spirix_tensor() {
         use crate::types::Tensor;
         use spirix::ScalarF6E4;
