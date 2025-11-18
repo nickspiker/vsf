@@ -1,4 +1,6 @@
 use num_complex::Complex;
+
+#[cfg(feature = "spirix")]
 use spirix::{
     // All 25 valid Circle combinations (F3-F7 × E3-E7)
     CircleF3E3,
@@ -127,67 +129,117 @@ pub enum VsfType {
     j6(Complex<f64>), // Complex<f64>
 
     // ==================== SPIRIX SCALARS ====================
+    #[cfg(feature = "spirix")]
     // F3 (i8 fraction)
     s33(ScalarF3E3),
+    #[cfg(feature = "spirix")]
     s34(ScalarF3E4),
+    #[cfg(feature = "spirix")]
     s35(ScalarF3E5),
+    #[cfg(feature = "spirix")]
     s36(ScalarF3E6),
+    #[cfg(feature = "spirix")]
     s37(ScalarF3E7),
+    #[cfg(feature = "spirix")]
     // F4 (i16 fraction)
     s43(ScalarF4E3),
+    #[cfg(feature = "spirix")]
     s44(ScalarF4E4),
+    #[cfg(feature = "spirix")]
     s45(ScalarF4E5),
+    #[cfg(feature = "spirix")]
     s46(ScalarF4E6),
+    #[cfg(feature = "spirix")]
     s47(ScalarF4E7),
+    #[cfg(feature = "spirix")]
     // F5 (i32 fraction)
     s53(ScalarF5E3),
+    #[cfg(feature = "spirix")]
     s54(ScalarF5E4),
+    #[cfg(feature = "spirix")]
     s55(ScalarF5E5),
+    #[cfg(feature = "spirix")]
     s56(ScalarF5E6),
+    #[cfg(feature = "spirix")]
     s57(ScalarF5E7),
+    #[cfg(feature = "spirix")]
     // F6 (i64 fraction)
     s63(ScalarF6E3),
+    #[cfg(feature = "spirix")]
     s64(ScalarF6E4),
+    #[cfg(feature = "spirix")]
     s65(ScalarF6E5),
+    #[cfg(feature = "spirix")]
     s66(ScalarF6E6),
+    #[cfg(feature = "spirix")]
     s67(ScalarF6E7),
+    #[cfg(feature = "spirix")]
     // F7 (i128 fraction)
     s73(ScalarF7E3),
+    #[cfg(feature = "spirix")]
     s74(ScalarF7E4),
+    #[cfg(feature = "spirix")]
     s75(ScalarF7E5),
+    #[cfg(feature = "spirix")]
     s76(ScalarF7E6),
+    #[cfg(feature = "spirix")]
     s77(ScalarF7E7),
 
     // ==================== SPIRIX CIRCLES ====================
+    #[cfg(feature = "spirix")]
     // F3 (i8 fraction)
     c33(CircleF3E3),
+    #[cfg(feature = "spirix")]
     c34(CircleF3E4),
+    #[cfg(feature = "spirix")]
     c35(CircleF3E5),
+    #[cfg(feature = "spirix")]
     c36(CircleF3E6),
+    #[cfg(feature = "spirix")]
     c37(CircleF3E7),
+    #[cfg(feature = "spirix")]
     // F4 (i16 fraction)
     c43(CircleF4E3),
+    #[cfg(feature = "spirix")]
     c44(CircleF4E4),
+    #[cfg(feature = "spirix")]
     c45(CircleF4E5),
+    #[cfg(feature = "spirix")]
     c46(CircleF4E6),
+    #[cfg(feature = "spirix")]
     c47(CircleF4E7),
+    #[cfg(feature = "spirix")]
     // F5 (i32 fraction)
     c53(CircleF5E3),
+    #[cfg(feature = "spirix")]
     c54(CircleF5E4),
+    #[cfg(feature = "spirix")]
     c55(CircleF5E5),
+    #[cfg(feature = "spirix")]
     c56(CircleF5E6),
+    #[cfg(feature = "spirix")]
     c57(CircleF5E7),
+    #[cfg(feature = "spirix")]
     // F6 (i64 fraction)
     c63(CircleF6E3),
+    #[cfg(feature = "spirix")]
     c64(CircleF6E4),
+    #[cfg(feature = "spirix")]
     c65(CircleF6E5),
+    #[cfg(feature = "spirix")]
     c66(CircleF6E6),
+    #[cfg(feature = "spirix")]
     c67(CircleF6E7),
+    #[cfg(feature = "spirix")]
     // F7 (i128 fraction)
     c73(CircleF7E3),
+    #[cfg(feature = "spirix")]
     c74(CircleF7E4),
+    #[cfg(feature = "spirix")]
     c75(CircleF7E5),
+    #[cfg(feature = "spirix")]
     c76(CircleF7E6),
+    #[cfg(feature = "spirix")]
     c77(CircleF7E7),
 
     // ==================== CONTIGUOUS TENSORS (DYNAMIC DIMS) ====================
@@ -210,66 +262,116 @@ pub enum VsfType {
 
     // ==================== SPIRIX SCALAR TENSORS ====================
     // F3 (i8 fraction)
+    #[cfg(feature = "spirix")]
     t_s33(Tensor<ScalarF3E3>),
+    #[cfg(feature = "spirix")]
     t_s34(Tensor<ScalarF3E4>),
+    #[cfg(feature = "spirix")]
     t_s35(Tensor<ScalarF3E5>),
+    #[cfg(feature = "spirix")]
     t_s36(Tensor<ScalarF3E6>),
+    #[cfg(feature = "spirix")]
     t_s37(Tensor<ScalarF3E7>),
     // F4 (i16 fraction)
+    #[cfg(feature = "spirix")]
     t_s43(Tensor<ScalarF4E3>),
+    #[cfg(feature = "spirix")]
     t_s44(Tensor<ScalarF4E4>),
+    #[cfg(feature = "spirix")]
     t_s45(Tensor<ScalarF4E5>),
+    #[cfg(feature = "spirix")]
     t_s46(Tensor<ScalarF4E6>),
+    #[cfg(feature = "spirix")]
     t_s47(Tensor<ScalarF4E7>),
     // F5 (i32 fraction)
+    #[cfg(feature = "spirix")]
     t_s53(Tensor<ScalarF5E3>),
+    #[cfg(feature = "spirix")]
     t_s54(Tensor<ScalarF5E4>),
+    #[cfg(feature = "spirix")]
     t_s55(Tensor<ScalarF5E5>),
+    #[cfg(feature = "spirix")]
     t_s56(Tensor<ScalarF5E6>),
+    #[cfg(feature = "spirix")]
     t_s57(Tensor<ScalarF5E7>),
     // F6 (i64 fraction)
+    #[cfg(feature = "spirix")]
     t_s63(Tensor<ScalarF6E3>),
+    #[cfg(feature = "spirix")]
     t_s64(Tensor<ScalarF6E4>),
+    #[cfg(feature = "spirix")]
     t_s65(Tensor<ScalarF6E5>),
+    #[cfg(feature = "spirix")]
     t_s66(Tensor<ScalarF6E6>),
+    #[cfg(feature = "spirix")]
     t_s67(Tensor<ScalarF6E7>),
     // F7 (i128 fraction)
+    #[cfg(feature = "spirix")]
     t_s73(Tensor<ScalarF7E3>),
+    #[cfg(feature = "spirix")]
     t_s74(Tensor<ScalarF7E4>),
+    #[cfg(feature = "spirix")]
     t_s75(Tensor<ScalarF7E5>),
+    #[cfg(feature = "spirix")]
     t_s76(Tensor<ScalarF7E6>),
+    #[cfg(feature = "spirix")]
     t_s77(Tensor<ScalarF7E7>),
 
     // ==================== SPIRIX CIRCLE TENSORS ====================
     // F3 (i8 fraction)
+    #[cfg(feature = "spirix")]
     t_c33(Tensor<CircleF3E3>),
+    #[cfg(feature = "spirix")]
     t_c34(Tensor<CircleF3E4>),
+    #[cfg(feature = "spirix")]
     t_c35(Tensor<CircleF3E5>),
+    #[cfg(feature = "spirix")]
     t_c36(Tensor<CircleF3E6>),
+    #[cfg(feature = "spirix")]
     t_c37(Tensor<CircleF3E7>),
     // F4 (i16 fraction)
+    #[cfg(feature = "spirix")]
     t_c43(Tensor<CircleF4E3>),
+    #[cfg(feature = "spirix")]
     t_c44(Tensor<CircleF4E4>),
+    #[cfg(feature = "spirix")]
     t_c45(Tensor<CircleF4E5>),
+    #[cfg(feature = "spirix")]
     t_c46(Tensor<CircleF4E6>),
+    #[cfg(feature = "spirix")]
     t_c47(Tensor<CircleF4E7>),
     // F5 (i32 fraction)
+    #[cfg(feature = "spirix")]
     t_c53(Tensor<CircleF5E3>),
+    #[cfg(feature = "spirix")]
     t_c54(Tensor<CircleF5E4>),
+    #[cfg(feature = "spirix")]
     t_c55(Tensor<CircleF5E5>),
+    #[cfg(feature = "spirix")]
     t_c56(Tensor<CircleF5E6>),
+    #[cfg(feature = "spirix")]
     t_c57(Tensor<CircleF5E7>),
     // F6 (i64 fraction)
+    #[cfg(feature = "spirix")]
     t_c63(Tensor<CircleF6E3>),
+    #[cfg(feature = "spirix")]
     t_c64(Tensor<CircleF6E4>),
+    #[cfg(feature = "spirix")]
     t_c65(Tensor<CircleF6E5>),
+    #[cfg(feature = "spirix")]
     t_c66(Tensor<CircleF6E6>),
+    #[cfg(feature = "spirix")]
     t_c67(Tensor<CircleF6E7>),
     // F7 (i128 fraction)
+    #[cfg(feature = "spirix")]
     t_c73(Tensor<CircleF7E3>),
+    #[cfg(feature = "spirix")]
     t_c74(Tensor<CircleF7E4>),
+    #[cfg(feature = "spirix")]
     t_c75(Tensor<CircleF7E5>),
+    #[cfg(feature = "spirix")]
     t_c76(Tensor<CircleF7E6>),
+    #[cfg(feature = "spirix")]
     t_c77(Tensor<CircleF7E7>),
 
     // ==================== STRIDED TENSORS ====================
@@ -292,66 +394,116 @@ pub enum VsfType {
 
     // ==================== SPIRIX SCALAR STRIDED TENSORS ====================
     // F3 (i8 fraction)
+    #[cfg(feature = "spirix")]
     q_s33(StridedTensor<ScalarF3E3>),
+    #[cfg(feature = "spirix")]
     q_s34(StridedTensor<ScalarF3E4>),
+    #[cfg(feature = "spirix")]
     q_s35(StridedTensor<ScalarF3E5>),
+    #[cfg(feature = "spirix")]
     q_s36(StridedTensor<ScalarF3E6>),
+    #[cfg(feature = "spirix")]
     q_s37(StridedTensor<ScalarF3E7>),
     // F4 (i16 fraction)
+    #[cfg(feature = "spirix")]
     q_s43(StridedTensor<ScalarF4E3>),
+    #[cfg(feature = "spirix")]
     q_s44(StridedTensor<ScalarF4E4>),
+    #[cfg(feature = "spirix")]
     q_s45(StridedTensor<ScalarF4E5>),
+    #[cfg(feature = "spirix")]
     q_s46(StridedTensor<ScalarF4E6>),
+    #[cfg(feature = "spirix")]
     q_s47(StridedTensor<ScalarF4E7>),
     // F5 (i32 fraction)
+    #[cfg(feature = "spirix")]
     q_s53(StridedTensor<ScalarF5E3>),
+    #[cfg(feature = "spirix")]
     q_s54(StridedTensor<ScalarF5E4>),
+    #[cfg(feature = "spirix")]
     q_s55(StridedTensor<ScalarF5E5>),
+    #[cfg(feature = "spirix")]
     q_s56(StridedTensor<ScalarF5E6>),
+    #[cfg(feature = "spirix")]
     q_s57(StridedTensor<ScalarF5E7>),
     // F6 (i64 fraction)
+    #[cfg(feature = "spirix")]
     q_s63(StridedTensor<ScalarF6E3>),
+    #[cfg(feature = "spirix")]
     q_s64(StridedTensor<ScalarF6E4>),
+    #[cfg(feature = "spirix")]
     q_s65(StridedTensor<ScalarF6E5>),
+    #[cfg(feature = "spirix")]
     q_s66(StridedTensor<ScalarF6E6>),
+    #[cfg(feature = "spirix")]
     q_s67(StridedTensor<ScalarF6E7>),
     // F7 (i128 fraction)
+    #[cfg(feature = "spirix")]
     q_s73(StridedTensor<ScalarF7E3>),
+    #[cfg(feature = "spirix")]
     q_s74(StridedTensor<ScalarF7E4>),
+    #[cfg(feature = "spirix")]
     q_s75(StridedTensor<ScalarF7E5>),
+    #[cfg(feature = "spirix")]
     q_s76(StridedTensor<ScalarF7E6>),
+    #[cfg(feature = "spirix")]
     q_s77(StridedTensor<ScalarF7E7>),
 
     // ==================== SPIRIX CIRCLE STRIDED TENSORS ====================
     // F3 (i8 fraction)
+    #[cfg(feature = "spirix")]
     q_c33(StridedTensor<CircleF3E3>),
+    #[cfg(feature = "spirix")]
     q_c34(StridedTensor<CircleF3E4>),
+    #[cfg(feature = "spirix")]
     q_c35(StridedTensor<CircleF3E5>),
+    #[cfg(feature = "spirix")]
     q_c36(StridedTensor<CircleF3E6>),
+    #[cfg(feature = "spirix")]
     q_c37(StridedTensor<CircleF3E7>),
     // F4 (i16 fraction)
+    #[cfg(feature = "spirix")]
     q_c43(StridedTensor<CircleF4E3>),
+    #[cfg(feature = "spirix")]
     q_c44(StridedTensor<CircleF4E4>),
+    #[cfg(feature = "spirix")]
     q_c45(StridedTensor<CircleF4E5>),
+    #[cfg(feature = "spirix")]
     q_c46(StridedTensor<CircleF4E6>),
+    #[cfg(feature = "spirix")]
     q_c47(StridedTensor<CircleF4E7>),
     // F5 (i32 fraction)
+    #[cfg(feature = "spirix")]
     q_c53(StridedTensor<CircleF5E3>),
+    #[cfg(feature = "spirix")]
     q_c54(StridedTensor<CircleF5E4>),
+    #[cfg(feature = "spirix")]
     q_c55(StridedTensor<CircleF5E5>),
+    #[cfg(feature = "spirix")]
     q_c56(StridedTensor<CircleF5E6>),
+    #[cfg(feature = "spirix")]
     q_c57(StridedTensor<CircleF5E7>),
     // F6 (i64 fraction)
+    #[cfg(feature = "spirix")]
     q_c63(StridedTensor<CircleF6E3>),
+    #[cfg(feature = "spirix")]
     q_c64(StridedTensor<CircleF6E4>),
+    #[cfg(feature = "spirix")]
     q_c65(StridedTensor<CircleF6E5>),
+    #[cfg(feature = "spirix")]
     q_c66(StridedTensor<CircleF6E6>),
+    #[cfg(feature = "spirix")]
     q_c67(StridedTensor<CircleF6E7>),
     // F7 (i128 fraction)
+    #[cfg(feature = "spirix")]
     q_c73(StridedTensor<CircleF7E3>),
+    #[cfg(feature = "spirix")]
     q_c74(StridedTensor<CircleF7E4>),
+    #[cfg(feature = "spirix")]
     q_c75(StridedTensor<CircleF7E5>),
+    #[cfg(feature = "spirix")]
     q_c76(StridedTensor<CircleF7E6>),
+    #[cfg(feature = "spirix")]
     q_c77(StridedTensor<CircleF7E7>),
 
     // ==================== BITPACKED TENSORS ====================
@@ -461,7 +613,7 @@ pub enum VsfType {
 
     // VSF Structure
     d(String),      // Data type name
-    l(String),      // Label text
+    l(String),      // ASCII label/descriptor for fields and sections or non unicode text
     o(usize),       // Offset in Bytes
     b(usize, bool), // Length in Bytes (value, inclusive_mode)
     n(usize),       // Number/count
@@ -478,7 +630,10 @@ pub enum VsfType {
     // Signature algorithms
     ge(Vec<u8>), // Ed25519 signature
     gp(Vec<u8>), // ECDSA-P256 signature
-    #[deprecated(since = "0.1.7", note = "RSA is legacy - prefer Ed25519 for new applications")]
+    #[deprecated(
+        since = "0.1.7",
+        note = "RSA is legacy - prefer Ed25519 for new applications"
+    )]
     gr(Vec<u8>), // RSA signature (deprecated)
 
     // Cryptographic keys

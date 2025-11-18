@@ -10,6 +10,7 @@ use super::metadata::{
     parse_signature, parse_string, parse_version, parse_world_coord, parse_wrapped,
 };
 use super::primitives::{parse_complex, parse_float, parse_signed, parse_unsigned};
+#[cfg(feature = "spirix")]
 use super::spirix::{parse_spirix_circle, parse_spirix_scalar};
 use super::tensors::{parse_bitpacked_tensor, parse_strided_tensor, parse_tensor};
 
@@ -47,8 +48,20 @@ pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
         b'i' => parse_signed(data, pointer),
         b'f' => parse_float(data, pointer),
         b'j' => parse_complex(data, pointer),
+        #[cfg(feature = "spirix")]
         b's' => parse_spirix_scalar(data, pointer),
+        #[cfg(not(feature = "spirix"))]
+        b's' => Err(Error::new(
+            ErrorKind::Unsupported,
+            "Spirix scalar types require 'spirix' feature",
+        )),
+        #[cfg(feature = "spirix")]
         b'c' => parse_spirix_circle(data, pointer),
+        #[cfg(not(feature = "spirix"))]
+        b'c' => Err(Error::new(
+            ErrorKind::Unsupported,
+            "Spirix circle types require 'spirix' feature",
+        )),
         b'p' => parse_bitpacked_tensor(data, pointer),
         b't' => parse_tensor(data, pointer),
         b'q' => parse_strided_tensor(data, pointer),

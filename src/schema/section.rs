@@ -1,12 +1,80 @@
-//! Section schema and builder (stub implementation)
+//! Section schema and builder with positional encoding
 //!
-//! TODO: Complete implementation for parse → modify → encode workflow
+//! ## Design: Vec for Building, Positional for Wire Format
+//!
+//! **Building phase (Vec<Option<VsfType>> indexed by field position):**
+//! ```rust
+//! let section = schema.builder()
+//!     .set("iso", 800u32)?          // Find "iso" in schema (index 0), set fields[0] = Some(u5(800))
+//!     .set("aperture", 2.8f32)?     // Find "aperture" (index 1), set fields[1] = Some(f5(2.8))
+//!     .set("timestamp", time)?      // Find "timestamp" (index 2), set fields[2] = Some(e(...))
+//!     .encode()?;
+//! // Vec has length = schema.fields.len(), uses Option for unset fields
+//! ```
+//!
+//! **Wire format (Positional - just the values):**
+//! ```text
+//! [d"camera" u5{800} f5{2.8} ef6{...}]
+//!    └─name   └─value[0] └─value[1] └─value[2]
+//!             (written in schema order: iso, aperture, timestamp)
+//! ```
+//! Values encoded positionally in schema-defined order. Vec discarded after encode().
+//!
+//! **Why Vec<Option<VsfType>> during building?**
+//! - Ergonomic field access by name: `builder.set("field_name", value)`
+//! - Order-independent construction: set fields in any order
+//! - Parse → modify → re-encode workflow: `builder.set("iso", new_value)?`
+//! - Compact memory: Vec length = number of fields in schema (typically 3-10)
+//! - Fast linear search: Finding field index in 3-10 element schema is faster than HashMap overhead
+//!
+//! **Why positional encoding on wire?**
+//! - Compact: No field names repeated in binary (30-50% size reduction)
+//! - Fast parsing: No string matching, direct positional decode
+//! - Schema-driven: Field semantics come from schema, not wire format
+//! - Forward compatible: Schema can add optional fields at end
+//!
+//! **Concrete example with 3 fields:**
+//! ```text
+//! Schema defines:      ["iso", "aperture", "timestamp"]       (Vec<FieldSchema>)
+//! Builder stores:      [Some(u5(800)), Some(f5(2.8)), Some(e(...))]  (Vec<Option<VsfType>>)
+//! Wire bytes:          [d"camera" u5{800} f5{2.8} ef6{...}]          (no field names)
+//! ```
+//!
+//! ## Parse → Modify → Encode Workflow
+//! ```rust
+//! // Parse existing section
+//! let mut builder = SectionBuilder::parse(schema, section_bytes)?;
+//!
+//! // Modify specific fields
+//! builder = builder.set("iso", 1600u32)?;      // Update ISO
+//!
+//! // Re-encode with changes
+//! let updated_bytes = builder.encode()?;
+//! ```
 
-use super::field::{FieldSchema, FieldValue};
+use super::constraint::TypeConstraint;
+use super::conversions::{FromVsfType, IntoVsfType};
+use super::field::FieldSchema;
 use super::validate::{ValidationError, ValidationResult};
-use std::collections::HashMap;
+use crate::VsfType;
 
 /// Schema definition for a VSF section
+///
+/// Defines the structure, field types, and validation rules for a VSF section.
+/// Sections are encoded with positional field values (no field names in wire format).
+///
+/// # Example
+/// ```rust
+/// use vsf::schema::{SectionSchema, TypeConstraint};
+///
+/// let schema = SectionSchema::new("camera")
+///     .description("Camera metadata")
+///     .field("iso", TypeConstraint::AnyUnsigned)
+///     .field("aperture", TypeConstraint::AnyFloat)
+///     .field("timestamp", TypeConstraint::AnyEagleTime);
+///
+/// // Fields are encoded positionally in this order: iso, aperture, timestamp
+/// ```
 #[derive(Debug, Clone)]
 pub struct SectionSchema {
     pub name: String,
@@ -25,9 +93,8 @@ impl SectionSchema {
     }
 
     /// Add a field to this section schema
-    pub fn field(mut self, name: impl Into<String>, field_type: super::field::FieldType) -> Self {
-        self.fields
-            .push(FieldSchema::new(name, field_type));
+    pub fn field(mut self, name: impl Into<String>, constraint: TypeConstraint) -> Self {
+        self.fields.push(FieldSchema::new(name, constraint));
         self
     }
 
@@ -61,41 +128,88 @@ impl SectionSchema {
 }
 
 /// Builder for creating section instances with validation
+///
+/// Uses Vec<Option<VsfType>> internally, indexed by field position in schema.
+/// Field names are looked up via linear search (fast for typical 3-10 field schemas).
+///
+/// # Example
+/// ```rust
+/// use vsf::schema::{SectionSchema, TypeConstraint};
+///
+/// let schema = SectionSchema::new("image")
+///     .field("width", TypeConstraint::AnyUnsigned)
+///     .field("height", TypeConstraint::AnyUnsigned);
+///
+/// let section = schema.builder()
+///     .set("width", 1920u32)?     // Finds "width" at index 0, sets fields[0]
+///     .set("height", 1080u32)?    // Finds "height" at index 1, sets fields[1]
+///     .encode()?;                 // Encodes positionally: [d"image" u5{1920} u5{1080}]
+/// ```
 #[derive(Debug)]
 pub struct SectionBuilder {
     schema: SectionSchema,
-    fields: HashMap<String, FieldValue>,
+    fields: Vec<Option<VsfType>>,  // Indexed by schema field position
 }
 
 impl SectionBuilder {
     /// Create new builder from schema
     pub fn new(schema: SectionSchema) -> Self {
+        let field_count = schema.fields.len();
         Self {
             schema,
-            fields: HashMap::new(),
+            fields: vec![None; field_count],
         }
     }
 
-    /// Set a field value (with type checking)
-    pub fn set(mut self, name: impl AsRef<str>, value: impl Into<FieldValue>) -> ValidationResult<Self> {
+    /// Set a field value with automatic conversion and validation
+    pub fn set<T: IntoVsfType>(
+        mut self,
+        name: impl AsRef<str>,
+        value: T,
+    ) -> ValidationResult<Self> {
         let name = name.as_ref();
-        let value = value.into();
+        let vsf_value = value.into_vsf_type();
 
-        // Validate field exists
-        let field_schema = self.schema.validate_field(name)?;
+        // Find field index in schema (linear search - fast for 3-10 fields)
+        let field_index = self
+            .schema
+            .fields
+            .iter()
+            .position(|f| f.name == name)
+            .ok_or_else(|| ValidationError::UnknownField {
+                section: self.schema.name.clone(),
+                field: name.to_string(),
+                allowed: self.schema.allowed_fields(),
+            })?;
 
-        // Validate type
-        field_schema.validate(&value)?;
+        // Validate type constraint
+        self.schema.fields[field_index].validate(&vsf_value)?;
 
-        self.fields.insert(name.to_string(), value);
+        // Set value at field position
+        self.fields[field_index] = Some(vsf_value);
         Ok(self)
     }
 
-    /// Get a field value
-    pub fn get<T>(&self, name: &str) -> ValidationResult<&FieldValue> {
-        self.fields.get(name).ok_or_else(|| {
-            ValidationError::Custom(format!("Field '{}' not set", name))
-        })
+    /// Get a field value by name
+    pub fn get(&self, name: &str) -> ValidationResult<&VsfType> {
+        // Find field index
+        let field_index = self
+            .schema
+            .fields
+            .iter()
+            .position(|f| f.name == name)
+            .ok_or_else(|| ValidationError::Custom(format!("Field '{}' not in schema", name)))?;
+
+        // Get value at that index
+        self.fields[field_index]
+            .as_ref()
+            .ok_or_else(|| ValidationError::Custom(format!("Field '{}' not set", name)))
+    }
+
+    /// Get and extract a specific Rust type
+    pub fn get_value<T: FromVsfType>(&self, name: &str) -> ValidationResult<T> {
+        let vsf = self.get(name)?;
+        T::from_vsf_type(vsf)
     }
 
     /// Encode to VSF bytes
@@ -105,8 +219,8 @@ impl SectionBuilder {
         use crate::VsfType;
 
         // Check all required fields are set
-        for field_schema in &self.schema.fields {
-            if field_schema.required && !self.fields.contains_key(&field_schema.name) {
+        for (i, field_schema) in self.schema.fields.iter().enumerate() {
+            if field_schema.required && self.fields[i].is_none() {
                 return Err(ValidationError::MissingField {
                     section: self.schema.name.clone(),
                     field: field_schema.name.clone(),
@@ -123,10 +237,10 @@ impl SectionBuilder {
         // Section name as dictionary key
         bytes.extend(VsfType::d(self.schema.name.clone()).flatten());
 
-        // Encode field values in schema order
-        for field_schema in &self.schema.fields {
-            if let Some(value) = self.fields.get(&field_schema.name) {
-                bytes.extend(value.to_vsf_type().flatten());
+        // Encode field values in schema order (positional)
+        for field_value in &self.fields {
+            if let Some(value) = field_value {
+                bytes.extend(value.flatten());
             }
         }
 
@@ -165,7 +279,12 @@ impl SectionBuilder {
             .map_err(|e| ValidationError::Custom(format!("Failed to parse section name: {}", e)))?;
         let section_name_str = match section_name {
             crate::VsfType::d(name) => name,
-            _ => return Err(ValidationError::Custom(format!("Expected section name (d), got {:?}", section_name))),
+            _ => {
+                return Err(ValidationError::Custom(format!(
+                    "Expected section name (d), got {:?}",
+                    section_name
+                )))
+            }
         };
 
         // Verify section name matches schema
@@ -179,7 +298,7 @@ impl SectionBuilder {
         let mut builder = SectionBuilder::new(schema.clone());
 
         // Parse field values in schema order (positional)
-        for field_schema in &schema.fields {
+        for (i, field_schema) in schema.fields.iter().enumerate() {
             // Check if we've hit the closing ']'
             if ptr >= section_bytes.len() || section_bytes[ptr] == b']' {
                 // No more values - remaining fields are unset
@@ -187,12 +306,16 @@ impl SectionBuilder {
             }
 
             // Parse the value
-            let value = parse(section_bytes, &mut ptr)
-                .map_err(|e| ValidationError::Custom(format!("Failed to parse field '{}': {}", field_schema.name, e)))?;
+            let value = parse(section_bytes, &mut ptr).map_err(|e| {
+                ValidationError::Custom(format!(
+                    "Failed to parse field '{}': {}",
+                    field_schema.name, e
+                ))
+            })?;
 
-            // Convert VsfType to FieldValue and add to builder
-            let field_value = FieldValue::from_vsf_type(&value)?;
-            builder = builder.set(&field_schema.name, field_value)?;
+            // Validate and store directly at position i
+            field_schema.validate(&value)?;
+            builder.fields[i] = Some(value);
         }
 
         // Expect ']' to close section
@@ -210,21 +333,25 @@ impl SectionBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::field::FieldType;
+    use super::super::constraint::TypeConstraint;
 
     #[test]
     fn test_section_builder_round_trip() {
         // Create a schema
         let schema = SectionSchema::new("test")
-            .field("width", FieldType::U32)
-            .field("height", FieldType::U32)
-            .field("name", FieldType::String);
+            .field("width", TypeConstraint::AnyUnsigned)
+            .field("height", TypeConstraint::AnyUnsigned)
+            .field("name", TypeConstraint::AnyString);
 
         // Build a section with the schema
-        let builder = schema.build()
-            .set("width", 1920u32).unwrap()
-            .set("height", 1080u32).unwrap()
-            .set("name", "test_section".to_string()).unwrap();
+        let builder = schema
+            .build()
+            .set("width", 1920u32)
+            .unwrap()
+            .set("height", 1080u32)
+            .unwrap()
+            .set("name", "test_section".to_string())
+            .unwrap();
 
         // Encode it
         let encoded = builder.encode().unwrap();
@@ -234,20 +361,20 @@ mod tests {
 
         // Re-encode and verify it matches
         let re_encoded = parsed.encode().unwrap();
-        assert_eq!(encoded, re_encoded, "Round-trip encoding should produce identical bytes");
+        assert_eq!(
+            encoded, re_encoded,
+            "Round-trip encoding should produce identical bytes"
+        );
     }
 
     #[test]
     fn test_section_parser_validates_name() {
-        let schema = SectionSchema::new("test")
-            .field("value", FieldType::U16);
+        let schema = SectionSchema::new("test").field("value", TypeConstraint::AnyUnsigned);
 
         // Create a section with wrong name
-        let wrong_section = SectionSchema::new("wrong")
-            .field("value", FieldType::U16);
+        let wrong_section = SectionSchema::new("wrong").field("value", TypeConstraint::AnyUnsigned);
 
-        let built = wrong_section.build()
-            .set("value", 42u16).unwrap();
+        let built = wrong_section.build().set("value", 42u16).unwrap();
         let encoded = built.encode().unwrap();
 
         // Should fail because names don't match
@@ -258,15 +385,18 @@ mod tests {
 
     #[test]
     fn test_section_parser_with_eagle_time() {
-        use crate::schema::field::FieldType;
+        use crate::types::EtType;
 
         let schema = SectionSchema::new("metadata")
-            .field("timestamp", FieldType::EagleTimeF64)
-            .field("count", FieldType::U32);
+            .field("timestamp", TypeConstraint::AnyEagleTime)
+            .field("count", TypeConstraint::AnyUnsigned);
 
-        let builder = schema.build()
-            .set("timestamp", FieldValue::EagleTimeF64(1234567.89)).unwrap()
-            .set("count", 42u32).unwrap();
+        let builder = schema
+            .build()
+            .set("timestamp", VsfType::e(EtType::f6(1234567.89)))
+            .unwrap()
+            .set("count", 42u32)
+            .unwrap();
 
         let encoded = builder.encode().unwrap();
         let parsed = SectionBuilder::parse(schema, &encoded).unwrap();

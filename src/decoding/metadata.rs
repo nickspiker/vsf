@@ -7,29 +7,51 @@ use std::io::{Error, ErrorKind};
 // ==================== METADATA ====================
 
 pub fn parse_string(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
-    use crate::text_encoding::decode_text_with_size;
+    #[cfg(feature = "text")]
+    {
+        use crate::text_encoding::decode_text_with_size;
 
-    // Read character count
-    let char_count = decode_usize(data, pointer)?;
+        // Read character count
+        let char_count = decode_usize(data, pointer)?;
 
-    // Rest of data is Huffman-encoded bytes
-    let huffman_bytes = &data[*pointer..];
+        // Rest of data is Huffman-encoded bytes
+        let huffman_bytes = &data[*pointer..];
 
-    if huffman_bytes.is_empty() && char_count > 0 {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "No Huffman data for non-zero char count",
-        ));
+        if huffman_bytes.is_empty() && char_count > 0 {
+            return Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                "No Huffman data for non-zero char count",
+            ));
+        }
+
+        // Decode using Huffman decoder and get bytes consumed
+        let (value, bytes_consumed) = decode_text_with_size(huffman_bytes, char_count)
+            .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Huffman decode: {}", e)))?;
+
+        // Advance pointer by actual bytes consumed
+        *pointer += bytes_consumed;
+
+        Ok(VsfType::x(value))
     }
+    #[cfg(not(feature = "text"))]
+    {
+        // Without text feature, decode as raw UTF-8 bytes
+        let byte_count = decode_usize(data, pointer)?;
 
-    // Decode using Huffman decoder and get bytes consumed
-    let (value, bytes_consumed) = decode_text_with_size(huffman_bytes, char_count)
-        .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Huffman decode: {}", e)))?;
+        if *pointer + byte_count > data.len() {
+            return Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                "Not enough data for string bytes",
+            ));
+        }
 
-    // Advance pointer by actual bytes consumed
-    *pointer += bytes_consumed;
+        let bytes = &data[*pointer..*pointer + byte_count];
+        let value = String::from_utf8(bytes.to_vec())
+            .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Invalid UTF-8: {}", e)))?;
 
-    Ok(VsfType::x(value))
+        *pointer += byte_count;
+        Ok(VsfType::x(value))
+    }
 }
 
 pub fn parse_eagle_time(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {

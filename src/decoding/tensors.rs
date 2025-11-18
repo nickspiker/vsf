@@ -1,6 +1,7 @@
 //! Tensor parsers
 
 use super::helpers::{decode_usize, parse_shape};
+#[cfg(feature = "spirix")]
 use super::spirix::{
     parse_circle_f3e3, parse_circle_f3e4, parse_circle_f3e5, parse_circle_f3e6, parse_circle_f3e7,
     parse_circle_f4e3, parse_circle_f4e4, parse_circle_f4e5, parse_circle_f4e6, parse_circle_f4e7,
@@ -71,12 +72,32 @@ pub fn parse_bitpacked_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfTyp
 
 // ==================== TENSORS ====================
 
-/// Parse contiguous tensor: [t][ndim][elem_type][elem_size][shape...][data...]
+/// Parse contiguous tensor: [t][ndim OR 'n'][elem_type][elem_size][shape... OR][data...]
+/// Supports two formats:
+/// - Multi-dim: [t][u:ndim][elem_type][elem_size][shape...][data...]
+/// - 1D vector: [t]['n'][u:count][elem_type][elem_size][data...]
 pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
-    // Parse dimension count
-    let ndim = decode_usize(data, pointer)?;
+    // Check if this is 1D vector format (starts with 'n') or multi-dim format
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for tensor format marker",
+        ));
+    }
 
-    // Parse element type markers
+    // Parse ndim or count
+    let (ndim, count) = if data[*pointer] == b'n' {
+        // 1D vector format: [t]['n'][count][elem_type][elem_size][data...]
+        *pointer += 1; // Skip 'n'
+        let count = decode_usize(data, pointer)?;
+        (1, count)
+    } else {
+        // Multi-dim format: [t][ndim][elem_type][elem_size][shape...][data...]
+        let ndim = decode_usize(data, pointer)?;
+        (ndim, 0) // count will be calculated from shape
+    };
+
+    // Parse element type markers (same position in both formats)
     if *pointer + 2 > data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
@@ -88,9 +109,16 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
     let elem_size = data[*pointer];
     *pointer += 1;
 
-    // Parse shape
-    let shape = parse_shape(data, pointer, ndim)?;
-    let total_elements: usize = shape.iter().product();
+    // Parse shape (only for multi-dim; 1D already has count)
+    let (shape, total_elements) = if ndim == 1 && count > 0 {
+        // 1D vector: use count directly
+        (vec![count], count)
+    } else {
+        // Multi-dim: parse shape dimensions
+        let shape = parse_shape(data, pointer, ndim)?;
+        let total_elements: usize = shape.iter().product();
+        (shape, total_elements)
+    };
 
     // Dispatch based on element type
     match elem_type {
@@ -133,6 +161,7 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
                 format!("Invalid complex size: {}", elem_size as char),
             )),
         },
+        #[cfg(feature = "spirix")]
         b's' => {
             // Spirix Scalar: elem_size is F marker, need to read E marker
             let f_marker = elem_size;
@@ -173,6 +202,12 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
                 )),
             }
         }
+        #[cfg(not(feature = "spirix"))]
+        b's' => Err(Error::new(
+            ErrorKind::Unsupported,
+            "Spirix scalar tensor types require 'spirix' feature",
+        )),
+        #[cfg(feature = "spirix")]
         b'c' => {
             // Spirix Circle: elem_size is F marker, need to read E marker
             let f_marker = elem_size;
@@ -213,6 +248,11 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
                 )),
             }
         }
+        #[cfg(not(feature = "spirix"))]
+        b'c' => Err(Error::new(
+            ErrorKind::Unsupported,
+            "Spirix circle tensor types require 'spirix' feature",
+        )),
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Invalid tensor element type: {}", elem_type as char),
@@ -286,6 +326,7 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
                 format!("Invalid strided complex size: {}", elem_size as char),
             )),
         },
+        #[cfg(feature = "spirix")]
         b's' => {
             // Spirix Scalar: elem_size is F marker, need to read E marker
             let f_marker = elem_size;
@@ -376,6 +417,12 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
                 )),
             }
         }
+        #[cfg(not(feature = "spirix"))]
+        b's' => Err(Error::new(
+            ErrorKind::Unsupported,
+            "Spirix scalar strided tensor types require 'spirix' feature",
+        )),
+        #[cfg(feature = "spirix")]
         b'c' => {
             // Spirix Circle: elem_size is F marker, need to read E marker
             let f_marker = elem_size;
@@ -466,6 +513,11 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
                 )),
             }
         }
+        #[cfg(not(feature = "spirix"))]
+        b'c' => Err(Error::new(
+            ErrorKind::Unsupported,
+            "Spirix circle strided tensor types require 'spirix' feature",
+        )),
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Invalid strided tensor element type: {}", elem_type as char),
@@ -1408,6 +1460,7 @@ pub fn parse_strided_tensor_data_j64(
 }
 // ==================== SPIRIX SCALAR TENSOR DATA PARSERS ====================
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s33(
     data: &[u8],
     pointer: &mut usize,
@@ -1434,6 +1487,7 @@ pub fn parse_tensor_data_s33(
     Ok(VsfType::t_s33(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s34(
     data: &[u8],
     pointer: &mut usize,
@@ -1460,6 +1514,7 @@ pub fn parse_tensor_data_s34(
     Ok(VsfType::t_s34(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s35(
     data: &[u8],
     pointer: &mut usize,
@@ -1486,6 +1541,7 @@ pub fn parse_tensor_data_s35(
     Ok(VsfType::t_s35(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s36(
     data: &[u8],
     pointer: &mut usize,
@@ -1512,6 +1568,7 @@ pub fn parse_tensor_data_s36(
     Ok(VsfType::t_s36(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s37(
     data: &[u8],
     pointer: &mut usize,
@@ -1538,6 +1595,7 @@ pub fn parse_tensor_data_s37(
     Ok(VsfType::t_s37(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s43(
     data: &[u8],
     pointer: &mut usize,
@@ -1564,6 +1622,7 @@ pub fn parse_tensor_data_s43(
     Ok(VsfType::t_s43(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s44(
     data: &[u8],
     pointer: &mut usize,
@@ -1590,6 +1649,7 @@ pub fn parse_tensor_data_s44(
     Ok(VsfType::t_s44(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s45(
     data: &[u8],
     pointer: &mut usize,
@@ -1616,6 +1676,7 @@ pub fn parse_tensor_data_s45(
     Ok(VsfType::t_s45(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s46(
     data: &[u8],
     pointer: &mut usize,
@@ -1642,6 +1703,7 @@ pub fn parse_tensor_data_s46(
     Ok(VsfType::t_s46(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s47(
     data: &[u8],
     pointer: &mut usize,
@@ -1668,6 +1730,7 @@ pub fn parse_tensor_data_s47(
     Ok(VsfType::t_s47(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s53(
     data: &[u8],
     pointer: &mut usize,
@@ -1694,6 +1757,7 @@ pub fn parse_tensor_data_s53(
     Ok(VsfType::t_s53(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s54(
     data: &[u8],
     pointer: &mut usize,
@@ -1720,6 +1784,7 @@ pub fn parse_tensor_data_s54(
     Ok(VsfType::t_s54(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s55(
     data: &[u8],
     pointer: &mut usize,
@@ -1746,6 +1811,7 @@ pub fn parse_tensor_data_s55(
     Ok(VsfType::t_s55(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s56(
     data: &[u8],
     pointer: &mut usize,
@@ -1772,6 +1838,7 @@ pub fn parse_tensor_data_s56(
     Ok(VsfType::t_s56(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s57(
     data: &[u8],
     pointer: &mut usize,
@@ -1798,6 +1865,7 @@ pub fn parse_tensor_data_s57(
     Ok(VsfType::t_s57(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s63(
     data: &[u8],
     pointer: &mut usize,
@@ -1824,6 +1892,7 @@ pub fn parse_tensor_data_s63(
     Ok(VsfType::t_s63(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s64(
     data: &[u8],
     pointer: &mut usize,
@@ -1850,6 +1919,7 @@ pub fn parse_tensor_data_s64(
     Ok(VsfType::t_s64(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s65(
     data: &[u8],
     pointer: &mut usize,
@@ -1876,6 +1946,7 @@ pub fn parse_tensor_data_s65(
     Ok(VsfType::t_s65(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s66(
     data: &[u8],
     pointer: &mut usize,
@@ -1902,6 +1973,7 @@ pub fn parse_tensor_data_s66(
     Ok(VsfType::t_s66(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s67(
     data: &[u8],
     pointer: &mut usize,
@@ -1928,6 +2000,7 @@ pub fn parse_tensor_data_s67(
     Ok(VsfType::t_s67(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s73(
     data: &[u8],
     pointer: &mut usize,
@@ -1954,6 +2027,7 @@ pub fn parse_tensor_data_s73(
     Ok(VsfType::t_s73(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s74(
     data: &[u8],
     pointer: &mut usize,
@@ -1980,6 +2054,7 @@ pub fn parse_tensor_data_s74(
     Ok(VsfType::t_s74(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s75(
     data: &[u8],
     pointer: &mut usize,
@@ -2006,6 +2081,7 @@ pub fn parse_tensor_data_s75(
     Ok(VsfType::t_s75(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s76(
     data: &[u8],
     pointer: &mut usize,
@@ -2032,6 +2108,7 @@ pub fn parse_tensor_data_s76(
     Ok(VsfType::t_s76(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_s77(
     data: &[u8],
     pointer: &mut usize,
@@ -2060,6 +2137,7 @@ pub fn parse_tensor_data_s77(
 
 // ==================== SPIRIX CIRCLE TENSOR DATA PARSERS ====================
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c33(
     data: &[u8],
     pointer: &mut usize,
@@ -2086,6 +2164,7 @@ pub fn parse_tensor_data_c33(
     Ok(VsfType::t_c33(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c34(
     data: &[u8],
     pointer: &mut usize,
@@ -2112,6 +2191,7 @@ pub fn parse_tensor_data_c34(
     Ok(VsfType::t_c34(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c35(
     data: &[u8],
     pointer: &mut usize,
@@ -2138,6 +2218,7 @@ pub fn parse_tensor_data_c35(
     Ok(VsfType::t_c35(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c36(
     data: &[u8],
     pointer: &mut usize,
@@ -2164,6 +2245,7 @@ pub fn parse_tensor_data_c36(
     Ok(VsfType::t_c36(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c37(
     data: &[u8],
     pointer: &mut usize,
@@ -2190,6 +2272,7 @@ pub fn parse_tensor_data_c37(
     Ok(VsfType::t_c37(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c43(
     data: &[u8],
     pointer: &mut usize,
@@ -2216,6 +2299,7 @@ pub fn parse_tensor_data_c43(
     Ok(VsfType::t_c43(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c44(
     data: &[u8],
     pointer: &mut usize,
@@ -2242,6 +2326,7 @@ pub fn parse_tensor_data_c44(
     Ok(VsfType::t_c44(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c45(
     data: &[u8],
     pointer: &mut usize,
@@ -2268,6 +2353,7 @@ pub fn parse_tensor_data_c45(
     Ok(VsfType::t_c45(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c46(
     data: &[u8],
     pointer: &mut usize,
@@ -2294,6 +2380,7 @@ pub fn parse_tensor_data_c46(
     Ok(VsfType::t_c46(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c47(
     data: &[u8],
     pointer: &mut usize,
@@ -2320,6 +2407,7 @@ pub fn parse_tensor_data_c47(
     Ok(VsfType::t_c47(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c53(
     data: &[u8],
     pointer: &mut usize,
@@ -2346,6 +2434,7 @@ pub fn parse_tensor_data_c53(
     Ok(VsfType::t_c53(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c54(
     data: &[u8],
     pointer: &mut usize,
@@ -2372,6 +2461,7 @@ pub fn parse_tensor_data_c54(
     Ok(VsfType::t_c54(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c55(
     data: &[u8],
     pointer: &mut usize,
@@ -2398,6 +2488,7 @@ pub fn parse_tensor_data_c55(
     Ok(VsfType::t_c55(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c56(
     data: &[u8],
     pointer: &mut usize,
@@ -2424,6 +2515,7 @@ pub fn parse_tensor_data_c56(
     Ok(VsfType::t_c56(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c57(
     data: &[u8],
     pointer: &mut usize,
@@ -2450,6 +2542,7 @@ pub fn parse_tensor_data_c57(
     Ok(VsfType::t_c57(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c63(
     data: &[u8],
     pointer: &mut usize,
@@ -2476,6 +2569,7 @@ pub fn parse_tensor_data_c63(
     Ok(VsfType::t_c63(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c64(
     data: &[u8],
     pointer: &mut usize,
@@ -2502,6 +2596,7 @@ pub fn parse_tensor_data_c64(
     Ok(VsfType::t_c64(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c65(
     data: &[u8],
     pointer: &mut usize,
@@ -2528,6 +2623,7 @@ pub fn parse_tensor_data_c65(
     Ok(VsfType::t_c65(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c66(
     data: &[u8],
     pointer: &mut usize,
@@ -2554,6 +2650,7 @@ pub fn parse_tensor_data_c66(
     Ok(VsfType::t_c66(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c67(
     data: &[u8],
     pointer: &mut usize,
@@ -2580,6 +2677,7 @@ pub fn parse_tensor_data_c67(
     Ok(VsfType::t_c67(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c73(
     data: &[u8],
     pointer: &mut usize,
@@ -2606,6 +2704,7 @@ pub fn parse_tensor_data_c73(
     Ok(VsfType::t_c73(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c74(
     data: &[u8],
     pointer: &mut usize,
@@ -2632,6 +2731,7 @@ pub fn parse_tensor_data_c74(
     Ok(VsfType::t_c74(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c75(
     data: &[u8],
     pointer: &mut usize,
@@ -2658,6 +2758,7 @@ pub fn parse_tensor_data_c75(
     Ok(VsfType::t_c75(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c76(
     data: &[u8],
     pointer: &mut usize,
@@ -2684,6 +2785,7 @@ pub fn parse_tensor_data_c76(
     Ok(VsfType::t_c76(Tensor::new(shape, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_tensor_data_c77(
     data: &[u8],
     pointer: &mut usize,
@@ -2712,6 +2814,7 @@ pub fn parse_tensor_data_c77(
 
 // ==================== STRIDED SPIRIX SCALAR TENSOR DATA PARSERS ====================
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s33(
     data: &[u8],
     pointer: &mut usize,
@@ -2739,6 +2842,7 @@ pub fn parse_strided_tensor_data_s33(
     Ok(VsfType::q_s33(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s34(
     data: &[u8],
     pointer: &mut usize,
@@ -2766,6 +2870,7 @@ pub fn parse_strided_tensor_data_s34(
     Ok(VsfType::q_s34(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s35(
     data: &[u8],
     pointer: &mut usize,
@@ -2793,6 +2898,7 @@ pub fn parse_strided_tensor_data_s35(
     Ok(VsfType::q_s35(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s36(
     data: &[u8],
     pointer: &mut usize,
@@ -2820,6 +2926,7 @@ pub fn parse_strided_tensor_data_s36(
     Ok(VsfType::q_s36(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s37(
     data: &[u8],
     pointer: &mut usize,
@@ -2847,6 +2954,7 @@ pub fn parse_strided_tensor_data_s37(
     Ok(VsfType::q_s37(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s43(
     data: &[u8],
     pointer: &mut usize,
@@ -2874,6 +2982,7 @@ pub fn parse_strided_tensor_data_s43(
     Ok(VsfType::q_s43(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s44(
     data: &[u8],
     pointer: &mut usize,
@@ -2901,6 +3010,7 @@ pub fn parse_strided_tensor_data_s44(
     Ok(VsfType::q_s44(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s45(
     data: &[u8],
     pointer: &mut usize,
@@ -2928,6 +3038,7 @@ pub fn parse_strided_tensor_data_s45(
     Ok(VsfType::q_s45(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s46(
     data: &[u8],
     pointer: &mut usize,
@@ -2955,6 +3066,7 @@ pub fn parse_strided_tensor_data_s46(
     Ok(VsfType::q_s46(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s47(
     data: &[u8],
     pointer: &mut usize,
@@ -2982,6 +3094,7 @@ pub fn parse_strided_tensor_data_s47(
     Ok(VsfType::q_s47(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s53(
     data: &[u8],
     pointer: &mut usize,
@@ -3009,6 +3122,7 @@ pub fn parse_strided_tensor_data_s53(
     Ok(VsfType::q_s53(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s54(
     data: &[u8],
     pointer: &mut usize,
@@ -3036,6 +3150,7 @@ pub fn parse_strided_tensor_data_s54(
     Ok(VsfType::q_s54(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s55(
     data: &[u8],
     pointer: &mut usize,
@@ -3063,6 +3178,7 @@ pub fn parse_strided_tensor_data_s55(
     Ok(VsfType::q_s55(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s56(
     data: &[u8],
     pointer: &mut usize,
@@ -3090,6 +3206,7 @@ pub fn parse_strided_tensor_data_s56(
     Ok(VsfType::q_s56(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s57(
     data: &[u8],
     pointer: &mut usize,
@@ -3117,6 +3234,7 @@ pub fn parse_strided_tensor_data_s57(
     Ok(VsfType::q_s57(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s63(
     data: &[u8],
     pointer: &mut usize,
@@ -3144,6 +3262,7 @@ pub fn parse_strided_tensor_data_s63(
     Ok(VsfType::q_s63(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s64(
     data: &[u8],
     pointer: &mut usize,
@@ -3171,6 +3290,7 @@ pub fn parse_strided_tensor_data_s64(
     Ok(VsfType::q_s64(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s65(
     data: &[u8],
     pointer: &mut usize,
@@ -3198,6 +3318,7 @@ pub fn parse_strided_tensor_data_s65(
     Ok(VsfType::q_s65(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s66(
     data: &[u8],
     pointer: &mut usize,
@@ -3225,6 +3346,7 @@ pub fn parse_strided_tensor_data_s66(
     Ok(VsfType::q_s66(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s67(
     data: &[u8],
     pointer: &mut usize,
@@ -3252,6 +3374,7 @@ pub fn parse_strided_tensor_data_s67(
     Ok(VsfType::q_s67(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s73(
     data: &[u8],
     pointer: &mut usize,
@@ -3279,6 +3402,7 @@ pub fn parse_strided_tensor_data_s73(
     Ok(VsfType::q_s73(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s74(
     data: &[u8],
     pointer: &mut usize,
@@ -3306,6 +3430,7 @@ pub fn parse_strided_tensor_data_s74(
     Ok(VsfType::q_s74(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s75(
     data: &[u8],
     pointer: &mut usize,
@@ -3333,6 +3458,7 @@ pub fn parse_strided_tensor_data_s75(
     Ok(VsfType::q_s75(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s76(
     data: &[u8],
     pointer: &mut usize,
@@ -3360,6 +3486,7 @@ pub fn parse_strided_tensor_data_s76(
     Ok(VsfType::q_s76(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_s77(
     data: &[u8],
     pointer: &mut usize,
@@ -3389,6 +3516,7 @@ pub fn parse_strided_tensor_data_s77(
 
 // ==================== STRIDED SPIRIX CIRCLE TENSOR DATA PARSERS ====================
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c33(
     data: &[u8],
     pointer: &mut usize,
@@ -3416,6 +3544,7 @@ pub fn parse_strided_tensor_data_c33(
     Ok(VsfType::q_c33(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c34(
     data: &[u8],
     pointer: &mut usize,
@@ -3443,6 +3572,7 @@ pub fn parse_strided_tensor_data_c34(
     Ok(VsfType::q_c34(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c35(
     data: &[u8],
     pointer: &mut usize,
@@ -3470,6 +3600,7 @@ pub fn parse_strided_tensor_data_c35(
     Ok(VsfType::q_c35(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c36(
     data: &[u8],
     pointer: &mut usize,
@@ -3497,6 +3628,7 @@ pub fn parse_strided_tensor_data_c36(
     Ok(VsfType::q_c36(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c37(
     data: &[u8],
     pointer: &mut usize,
@@ -3524,6 +3656,7 @@ pub fn parse_strided_tensor_data_c37(
     Ok(VsfType::q_c37(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c43(
     data: &[u8],
     pointer: &mut usize,
@@ -3551,6 +3684,7 @@ pub fn parse_strided_tensor_data_c43(
     Ok(VsfType::q_c43(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c44(
     data: &[u8],
     pointer: &mut usize,
@@ -3578,6 +3712,7 @@ pub fn parse_strided_tensor_data_c44(
     Ok(VsfType::q_c44(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c45(
     data: &[u8],
     pointer: &mut usize,
@@ -3605,6 +3740,7 @@ pub fn parse_strided_tensor_data_c45(
     Ok(VsfType::q_c45(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c46(
     data: &[u8],
     pointer: &mut usize,
@@ -3632,6 +3768,7 @@ pub fn parse_strided_tensor_data_c46(
     Ok(VsfType::q_c46(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c47(
     data: &[u8],
     pointer: &mut usize,
@@ -3659,6 +3796,7 @@ pub fn parse_strided_tensor_data_c47(
     Ok(VsfType::q_c47(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c53(
     data: &[u8],
     pointer: &mut usize,
@@ -3686,6 +3824,7 @@ pub fn parse_strided_tensor_data_c53(
     Ok(VsfType::q_c53(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c54(
     data: &[u8],
     pointer: &mut usize,
@@ -3713,6 +3852,7 @@ pub fn parse_strided_tensor_data_c54(
     Ok(VsfType::q_c54(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c55(
     data: &[u8],
     pointer: &mut usize,
@@ -3740,6 +3880,7 @@ pub fn parse_strided_tensor_data_c55(
     Ok(VsfType::q_c55(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c56(
     data: &[u8],
     pointer: &mut usize,
@@ -3767,6 +3908,7 @@ pub fn parse_strided_tensor_data_c56(
     Ok(VsfType::q_c56(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c57(
     data: &[u8],
     pointer: &mut usize,
@@ -3794,6 +3936,7 @@ pub fn parse_strided_tensor_data_c57(
     Ok(VsfType::q_c57(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c63(
     data: &[u8],
     pointer: &mut usize,
@@ -3821,6 +3964,7 @@ pub fn parse_strided_tensor_data_c63(
     Ok(VsfType::q_c63(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c64(
     data: &[u8],
     pointer: &mut usize,
@@ -3848,6 +3992,7 @@ pub fn parse_strided_tensor_data_c64(
     Ok(VsfType::q_c64(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c65(
     data: &[u8],
     pointer: &mut usize,
@@ -3875,6 +4020,7 @@ pub fn parse_strided_tensor_data_c65(
     Ok(VsfType::q_c65(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c66(
     data: &[u8],
     pointer: &mut usize,
@@ -3902,6 +4048,7 @@ pub fn parse_strided_tensor_data_c66(
     Ok(VsfType::q_c66(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c67(
     data: &[u8],
     pointer: &mut usize,
@@ -3929,6 +4076,7 @@ pub fn parse_strided_tensor_data_c67(
     Ok(VsfType::q_c67(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c73(
     data: &[u8],
     pointer: &mut usize,
@@ -3956,6 +4104,7 @@ pub fn parse_strided_tensor_data_c73(
     Ok(VsfType::q_c73(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c74(
     data: &[u8],
     pointer: &mut usize,
@@ -3983,6 +4132,7 @@ pub fn parse_strided_tensor_data_c74(
     Ok(VsfType::q_c74(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c75(
     data: &[u8],
     pointer: &mut usize,
@@ -4010,6 +4160,7 @@ pub fn parse_strided_tensor_data_c75(
     Ok(VsfType::q_c75(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c76(
     data: &[u8],
     pointer: &mut usize,
@@ -4037,6 +4188,7 @@ pub fn parse_strided_tensor_data_c76(
     Ok(VsfType::q_c76(StridedTensor::new(shape, stride, values)))
 }
 
+#[cfg(feature = "spirix")]
 pub fn parse_strided_tensor_data_c77(
     data: &[u8],
     pointer: &mut usize,

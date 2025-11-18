@@ -219,6 +219,23 @@ fn rebuild_with_header(
 
         // Check if converged
         if new_header_size == prev_header_size {
+            // Extract signatures from fields BEFORE we consume them
+            let field_signatures: Vec<Option<VsfType>> = fields.iter()
+                .map(|f| {
+                    if let Some(ref sig) = f.signature {
+                        let sig_bytes = match sig {
+                            VsfType::ge(bytes) => bytes,
+                            VsfType::gp(bytes) => bytes,
+                            VsfType::gr(bytes) => bytes,
+                            _ => &vec![],
+                        };
+                        eprintln!("DEBUG rebuild_with_header: Extracting signature from field '{}', {} bytes, first 4: {:02X?}",
+                            f.name, sig_bytes.len(), if sig_bytes.len() >= 4 { &sig_bytes[0..4] } else { &sig_bytes[..] });
+                    }
+                    f.signature.clone()
+                })
+                .collect();
+
             // Build final header with these offsets
             let mut final_header = VsfHeader::new(version, backward_compat);
             final_header.provenance_hash = VsfType::hp(vec![0u8; 32]);
@@ -232,13 +249,26 @@ fn rebuild_with_header(
             // Append section data
             new_file.extend_from_slice(&old_data[old_header_end..]);
 
-            // Compute and write provenance hash (hp)
+            // Compute and write provenance hash (hp) - this zeros signatures internally
             let hp_hash = compute_provenance_hash(&new_file)?;
             new_file = write_provenance_hash(new_file, &hp_hash)?;
 
-            // Compute and write rolling hash (hb)
+            // Compute and write rolling hash (hb) - this zeros hb internally
             let hb_hash = compute_file_hash(&new_file)?;
-            return write_file_hash(new_file, &hb_hash);
+            new_file = write_file_hash(new_file, &hb_hash)?;
+
+            // Write all header field signatures (ge/gp/gr) into placeholders
+            // This must come AFTER hash computation since hashes are computed with signatures zeroed
+            // Use the signatures we extracted earlier, not the parsed ones (which are all zeros)
+            eprintln!("DEBUG rebuild_with_header: About to call write_header_field_signatures_from_list with {} signatures", field_signatures.len());
+            new_file = write_header_field_signatures_from_list(new_file, field_signatures)?;
+
+            // DEBUG: Check if signature is in bytes
+            if new_file.len() > 120 {
+                eprintln!("DEBUG rebuild_with_header: Bytes 0x70-0x7F = {:02X?}", &new_file[0x70..0x80]);
+            }
+
+            return Ok(new_file);
         }
 
         // Adjust offsets for next iteration
@@ -321,19 +351,92 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
                 ));
             }
 
-            // Clone file and zero out the hash bytes
+            // Clone file and zero out all crypto fields: hp, hb (if present), ge (if present in header fields)
             let mut temp_bytes = vsf_bytes.to_vec();
             let hash_start = find_hp_value_position(&temp_bytes, hash_position)?;
 
+            // Zero out hp field
             for i in 0..32 {
                 temp_bytes[hash_start + i] = 0;
             }
+
+            // Check for optional hb (rolling hash) after hp
+            let mut ptr_after_hp = pointer;
+            if ptr_after_hp < temp_bytes.len() && temp_bytes[ptr_after_hp] == b'h' {
+                let hb_position = ptr_after_hp;
+                let hb_type = parse(&temp_bytes, &mut ptr_after_hp)
+                    .map_err(|e| format!("Failed to parse rolling hash: {}", e))?;
+                if let VsfType::hb(hb_bytes) = hb_type {
+                    if hb_bytes.len() == 32 {
+                        let hb_start = find_hash_value_position(&temp_bytes, hb_position)?;
+                        // Zero out hb field
+                        for i in 0..32 {
+                            temp_bytes[hb_start + i] = 0;
+                        }
+                    }
+                }
+            }
+
+            // Now we need to find and zero out any ge/gp/gr signatures in header fields
+            // This requires parsing the header fields which come after the field count
+            // For now, we'll scan for signature fields and zero them
+            zero_all_signatures(&mut temp_bytes)?;
 
             // Compute BLAKE3 hash of entire file
             let computed_hash = blake3::hash(&temp_bytes);
             Ok(*computed_hash.as_bytes())
         }
         _ => Err("Expected BLAKE3 provenance hash (hp)".to_string()),
+    }
+}
+
+/// Zero out all signature fields (ge, gp, gr) in the VSF file
+fn zero_all_signatures(vsf_bytes: &mut Vec<u8>) -> Result<(), String> {
+    let mut ptr = 0;
+    while ptr < vsf_bytes.len() - 1 {
+        // Look for signature markers: ge, gp, gr
+        if vsf_bytes[ptr] == b'g' && (vsf_bytes[ptr+1] == b'e' || vsf_bytes[ptr+1] == b'p' || vsf_bytes[ptr+1] == b'r') {
+            let sig_position = ptr;
+            let sig_type = match parse(vsf_bytes, &mut ptr) {
+                Ok(t) => t,
+                Err(_) => {
+                    ptr = sig_position + 1;
+                    continue;
+                }
+            };
+
+            match sig_type {
+                VsfType::ge(sig_bytes) | VsfType::gp(sig_bytes) | VsfType::gr(sig_bytes) => {
+                    let sig_len = sig_bytes.len();
+                    if let Ok(sig_start) = find_signature_value_position(vsf_bytes, sig_position, sig_len) {
+                        // Zero out signature
+                        for i in 0..sig_len {
+                            vsf_bytes[sig_start + i] = 0;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            ptr += 1;
+        }
+    }
+    Ok(())
+}
+
+/// Find the position of signature value bytes within the encoded signature type
+fn find_signature_value_position(data: &[u8], sig_marker_pos: usize, sig_len: usize) -> Result<usize, String> {
+    let mut pos = sig_marker_pos;
+    let sig_type = parse(data, &mut pos).map_err(|e| format!("Failed to parse signature: {}", e))?;
+
+    match sig_type {
+        VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) => {
+            // pos now points AFTER the signature
+            // Calculate where the signature bytes started
+            let sig_start = pos - bytes.len();
+            Ok(sig_start)
+        }
+        _ => Err("Expected signature type (ge/gp/gr)".to_string()),
     }
 }
 
@@ -602,6 +705,150 @@ fn find_hash_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize
     }
 }
 
+/// Write all header field signatures from the parsed header into their placeholders
+///
+/// This function scans the header for all signature placeholders (ge/gp/gr with zeros)
+/// and writes the actual signature bytes from the parsed header fields.
+///
+/// # Arguments
+/// * `vsf_bytes` - Complete VSF file bytes with signature placeholders (zeros)
+///
+/// # Returns
+/// Modified VSF bytes with actual signature values written
+/// Write header field signatures from a provided list (instead of parsing)
+/// This is used when we already have the signature bytes extracted before flattening
+fn write_header_field_signatures_from_list(mut vsf_bytes: Vec<u8>, field_signatures: Vec<Option<VsfType>>) -> Result<Vec<u8>, String> {
+    eprintln!("DEBUG write_from_list: Called with {} field signatures", field_signatures.len());
+
+    // Parse the header just to get header_end (don't extract signatures from it)
+    let header = parse_full_header(&vsf_bytes)?;
+
+    // Extract signature bytes from the provided list
+    let mut signatures = Vec::new();
+    for sig_opt in field_signatures {
+        if let Some(sig_vsf) = sig_opt {
+            let sig_bytes = match sig_vsf {
+                VsfType::ge(bytes) => bytes,
+                VsfType::gp(bytes) => bytes,
+                VsfType::gr(bytes) => bytes,
+                _ => continue,
+            };
+            eprintln!("DEBUG write_from_list: Extracted signature {} bytes, first 4: {:02X?}", sig_bytes.len(), if sig_bytes.len() >= 4 { &sig_bytes[0..4] } else { &sig_bytes[..] });
+            signatures.push(sig_bytes);
+        }
+    }
+    eprintln!("DEBUG write_from_list: Total signatures to write: {}", signatures.len());
+
+    // Now scan header for signature placeholders and write them
+    // We scan only up to header_end
+    let header_end = header.header_end;
+    eprintln!("DEBUG write_from_list: Header ends at byte {}", header_end);
+    let mut sig_index = 0;
+
+    let mut pos = 0;
+    while pos < header_end - 1 && sig_index < signatures.len() {
+        if vsf_bytes[pos] == b'g' &&
+           (vsf_bytes[pos+1] == b'e' || vsf_bytes[pos+1] == b'p' || vsf_bytes[pos+1] == b'r') {
+            // Found potential signature marker
+            eprintln!("DEBUG write_from_list: Found signature marker at pos {}", pos);
+            let mut test_ptr = pos;
+            if let Ok(sig_type) = parse(&vsf_bytes, &mut test_ptr) {
+                match sig_type {
+                    VsfType::ge(test_bytes) | VsfType::gp(test_bytes) | VsfType::gr(test_bytes) => {
+                        eprintln!("DEBUG write_from_list: Parsed signature, {} bytes, all zeros: {}", test_bytes.len(), test_bytes.iter().all(|&b| b == 0));
+                        // Check if this is all zeros (placeholder)
+                        if test_bytes.iter().all(|&b| b == 0) && test_bytes.len() == signatures[sig_index].len() {
+                            // Found a placeholder - write the signature
+                            let sig_start = test_ptr - test_bytes.len();
+                            eprintln!("DEBUG write_from_list: Writing signature at byte {}, first 4 bytes: {:02X?}", sig_start, &signatures[sig_index][0..4]);
+                            vsf_bytes[sig_start..sig_start + signatures[sig_index].len()].copy_from_slice(&signatures[sig_index]);
+                            eprintln!("DEBUG write_from_list: After write, bytes at sig_start: {:02X?}", &vsf_bytes[sig_start..sig_start+4]);
+                            sig_index += 1;
+                        }
+                        pos = test_ptr;  // Continue after this signature
+                    }
+                    _ => {
+                        pos += 1;
+                    }
+                }
+            } else {
+                pos += 1;
+            }
+        } else {
+            pos += 1;
+        }
+    }
+    eprintln!("DEBUG write_from_list: Finished scanning, wrote {} signatures", sig_index);
+
+    Ok(vsf_bytes)
+}
+
+fn write_header_field_signatures(mut vsf_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    // Parse the full header to get all fields with their signatures
+    let header = parse_full_header(&vsf_bytes)?;
+
+    // Get all signature bytes from header fields
+    let mut signatures = Vec::new();
+    for field in &header.fields {
+        if let Some(ref sig_vsf) = field.signature {
+            let sig_bytes = match sig_vsf {
+                VsfType::ge(bytes) => bytes.clone(),
+                VsfType::gp(bytes) => bytes.clone(),
+                VsfType::gr(bytes) => bytes.clone(),
+                _ => continue,
+            };
+            eprintln!("DEBUG: Found signature in header field, {} bytes", sig_bytes.len());
+            signatures.push(sig_bytes);
+        }
+    }
+    eprintln!("DEBUG: Total signatures to write: {}", signatures.len());
+
+    // Now scan header for signature placeholders and write them
+    // We scan only up to header_end
+    let header_end = header.header_end;
+    eprintln!("DEBUG: Header ends at byte {}", header_end);
+    let mut sig_index = 0;
+
+    let mut pos = 0;
+    while pos < header_end - 1 && sig_index < signatures.len() {
+        if vsf_bytes[pos] == b'g' &&
+           (vsf_bytes[pos+1] == b'e' || vsf_bytes[pos+1] == b'p' || vsf_bytes[pos+1] == b'r') {
+            // Found potential signature marker
+            eprintln!("DEBUG: Found signature marker at pos {}", pos);
+            let mut test_ptr = pos;
+            if let Ok(sig_type) = parse(&vsf_bytes, &mut test_ptr) {
+                match sig_type {
+                    VsfType::ge(test_bytes) | VsfType::gp(test_bytes) | VsfType::gr(test_bytes) => {
+                        eprintln!("DEBUG: Parsed signature, {} bytes, all zeros: {}", test_bytes.len(), test_bytes.iter().all(|&b| b == 0));
+                        // Check if this is all zeros (placeholder)
+                        if test_bytes.iter().all(|&b| b == 0) && test_bytes.len() == signatures[sig_index].len() {
+                            // Found a placeholder - write the signature
+                            let sig_start = test_ptr - test_bytes.len();
+                            eprintln!("DEBUG: test_ptr={}, test_bytes.len()={}, sig_start={}", test_ptr, test_bytes.len(), sig_start);
+                            eprintln!("DEBUG: Byte at sig_start (before write): 0x{:02X}", vsf_bytes[sig_start]);
+                            eprintln!("DEBUG: First 4 signature bytes: {:02X?}", &signatures[sig_index][0..4]);
+                            vsf_bytes[sig_start..sig_start + signatures[sig_index].len()].copy_from_slice(&signatures[sig_index]);
+                            eprintln!("DEBUG: Byte at sig_start (after write): 0x{:02X}", vsf_bytes[sig_start]);
+                            sig_index += 1;
+                        }
+                        pos = test_ptr;  // Continue after this signature
+                    }
+                    _ => {
+                        pos += 1;
+                    }
+                }
+            } else {
+                pos += 1;
+            }
+        } else {
+            pos += 1;
+        }
+    }
+    eprintln!("DEBUG: Finished scanning, wrote {} signatures", sig_index);
+
+    Ok(vsf_bytes)
+}
+
 ///
 /// This function:
 /// 0. Finds the specified section in the header
@@ -626,6 +873,7 @@ fn find_hash_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize
 /// let signing_key = SigningKey::generate(&mut OsRng);
 /// let bytes = sign_section(bytes, "raw", signing_key.as_bytes())?;
 /// ```
+#[cfg(feature = "crypto")]
 pub fn sign_section(
     vsf_bytes: Vec<u8>,
     section_name: &str,
@@ -663,7 +911,9 @@ pub fn sign_section(
     let signature = signing_key.sign(section_bytes);
 
     // Create signature VsfType (Ed25519 signature is always 64 bytes)
-    let sig_vsf = VsfType::ge(signature.to_bytes().to_vec());
+    let sig_bytes = signature.to_bytes().to_vec();
+    eprintln!("DEBUG sign_section: Generated signature, first 4 bytes: {:02X?}", &sig_bytes[0..4]);
+    let sig_vsf = VsfType::ge(sig_bytes);
 
     // Update header fields - add signature to target section
     let mut new_fields = header.fields.clone();

@@ -28,6 +28,8 @@ pub enum ValidationError {
     },
     /// Section not found in registry
     UnknownSection { name: String },
+    /// Type constraint violation
+    TypeConstraintViolation { constraint: String, got: String },
     /// Custom validation error
     Custom(String),
 }
@@ -80,6 +82,9 @@ impl fmt::Display for ValidationError {
             }
             ValidationError::UnknownSection { name } => {
                 write!(f, "Unknown section type '{}'", name)
+            }
+            ValidationError::TypeConstraintViolation { constraint, got } => {
+                write!(f, "Type constraint violation: expected {}, got {}", constraint, got)
             }
             ValidationError::Custom(msg) => write!(f, "{}", msg),
         }
