@@ -117,7 +117,7 @@ impl FieldValue {
             bytes.push(b':');
             for (i, value) in self.values.iter().enumerate() {
                 if i > 0 {
-                    bytes.push(b',');  // Comma separator between values
+                    bytes.push(b','); // Comma separator between values
                 }
                 bytes.extend(value.flatten());
             }
@@ -223,7 +223,7 @@ impl SectionSchema {
 #[derive(Debug)]
 pub struct SectionBuilder {
     schema: SectionSchema,
-    fields: Vec<FieldValue>,  // Multi-valued fields
+    fields: Vec<FieldValue>, // Multi-valued fields
 }
 
 impl SectionBuilder {
@@ -359,9 +359,7 @@ impl SectionBuilder {
 
         // Check all required fields are set
         for field_schema in &self.schema.fields {
-            if field_schema.required
-                && !self.fields.iter().any(|f| f.name == field_schema.name)
-            {
+            if field_schema.required && !self.fields.iter().any(|f| f.name == field_schema.name) {
                 return Err(ValidationError::MissingField {
                     section: self.schema.name.clone(),
                     field: field_schema.name.clone(),
@@ -461,8 +459,9 @@ impl SectionBuilder {
             ptr += 1;
 
             // Parse field name (d"name")
-            let field_name_vsf = parse(section_bytes, &mut ptr)
-                .map_err(|e| ValidationError::Custom(format!("Failed to parse field name: {}", e)))?;
+            let field_name_vsf = parse(section_bytes, &mut ptr).map_err(|e| {
+                ValidationError::Custom(format!("Failed to parse field name: {}", e))
+            })?;
             let field_name = match field_name_vsf {
                 crate::VsfType::d(name) => name,
                 _ => {
@@ -483,7 +482,7 @@ impl SectionBuilder {
 
             // Check for ':' - if present, parse values
             if ptr < section_bytes.len() && section_bytes[ptr] == b':' {
-                ptr += 1;  // Skip ':'
+                ptr += 1; // Skip ':'
 
                 // Parse comma-separated values
                 loop {
@@ -515,10 +514,10 @@ impl SectionBuilder {
                     }
 
                     if section_bytes[ptr] == b',' {
-                        ptr += 1;  // Skip comma, continue parsing values
+                        ptr += 1; // Skip comma, continue parsing values
                         continue;
                     } else if section_bytes[ptr] == b')' {
-                        break;  // End of field
+                        break; // End of field
                     } else {
                         return Err(ValidationError::Custom(format!(
                             "Expected ',' or ')' after value in field '{}', found {:?}",
@@ -557,8 +556,8 @@ impl SectionBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::constraint::TypeConstraint;
+    use super::*;
 
     #[test]
     fn test_section_builder_round_trip() {
@@ -698,10 +697,10 @@ mod tests {
     fn test_mixed_single_multi_empty_fields() {
         // Test a realistic mix of field types
         let schema = SectionSchema::new("data")
-            .field("port", TypeConstraint::AnyUnsigned)       // Single value
-            .field("sizes", TypeConstraint::AnyUnsigned)      // Multiple values
-            .field("cloudy", TypeConstraint::AnyUnsigned)     // Empty
-            .field("temps", TypeConstraint::AnyFloat);        // Multiple values
+            .field("port", TypeConstraint::AnyUnsigned) // Single value
+            .field("sizes", TypeConstraint::AnyUnsigned) // Multiple values
+            .field("cloudy", TypeConstraint::AnyUnsigned) // Empty
+            .field("temps", TypeConstraint::AnyFloat); // Multiple values
 
         let builder = schema
             .build()
@@ -733,8 +732,7 @@ mod tests {
     #[test]
     fn test_add_value_method() {
         // Test incrementally adding values to a field
-        let schema = SectionSchema::new("test")
-            .field("values", TypeConstraint::AnyUnsigned);
+        let schema = SectionSchema::new("test").field("values", TypeConstraint::AnyUnsigned);
 
         let builder = schema
             .build()

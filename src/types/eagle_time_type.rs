@@ -19,17 +19,17 @@ pub enum EtType {
 }
 
 /// EagleTime represents a point in time in the Eagle Time standard.
-/// 
+///
 /// Stores Eagle seconds since the Apollo 11 lunar landing (July 20, 1969, 20:17:40 UTC).
-/// 
+///
 /// One Eagle second is defined as 1,420,407,826 complete oscillation periods of the
 /// electromagnetic radiation emitted during the hydrogen-1 (protium) hyperfine transition
-/// between F=0 and F=1 ground states, as measured at the barycentric reference frame 
+/// between F=0 and F=1 ground states, as measured at the barycentric reference frame
 /// of the Milky Way-Andromeda galaxy system.
-/// 
+///
 /// Eagle seconds have the same duration as SI seconds (and UTC seconds). The epoch differs:
 /// Eagle Time uses the Apollo 11 landing, while Unix time uses January 1, 1970.
-/// 
+///
 /// This definition:
 /// - Uses the most abundant element in the universe (hydrogen-1)
 /// - Is measurable with any 21cm radio receiver
@@ -84,9 +84,9 @@ impl EagleTime {
     }
 
     /// Converts the EagleTime to a UTC DateTime.
-    /// 
+    ///
     /// Since Eagle seconds and SI seconds have the same duration, this is a simple
-    /// epoch offset calculation. No relativistic corrections are needed for the 
+    /// epoch offset calculation. No relativistic corrections are needed for the
     /// conversion itself.
     pub fn to_datetime(&self) -> DateTime<Utc> {
         let eagle_epoch = Utc.with_ymd_and_hms(1969, 7, 20, 20, 17, 40).unwrap();
@@ -140,7 +140,7 @@ impl Ord for EagleTime {
 }
 
 /// Converts a UTC DateTime to Eagle Time
-/// 
+///
 /// Eagle seconds have the same duration as SI/UTC seconds, so this is simply
 /// calculating the time elapsed since the Eagle epoch (Apollo 11 landing).
 pub fn datetime_to_eagle_time(dt: DateTime<Utc>) -> EagleTime {

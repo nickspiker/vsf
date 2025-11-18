@@ -166,7 +166,9 @@ fn main() {
             eprintln!("Warning: frequencies.bin not available, skipping Huffman table generation");
             eprintln!("Huffman text compression will not be available in this build.");
             if download_result.is_err() {
-                eprintln!("Download failed (likely building in restricted environment like docs.rs)");
+                eprintln!(
+                    "Download failed (likely building in restricted environment like docs.rs)"
+                );
             }
             return; // Skip Huffman generation, library will still compile
         }

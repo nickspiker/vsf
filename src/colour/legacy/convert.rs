@@ -211,7 +211,9 @@ pub fn linearize_bt709_u16(encoded: u16) -> f32 {
 /// - Output clamped to [4096, 60160]
 #[inline]
 pub fn encode_bt709_u16(linear: f32) -> u16 {
-    (encode_bt709(linear) * 56064. + 4096.).round().clamp(4096., 60160.) as u16
+    (encode_bt709(linear) * 56064. + 4096.)
+        .round()
+        .clamp(4096., 60160.) as u16
 }
 
 // ==================== sRGB RGB TRIPLE HELPERS ====================

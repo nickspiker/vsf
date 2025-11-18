@@ -1,5 +1,5 @@
-use vsf::types::{VsfType, EtType};
 use chrono::Utc;
+use vsf::types::{EtType, VsfType};
 
 fn main() {
     // Simulate what vsf_builder does
@@ -68,7 +68,10 @@ fn main() {
         pointer += 1;
         let len_marker = bytes[pointer];
         pointer += 1;
-        println!("Header length type at {}, marker={}, pointer now={}", hl_start, len_marker as char, pointer);
+        println!(
+            "Header length type at {}, marker={}, pointer now={}",
+            hl_start, len_marker as char, pointer
+        );
     }
 
     // Parse version (z)
@@ -77,7 +80,10 @@ fn main() {
         pointer += 1;
         let len_marker = bytes[pointer];
         pointer += 1;
-        println!("Version at {}, marker={}, pointer now={}", v_start, len_marker as char, pointer);
+        println!(
+            "Version at {}, marker={}, pointer now={}",
+            v_start, len_marker as char, pointer
+        );
     }
 
     // Parse backward compat (y)
@@ -86,7 +92,10 @@ fn main() {
         pointer += 1;
         let len_marker = bytes[pointer];
         pointer += 1;
-        println!("Backward compat at {}, marker={}, pointer now={}", bc_start, len_marker as char, pointer);
+        println!(
+            "Backward compat at {}, marker={}, pointer now={}",
+            bc_start, len_marker as char, pointer
+        );
     }
 
     // Parse creation time (e)
@@ -104,7 +113,10 @@ fn main() {
     }
 
     // Now we should be at the hash
-    println!("\nAt position {}: byte = 0x{:02X} ('{}')", pointer, bytes[pointer], bytes[pointer] as char);
+    println!(
+        "\nAt position {}: byte = 0x{:02X} ('{}')",
+        pointer, bytes[pointer], bytes[pointer] as char
+    );
     if bytes[pointer] == b'h' {
         println!("SUCCESS: Found hash placeholder at correct position!");
     } else {

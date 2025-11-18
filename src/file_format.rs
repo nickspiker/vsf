@@ -116,9 +116,9 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 pub struct VsfHeader {
     pub version: usize,
     pub backward_compat: usize,
-    pub creation_time: VsfType,           // Creation timestamp (ef5 for ~2min precision)
-    pub provenance_hash: VsfType,         // Required: BLAKE3 hash of immutable content (hp)
-    pub rolling_hash: Option<VsfType>,    // Optional: BLAKE3 hash of current state (hb)
+    pub creation_time: VsfType, // Creation timestamp (ef5 for ~2min precision)
+    pub provenance_hash: VsfType, // Required: BLAKE3 hash of immutable content (hp)
+    pub rolling_hash: Option<VsfType>, // Optional: BLAKE3 hash of current state (hb)
     pub fields: Vec<HeaderField>,
 }
 
@@ -284,62 +284,84 @@ impl VsfHeader {
         let mut ptr = 4; // After "RÅ<"
 
         // Parse version (z)
-        let version_type = parse(data, &mut ptr)
-            .map_err(|e| format!("Failed to parse version: {}", e))?;
+        let version_type =
+            parse(data, &mut ptr).map_err(|e| format!("Failed to parse version: {}", e))?;
         let version = match version_type {
             VsfType::z(v) => v,
             _ => return Err(format!("Expected version (z), got {:?}", version_type)),
         };
 
         // Parse backward compatibility (y)
-        let backward_compat_type = parse(data, &mut ptr)
-            .map_err(|e| format!("Failed to parse backward_compat: {}", e))?;
+        let backward_compat_type =
+            parse(data, &mut ptr).map_err(|e| format!("Failed to parse backward_compat: {}", e))?;
         let backward_compat = match backward_compat_type {
             VsfType::y(v) => v,
-            _ => return Err(format!("Expected backward_compat (y), got {:?}", backward_compat_type)),
+            _ => {
+                return Err(format!(
+                    "Expected backward_compat (y), got {:?}",
+                    backward_compat_type
+                ))
+            }
         };
 
         // Parse header length (b) - we validate but don't use it for parsing
-        let header_length_type = parse(data, &mut ptr)
-            .map_err(|e| format!("Failed to parse header_length: {}", e))?;
+        let header_length_type =
+            parse(data, &mut ptr).map_err(|e| format!("Failed to parse header_length: {}", e))?;
         let _header_length = match header_length_type {
             VsfType::b(len, _) => len,
-            _ => return Err(format!("Expected header_length (b), got {:?}", header_length_type)),
+            _ => {
+                return Err(format!(
+                    "Expected header_length (b), got {:?}",
+                    header_length_type
+                ))
+            }
         };
 
         // Parse creation time (e)
-        let creation_time = parse(data, &mut ptr)
-            .map_err(|e| format!("Failed to parse creation_time: {}", e))?;
+        let creation_time =
+            parse(data, &mut ptr).map_err(|e| format!("Failed to parse creation_time: {}", e))?;
         if !matches!(creation_time, VsfType::e(_)) {
-            return Err(format!("Expected creation_time (e), got {:?}", creation_time));
+            return Err(format!(
+                "Expected creation_time (e), got {:?}",
+                creation_time
+            ));
         }
 
         // Parse provenance hash (hp)
-        let provenance_hash = parse(data, &mut ptr)
-            .map_err(|e| format!("Failed to parse provenance_hash: {}", e))?;
+        let provenance_hash =
+            parse(data, &mut ptr).map_err(|e| format!("Failed to parse provenance_hash: {}", e))?;
         if !matches!(provenance_hash, VsfType::hp(_)) {
-            return Err(format!("Expected provenance_hash (hp), got {:?}", provenance_hash));
+            return Err(format!(
+                "Expected provenance_hash (hp), got {:?}",
+                provenance_hash
+            ));
         }
 
         // Check for optional rolling hash (hb) or field count (n)
         let mut rolling_hash = None;
         let field_count_type = if ptr < data.len() && data[ptr] == b'h' {
             // Optional rolling hash present
-            rolling_hash = Some(parse(data, &mut ptr)
-                .map_err(|e| format!("Failed to parse rolling_hash: {}", e))?);
+            rolling_hash = Some(
+                parse(data, &mut ptr)
+                    .map_err(|e| format!("Failed to parse rolling_hash: {}", e))?,
+            );
 
             // Now parse field count
             parse(data, &mut ptr)
                 .map_err(|e| format!("Failed to parse field_count after rolling_hash: {}", e))?
         } else {
             // No rolling hash, parse field count directly
-            parse(data, &mut ptr)
-                .map_err(|e| format!("Failed to parse field_count: {}", e))?
+            parse(data, &mut ptr).map_err(|e| format!("Failed to parse field_count: {}", e))?
         };
 
         let field_count = match field_count_type {
             VsfType::n(count) => count,
-            _ => return Err(format!("Expected field_count (n), got {:?}", field_count_type)),
+            _ => {
+                return Err(format!(
+                    "Expected field_count (n), got {:?}",
+                    field_count_type
+                ))
+            }
         };
 
         // Parse header fields (section pointers)
@@ -347,7 +369,11 @@ impl VsfHeader {
         for i in 0..field_count {
             // Expect opening '('
             if ptr >= data.len() || data[ptr] != b'(' {
-                return Err(format!("Expected '(' for header field {}, found {:?}", i, data.get(ptr)));
+                return Err(format!(
+                    "Expected '(' for header field {}, found {:?}",
+                    i,
+                    data.get(ptr)
+                ));
             }
             ptr += 1;
 
@@ -356,7 +382,12 @@ impl VsfHeader {
                 .map_err(|e| format!("Failed to parse field {} name: {}", i, e))?;
             let name = match name_type {
                 VsfType::d(n) => n,
-                _ => return Err(format!("Expected section name (d) for field {}, got {:?}", i, name_type)),
+                _ => {
+                    return Err(format!(
+                        "Expected section name (d) for field {}, got {:?}",
+                        i, name_type
+                    ))
+                }
             };
 
             // Parse optional hash, signature, key, wrap
@@ -369,23 +400,35 @@ impl VsfHeader {
             while ptr < data.len() && data[ptr] != b'o' {
                 match data[ptr] {
                     b'h' => {
-                        hash = Some(parse(data, &mut ptr)
-                            .map_err(|e| format!("Failed to parse hash for field {}: {}", i, e))?);
+                        hash =
+                            Some(parse(data, &mut ptr).map_err(|e| {
+                                format!("Failed to parse hash for field {}: {}", i, e)
+                            })?);
                     }
                     b'g' => {
-                        signature = Some(parse(data, &mut ptr)
-                            .map_err(|e| format!("Failed to parse signature for field {}: {}", i, e))?);
+                        signature = Some(parse(data, &mut ptr).map_err(|e| {
+                            format!("Failed to parse signature for field {}: {}", i, e)
+                        })?);
                     }
                     b'k' => {
-                        key = Some(parse(data, &mut ptr)
-                            .map_err(|e| format!("Failed to parse key for field {}: {}", i, e))?);
+                        key =
+                            Some(parse(data, &mut ptr).map_err(|e| {
+                                format!("Failed to parse key for field {}: {}", i, e)
+                            })?);
                     }
                     b'v' => {
-                        wrap = Some(parse(data, &mut ptr)
-                            .map_err(|e| format!("Failed to parse wrap for field {}: {}", i, e))?);
+                        wrap =
+                            Some(parse(data, &mut ptr).map_err(|e| {
+                                format!("Failed to parse wrap for field {}: {}", i, e)
+                            })?);
                     }
                     b')' => break, // End of field
-                    _ => return Err(format!("Unexpected byte '{}' in header field {}", data[ptr] as char, i)),
+                    _ => {
+                        return Err(format!(
+                            "Unexpected byte '{}' in header field {}",
+                            data[ptr] as char, i
+                        ))
+                    }
                 }
             }
 
@@ -394,7 +437,12 @@ impl VsfHeader {
                 .map_err(|e| format!("Failed to parse offset for field {}: {}", i, e))?;
             let offset_bytes = match offset_type {
                 VsfType::o(offset) => offset,
-                _ => return Err(format!("Expected offset (o) for field {}, got {:?}", i, offset_type)),
+                _ => {
+                    return Err(format!(
+                        "Expected offset (o) for field {}, got {:?}",
+                        i, offset_type
+                    ))
+                }
             };
 
             // Parse size (b)
@@ -402,7 +450,12 @@ impl VsfHeader {
                 .map_err(|e| format!("Failed to parse size for field {}: {}", i, e))?;
             let size_bytes = match size_type {
                 VsfType::b(size, _) => size,
-                _ => return Err(format!("Expected size (b) for field {}, got {:?}", i, size_type)),
+                _ => {
+                    return Err(format!(
+                        "Expected size (b) for field {}, got {:?}",
+                        i, size_type
+                    ))
+                }
             };
 
             // Parse child count (n) - optional if encrypted (wrap present)
@@ -413,13 +466,22 @@ impl VsfHeader {
                     .map_err(|e| format!("Failed to parse count for field {}: {}", i, e))?;
                 match count_type {
                     VsfType::n(count) => count,
-                    _ => return Err(format!("Expected count (n) for field {}, got {:?}", i, count_type)),
+                    _ => {
+                        return Err(format!(
+                            "Expected count (n) for field {}, got {:?}",
+                            i, count_type
+                        ))
+                    }
                 }
             };
 
             // Expect closing ')'
             if ptr >= data.len() || data[ptr] != b')' {
-                return Err(format!("Expected ')' for header field {}, found {:?}", i, data.get(ptr)));
+                return Err(format!(
+                    "Expected ')' for header field {}, found {:?}",
+                    i,
+                    data.get(ptr)
+                ));
             }
             ptr += 1;
 
@@ -437,7 +499,10 @@ impl VsfHeader {
 
         // Expect closing '>'
         if ptr >= data.len() || data[ptr] != b'>' {
-            return Err(format!("Expected '>' to close header, found {:?}", data.get(ptr)));
+            return Err(format!(
+                "Expected '>' to close header, found {:?}",
+                data.get(ptr)
+            ));
         }
         ptr += 1;
 
@@ -757,10 +822,10 @@ mod tests {
         section.add_field("width", VsfType::u(1920, false));
 
         // Test multi-value (colon + comma-separated values)
-        section.add_field_multi("resolution", vec![
-            VsfType::u(1920, false),
-            VsfType::u(1080, false),
-        ]);
+        section.add_field_multi(
+            "resolution",
+            vec![VsfType::u(1920, false), VsfType::u(1080, false)],
+        );
 
         let encoded = section.encode();
         let encoded_str = String::from_utf8_lossy(&encoded);
@@ -880,13 +945,13 @@ mod tests {
         let mut header = VsfHeader::new(1, 1);
         header.add_field(HeaderField {
             name: "encrypted_section".to_string(),
-            hash: Some(VsfType::hb(vec![0u8; 32])),  // BLAKE3 rolling hash
-            signature: Some(VsfType::ge(vec![0u8; 64])),  // Ed25519 signature
+            hash: Some(VsfType::hb(vec![0u8; 32])), // BLAKE3 rolling hash
+            signature: Some(VsfType::ge(vec![0u8; 64])), // Ed25519 signature
             key: Some(VsfType::kx(vec![0u8; 32])),  // X25519 key
-            wrap: Some(VsfType::v(0, vec![0u8; 0])),  // Encrypted marker
+            wrap: Some(VsfType::v(0, vec![0u8; 0])), // Encrypted marker
             offset_bytes: 512,
             size_bytes: 1024,
-            child_count: 0,  // Encrypted sections have n[0]
+            child_count: 0, // Encrypted sections have n[0]
         });
 
         // Encode it

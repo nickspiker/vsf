@@ -4,7 +4,7 @@
 //! rather than parallel type enums. This ensures complete coverage of all VsfType
 //! variants without duplication.
 
-use super::constraint::{TypeConstraint, vsf_type_name};
+use super::constraint::{vsf_type_name, TypeConstraint};
 use super::validate::ValidationResult;
 use crate::VsfType;
 
@@ -100,10 +100,10 @@ mod tests {
 
     #[test]
     fn test_field_with_default() {
-        let field = FieldSchema::new("timeout", TypeConstraint::AnyUnsigned)
-            .default(VsfType::u5(30));
+        let field =
+            FieldSchema::new("timeout", TypeConstraint::AnyUnsigned).default(VsfType::u5(30));
 
-        assert!(!field.required);  // default() makes it optional
+        assert!(!field.required); // default() makes it optional
         assert!(field.default.is_some());
     }
 }
