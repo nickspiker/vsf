@@ -1,6 +1,6 @@
-//! Section schema and builder with positional encoding
+//! Section schema and builder with named field encoding
 //!
-//! ## Design: Vec for Building, Positional for Wire Format
+//! ## Design: Vec for Building, Named Fields on Wire
 //!
 //! **Building phase (Vec<Option<VsfType>> indexed by field position):**
 //! ```rust
@@ -12,13 +12,13 @@
 //! // Vec has length = schema.fields.len(), uses Option for unset fields
 //! ```
 //!
-//! **Wire format (Positional - just the values):**
+//! **Wire format (Named fields with d-type keys):**
 //! ```text
-//! [d"camera" u5{800} f5{2.8} ef6{...}]
-//!    └─name   └─value[0] └─value[1] └─value[2]
-//!             (written in schema order: iso, aperture, timestamp)
+//! [d"camera" (d"iso":u5{800}) (d"aperture":f5{2.8}) (d"timestamp":ef6{...})]
+//!    └─name   └─field1          └─field2              └─field3
 //! ```
-//! Values encoded positionally in schema-defined order. Vec discarded after encode().
+//! Each field is encoded as `(d"field_name":value)`. This allows different sections
+//! to have different field types while maintaining type compression and schema validation.
 //!
 //! **Why Vec<Option<VsfType>> during building?**
 //! - Ergonomic field access by name: `builder.set("field_name", value)`
@@ -27,17 +27,18 @@
 //! - Compact memory: Vec length = number of fields in schema (typically 3-10)
 //! - Fast linear search: Finding field index in 3-10 element schema is faster than HashMap overhead
 //!
-//! **Why positional encoding on wire?**
-//! - Compact: No field names repeated in binary (30-50% size reduction)
-//! - Fast parsing: No string matching, direct positional decode
-//! - Schema-driven: Field semantics come from schema, not wire format
-//! - Forward compatible: Schema can add optional fields at end
+//! **Why named field encoding on wire?**
+//! - Type flexibility: Different sections can have different field types (u5, f6, etc.)
+//! - Compressible: Field names compress well (3-15 chars become 1-2 bytes with dictionary compression)
+//! - Order-independent parsing: Fields can be read in any order
+//! - Optional fields: Missing fields are simply omitted from encoding
+//! - Future-compatible: New fields can be added without breaking existing parsers
 //!
 //! **Concrete example with 3 fields:**
 //! ```text
 //! Schema defines:      ["iso", "aperture", "timestamp"]       (Vec<FieldSchema>)
 //! Builder stores:      [Some(u5(800)), Some(f5(2.8)), Some(e(...))]  (Vec<Option<VsfType>>)
-//! Wire bytes:          [d"camera" u5{800} f5{2.8} ef6{...}]          (no field names)
+//! Wire bytes:          [d"camera" (d"iso":u5{800}) (d"aperture":f5{2.8}) (d"timestamp":ef6{...})]
 //! ```
 //!
 //! ## Parse → Modify → Encode Workflow
@@ -237,10 +238,16 @@ impl SectionBuilder {
         // Section name as dictionary key
         bytes.extend(VsfType::d(self.schema.name.clone()).flatten());
 
-        // Encode field values in schema order (positional)
-        for field_value in &self.fields {
+        // Encode fields with names: (d"field_name":value)
+        for (i, field_value) in self.fields.iter().enumerate() {
             if let Some(value) = field_value {
+                let field_name = &self.schema.fields[i].name;
+                // (d"field_name":value)
+                bytes.push(b'(');
+                bytes.extend(VsfType::d(field_name.clone()).flatten());
+                bytes.push(b':');
                 bytes.extend(value.flatten());
+                bytes.push(b')');
             }
         }
 
@@ -254,12 +261,10 @@ impl SectionBuilder {
     /// This enables the parse → modify → encode workflow
     ///
     /// # Format
-    /// Values are encoded POSITIONALLY in schema order (no field names in bytes):
+    /// Fields are encoded with names: (d"field_name":value)
     /// ```text
-    /// [d"section_name" value1 value2 value3]
+    /// [d"section_name" (d"field1":value1) (d"field2":value2)]
     /// ```
-    ///
-    /// The schema defines which value corresponds to which field based on position.
     pub fn parse(schema: SectionSchema, section_bytes: &[u8]) -> ValidationResult<Self> {
         use crate::decoding::parse::parse;
 
@@ -297,25 +302,78 @@ impl SectionBuilder {
 
         let mut builder = SectionBuilder::new(schema.clone());
 
-        // Parse field values in schema order (positional)
-        for (i, field_schema) in schema.fields.iter().enumerate() {
-            // Check if we've hit the closing ']'
+        // Parse fields: (d"field_name":value)
+        loop {
+            // Skip whitespace
+            while ptr < section_bytes.len() && section_bytes[ptr].is_ascii_whitespace() {
+                ptr += 1;
+            }
+
+            // Check for end of section
             if ptr >= section_bytes.len() || section_bytes[ptr] == b']' {
-                // No more values - remaining fields are unset
                 break;
             }
 
-            // Parse the value
-            let value = parse(section_bytes, &mut ptr).map_err(|e| {
-                ValidationError::Custom(format!(
-                    "Failed to parse field '{}': {}",
-                    field_schema.name, e
-                ))
-            })?;
+            // Expect '(' to start field
+            if section_bytes[ptr] != b'(' {
+                return Err(ValidationError::Custom(format!(
+                    "Expected '(' to start field at position {}, found {:?}",
+                    ptr,
+                    section_bytes.get(ptr)
+                )));
+            }
+            ptr += 1;
 
-            // Validate and store directly at position i
-            field_schema.validate(&value)?;
-            builder.fields[i] = Some(value);
+            // Parse field name (d"name")
+            let field_name_vsf = parse(section_bytes, &mut ptr)
+                .map_err(|e| ValidationError::Custom(format!("Failed to parse field name: {}", e)))?;
+            let field_name = match field_name_vsf {
+                crate::VsfType::d(name) => name,
+                _ => {
+                    return Err(ValidationError::Custom(format!(
+                        "Expected field name (d), got {:?}",
+                        field_name_vsf
+                    )))
+                }
+            };
+
+            // Expect ':'
+            if ptr >= section_bytes.len() || section_bytes[ptr] != b':' {
+                return Err(ValidationError::Custom(format!(
+                    "Expected ':' after field name '{}', found {:?}",
+                    field_name,
+                    section_bytes.get(ptr)
+                )));
+            }
+            ptr += 1;
+
+            // Parse field value
+            let value = parse(section_bytes, &mut ptr)
+                .map_err(|e| ValidationError::Custom(format!("Failed to parse field '{}' value: {}", field_name, e)))?;
+
+            // Expect ')' to close field
+            if ptr >= section_bytes.len() || section_bytes[ptr] != b')' {
+                return Err(ValidationError::Custom(format!(
+                    "Expected ')' to close field '{}', found {:?}",
+                    field_name,
+                    section_bytes.get(ptr)
+                )));
+            }
+            ptr += 1;
+
+            // Find field in schema and validate
+            let field_index = schema
+                .fields
+                .iter()
+                .position(|f| f.name == field_name)
+                .ok_or_else(|| ValidationError::UnknownField {
+                    section: schema.name.clone(),
+                    field: field_name.clone(),
+                    allowed: schema.allowed_fields(),
+                })?;
+
+            schema.fields[field_index].validate(&value)?;
+            builder.fields[field_index] = Some(value);
         }
 
         // Expect ']' to close section

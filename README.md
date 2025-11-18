@@ -388,7 +388,7 @@ VsfType::x(text)  // Automatically compressed
 
 ✅ **Type-safe schema system**
 - Pattern-based TypeConstraint validation (no type system duplication)
-- Positional encoding (30-50% size reduction vs named fields)
+- Named field encoding with d-type keys: `(d"field_name":value)`
 - Automatic type conversion via IntoVsfType/FromVsfType traits
 - Parse → modify → re-encode workflow
 - Official schemas: image, camera, audio, network_peer, announce
