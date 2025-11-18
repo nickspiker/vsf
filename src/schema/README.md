@@ -325,6 +325,8 @@ This approach provides:
 
 **Ergonomic** - Automatic type conversion via IntoVsfType/FromVsfType traits
 
+**Flexible wire format** - Named fields with d-type keys, compressible and order-independent
+
 **Future-proof** - New VsfType variants automatically supported by category constraints (AnyUnsigned, etc.)
 
 ## Migration from Raw VsfType
