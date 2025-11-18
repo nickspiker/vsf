@@ -128,6 +128,56 @@ impl FieldValue {
             FieldValue::VsfType(vsf) => vsf.clone(),
         }
     }
+
+    /// Convert from VsfType for parsing
+    /// Returns Ok(FieldValue) or Err if the conversion is not supported
+    pub fn from_vsf_type(vsf: &VsfType) -> super::validate::ValidationResult<Self> {
+        use super::validate::ValidationError;
+        use crate::types::EtType;
+
+        match vsf {
+            // Unsigned integers - convert to appropriate size based on value
+            VsfType::u(v, _) => {
+                if *v <= u8::MAX as usize {
+                    Ok(FieldValue::U8(*v as u8))
+                } else if *v <= u16::MAX as usize {
+                    Ok(FieldValue::U16(*v as u16))
+                } else if *v <= u32::MAX as usize {
+                    Ok(FieldValue::U32(*v as u32))
+                } else {
+                    Ok(FieldValue::U64(*v as u64))
+                }
+            }
+            // Signed integers
+            VsfType::i(v) => {
+                if *v >= i8::MIN as isize && *v <= i8::MAX as isize {
+                    Ok(FieldValue::I8(*v as i8))
+                } else if *v >= i16::MIN as isize && *v <= i16::MAX as isize {
+                    Ok(FieldValue::I16(*v as i16))
+                } else if *v >= i32::MIN as isize && *v <= i32::MAX as isize {
+                    Ok(FieldValue::I32(*v as i32))
+                } else {
+                    Ok(FieldValue::I64(*v as i64))
+                }
+            }
+            // Floats
+            VsfType::f5(v) => Ok(FieldValue::F32(*v)),
+            VsfType::f6(v) => Ok(FieldValue::F64(*v)),
+            // Eagle Time
+            VsfType::e(et) => match et {
+                EtType::f5(v) => Ok(FieldValue::EagleTimeF32(*v)),
+                EtType::f6(v) => Ok(FieldValue::EagleTimeF64(*v)),
+                EtType::u(v) => Ok(FieldValue::EagleTimeF64(*v as f64)),
+                EtType::i(v) => Ok(FieldValue::EagleTimeF64(*v as f64)),
+            },
+            // Strings
+            VsfType::x(s) => Ok(FieldValue::String(s.clone())),
+            VsfType::d(s) => Ok(FieldValue::String(s.clone())),
+            // Hashes and binary data - wrap in VsfType for now
+            // (could add specific variants if needed)
+            _ => Ok(FieldValue::VsfType(vsf.clone())),
+        }
+    }
 }
 
 /// Type-safe conversions from Rust primitives to FieldValue

@@ -138,11 +138,141 @@ impl SectionBuilder {
 
     /// Parse a section from VSF bytes into this builder
     /// This enables the parse → modify → encode workflow
+    ///
+    /// # Format
+    /// Values are encoded POSITIONALLY in schema order (no field names in bytes):
+    /// ```text
+    /// [d"section_name" value1 value2 value3]
+    /// ```
+    ///
+    /// The schema defines which value corresponds to which field based on position.
     pub fn parse(schema: SectionSchema, section_bytes: &[u8]) -> ValidationResult<Self> {
-        // TODO: Implement parsing - extract fields from VSF section bytes
-        // This will use vsf::parse() to decode the section structure
-        Err(ValidationError::Custom(
-            "SectionBuilder::parse() not yet implemented".to_string(),
-        ))
+        use crate::decoding::parse::parse;
+
+        let mut ptr = 0;
+
+        // Check for '[' start marker
+        if section_bytes.is_empty() || section_bytes[ptr] != b'[' {
+            return Err(ValidationError::Custom(format!(
+                "Expected '[' to start section, found {:?}",
+                section_bytes.get(ptr)
+            )));
+        }
+        ptr += 1;
+
+        // Parse section name
+        let section_name = parse(section_bytes, &mut ptr)
+            .map_err(|e| ValidationError::Custom(format!("Failed to parse section name: {}", e)))?;
+        let section_name_str = match section_name {
+            crate::VsfType::d(name) => name,
+            _ => return Err(ValidationError::Custom(format!("Expected section name (d), got {:?}", section_name))),
+        };
+
+        // Verify section name matches schema
+        if section_name_str != schema.name {
+            return Err(ValidationError::Custom(format!(
+                "Section name mismatch: expected '{}', found '{}'",
+                schema.name, section_name_str
+            )));
+        }
+
+        let mut builder = SectionBuilder::new(schema.clone());
+
+        // Parse field values in schema order (positional)
+        for field_schema in &schema.fields {
+            // Check if we've hit the closing ']'
+            if ptr >= section_bytes.len() || section_bytes[ptr] == b']' {
+                // No more values - remaining fields are unset
+                break;
+            }
+
+            // Parse the value
+            let value = parse(section_bytes, &mut ptr)
+                .map_err(|e| ValidationError::Custom(format!("Failed to parse field '{}': {}", field_schema.name, e)))?;
+
+            // Convert VsfType to FieldValue and add to builder
+            let field_value = FieldValue::from_vsf_type(&value)?;
+            builder = builder.set(&field_schema.name, field_value)?;
+        }
+
+        // Expect ']' to close section
+        if ptr >= section_bytes.len() || section_bytes[ptr] != b']' {
+            return Err(ValidationError::Custom(format!(
+                "Expected ']' to close section, found {:?}",
+                section_bytes.get(ptr)
+            )));
+        }
+
+        Ok(builder)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::field::FieldType;
+
+    #[test]
+    fn test_section_builder_round_trip() {
+        // Create a schema
+        let schema = SectionSchema::new("test")
+            .field("width", FieldType::U32)
+            .field("height", FieldType::U32)
+            .field("name", FieldType::String);
+
+        // Build a section with the schema
+        let builder = schema.build()
+            .set("width", 1920u32).unwrap()
+            .set("height", 1080u32).unwrap()
+            .set("name", "test_section".to_string()).unwrap();
+
+        // Encode it
+        let encoded = builder.encode().unwrap();
+
+        // Parse it back
+        let parsed = SectionBuilder::parse(schema.clone(), &encoded).unwrap();
+
+        // Re-encode and verify it matches
+        let re_encoded = parsed.encode().unwrap();
+        assert_eq!(encoded, re_encoded, "Round-trip encoding should produce identical bytes");
+    }
+
+    #[test]
+    fn test_section_parser_validates_name() {
+        let schema = SectionSchema::new("test")
+            .field("value", FieldType::U16);
+
+        // Create a section with wrong name
+        let wrong_section = SectionSchema::new("wrong")
+            .field("value", FieldType::U16);
+
+        let built = wrong_section.build()
+            .set("value", 42u16).unwrap();
+        let encoded = built.encode().unwrap();
+
+        // Should fail because names don't match
+        let result = SectionBuilder::parse(schema, &encoded);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("name mismatch"));
+    }
+
+    #[test]
+    fn test_section_parser_with_eagle_time() {
+        use crate::schema::field::FieldType;
+
+        let schema = SectionSchema::new("metadata")
+            .field("timestamp", FieldType::EagleTimeF64)
+            .field("count", FieldType::U32);
+
+        let builder = schema.build()
+            .set("timestamp", FieldValue::EagleTimeF64(1234567.89)).unwrap()
+            .set("count", 42u32).unwrap();
+
+        let encoded = builder.encode().unwrap();
+        let parsed = SectionBuilder::parse(schema, &encoded).unwrap();
+
+        // Verify round-trip
+        let re_encoded = parsed.encode().unwrap();
+        assert_eq!(encoded, re_encoded);
     }
 }
