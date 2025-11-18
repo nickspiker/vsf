@@ -9,6 +9,7 @@ use colored::*;
 use std::fs;
 use std::path::PathBuf;
 use vsf::decoding::parse::parse;
+use vsf::schema::SchemaRegistry;
 use vsf::types::VsfType;
 
 #[derive(Parser)]
@@ -74,10 +75,10 @@ fn main() {
 struct VsfHeader {
     version: usize,
     backward_compat: usize,
-    creation_time: Option<VsfType>,     // ef5 creation timestamp
-    provenance_hash: Option<VsfType>,    // hp: BLAKE3 provenance hash (required in v3+)
-    signature: Option<VsfType>,          // ge: Ed25519 signature (optional)
-    rolling_hash: Option<VsfType>,       // hb: BLAKE3 rolling hash (optional)
+    creation_time: Option<VsfType>,   // ef5 creation timestamp
+    provenance_hash: Option<VsfType>, // hp: BLAKE3 provenance hash (required in v3+)
+    signature: Option<VsfType>,       // ge: Ed25519 signature (optional)
+    rolling_hash: Option<VsfType>,    // hb: BLAKE3 rolling hash (optional)
     labels: Vec<LabelInfo>,
 }
 
@@ -212,12 +213,8 @@ impl VsfHeader {
                 let next_type = parse(data, &mut pointer)
                     .map_err(|e| format!("Failed to parse label crypto field: {}", e))?;
                 match next_type {
-                    VsfType::hb(_) | VsfType::hs(_) => {
-                        hash = Some(next_type)
-                    }
-                    VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => {
-                        signature = Some(next_type)
-                    }
+                    VsfType::hb(_) | VsfType::hs(_) => hash = Some(next_type),
+                    VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => signature = Some(next_type),
                     VsfType::ke(_)
                     | VsfType::kx(_)
                     | VsfType::kp(_)
@@ -304,8 +301,8 @@ impl VsfHeader {
             }
             *pointer += 1;
 
-            let label_name_type = parse(data, pointer)
-                .map_err(|e| format!("Failed to parse label name: {}", e))?;
+            let label_name_type =
+                parse(data, pointer).map_err(|e| format!("Failed to parse label name: {}", e))?;
             let label_name = match label_name_type {
                 VsfType::d(name) => name,
                 _ => return Err("Expected d type for label name".to_string()),
@@ -607,9 +604,15 @@ fn format_value(vsf: &VsfType) -> String {
                 .map(|d| format_number(*d))
                 .collect::<Vec<_>>()
                 .join(" × ");
+            let format_hint = if tensor.ndim() == 1 {
+                " [1D vector]"
+            } else {
+                ""
+            };
             format!(
-                "{}, 8-bit tensor ({} Bytes)",
+                "{}, 8-bit tensor{} ({} Bytes)",
                 shape_str,
+                format_hint,
                 format_number(tensor.data.len())
             )
         }
@@ -627,16 +630,20 @@ fn format_value(vsf: &VsfType) -> String {
             format!("({:.4}°N, {:.4}°W)", lat, lon)
         }
         VsfType::e(et) => format_et(et),
-        VsfType::hp(hash) => format!("hp[BLAKE3 Provenance {} Bytes] {}...", hash.len(), hex_preview(hash)),
-        VsfType::hb(hash) => format!("hb[BLAKE3 Rolling {} Bytes] {}...", hash.len(), hex_preview(hash)),
+        VsfType::hp(hash) => format!(
+            "hp[BLAKE3 Provenance {} Bytes] {}...",
+            hash.len(),
+            hex_preview(hash)
+        ),
+        VsfType::hb(hash) => format!(
+            "hb[BLAKE3 Rolling {} Bytes] {}...",
+            hash.len(),
+            hex_preview(hash)
+        ),
         VsfType::hs(hash) => format!("hs[SHA-2 {} Bytes] {}...", hash.len(), hex_preview(hash)),
 
         VsfType::ge(sig) => format!("ge[Ed25519 {} Bytes] {}...", sig.len(), hex_preview(sig)),
-        VsfType::gp(sig) => format!(
-            "gp[ECDSA-P256 {} Bytes] {}...",
-            sig.len(),
-            hex_preview(sig)
-        ),
+        VsfType::gp(sig) => format!("gp[ECDSA-P256 {} Bytes] {}...", sig.len(), hex_preview(sig)),
         VsfType::gr(sig) => format!("gr[RSA {} Bytes] {}...", sig.len(), hex_preview(sig)),
 
         VsfType::ke(key) => format!(
@@ -644,11 +651,7 @@ fn format_value(vsf: &VsfType) -> String {
             key.len(),
             hex_preview(key)
         ),
-        VsfType::kx(key) => format!(
-            "kx[X25519 key {} Bytes] {}...",
-            key.len(),
-            hex_preview(key)
-        ),
+        VsfType::kx(key) => format!("kx[X25519 key {} Bytes] {}...", key.len(), hex_preview(key)),
         VsfType::kp(key) => format!(
             "kp[ECDSA-P256 key {} Bytes] {}...",
             key.len(),
@@ -873,11 +876,7 @@ fn show_info(data: &[u8]) -> Result<(), String> {
     // Display creation time if present
     if let Some(ref creation) = header.creation_time {
         if let VsfType::e(ref et) = creation {
-            println!(
-                " {} {}",
-                "Created".cyan(),
-                format_et(et).white()
-            );
+            println!(" {} {}", "Created".cyan(), format_et(et).white());
         }
     }
 
@@ -996,6 +995,20 @@ fn show_info(data: &[u8]) -> Result<(), String> {
             label.name.bold()
         );
 
+        // Show schema validation if available
+        let field_prefix = if is_last { "   " } else { " │ " };
+        let registry = SchemaRegistry::global();
+        if let Ok(schema) = registry.get(&label.name) {
+            if let Some(ref desc) = schema.description {
+                println!("{}  {} {}", field_prefix, "Schema:".cyan(), desc.truecolor(200, 200, 200));
+            }
+            println!("{}  {} {} fields defined",
+                field_prefix,
+                "✓".truecolor(0, 255, 0),
+                schema.fields.len()
+            );
+        }
+
         // Parse and show fields (skip for n[0] unboxed blobs)
         if label.child_count == 0 {
             let field_prefix = if is_last { "   " } else { " │ " };
@@ -1051,8 +1064,8 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
     if let Some(ref hp) = header.provenance_hash {
         match hp {
             VsfType::hp(stored_hash) => {
-                let computed = vsf::verification::compute_provenance_hash(data)
-                    .unwrap_or_else(|_| [0u8; 32]);
+                let computed =
+                    vsf::verification::compute_provenance_hash(data).unwrap_or_else(|_| [0u8; 32]);
                 let verified = computed.as_slice() == stored_hash.as_slice();
 
                 println!(
@@ -1072,6 +1085,10 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
                 } else {
                     println!("{}", "FAIL".truecolor(255, 0, 0));
                 }
+                println!(" {} {}",
+                    "Semantics:".cyan(),
+                    "Content identifier, links challenge → response in FGTW protocol".truecolor(200, 200, 200)
+                );
             }
             _ => {}
         }
@@ -1101,11 +1118,12 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
     }
 
     // Display and verify rolling hash (hb)
-    let (file_hash_verified, stored_hash, computed_hash) = if let Some(ref hb) = header.rolling_hash {
+    let (file_hash_verified, stored_hash, computed_hash) = if let Some(ref hb) = header.rolling_hash
+    {
         match hb {
             VsfType::hb(stored_hash) => {
-                let computed = vsf::verification::compute_file_hash(data)
-                    .unwrap_or_else(|_| [0u8; 32]);
+                let computed =
+                    vsf::verification::compute_file_hash(data).unwrap_or_else(|_| [0u8; 32]);
                 let verified = computed.as_slice() == stored_hash.as_slice();
                 (verified, Some(stored_hash.clone()), Some(computed.to_vec()))
             }
@@ -1125,9 +1143,9 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<(), Strin
             // Hash is now in the label, not preamble
             if let Some(ref hash_vsf) = label.hash {
                 let hash_bytes = match hash_vsf {
-                    VsfType::hp(ref bytes)
-                    | VsfType::hb(ref bytes)
-                    | VsfType::hs(ref bytes) => bytes,
+                    VsfType::hp(ref bytes) | VsfType::hb(ref bytes) | VsfType::hs(ref bytes) => {
+                        bytes
+                    }
                     _ => continue,
                 };
 
@@ -1220,8 +1238,7 @@ fn verify_file(data: &[u8]) -> Result<(), String> {
         // Check section hash (now in label, not preamble)
         if let Some(ref hash_vsf) = label.hash {
             let hash_bytes = match hash_vsf {
-                VsfType::hb(ref bytes)
-                | VsfType::hs(ref bytes) => bytes,
+                VsfType::hb(ref bytes) | VsfType::hs(ref bytes) => bytes,
                 _ => continue,
             };
 
