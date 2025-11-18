@@ -134,6 +134,9 @@ fn generate_codes(tree: &Node) -> HashMap<char, (u32, u8)> {
 }
 
 fn main() {
+    // Tell Cargo about the huffman_available cfg so it doesn't warn
+    println!("cargo::rustc-check-cfg=cfg(huffman_available)");
+
     println!("cargo:rerun-if-changed=frequencies.bin");
 
     // Skip if output is already newer than input
@@ -143,7 +146,8 @@ fn main() {
     ) {
         if let (Ok(out_time), Ok(in_time)) = (out_meta.modified(), in_meta.modified()) {
             if out_time > in_time {
-                // Output is newer, skip regeneration
+                // Output is newer, skip regeneration but still emit cfg flag
+                println!("cargo:rustc-cfg=huffman_available");
                 return;
             }
         }

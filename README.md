@@ -72,8 +72,8 @@ VSF introduces **Exponential Width Encoding (EWE)** - a novel byte-aligned schem
 
 ```
 How it works:
-0. Type marker: 'u' (unsigned), 'i' (signed), etc.
-1. Size marker: ASCII character '0'-'Z'
+0. Type: 'u' (unsigned), 'i' (signed), etc.
+1. Size: ASCII character '0'-'Z'
 2. Data: Exactly 2^(ASCII) bits follow
 3. 0=bool, 3=8 bits, 4=16 bits, 5=32 bits, 6=64 bits, ..., Z=2^36 bits (8 GB)
 
@@ -385,6 +385,14 @@ VsfType::x(text)  // Automatically compressed
 - Section names support dots: `"camera.sensor"`, `"raw.calibration"`, etc.
 - Validation enforces clean syntax (no leading/trailing dots, no double dots)
 - Already implemented - use `builder.add_section("camera.sensor", items)`
+
+✅ **Type-safe schema system**
+- Pattern-based TypeConstraint validation (no type system duplication)
+- Positional encoding (30-50% size reduction vs named fields)
+- Automatic type conversion via IntoVsfType/FromVsfType traits
+- Parse → modify → re-encode workflow
+- Official schemas: image, camera, audio, network_peer, announce
+- See [schema/README.md](src/schema/README.md) for examples
 
 ### Coming Next (v0.2.0)
 

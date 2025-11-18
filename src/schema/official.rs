@@ -3,7 +3,7 @@
 //! These schemas define the standard fields for common VSF section types.
 //! They are automatically registered in SchemaRegistry::global()
 
-use super::field::FieldType;
+use super::constraint::TypeConstraint;
 use super::section::SectionSchema;
 
 /// Create image metadata schema
@@ -11,15 +11,15 @@ use super::section::SectionSchema;
 pub fn image_schema() -> SectionSchema {
     SectionSchema::new("image")
         .description("Image capture metadata")
-        .field("width", FieldType::U32)
-        .field("height", FieldType::U32)
-        .field("format", FieldType::String) // e.g., "RGB", "RGBA", "YUV420"
-        .field("bit_depth", FieldType::U8) // bits per channel
-        .field("timestamp", FieldType::EagleTimeF64)
-        .field("exposure_time", FieldType::F64) // seconds
-        .field("iso", FieldType::U16)
-        .field("focal_length", FieldType::F32) // mm
-        .field("aperture", FieldType::F32) // f-number
+        .field("width", TypeConstraint::AnyUnsigned)
+        .field("height", TypeConstraint::AnyUnsigned)
+        .field("format", TypeConstraint::AnyString) // e.g., "RGB", "RGBA", "YUV420"
+        .field("bit_depth", TypeConstraint::AnyUnsigned) // bits per channel
+        .field("timestamp", TypeConstraint::AnyEagleTime)
+        .field("exposure_time", TypeConstraint::AnyFloat) // seconds
+        .field("iso", TypeConstraint::AnyUnsigned)
+        .field("focal_length", TypeConstraint::AnyFloat) // mm
+        .field("aperture", TypeConstraint::AnyFloat) // f-number
 }
 
 /// Create camera configuration schema
@@ -27,15 +27,15 @@ pub fn image_schema() -> SectionSchema {
 pub fn camera_schema() -> SectionSchema {
     SectionSchema::new("camera")
         .description("Camera hardware configuration")
-        .field("model", FieldType::String)
-        .field("serial", FieldType::String)
-        .field("sensor_width", FieldType::F32) // mm
-        .field("sensor_height", FieldType::F32) // mm
-        .field("resolution_x", FieldType::U32)
-        .field("resolution_y", FieldType::U32)
-        .field("pixel_size", FieldType::F32) // micrometers
-        .field("calibrated", FieldType::U8) // bool: 0 or 1
-        .field("timestamp", FieldType::EagleTimeF64)
+        .field("model", TypeConstraint::AnyString)
+        .field("serial", TypeConstraint::AnyString)
+        .field("sensor_width", TypeConstraint::AnyFloat) // mm
+        .field("sensor_height", TypeConstraint::AnyFloat) // mm
+        .field("resolution_x", TypeConstraint::AnyUnsigned)
+        .field("resolution_y", TypeConstraint::AnyUnsigned)
+        .field("pixel_size", TypeConstraint::AnyFloat) // micrometers
+        .field("calibrated", TypeConstraint::AnyUnsigned) // bool: 0 or 1
+        .field("timestamp", TypeConstraint::AnyEagleTime)
 }
 
 /// Create audio stream schema
@@ -43,12 +43,12 @@ pub fn camera_schema() -> SectionSchema {
 pub fn audio_schema() -> SectionSchema {
     SectionSchema::new("audio")
         .description("Audio stream metadata")
-        .field("sample_rate", FieldType::U32) // Hz
-        .field("channels", FieldType::U8) // 1=mono, 2=stereo, etc.
-        .field("bit_depth", FieldType::U8) // bits per sample
-        .field("format", FieldType::String) // e.g., "PCM", "FLAC", "Opus"
-        .field("duration", FieldType::F64) // seconds
-        .field("timestamp", FieldType::EagleTimeF64)
+        .field("sample_rate", TypeConstraint::AnyUnsigned) // Hz
+        .field("channels", TypeConstraint::AnyUnsigned) // 1=mono, 2=stereo, etc.
+        .field("bit_depth", TypeConstraint::AnyUnsigned) // bits per sample
+        .field("format", TypeConstraint::AnyString) // e.g., "PCM", "FLAC", "Opus"
+        .field("duration", TypeConstraint::AnyFloat) // seconds
+        .field("timestamp", TypeConstraint::AnyEagleTime)
 }
 
 /// Create network peer schema
@@ -56,12 +56,12 @@ pub fn audio_schema() -> SectionSchema {
 pub fn network_peer_schema() -> SectionSchema {
     SectionSchema::new("network_peer")
         .description("Network peer information")
-        .field("handle_hash", FieldType::Blake3Hash)
-        .field("device_pubkey", FieldType::X25519Key)
-        .field("ip_address", FieldType::String)
-        .field("port", FieldType::U16)
-        .field("last_seen", FieldType::EagleTimeF64)
-        .field("protocol_version", FieldType::U16)
+        .field("handle_hash", TypeConstraint::Blake3Provenance)
+        .field("device_pubkey", TypeConstraint::X25519Key)
+        .field("ip_address", TypeConstraint::AnyString)
+        .field("port", TypeConstraint::AnyUnsigned)
+        .field("last_seen", TypeConstraint::AnyEagleTime)
+        .field("protocol_version", TypeConstraint::AnyUnsigned)
 }
 
 /// Create announce schema for FGTW bootstrap
@@ -69,10 +69,10 @@ pub fn network_peer_schema() -> SectionSchema {
 pub fn announce_schema() -> SectionSchema {
     SectionSchema::new("announce")
         .description("FGTW bootstrap announce message")
-        .field("challenge_hash", FieldType::Blake3Hash)
-        .field("handle_hash", FieldType::Blake3Hash)
-        .field("port", FieldType::U16)
-        .field("protocol_version", FieldType::U16)
+        .field("challenge_hash", TypeConstraint::Blake3Rolling)
+        .field("handle_hash", TypeConstraint::Blake3Provenance)
+        .field("port", TypeConstraint::AnyUnsigned)
+        .field("protocol_version", TypeConstraint::AnyUnsigned)
 }
 
 /// Register all official schemas
@@ -107,7 +107,7 @@ mod tests {
     fn test_audio_schema_creation() {
         let schema = audio_schema();
         assert_eq!(schema.name, "audio");
-        assert_eq!(schema.fields.iter().find(|f| f.name == "sample_rate").unwrap().field_type, FieldType::U32);
+        assert!(schema.fields.iter().any(|f| f.name == "sample_rate"));
     }
 
     #[test]

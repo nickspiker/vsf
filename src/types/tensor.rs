@@ -37,6 +37,15 @@ pub struct Tensor<T> {
     pub data: Vec<T>,
 }
 
+/// Contiguous tensor with row-major layout (no dims stored, 1D only)
+///
+/// Binary format: `[t][unsigned length encoded with v instead of u][data...]`
+/// Do we support only unsigned integers? 'u' -> 'v'
+#[derive(Debug, Clone)]
+pub struct Vector<T> {
+    pub data: Vec<T>,
+}
+
 /// Tensor with explicit stride for non-contiguous layouts
 ///
 /// Binary format: `[q][dim_count][type][shape...][stride...][data...]`

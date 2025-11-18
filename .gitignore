@@ -17,3 +17,11 @@ Cargo.lock
 # OS
 .DS_Store
 Thumbs.db
+
+# Build artifacts
+*.vsf
+*.bin
+
+# Wrangler/Cloudflare
+.wrangler/
+node_modules/

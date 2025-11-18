@@ -1,4 +1,5 @@
 use super::traits::{EncodeNumber, EncodeNumberInclusive};
+#[cfg(feature = "text")]
 use crate::text_encoding::encode_text;
 use crate::types::{EtType, VsfType};
 
@@ -126,16 +127,26 @@ impl VsfType {
                 let mut flat = Vec::new();
                 flat.push(b'x');
 
-                // Huffman-encode the text (no internal header)
-                let encoded_text = encode_text(value);
+                #[cfg(feature = "text")]
+                {
+                    // Huffman-encode the text (no internal header)
+                    let encoded_text = encode_text(value);
 
-                // Encode ONLY character count (for Huffman decoder)
-                // VSF structure handles byte boundaries
-                let char_count = value.chars().count();
-                flat.extend_from_slice(&char_count.encode_number());
+                    // Encode ONLY character count (for Huffman decoder)
+                    // VSF structure handles byte boundaries
+                    let char_count = value.chars().count();
+                    flat.extend_from_slice(&char_count.encode_number());
 
-                // Append Huffman bytes directly
-                flat.extend_from_slice(&encoded_text);
+                    // Append Huffman bytes directly
+                    flat.extend_from_slice(&encoded_text);
+                }
+                #[cfg(not(feature = "text"))]
+                {
+                    // Without text feature, just store raw UTF-8 bytes
+                    let bytes = value.as_bytes();
+                    flat.extend_from_slice(&bytes.len().encode_number());
+                    flat.extend_from_slice(bytes);
+                }
 
                 flat
             }
@@ -352,21 +363,21 @@ impl VsfType {
             VsfType::hp(value) => {
                 let mut flat = vec![b'h', b'p'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.extend_from_slice(value);
+                flat.resize(flat.len() + value.len(), 0); // Write zeros as placeholders
                 flat
             }
 
             VsfType::hb(value) => {
                 let mut flat = vec![b'h', b'b'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.extend_from_slice(value);
+                flat.resize(flat.len() + value.len(), 0); // Write zeros as placeholders
                 flat
             }
 
             VsfType::hs(value) => {
                 let mut flat = vec![b'h', b's'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.extend_from_slice(value);
+                flat.resize(flat.len() + value.len(), 0); // Write zeros as placeholders
                 flat
             }
 
@@ -374,21 +385,21 @@ impl VsfType {
             VsfType::ge(value) => {
                 let mut flat = vec![b'g', b'e'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.extend_from_slice(value);
+                flat.resize(flat.len() + value.len(), 0); // Write zeros as placeholders
                 flat
             }
 
             VsfType::gp(value) => {
                 let mut flat = vec![b'g', b'p'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.extend_from_slice(value);
+                flat.resize(flat.len() + value.len(), 0); // Write zeros as placeholders
                 flat
             }
 
             VsfType::gr(value) => {
                 let mut flat = vec![b'g', b'r'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.extend_from_slice(value);
+                flat.resize(flat.len() + value.len(), 0); // Write zeros as placeholders
                 flat
             }
 
@@ -543,68 +554,121 @@ impl VsfType {
 
             VsfType::t_u3(tensor) => {
                 let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'u');
-                flat.push(b'3');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
+                // 1D optimization: use 'n' for element count instead of ndim+shape
+                if tensor.ndim() == 1 {
+                    flat.push(b'n');
+                    flat.extend_from_slice(&tensor.data.len().encode_number());
+                    flat.push(b'u');
+                    flat.push(b'3');
+                    flat.extend_from_slice(&tensor.data);
+                } else {
+                    flat.extend_from_slice(&tensor.ndim().encode_number());
+                    flat.push(b'u');
+                    flat.push(b'3');
+                    for &dim in &tensor.shape {
+                        flat.extend_from_slice(&dim.encode_number());
+                    }
+                    flat.extend_from_slice(&tensor.data);
                 }
-                flat.extend_from_slice(&tensor.data);
                 flat
             }
 
             VsfType::t_u4(tensor) => {
                 let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'u');
-                flat.push(b'4');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
-                for &value in &tensor.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
+                // 1D optimization: use 'n' for element count instead of ndim+shape
+                if tensor.ndim() == 1 {
+                    flat.push(b'n');
+                    flat.extend_from_slice(&tensor.data.len().encode_number());
+                    flat.push(b'u');
+                    flat.push(b'4');
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
+                } else {
+                    flat.extend_from_slice(&tensor.ndim().encode_number());
+                    flat.push(b'u');
+                    flat.push(b'4');
+                    for &dim in &tensor.shape {
+                        flat.extend_from_slice(&dim.encode_number());
+                    }
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
                 }
                 flat
             }
 
             VsfType::t_u5(tensor) => {
                 let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'u');
-                flat.push(b'5');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
-                for &value in &tensor.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
+                // 1D optimization: use 'n' for element count instead of ndim+shape
+                if tensor.ndim() == 1 {
+                    flat.push(b'n');
+                    flat.extend_from_slice(&tensor.data.len().encode_number());
+                    flat.push(b'u');
+                    flat.push(b'5');
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
+                } else {
+                    flat.extend_from_slice(&tensor.ndim().encode_number());
+                    flat.push(b'u');
+                    flat.push(b'5');
+                    for &dim in &tensor.shape {
+                        flat.extend_from_slice(&dim.encode_number());
+                    }
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
                 }
                 flat
             }
 
             VsfType::t_u6(tensor) => {
                 let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'u');
-                flat.push(b'6');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
-                for &value in &tensor.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
+                // 1D optimization: use 'n' for element count instead of ndim+shape
+                if tensor.ndim() == 1 {
+                    flat.push(b'n');
+                    flat.extend_from_slice(&tensor.data.len().encode_number());
+                    flat.push(b'u');
+                    flat.push(b'6');
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
+                } else {
+                    flat.extend_from_slice(&tensor.ndim().encode_number());
+                    flat.push(b'u');
+                    flat.push(b'6');
+                    for &dim in &tensor.shape {
+                        flat.extend_from_slice(&dim.encode_number());
+                    }
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
                 }
                 flat
             }
 
             VsfType::t_u7(tensor) => {
                 let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'u');
-                flat.push(b'7');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
-                for &value in &tensor.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
+                // 1D optimization: use 'n' for element count instead of ndim+shape
+                if tensor.ndim() == 1 {
+                    flat.push(b'n');
+                    flat.extend_from_slice(&tensor.data.len().encode_number());
+                    flat.push(b'u');
+                    flat.push(b'7');
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
+                } else {
+                    flat.extend_from_slice(&tensor.ndim().encode_number());
+                    flat.push(b'u');
+                    flat.push(b'7');
+                    for &dim in &tensor.shape {
+                        flat.extend_from_slice(&dim.encode_number());
+                    }
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
                 }
                 flat
             }
@@ -612,70 +676,125 @@ impl VsfType {
             // Signed integer tensors
             VsfType::t_i3(tensor) => {
                 let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'i');
-                flat.push(b'3');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
-                for &value in &tensor.data {
-                    flat.push(value as u8);
+                // 1D optimization: use 'n' for element count instead of ndim+shape
+                if tensor.ndim() == 1 {
+                    flat.push(b'n');
+                    flat.extend_from_slice(&tensor.data.len().encode_number());
+                    flat.push(b'i');
+                    flat.push(b'3');
+                    for &value in &tensor.data {
+                        flat.push(value as u8);
+                    }
+                } else {
+                    flat.extend_from_slice(&tensor.ndim().encode_number());
+                    flat.push(b'i');
+                    flat.push(b'3');
+                    for &dim in &tensor.shape {
+                        flat.extend_from_slice(&dim.encode_number());
+                    }
+                    for &value in &tensor.data {
+                        flat.push(value as u8);
+                    }
                 }
                 flat
             }
 
             VsfType::t_i4(tensor) => {
                 let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'i');
-                flat.push(b'4');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
-                for &value in &tensor.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
+                // 1D optimization: use 'n' for element count instead of ndim+shape
+                if tensor.ndim() == 1 {
+                    flat.push(b'n');
+                    flat.extend_from_slice(&tensor.data.len().encode_number());
+                    flat.push(b'i');
+                    flat.push(b'4');
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
+                } else {
+                    flat.extend_from_slice(&tensor.ndim().encode_number());
+                    flat.push(b'i');
+                    flat.push(b'4');
+                    for &dim in &tensor.shape {
+                        flat.extend_from_slice(&dim.encode_number());
+                    }
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
                 }
                 flat
             }
 
             VsfType::t_i5(tensor) => {
                 let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'i');
-                flat.push(b'5');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
-                for &value in &tensor.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
+                // 1D optimization: use 'n' for element count instead of ndim+shape
+                if tensor.ndim() == 1 {
+                    flat.push(b'n');
+                    flat.extend_from_slice(&tensor.data.len().encode_number());
+                    flat.push(b'i');
+                    flat.push(b'5');
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
+                } else {
+                    flat.extend_from_slice(&tensor.ndim().encode_number());
+                    flat.push(b'i');
+                    flat.push(b'5');
+                    for &dim in &tensor.shape {
+                        flat.extend_from_slice(&dim.encode_number());
+                    }
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
                 }
                 flat
             }
 
             VsfType::t_i6(tensor) => {
                 let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'i');
-                flat.push(b'6');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
-                for &value in &tensor.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
+                // 1D optimization: use 'n' for element count instead of ndim+shape
+                if tensor.ndim() == 1 {
+                    flat.push(b'n');
+                    flat.extend_from_slice(&tensor.data.len().encode_number());
+                    flat.push(b'i');
+                    flat.push(b'6');
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
+                } else {
+                    flat.extend_from_slice(&tensor.ndim().encode_number());
+                    flat.push(b'i');
+                    flat.push(b'6');
+                    for &dim in &tensor.shape {
+                        flat.extend_from_slice(&dim.encode_number());
+                    }
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
                 }
                 flat
             }
 
             VsfType::t_i7(tensor) => {
                 let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'i');
-                flat.push(b'7');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
-                for &value in &tensor.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
+                // 1D optimization: use 'n' for element count instead of ndim+shape
+                if tensor.ndim() == 1 {
+                    flat.push(b'n');
+                    flat.extend_from_slice(&tensor.data.len().encode_number());
+                    flat.push(b'i');
+                    flat.push(b'7');
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
+                } else {
+                    flat.extend_from_slice(&tensor.ndim().encode_number());
+                    flat.push(b'i');
+                    flat.push(b'7');
+                    for &dim in &tensor.shape {
+                        flat.extend_from_slice(&dim.encode_number());
+                    }
+                    for &value in &tensor.data {
+                        flat.extend_from_slice(&value.to_be_bytes());
+                    }
                 }
                 flat
             }
@@ -1012,150 +1131,175 @@ impl VsfType {
 
             // ==================== SPIRIX SCALARS (PRIMITIVES) ====================
             // Format: [s][F][E][fraction_bytes][exponent_bytes]
+            #[cfg(feature = "spirix")]
             VsfType::s33(v) => {
                 let mut flat = vec![b's', b'3', b'3'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s34(v) => {
                 let mut flat = vec![b's', b'3', b'4'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s35(v) => {
                 let mut flat = vec![b's', b'3', b'5'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s36(v) => {
                 let mut flat = vec![b's', b'3', b'6'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s37(v) => {
                 let mut flat = vec![b's', b'3', b'7'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s43(v) => {
                 let mut flat = vec![b's', b'4', b'3'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s44(v) => {
                 let mut flat = vec![b's', b'4', b'4'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s45(v) => {
                 let mut flat = vec![b's', b'4', b'5'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s46(v) => {
                 let mut flat = vec![b's', b'4', b'6'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s47(v) => {
                 let mut flat = vec![b's', b'4', b'7'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s53(v) => {
                 let mut flat = vec![b's', b'5', b'3'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s54(v) => {
                 let mut flat = vec![b's', b'5', b'4'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s55(v) => {
                 let mut flat = vec![b's', b'5', b'5'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s56(v) => {
                 let mut flat = vec![b's', b'5', b'6'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s57(v) => {
                 let mut flat = vec![b's', b'5', b'7'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s63(v) => {
                 let mut flat = vec![b's', b'6', b'3'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s64(v) => {
                 let mut flat = vec![b's', b'6', b'4'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s65(v) => {
                 let mut flat = vec![b's', b'6', b'5'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s66(v) => {
                 let mut flat = vec![b's', b'6', b'6'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s67(v) => {
                 let mut flat = vec![b's', b'6', b'7'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s73(v) => {
                 let mut flat = vec![b's', b'7', b'3'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s74(v) => {
                 let mut flat = vec![b's', b'7', b'4'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s75(v) => {
                 let mut flat = vec![b's', b'7', b'5'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s76(v) => {
                 let mut flat = vec![b's', b'7', b'6'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::s77(v) => {
                 let mut flat = vec![b's', b'7', b'7'];
                 flat.extend_from_slice(&v.fraction.to_be_bytes());
@@ -1165,6 +1309,7 @@ impl VsfType {
 
             // ==================== SPIRIX CIRCLES (PRIMITIVES) ====================
             // Format: [c][F][E][real_bytes][imaginary_bytes][exponent_bytes]
+            #[cfg(feature = "spirix")]
             VsfType::c33(v) => {
                 let mut flat = vec![b'c', b'3', b'3'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1172,6 +1317,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c34(v) => {
                 let mut flat = vec![b'c', b'3', b'4'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1179,6 +1325,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c35(v) => {
                 let mut flat = vec![b'c', b'3', b'5'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1186,6 +1333,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c36(v) => {
                 let mut flat = vec![b'c', b'3', b'6'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1193,6 +1341,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c37(v) => {
                 let mut flat = vec![b'c', b'3', b'7'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1200,6 +1349,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c43(v) => {
                 let mut flat = vec![b'c', b'4', b'3'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1207,6 +1357,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c44(v) => {
                 let mut flat = vec![b'c', b'4', b'4'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1214,6 +1365,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c45(v) => {
                 let mut flat = vec![b'c', b'4', b'5'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1221,6 +1373,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c46(v) => {
                 let mut flat = vec![b'c', b'4', b'6'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1228,6 +1381,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c47(v) => {
                 let mut flat = vec![b'c', b'4', b'7'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1235,6 +1389,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c53(v) => {
                 let mut flat = vec![b'c', b'5', b'3'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1242,6 +1397,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c54(v) => {
                 let mut flat = vec![b'c', b'5', b'4'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1249,6 +1405,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c55(v) => {
                 let mut flat = vec![b'c', b'5', b'5'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1256,6 +1413,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c56(v) => {
                 let mut flat = vec![b'c', b'5', b'6'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1263,6 +1421,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c57(v) => {
                 let mut flat = vec![b'c', b'5', b'7'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1270,6 +1429,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c63(v) => {
                 let mut flat = vec![b'c', b'6', b'3'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1277,6 +1437,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c64(v) => {
                 let mut flat = vec![b'c', b'6', b'4'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1284,6 +1445,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c65(v) => {
                 let mut flat = vec![b'c', b'6', b'5'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1291,6 +1453,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c66(v) => {
                 let mut flat = vec![b'c', b'6', b'6'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1298,6 +1461,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c67(v) => {
                 let mut flat = vec![b'c', b'6', b'7'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1305,6 +1469,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c73(v) => {
                 let mut flat = vec![b'c', b'7', b'3'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1312,6 +1477,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c74(v) => {
                 let mut flat = vec![b'c', b'7', b'4'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1319,6 +1485,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c75(v) => {
                 let mut flat = vec![b'c', b'7', b'5'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1326,6 +1493,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c76(v) => {
                 let mut flat = vec![b'c', b'7', b'6'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1333,6 +1501,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::c77(v) => {
                 let mut flat = vec![b'c', b'7', b'7'];
                 flat.extend_from_slice(&v.real.to_be_bytes());
@@ -1342,6 +1511,7 @@ impl VsfType {
             }
             // ==================== SPIRIX SCALAR TENSORS ====================
             // Format: [t][dim_count][s][F][E][shape...][data...]
+            #[cfg(feature = "spirix")]
             VsfType::t_s33(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1361,6 +1531,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s34(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1380,6 +1551,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s35(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1399,6 +1571,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s36(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1418,6 +1591,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s37(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1437,6 +1611,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s43(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1456,6 +1631,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s44(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1475,6 +1651,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s45(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1494,6 +1671,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s46(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1513,6 +1691,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s47(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1532,6 +1711,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s53(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1551,6 +1731,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s54(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1570,6 +1751,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s55(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1589,6 +1771,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s56(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1608,6 +1791,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s57(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1627,6 +1811,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s63(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1646,6 +1831,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s64(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1665,6 +1851,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s65(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1684,6 +1871,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s66(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1703,6 +1891,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s67(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1722,6 +1911,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s73(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1741,6 +1931,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s74(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1760,6 +1951,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s75(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1779,6 +1971,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s76(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1798,6 +1991,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_s77(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1819,6 +2013,7 @@ impl VsfType {
             }
             // ==================== SPIRIX CIRCLE TENSORS ====================
             // Format: [t][dim_count][c][F][E][shape...][data...]
+            #[cfg(feature = "spirix")]
             VsfType::t_c33(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1839,6 +2034,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c34(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1859,6 +2055,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c35(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1879,6 +2076,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c36(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1899,6 +2097,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c37(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1919,6 +2118,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c43(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1939,6 +2139,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c44(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1959,6 +2160,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c45(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1979,6 +2181,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c46(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -1999,6 +2202,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c47(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2019,6 +2223,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c53(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2039,6 +2244,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c54(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2059,6 +2265,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c55(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2079,6 +2286,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c56(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2099,6 +2307,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c57(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2119,6 +2328,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c63(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2139,6 +2349,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c64(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2159,6 +2370,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c65(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2179,6 +2391,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c66(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2199,6 +2412,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c67(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2219,6 +2433,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c73(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2239,6 +2454,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c74(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2259,6 +2475,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c75(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2279,6 +2496,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c76(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2299,6 +2517,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::t_c77(tensor) => {
                 let mut flat = vec![b't'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2322,6 +2541,7 @@ impl VsfType {
 
             // ==================== SPIRIX STRIDED TENSORS ====================
             // Same as above but with 'q' marker and stride encoding
+            #[cfg(feature = "spirix")]
             VsfType::q_s33(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2344,6 +2564,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s34(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2366,6 +2587,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s35(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2388,6 +2610,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s36(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2410,6 +2633,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s37(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2432,6 +2656,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s43(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2454,6 +2679,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s44(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2476,6 +2702,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s45(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2498,6 +2725,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s46(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2520,6 +2748,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s47(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2542,6 +2771,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s53(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2564,6 +2794,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s54(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2586,6 +2817,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s55(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2608,6 +2840,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s56(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2630,6 +2863,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s57(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2652,6 +2886,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s63(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2674,6 +2909,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s64(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2696,6 +2932,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s65(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2718,6 +2955,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s66(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2740,6 +2978,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s67(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2762,6 +3001,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s73(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2784,6 +3024,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s74(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2806,6 +3047,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s75(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2828,6 +3070,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s76(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2850,6 +3093,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_s77(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2872,7 +3116,7 @@ impl VsfType {
 
                 flat
             }
-
+            #[cfg(feature = "spirix")]
             VsfType::q_c33(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2896,6 +3140,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c34(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2919,6 +3164,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c35(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2942,6 +3188,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c36(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2965,6 +3212,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c37(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -2988,6 +3236,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c43(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3011,6 +3260,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c44(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3034,6 +3284,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c45(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3057,6 +3308,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c46(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3080,6 +3332,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c47(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3103,6 +3356,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c53(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3126,6 +3380,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c54(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3149,6 +3404,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c55(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3172,6 +3428,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c56(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3195,6 +3452,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c57(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3218,6 +3476,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c63(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3241,6 +3500,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c64(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3264,6 +3524,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c65(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3287,6 +3548,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c66(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3310,6 +3572,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c67(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3333,6 +3596,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c73(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3356,6 +3620,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c74(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3379,6 +3644,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c75(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3402,6 +3668,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c76(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3425,6 +3692,7 @@ impl VsfType {
 
                 flat
             }
+            #[cfg(feature = "spirix")]
             VsfType::q_c77(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
@@ -3495,14 +3763,20 @@ impl VsfType {
             // ==================== VSF STRUCTURE ====================
             VsfType::d(s) => {
                 // 'd' + encoded_string
-                let encoded_str = encode_text(s);
-                1 + encoded_usize_len(encoded_str.len()) + encoded_str.len()
+                #[cfg(feature = "text")]
+                let encoded_len = encode_text(s).len();
+                #[cfg(not(feature = "text"))]
+                let encoded_len = s.as_bytes().len();
+                1 + encoded_usize_len(encoded_len) + encoded_len
             }
 
             VsfType::l(s) => {
                 // 'l' + encoded_string
-                let encoded_str = encode_text(s);
-                1 + encoded_usize_len(encoded_str.len()) + encoded_str.len()
+                #[cfg(feature = "text")]
+                let encoded_len = encode_text(s).len();
+                #[cfg(not(feature = "text"))]
+                let encoded_len = s.as_bytes().len();
+                1 + encoded_usize_len(encoded_len) + encoded_len
             }
 
             VsfType::o(offset) => {

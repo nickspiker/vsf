@@ -6,6 +6,7 @@ pub mod helpers;
 pub mod metadata;
 pub mod parse;
 pub mod primitives;
+#[cfg(feature = "spirix")]
 pub mod spirix;
 pub mod tensors;
 
