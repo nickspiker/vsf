@@ -54,7 +54,7 @@ pub use conversions::{FromVsfType, IntoVsfType};
 pub use field::FieldSchema;
 pub use official::register_official_schemas;
 pub use registry::{SchemaRegistry, UserRegistry};
-pub use section::{SectionBuilder, SectionSchema};
+pub use section::{FieldValue, SectionBuilder, SectionSchema};
 pub use validate::{ValidationError, ValidationResult};
 
 /// Prelude for common schema operations
@@ -63,6 +63,6 @@ pub mod prelude {
     pub use super::conversions::{FromVsfType, IntoVsfType};
     pub use super::field::FieldSchema;
     pub use super::registry::{SchemaRegistry, UserRegistry};
-    pub use super::section::{SectionBuilder, SectionSchema};
+    pub use super::section::{FieldValue, SectionBuilder, SectionSchema};
     pub use super::validate::{ValidationError, ValidationResult};
 }
