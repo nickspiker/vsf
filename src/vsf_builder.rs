@@ -7,6 +7,7 @@
 //! for integrity verification. This is computed transparently during `build()`.
 //! No manual hashing required - just call `builder.build()` and you're done!
 
+use crate::encoding::hash_placeholder;
 use crate::file_format::VsfSection;
 use crate::types::VsfType;
 use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
@@ -110,11 +111,11 @@ impl VsfBuilder {
         vsf.push(self.creation_time.flatten());
 
         // Provenance hash placeholder (required, always BLAKE3)
-        vsf[header_index].extend_from_slice(&VsfType::hp(vec![0u8; 32]).flatten());
+        vsf[header_index].extend_from_slice(&hash_placeholder(b'p', 32));
 
         // Rolling hash placeholder OR signature placeholder (optional, default enabled)
         if self.include_file_hash {
-            vsf[header_index].extend_from_slice(&VsfType::hb(vec![0u8; 32]).flatten());
+            vsf[header_index].extend_from_slice(&hash_placeholder(b'b', 32));
         }
 
         // If signed, signature would replace hp bytes here (ge replaces hp)

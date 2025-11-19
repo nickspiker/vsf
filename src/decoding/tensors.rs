@@ -14,7 +14,7 @@ use super::spirix::{
     parse_scalar_f6e3, parse_scalar_f6e4, parse_scalar_f6e5, parse_scalar_f6e6, parse_scalar_f6e7,
     parse_scalar_f7e3, parse_scalar_f7e4, parse_scalar_f7e5, parse_scalar_f7e6, parse_scalar_f7e7,
 };
-use crate::types::{BitPackedTensor, StridedTensor, Tensor, VsfType};
+use crate::types::{BitPackedTensor, StridedTensor, Tensor, Vector, VsfType};
 use num_complex::Complex;
 use std::io::{Error, ErrorKind};
 
@@ -120,7 +120,56 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
         (shape, total_elements)
     };
 
-    // Dispatch based on element type
+    // If this is a 1D vector, dispatch to vector parsers
+    if ndim == 1 && count > 0 {
+        return match elem_type {
+            b'u' => match elem_size {
+                b'0' => parse_vector_data_u0(data, pointer, count),
+                b'3' => parse_vector_data_u8(data, pointer, count),
+                b'4' => parse_vector_data_u16(data, pointer, count),
+                b'5' => parse_vector_data_u32(data, pointer, count),
+                b'6' => parse_vector_data_u64(data, pointer, count),
+                b'7' => parse_vector_data_u128(data, pointer, count),
+                _ => Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Invalid unsigned size: {}", elem_size as char),
+                )),
+            },
+            b'i' => match elem_size {
+                b'3' => parse_vector_data_i8(data, pointer, count),
+                b'4' => parse_vector_data_i16(data, pointer, count),
+                b'5' => parse_vector_data_i32(data, pointer, count),
+                b'6' => parse_vector_data_i64(data, pointer, count),
+                b'7' => parse_vector_data_i128(data, pointer, count),
+                _ => Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Invalid signed size: {}", elem_size as char),
+                )),
+            },
+            b'f' => match elem_size {
+                b'5' => parse_vector_data_f32(data, pointer, count),
+                b'6' => parse_vector_data_f64(data, pointer, count),
+                _ => Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Invalid float size: {}", elem_size as char),
+                )),
+            },
+            b'j' => match elem_size {
+                b'5' => parse_vector_data_j32(data, pointer, count),
+                b'6' => parse_vector_data_j64(data, pointer, count),
+                _ => Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Invalid complex size: {}", elem_size as char),
+                )),
+            },
+            _ => Err(Error::new(
+                ErrorKind::InvalidData,
+                format!("Invalid vector element type: {}", elem_type as char),
+            )),
+        };
+    }
+
+    // Otherwise, dispatch to tensor parsers for multi-dimensional tensors
     match elem_type {
         b'u' => match elem_size {
             b'0' => parse_tensor_data_u0(data, pointer, shape, total_elements),
@@ -986,6 +1035,447 @@ pub fn parse_tensor_data_j64(
         *pointer += 16;
     }
     Ok(VsfType::t_j6(Tensor::new(shape, values)))
+}
+
+// ==================== VECTOR (1D) DATA PARSERS ====================
+
+pub fn parse_vector_data_u0(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    // Bitpacked: 8 bools per byte
+    let byte_count = (count + 7) / 8;
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for u0 vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    let mut byte_idx = 0;
+    let mut bit_idx = 0;
+
+    for _ in 0..count {
+        let byte = data[*pointer + byte_idx];
+        let bit = (byte >> (7 - bit_idx)) & 1;
+        values.push(bit != 0);
+
+        bit_idx += 1;
+        if bit_idx == 8 {
+            bit_idx = 0;
+            byte_idx += 1;
+        }
+    }
+
+    *pointer += byte_count;
+    Ok(VsfType::v_u0(Vector { data: values }))
+}
+
+pub fn parse_vector_data_u8(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    if *pointer + count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for u8 vector",
+        ));
+    }
+    let values = data[*pointer..*pointer + count].to_vec();
+    *pointer += count;
+    Ok(VsfType::v_u3(Vector { data: values }))
+}
+
+pub fn parse_vector_data_u16(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    let byte_count = count * 2;
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for u16 vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let value = u16::from_be_bytes([data[*pointer], data[*pointer + 1]]);
+        values.push(value);
+        *pointer += 2;
+    }
+    Ok(VsfType::v_u4(Vector { data: values }))
+}
+
+pub fn parse_vector_data_u32(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    let byte_count = count * 4;
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for u32 vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let value = u32::from_be_bytes([
+            data[*pointer],
+            data[*pointer + 1],
+            data[*pointer + 2],
+            data[*pointer + 3],
+        ]);
+        values.push(value);
+        *pointer += 4;
+    }
+    Ok(VsfType::v_u5(Vector { data: values }))
+}
+
+pub fn parse_vector_data_u64(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    let byte_count = count * 8;
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for u64 vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let value = u64::from_be_bytes([
+            data[*pointer],
+            data[*pointer + 1],
+            data[*pointer + 2],
+            data[*pointer + 3],
+            data[*pointer + 4],
+            data[*pointer + 5],
+            data[*pointer + 6],
+            data[*pointer + 7],
+        ]);
+        values.push(value);
+        *pointer += 8;
+    }
+    Ok(VsfType::v_u6(Vector { data: values }))
+}
+
+pub fn parse_vector_data_u128(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    let byte_count = count * 16;
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for u128 vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let value = u128::from_be_bytes([
+            data[*pointer],
+            data[*pointer + 1],
+            data[*pointer + 2],
+            data[*pointer + 3],
+            data[*pointer + 4],
+            data[*pointer + 5],
+            data[*pointer + 6],
+            data[*pointer + 7],
+            data[*pointer + 8],
+            data[*pointer + 9],
+            data[*pointer + 10],
+            data[*pointer + 11],
+            data[*pointer + 12],
+            data[*pointer + 13],
+            data[*pointer + 14],
+            data[*pointer + 15],
+        ]);
+        values.push(value);
+        *pointer += 16;
+    }
+    Ok(VsfType::v_u7(Vector { data: values }))
+}
+
+pub fn parse_vector_data_i8(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    if *pointer + count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for i8 vector",
+        ));
+    }
+    let values: Vec<i8> = data[*pointer..*pointer + count]
+        .iter()
+        .map(|&b| b as i8)
+        .collect();
+    *pointer += count;
+    Ok(VsfType::v_i3(Vector { data: values }))
+}
+
+pub fn parse_vector_data_i16(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    let byte_count = count * 2;
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for i16 vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let value = i16::from_be_bytes([data[*pointer], data[*pointer + 1]]);
+        values.push(value);
+        *pointer += 2;
+    }
+    Ok(VsfType::v_i4(Vector { data: values }))
+}
+
+pub fn parse_vector_data_i32(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    let byte_count = count * 4;
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for i32 vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let value = i32::from_be_bytes([
+            data[*pointer],
+            data[*pointer + 1],
+            data[*pointer + 2],
+            data[*pointer + 3],
+        ]);
+        values.push(value);
+        *pointer += 4;
+    }
+    Ok(VsfType::v_i5(Vector { data: values }))
+}
+
+pub fn parse_vector_data_i64(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    let byte_count = count * 8;
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for i64 vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let value = i64::from_be_bytes([
+            data[*pointer],
+            data[*pointer + 1],
+            data[*pointer + 2],
+            data[*pointer + 3],
+            data[*pointer + 4],
+            data[*pointer + 5],
+            data[*pointer + 6],
+            data[*pointer + 7],
+        ]);
+        values.push(value);
+        *pointer += 8;
+    }
+    Ok(VsfType::v_i6(Vector { data: values }))
+}
+
+pub fn parse_vector_data_i128(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    let byte_count = count * 16;
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for i128 vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let value = i128::from_be_bytes([
+            data[*pointer],
+            data[*pointer + 1],
+            data[*pointer + 2],
+            data[*pointer + 3],
+            data[*pointer + 4],
+            data[*pointer + 5],
+            data[*pointer + 6],
+            data[*pointer + 7],
+            data[*pointer + 8],
+            data[*pointer + 9],
+            data[*pointer + 10],
+            data[*pointer + 11],
+            data[*pointer + 12],
+            data[*pointer + 13],
+            data[*pointer + 14],
+            data[*pointer + 15],
+        ]);
+        values.push(value);
+        *pointer += 16;
+    }
+    Ok(VsfType::v_i7(Vector { data: values }))
+}
+
+pub fn parse_vector_data_f32(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    let byte_count = count * 4;
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for f32 vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let value = f32::from_be_bytes([
+            data[*pointer],
+            data[*pointer + 1],
+            data[*pointer + 2],
+            data[*pointer + 3],
+        ]);
+        values.push(value);
+        *pointer += 4;
+    }
+    Ok(VsfType::v_f5(Vector { data: values }))
+}
+
+pub fn parse_vector_data_f64(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    let byte_count = count * 8;
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for f64 vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let value = f64::from_be_bytes([
+            data[*pointer],
+            data[*pointer + 1],
+            data[*pointer + 2],
+            data[*pointer + 3],
+            data[*pointer + 4],
+            data[*pointer + 5],
+            data[*pointer + 6],
+            data[*pointer + 7],
+        ]);
+        values.push(value);
+        *pointer += 8;
+    }
+    Ok(VsfType::v_f6(Vector { data: values }))
+}
+
+pub fn parse_vector_data_j32(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    let byte_count = count * 8; // 2 f32s per complex
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for Complex<f32> vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let re = f32::from_be_bytes([
+            data[*pointer],
+            data[*pointer + 1],
+            data[*pointer + 2],
+            data[*pointer + 3],
+        ]);
+        let im = f32::from_be_bytes([
+            data[*pointer + 4],
+            data[*pointer + 5],
+            data[*pointer + 6],
+            data[*pointer + 7],
+        ]);
+        values.push(Complex::new(re, im));
+        *pointer += 8;
+    }
+    Ok(VsfType::v_j5(Vector { data: values }))
+}
+
+pub fn parse_vector_data_j64(
+    data: &[u8],
+    pointer: &mut usize,
+    count: usize,
+) -> Result<VsfType, Error> {
+    let byte_count = count * 16; // 2 f64s per complex
+    if *pointer + byte_count > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for Complex<f64> vector",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let re = f64::from_be_bytes([
+            data[*pointer],
+            data[*pointer + 1],
+            data[*pointer + 2],
+            data[*pointer + 3],
+            data[*pointer + 4],
+            data[*pointer + 5],
+            data[*pointer + 6],
+            data[*pointer + 7],
+        ]);
+        let im = f64::from_be_bytes([
+            data[*pointer + 8],
+            data[*pointer + 9],
+            data[*pointer + 10],
+            data[*pointer + 11],
+            data[*pointer + 12],
+            data[*pointer + 13],
+            data[*pointer + 14],
+            data[*pointer + 15],
+        ]);
+        values.push(Complex::new(re, im));
+        *pointer += 16;
+    }
+    Ok(VsfType::v_j6(Vector { data: values }))
 }
 
 // ==================== STRIDED TENSOR DATA PARSERS ====================

@@ -140,23 +140,20 @@ pub struct HeaderField {
 impl VsfHeader {
     /// Create new header with current timestamp
     pub fn new(version: usize, backward_compat: usize) -> Self {
-        use crate::types::EtType;
         use chrono::Utc;
 
-        // Get current time and convert to Eagle Time f32
+        // Get current time and convert to Eagle Time with full precision
         let now = Utc::now();
         let et = crate::datetime_to_eagle_time(now);
-        let et_f32 = match et.et_type() {
-            EtType::f6(v) => *v as f32,
-            EtType::f5(v) => *v,
-            EtType::u(v) => *v as f32,
-            EtType::i(v) => *v as f32,
-        };
+
+        // Preserve the original precision from datetime_to_eagle_time
+        // This uses f6 (f64) for subsecond precision
+        let creation_time = VsfType::e(et.et_type().clone());
 
         Self {
             version,
             backward_compat,
-            creation_time: VsfType::e(EtType::f5(et_f32)),
+            creation_time,
             provenance_hash: VsfType::hp(vec![0u8; 32]), // Placeholder, filled during build
             rolling_hash: None,
             fields: Vec::new(),
@@ -202,41 +199,50 @@ impl VsfHeader {
         // Header field count (number of section pointers)
         header.extend_from_slice(&VsfType::n(self.fields.len()).flatten());
 
-        // Header field definitions (section pointers with POSITIONAL values)
+        // Header field definitions (section pointers with : and , separators)
         for field in &self.fields {
             header.push(b'(');
 
             // Section name
             header.extend_from_slice(&VsfType::d(field.name.clone()).flatten());
 
+            // Separator after section name
+            header.push(b':');
+
             // Optional hash (VsfType::h with algorithm)
             if let Some(ref hash_type) = field.hash {
                 header.extend_from_slice(&hash_type.flatten());
+                header.push(b',');
             }
 
             // Optional signature (VsfType::g with algorithm)
             if let Some(ref sig_type) = field.signature {
                 header.extend_from_slice(&sig_type.flatten());
+                header.push(b',');
             }
 
             // Optional key (VsfType::k with algorithm)
             if let Some(ref key_type) = field.key {
                 header.extend_from_slice(&key_type.flatten());
+                header.push(b',');
             }
 
             // Optional wrap (VsfType::v with algorithm)
             if let Some(ref wrap_type) = field.wrap {
                 header.extend_from_slice(&wrap_type.flatten());
+                header.push(b',');
             }
 
-            // Offset (in bytes) - POSITIONAL (no colon)
+            // Offset (in bytes)
             header.extend_from_slice(&VsfType::o(field.offset_bytes).flatten());
+            header.push(b',');
 
-            // Size (in bytes) - POSITIONAL (no colon)
+            // Size (in bytes)
             header.extend_from_slice(&VsfType::b(field.size_bytes, false).flatten());
 
-            // Child count - POSITIONAL (no colon), omit if encrypted - implied to be n[0]
+            // Child count - omit if encrypted (implied to be n[0])
             if field.wrap.is_none() {
+                header.push(b',');
                 header.extend_from_slice(&VsfType::n(field.child_count).flatten());
             }
 
@@ -390,6 +396,16 @@ impl VsfHeader {
                 }
             };
 
+            // Expect ':' separator after section name
+            if ptr >= data.len() || data[ptr] != b':' {
+                return Err(format!(
+                    "Expected ':' after section name for field {}, found {:?}",
+                    i,
+                    data.get(ptr)
+                ));
+            }
+            ptr += 1;
+
             // Parse optional hash, signature, key, wrap
             let mut hash = None;
             let mut signature = None;
@@ -404,23 +420,39 @@ impl VsfHeader {
                             Some(parse(data, &mut ptr).map_err(|e| {
                                 format!("Failed to parse hash for field {}: {}", i, e)
                             })?);
+                        // Skip ',' separator
+                        if ptr < data.len() && data[ptr] == b',' {
+                            ptr += 1;
+                        }
                     }
                     b'g' => {
                         signature = Some(parse(data, &mut ptr).map_err(|e| {
                             format!("Failed to parse signature for field {}: {}", i, e)
                         })?);
+                        // Skip ',' separator
+                        if ptr < data.len() && data[ptr] == b',' {
+                            ptr += 1;
+                        }
                     }
                     b'k' => {
                         key =
                             Some(parse(data, &mut ptr).map_err(|e| {
                                 format!("Failed to parse key for field {}: {}", i, e)
                             })?);
+                        // Skip ',' separator
+                        if ptr < data.len() && data[ptr] == b',' {
+                            ptr += 1;
+                        }
                     }
                     b'v' => {
                         wrap =
                             Some(parse(data, &mut ptr).map_err(|e| {
                                 format!("Failed to parse wrap for field {}: {}", i, e)
                             })?);
+                        // Skip ',' separator
+                        if ptr < data.len() && data[ptr] == b',' {
+                            ptr += 1;
+                        }
                     }
                     b')' => break, // End of field
                     _ => {
@@ -445,6 +477,11 @@ impl VsfHeader {
                 }
             };
 
+            // Skip ',' separator after offset
+            if ptr < data.len() && data[ptr] == b',' {
+                ptr += 1;
+            }
+
             // Parse size (b)
             let size_type = parse(data, &mut ptr)
                 .map_err(|e| format!("Failed to parse size for field {}: {}", i, e))?;
@@ -462,6 +499,10 @@ impl VsfHeader {
             let child_count = if wrap.is_some() {
                 0 // Encrypted sections have implicit n[0]
             } else {
+                // Skip ',' separator before count
+                if ptr < data.len() && data[ptr] == b',' {
+                    ptr += 1;
+                }
                 let count_type = parse(data, &mut ptr)
                     .map_err(|e| format!("Failed to parse count for field {}: {}", i, e))?;
                 match count_type {

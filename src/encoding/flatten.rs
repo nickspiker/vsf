@@ -3,6 +3,24 @@ use super::traits::{EncodeNumber, EncodeNumberInclusive};
 use crate::text_encoding::encode_text;
 use crate::types::{EtType, VsfType};
 
+/// Create a hash placeholder with zeros (for provenance hash computation, etc.)
+///
+/// This function creates a properly formatted hash field filled with zeros,
+/// used when the actual hash will be computed and written later.
+///
+/// # Arguments
+/// * `hash_type` - The hash subtype: `b'b'` (BLAKE3), `b's'` (SHA2), or `b'p'` (provenance)
+/// * `len` - The length of the hash in bytes (e.g., 32 for BLAKE3)
+///
+/// # Returns
+/// A Vec<u8> containing: [b'h', hash_type, encoded_length, zeros...]
+pub fn hash_placeholder(hash_type: u8, len: usize) -> Vec<u8> {
+    let mut bytes = vec![b'h', hash_type];
+    bytes.extend_from_slice(&(len - 1).encode_number());
+    bytes.resize(bytes.len() + len, 0);
+    bytes
+}
+
 impl VsfType {
     /// Flatten this VsfType into its binary representation
     ///
@@ -124,11 +142,11 @@ impl VsfType {
 
             // ==================== METADATA & SPECIAL ====================
             VsfType::x(value) => {
-                let mut flat = Vec::new();
-                flat.push(b'x');
-
                 #[cfg(feature = "text")]
                 {
+                    let mut flat = Vec::new();
+                    flat.push(b'x');
+
                     // Huffman-encode the text (no internal header)
                     let encoded_text = encode_text(value);
 
@@ -139,16 +157,21 @@ impl VsfType {
 
                     // Append Huffman bytes directly
                     flat.extend_from_slice(&encoded_text);
+
+                    flat
                 }
                 #[cfg(not(feature = "text"))]
                 {
-                    // Without text feature, just store raw UTF-8 bytes
-                    let bytes = value.as_bytes();
-                    flat.extend_from_slice(&bytes.len().encode_number());
-                    flat.extend_from_slice(bytes);
+                    // SECURITY: VsfType::x MUST only be used with the 'text' feature enabled.
+                    // Without it, this would send naked type bytes (no signature verification),
+                    // creating a security vulnerability where responses can be spoofed.
+                    // Use VsfType::l for ASCII text or build proper signed VSF files instead.
+                    panic!(
+                        "VsfType::x requires 'text' feature for Huffman compression. \
+                         Use VsfType::l for ASCII text instead. Message: '{}'",
+                        value
+                    );
                 }
-
-                flat
             }
 
             VsfType::e(value) => {
@@ -370,14 +393,14 @@ impl VsfType {
             VsfType::hb(value) => {
                 let mut flat = vec![b'h', b'b'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.resize(flat.len() + value.len(), 0); // Write zeros as placeholders
+                flat.extend_from_slice(&value); // Write actual hash bytes
                 flat
             }
 
             VsfType::hs(value) => {
                 let mut flat = vec![b'h', b's'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.resize(flat.len() + value.len(), 0); // Write zeros as placeholders
+                flat.extend_from_slice(&value); // Write actual hash bytes
                 flat
             }
 
@@ -853,6 +876,187 @@ impl VsfType {
                     flat.extend_from_slice(&dim.encode_number());
                 }
                 for value in &tensor.data {
+                    flat.extend_from_slice(&value.re.to_be_bytes());
+                    flat.extend_from_slice(&value.im.to_be_bytes());
+                }
+                flat
+            }
+
+            // ==================== VECTORS (1D CONTIGUOUS) ====================
+            VsfType::v_u0(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'u');
+                flat.push(b'0');
+                // Bit-pack bools (8 per byte)
+                let mut byte = 0u8;
+                let mut bit_pos = 0;
+                for &value in &vector.data {
+                    if value {
+                        byte |= 1 << (7 - bit_pos);
+                    }
+                    bit_pos += 1;
+                    if bit_pos == 8 {
+                        flat.push(byte);
+                        byte = 0;
+                        bit_pos = 0;
+                    }
+                }
+                // Push partial byte if any
+                if bit_pos > 0 {
+                    flat.push(byte);
+                }
+                flat
+            }
+
+            VsfType::v_u3(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'u');
+                flat.push(b'3');
+                flat.extend_from_slice(&vector.data);
+                flat
+            }
+
+            VsfType::v_u4(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'u');
+                flat.push(b'4');
+                for &value in &vector.data {
+                    flat.extend_from_slice(&value.to_be_bytes());
+                }
+                flat
+            }
+
+            VsfType::v_u5(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'u');
+                flat.push(b'5');
+                for &value in &vector.data {
+                    flat.extend_from_slice(&value.to_be_bytes());
+                }
+                flat
+            }
+
+            VsfType::v_u6(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'u');
+                flat.push(b'6');
+                for &value in &vector.data {
+                    flat.extend_from_slice(&value.to_be_bytes());
+                }
+                flat
+            }
+
+            VsfType::v_u7(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'u');
+                flat.push(b'7');
+                for &value in &vector.data {
+                    flat.extend_from_slice(&value.to_be_bytes());
+                }
+                flat
+            }
+
+            VsfType::v_i3(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'i');
+                flat.push(b'3');
+                for &value in &vector.data {
+                    flat.extend_from_slice(&value.to_be_bytes());
+                }
+                flat
+            }
+
+            VsfType::v_i4(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'i');
+                flat.push(b'4');
+                for &value in &vector.data {
+                    flat.extend_from_slice(&value.to_be_bytes());
+                }
+                flat
+            }
+
+            VsfType::v_i5(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'i');
+                flat.push(b'5');
+                for &value in &vector.data {
+                    flat.extend_from_slice(&value.to_be_bytes());
+                }
+                flat
+            }
+
+            VsfType::v_i6(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'i');
+                flat.push(b'6');
+                for &value in &vector.data {
+                    flat.extend_from_slice(&value.to_be_bytes());
+                }
+                flat
+            }
+
+            VsfType::v_i7(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'i');
+                flat.push(b'7');
+                for &value in &vector.data {
+                    flat.extend_from_slice(&value.to_be_bytes());
+                }
+                flat
+            }
+
+            VsfType::v_f5(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'f');
+                flat.push(b'5');
+                for &value in &vector.data {
+                    flat.extend_from_slice(&value.to_be_bytes());
+                }
+                flat
+            }
+
+            VsfType::v_f6(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'f');
+                flat.push(b'6');
+                for &value in &vector.data {
+                    flat.extend_from_slice(&value.to_be_bytes());
+                }
+                flat
+            }
+
+            VsfType::v_j5(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'j');
+                flat.push(b'5');
+                for value in &vector.data {
+                    flat.extend_from_slice(&value.re.to_be_bytes());
+                    flat.extend_from_slice(&value.im.to_be_bytes());
+                }
+                flat
+            }
+
+            VsfType::v_j6(vector) => {
+                let mut flat = vec![b't', b'n'];
+                flat.extend_from_slice(&vector.data.len().encode_number());
+                flat.push(b'j');
+                flat.push(b'6');
+                for value in &vector.data {
                     flat.extend_from_slice(&value.re.to_be_bytes());
                     flat.extend_from_slice(&value.im.to_be_bytes());
                 }

@@ -50,7 +50,7 @@
 //!   z?{version}                        Format version (FIRST - determines encoding)
 //!   y?{backward_version}               Backward compatibility version
 //!   b?{header_length}                  Header size (now we know how to encode it!)
-//!   ef5{creation_time}                 Eagle Time creation timestamp (f32, ~2min precision)
+//!   ef5{current_time}                  Eagle Time current timestamp when last edited (f32, ~2min precision)
 //!   hp{31}{provenance_hash}            Provenance: BLAKE3 hash of content (required, always 32 bytes)
 //!   ge{64}{signature}                  Ed25519 signature over hp (optional)
 //!   hb{31}{rolling_hash}               Rolling: BLAKE3 of current state with History (optional)
@@ -269,6 +269,10 @@ pub mod crypto_algorithms;
 
 // Verification functions for hashing and signing VSF files
 pub mod verification;
+
+// Decryption utilities
+#[cfg(feature = "crypto")]
+pub mod decrypt;
 
 // Colour system (spectral and legacy colourspaces)
 pub mod colour;
