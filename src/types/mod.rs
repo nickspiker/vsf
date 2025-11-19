@@ -15,6 +15,6 @@ pub mod world_coord;
 
 // Re-export main types
 pub use eagle_time_type::{datetime_to_eagle_time, EagleTime, EtType};
-pub use tensor::{BitPackedTensor, LayoutOrder, StridedTensor, Tensor};
+pub use tensor::{BitPackedTensor, LayoutOrder, StridedTensor, Tensor, Vector};
 pub use vsf_type::VsfType;
 pub use world_coord::WorldCoord;

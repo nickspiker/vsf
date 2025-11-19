@@ -148,7 +148,9 @@ pub fn datetime_to_eagle_time(dt: DateTime<Utc>) -> EagleTime {
     // (Moment when "The Eagle has landed" was transmitted)
     let eagle = Utc.with_ymd_and_hms(1969, 7, 20, 20, 17, 40).unwrap();
     let seconds_since_landing = dt - eagle;
-    let et_seconds = seconds_since_landing.num_seconds() as f64;
+    // Preserve subsecond precision by including nanoseconds
+    let et_seconds = seconds_since_landing.num_seconds() as f64
+        + seconds_since_landing.subsec_nanos() as f64 / 1_000_000_000.0;
     EagleTime::new(EtType::f6(et_seconds))
 }
 

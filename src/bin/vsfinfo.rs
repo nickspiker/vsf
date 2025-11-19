@@ -7,7 +7,7 @@ use chrono::{Datelike, Timelike};
 use clap::{Parser, Subcommand};
 use colored::*;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use vsf::decoding::parse::parse;
 use vsf::schema::SchemaRegistry;
 use vsf::types::VsfType;
@@ -20,6 +20,14 @@ struct Cli {
     /// VSF file to inspect
     #[arg(value_name = "FILE")]
     file: PathBuf,
+
+    /// Show detailed encoding information
+    #[arg(short, long)]
+    detailed: bool,
+
+    /// Path to VSF keypair file for decrypting encrypted sections
+    #[arg(short, long)]
+    key: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -59,7 +67,7 @@ fn main() {
 
     // Execute the appropriate command
     let result = match cli.command {
-        Some(Commands::Info) | None => show_info(&data),
+        Some(Commands::Info) | None => show_info(&data, cli.detailed, cli.key.as_deref()),
         Some(Commands::Verify) => verify_file(&data),
         Some(Commands::Extract { field_path }) => extract_field(&data, &field_path),
         Some(Commands::Tree) => show_tree(&data),
@@ -105,15 +113,7 @@ impl VsfHeader {
 
         let mut pointer = 4; // Skip "RÅ<"
 
-        // Parse header length (in bits)
-        let header_length_type = parse(data, &mut pointer)
-            .map_err(|e| format!("Failed to parse header length: {}", e))?;
-        let _header_length_bytes = match header_length_type {
-            VsfType::b(bytes, _) => bytes,
-            _ => return Err("Expected b type for header length".to_string()),
-        };
-
-        // Parse version and backward compat
+        // Parse version and backward compat FIRST (VSF v4+ format)
         let version_type =
             parse(data, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
         let version = match version_type {
@@ -126,6 +126,14 @@ impl VsfHeader {
         let backward_compat = match backward_type {
             VsfType::y(v) => v,
             _ => return Err("Expected y type for backward compat".to_string()),
+        };
+
+        // Parse header length (in bits)
+        let header_length_type = parse(data, &mut pointer)
+            .map_err(|e| format!("Failed to parse header length: {}", e))?;
+        let _header_length_bytes = match header_length_type {
+            VsfType::b(bytes, _) => bytes,
+            _ => return Err("Expected b type for header length".to_string()),
         };
 
         // Parse creation time (optional for backward compatibility)
@@ -826,11 +834,25 @@ fn parse_section_fields(data: &[u8], label: &LabelInfo) -> Result<Vec<(String, V
 }
 
 /// Show basic file information (default mode)
-fn show_info(data: &[u8]) -> Result<(), String> {
+fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(), String> {
+    // Load keypair for decryption if provided
+    #[cfg(feature = "crypto")]
+    let keypair = if let Some(path) = key_path {
+        Some(vsf::decrypt::Keypair::load_from_vsf(path)?)
+    } else {
+        None
+    };
+
     let header = VsfHeader::parse(data)?;
 
     // Calculate actual header length by parsing
     let mut pointer = 4; // After "RÅ<"
+
+    // Parse version and backward_compat first (VSF v4+ format)
+    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
+    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+
+    // Now parse header length
     let header_length_type =
         parse(data, &mut pointer).map_err(|e| format!("Failed to parse header length: {}", e))?;
     // Header length is encoded inclusively (with overhead baked in)
@@ -861,22 +883,125 @@ fn show_info(data: &[u8]) -> Result<(), String> {
     println!();
 
     // Header section
-    println!("{}", "<".truecolor(128, 128, 128));
-    println!(
-        " {} {}",
-        "Version".cyan(),
-        header.version.to_string().white()
-    );
-    println!(
-        " {} {}",
-        "Backward compat".cyan(),
-        header.backward_compat.to_string().white()
-    );
+    if detailed {
+        // Detailed mode - show raw encoding
+        println!("{:<25} {}", "RÅ".truecolor(128, 128, 128), "Magic".truecolor(128, 128, 128));
+        println!("{:<25} {}", "<".truecolor(128, 128, 128), "Header start".truecolor(128, 128, 128));
+        println!(
+            " {:<24} {} {}",
+            format!("z3 {:02x}", header.version).truecolor(128, 128, 128),
+            "Version".cyan(),
+            header.version.to_string().white()
+        );
+        println!(
+            " {:<24} {} {}",
+            format!("y3 {:02x}", header.backward_compat).truecolor(128, 128, 128),
+            "Backward compat".cyan(),
+            header.backward_compat.to_string().white()
+        );
 
-    // Display creation time if present
-    if let Some(ref creation) = header.creation_time {
-        if let VsfType::e(ref et) = creation {
-            println!(" {} {}", "Created".cyan(), format_et(et).white());
+        // Display creation time with encoding
+        if let Some(ref creation) = header.creation_time {
+            if let VsfType::e(ref et) = creation {
+                let timestamp = match et {
+                    vsf::types::EtType::f5(v) => *v as f64,
+                    vsf::types::EtType::f6(v) => *v,
+                    _ => 0.0,
+                };
+                println!(
+                    " {:<24} {} {}",
+                    format!("ef6 {:.10}", timestamp).truecolor(128, 128, 128),
+                    "Created".cyan(),
+                    format_et(et).white()
+                );
+            }
+        }
+
+        // Display provenance hash with encoding
+        if let Some(ref hp) = header.provenance_hash {
+            if let VsfType::hp(hash_bytes) = hp {
+                let preview = if hash_bytes.len() >= 8 {
+                    format!("{}...", hex::encode(&hash_bytes[..8]).to_uppercase())
+                } else {
+                    hex::encode(hash_bytes).to_uppercase()
+                };
+                println!(
+                    " {:<24} {} 0x{}",
+                    format!("hp3 1f [{} Bytes]", hash_bytes.len()).truecolor(128, 128, 128),
+                    "Provenance hash:".cyan(),
+                    preview.white()
+                );
+            }
+        }
+
+        // Display Ed25519 signature with encoding
+        if let Some(ref sig) = header.signature {
+            if let VsfType::ge(sig_bytes) = sig {
+                let preview = if sig_bytes.len() >= 8 {
+                    format!("{}...", hex::encode(&sig_bytes[..8]).to_uppercase())
+                } else {
+                    hex::encode(sig_bytes).to_uppercase()
+                };
+                println!(
+                    " {:<24} {} 0x{}",
+                    format!("ge3 3f [{} Bytes]", sig_bytes.len()).truecolor(128, 128, 128),
+                    "Ed25519 signature:".cyan(),
+                    preview.white()
+                );
+            }
+        }
+
+        // Display rolling hash with encoding
+        if let Some(ref hb) = header.rolling_hash {
+            if let VsfType::hb(hash_bytes) = hb {
+                let preview = if hash_bytes.len() >= 8 {
+                    format!("{}...", hex::encode(&hash_bytes[..8]).to_uppercase())
+                } else {
+                    hex::encode(hash_bytes).to_uppercase()
+                };
+                println!(
+                    " {:<24} {} 0x{}",
+                    format!("hb3 1f [{} Bytes]", hash_bytes.len()).truecolor(128, 128, 128),
+                    "Rolling hash:".cyan(),
+                    preview.white()
+                );
+            }
+        }
+
+        // Display label count with encoding
+        let label_count = header.labels.len();
+        let encoding = if label_count <= 63 {
+            format!("n3 {:02x}", label_count)
+        } else if label_count <= 255 {
+            format!("n4 {:02x}", label_count)
+        } else {
+            format!("n [{}]", label_count)
+        };
+        println!(
+            " {:<24} {} {}",
+            encoding.truecolor(128, 128, 128),
+            "Labels:".cyan(),
+            label_count.to_string().white()
+        );
+    } else {
+        // Normal mode - just descriptions
+        println!("{}", "<".truecolor(128, 128, 128));
+        println!(
+            " {} {}",
+            "Version".cyan(),
+            header.version.to_string().white()
+        );
+        println!(
+            " {} {}",
+            "Backward compat".cyan(),
+            header.backward_compat.to_string().white()
+        );
+
+        // Display creation time if present
+        if let Some(ref creation) = header.creation_time {
+            if let VsfType::e(ref et) = creation {
+                println!(" {} {}", "Created".cyan(), format_et(et).white());
+            }
         }
     }
 
@@ -1021,6 +1146,74 @@ fn show_info(data: &[u8]) -> Result<(), String> {
         // Parse and show fields (skip for n[0] unboxed blobs)
         if label.child_count == 0 {
             let field_prefix = if is_last { "   " } else { " │ " };
+
+            // Try to decrypt if we have a key and this is encrypted
+            #[cfg(feature = "crypto")]
+            let decrypted = if let Some(ref kp) = keypair {
+                // Extract section data
+                let section_start = label.offset;
+                let section_end = section_start + label.size;
+                if section_end <= data.len() {
+                    let section_data = &data[section_start..section_end];
+
+                    // Parse the section to extract the v'e' wrapper with encrypted content
+                    // Structure: [ d"name" v'e'[encrypted_bytes] ]
+                    let mut ptr = 0;
+                    if ptr < section_data.len() && section_data[ptr] == b'[' {
+                        ptr += 1;
+
+                        // Skip section name
+                        if let Ok(_) = parse(section_data, &mut ptr) {
+                            // Try to parse a v'e' wrapper
+                            if let Ok(VsfType::v(b'e', encrypted_bytes)) = parse(section_data, &mut ptr) {
+                                match vsf::decrypt::decrypt_ve(&encrypted_bytes, &kp.x25519_secret) {
+                                    Ok(plaintext) => {
+                                        println!("{}  {} Decrypted content:", field_prefix, "🔓".green());
+                                        // Parse and display decrypted VSF content
+                                        let mut ptr = 0;
+                                        while ptr < plaintext.len() {
+                                            match parse(&plaintext, &mut ptr) {
+                                                Ok(val) => {
+                                                    println!("{}    {}", field_prefix, format_value_short(&val));
+                                                }
+                                                Err(e) => {
+                                                    println!("{}    <parse error: {}>", field_prefix, e);
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        Some(())
+                                    }
+                                    Err(e) => {
+                                        println!("{}  {} Decryption failed: {}", field_prefix, "✗".red(), e);
+                                        None
+                                    }
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            #[cfg(feature = "crypto")]
+            if decrypted.is_none() {
+                println!(
+                    "{}  (opaque blob - encrypted or unstructured)",
+                    field_prefix
+                );
+            }
+
+            #[cfg(not(feature = "crypto"))]
             println!(
                 "{}  (opaque blob - encrypted or unstructured)",
                 field_prefix

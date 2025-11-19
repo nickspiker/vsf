@@ -30,6 +30,7 @@ use crate::types::VsfType;
 struct ParsedHeader {
     version: usize,
     backward_compat: usize,
+    rolling_hash: Option<VsfType>,
     fields: Vec<HeaderField>,
     header_end: usize, // Byte position where header ends (after '>')
 }
@@ -86,10 +87,11 @@ fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     }
 
     // Optional: hb (rolling hash) - only if next byte is 'h'
-    if ptr < data.len() && data[ptr] == b'h' {
-        let _ =
-            parse(data, &mut ptr).map_err(|e| format!("Failed to parse rolling hash: {}", e))?;
-    }
+    let rolling_hash = if ptr < data.len() && data[ptr] == b'h' {
+        Some(parse(data, &mut ptr).map_err(|e| format!("Failed to parse rolling hash: {}", e))?)
+    } else {
+        None
+    };
 
     // Parse header field count
     let field_count =
@@ -113,6 +115,7 @@ fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     Ok(ParsedHeader {
         version,
         backward_compat,
+        rolling_hash,
         fields,
         header_end: ptr,
     })
@@ -209,6 +212,7 @@ fn rebuild_with_header(
     version: usize,
     backward_compat: usize,
     old_header_end: usize,
+    include_rolling_hash: bool,
 ) -> Result<Vec<u8>, String> {
     use crate::file_format::VsfHeader;
 
@@ -222,7 +226,11 @@ fn rebuild_with_header(
         // Calculate what the new header size will be
         let mut test_header = VsfHeader::new(version, backward_compat);
         test_header.provenance_hash = VsfType::hp(vec![0u8; 32]);
-        test_header.rolling_hash = Some(VsfType::hb(vec![0u8; 32]));
+        test_header.rolling_hash = if include_rolling_hash {
+            Some(VsfType::hb(vec![0u8; 32]))
+        } else {
+            None
+        };
         for field in &fields {
             test_header.add_field(field.clone());
         }
@@ -252,7 +260,11 @@ fn rebuild_with_header(
             // Build final header with these offsets
             let mut final_header = VsfHeader::new(version, backward_compat);
             final_header.provenance_hash = VsfType::hp(vec![0u8; 32]);
-            final_header.rolling_hash = Some(VsfType::hb(vec![0u8; 32]));
+            final_header.rolling_hash = if include_rolling_hash {
+                Some(VsfType::hb(vec![0u8; 32]))
+            } else {
+                None
+            };
             for field in fields {
                 final_header.add_field(field);
             }
@@ -266,15 +278,18 @@ fn rebuild_with_header(
             let hp_hash = compute_provenance_hash(&new_file)?;
             new_file = write_provenance_hash(new_file, &hp_hash)?;
 
-            // Compute and write rolling hash (hb) - this zeros hb internally
-            let hb_hash = compute_file_hash(&new_file)?;
-            new_file = write_file_hash(new_file, &hb_hash)?;
-
             // Write all header field signatures (ge/gp/gr) into placeholders
-            // This must come AFTER hash computation since hashes are computed with signatures zeroed
-            // Use the signatures we extracted earlier, not the parsed ones (which are all zeros)
+            // This must come AFTER hp computation since hp is computed with signatures zeroed
+            // But BEFORE hb computation since hb should include the actual signature bytes
             eprintln!("DEBUG rebuild_with_header: About to call write_header_field_signatures_from_list with {} signatures", field_signatures.len());
             new_file = write_header_field_signatures_from_list(new_file, field_signatures)?;
+
+            // Compute and write rolling hash (hb) AFTER signatures are written (if requested)
+            // Rolling hash is redundant when using signatures, so only include if explicitly requested
+            if include_rolling_hash {
+                let hb_hash = compute_file_hash(&new_file)?;
+                new_file = write_file_hash(new_file, &hb_hash)?;
+            }
 
             // DEBUG: Check if signature is in bytes
             if new_file.len() > 120 {
@@ -326,15 +341,15 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
 
     let mut pointer = 4; // Skip "RÅ<"
 
-    // Parse header length
-    let _header_length_type = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse header length: {}", e))?;
-
-    // Parse version and backward compat
+    // Parse version and backward compat FIRST (VSF v4+ format)
     let _version =
         parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
     let _backward = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+
+    // Parse header length
+    let _header_length_type = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse header length: {}", e))?;
 
     // Skip creation time (ef5 - always present in version 3+)
     let _creation_time = parse(vsf_bytes, &mut pointer)
@@ -571,15 +586,15 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
 
     let mut pointer = 4; // Skip "RÅ<"
 
-    // Parse header length
-    let _header_length_type = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse header length: {}", e))?;
-
-    // Parse version and backward compat
+    // Parse version and backward compat FIRST (VSF v4+ format)
     let _version =
         parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
     let _backward = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+
+    // Parse header length
+    let _header_length_type = parse(vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse header length: {}", e))?;
 
     // Skip creation time (ef5 - always present in version 3+)
     let _creation_time = parse(vsf_bytes, &mut pointer)
@@ -1026,12 +1041,14 @@ pub fn sign_section(
     }
 
     // Rebuild file with modified header
+    // Don't include rolling hash when signing - the signature provides cryptographic integrity
     rebuild_with_header(
         &vsf_bytes,
         new_fields,
         header.version,
         header.backward_compat,
         header.header_end,
+        false, // Don't include rolling hash - signature is stronger
     )
 }
 
@@ -1109,12 +1126,14 @@ pub fn add_encryption_metadata(
     }
 
     // Rebuild file with modified header
+    // Preserve original rolling hash setting
     rebuild_with_header(
         &vsf_bytes,
         new_fields,
         header.version,
         header.backward_compat,
         header.header_end,
+        header.rolling_hash.is_some(),
     )
 }
 
