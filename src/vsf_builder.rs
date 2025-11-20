@@ -132,15 +132,22 @@ impl VsfBuilder {
             vsf[header_index].push(b'(');
             vsf[header_index].extend_from_slice(&VsfType::d(section.name.clone()).flatten());
 
-            // Offset placeholder (POSITIONAL - no colon)
+            // Separator after section name
+            vsf[header_index].push(b':');
+
+            // Offset placeholder
             field_offset_indices.push((i, vsf.len()));
-            vsf.push(VsfType::o(0).flatten());
+            let mut offset_vec = VsfType::o(0).flatten();
+            offset_vec.push(b',');  // Append separator to offset
+            vsf.push(offset_vec);
 
-            // Size placeholder (POSITIONAL - no colon, not inclusive - section size, not self-referential)
+            // Size placeholder (not inclusive - section size, not self-referential)
             field_size_indices.push((i, vsf.len()));
-            vsf.push(VsfType::b(0, false).flatten());
+            let mut size_vec = VsfType::b(0, false).flatten();
+            size_vec.push(b',');  // Append separator to size
+            vsf.push(size_vec);
 
-            // Child count (POSITIONAL - no colon, actual value)
+            // Child count (actual value)
             header_index = vsf.len();
             vsf.push(VsfType::n(section.fields.len()).flatten());
             vsf[header_index].push(b')');
@@ -151,16 +158,23 @@ impl VsfBuilder {
             vsf[header_index].push(b'(');
             vsf[header_index].extend_from_slice(&VsfType::d(name.clone()).flatten());
 
-            // Offset placeholder (POSITIONAL - no colon)
+            // Separator after section name
+            vsf[header_index].push(b':');
+
+            // Offset placeholder
             let unboxed_index = self.sections.len() + i;
             field_offset_indices.push((unboxed_index, vsf.len()));
-            vsf.push(VsfType::o(0).flatten());
+            let mut offset_vec = VsfType::o(0).flatten();
+            offset_vec.push(b',');  // Append separator to offset
+            vsf.push(offset_vec);
 
-            // Size placeholder (POSITIONAL - no colon, not inclusive - section size, not self-referential)
+            // Size placeholder (not inclusive - section size, not self-referential)
             field_size_indices.push((unboxed_index, vsf.len()));
-            vsf.push(VsfType::b(0, false).flatten());
+            let mut size_vec = VsfType::b(0, false).flatten();
+            size_vec.push(b',');  // Append separator to size
+            vsf.push(size_vec);
 
-            // Child count = 0 for unboxed (POSITIONAL - no colon)
+            // Child count = 0 for unboxed
             header_index = vsf.len();
             vsf.push(VsfType::n(0).flatten());
             vsf[header_index].push(b')');
@@ -205,7 +219,9 @@ impl VsfBuilder {
                 let offset_bytes = current_offset;
 
                 if offset_bytes != prev_offsets[idx] {
-                    vsf[*vsf_idx] = VsfType::o(offset_bytes).flatten();
+                    let mut offset_vec = VsfType::o(offset_bytes).flatten();
+                    offset_vec.push(b',');  // Preserve trailing comma
+                    vsf[*vsf_idx] = offset_vec;
                     prev_offsets[idx] = offset_bytes;
                     changed = true;
                 }
@@ -221,7 +237,9 @@ impl VsfBuilder {
                 };
 
                 if size_bytes != prev_sizes[idx] {
-                    vsf[field_size_indices[idx].1] = VsfType::b(size_bytes, false).flatten();
+                    let mut size_vec = VsfType::b(size_bytes, false).flatten();
+                    size_vec.push(b',');  // Preserve trailing comma
+                    vsf[field_size_indices[idx].1] = size_vec;
                     prev_sizes[idx] = size_bytes;
                     changed = true;
                 }
