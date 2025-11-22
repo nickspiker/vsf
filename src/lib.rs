@@ -293,7 +293,7 @@ pub use encoding::{EncodeNumber, EncodeNumberInclusive};
 pub use decoding::parse;
 
 // Re-export file format and builder
-pub use file_format::{validate_name, HeaderField, VsfHeader, VsfSection};
+pub use file_format::{validate_name, HeaderField, VsfField, VsfHeader, VsfSection};
 pub use vsf_builder::VsfBuilder;
 
 // RAW image builders and parser

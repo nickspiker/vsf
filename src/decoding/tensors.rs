@@ -1086,7 +1086,10 @@ pub fn parse_vector_data_u8(
     }
     let values = data[*pointer..*pointer + count].to_vec();
     *pointer += count;
-    Ok(VsfType::v_u3(Vector { data: values }))
+    Ok(VsfType::t_u3(Tensor {
+        shape: vec![count],
+        data: values,
+    }))
 }
 
 pub fn parse_vector_data_u16(

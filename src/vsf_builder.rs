@@ -71,6 +71,13 @@ impl VsfBuilder {
         self
     }
 
+    /// Add a pre-built VsfSection directly
+    /// Use this when you need fields with multiple values (Vec<VsfType>)
+    pub fn add_section_direct(mut self, section: VsfSection) -> Self {
+        self.sections.push(section);
+        self
+    }
+
     /// Add an unboxed data blob (zero-copy section)
     pub fn add_unboxed(mut self, name: impl Into<String>, data: Vec<u8>) -> Self {
         self.unboxed.push((name.into(), data));
@@ -124,64 +131,49 @@ impl VsfBuilder {
         let total_fields = self.sections.len() + self.unboxed.len();
         vsf[header_index].extend_from_slice(&VsfType::n(total_fields).flatten());
 
-        // Create header field definitions (section pointers) with placeholders
+        // Create header field definitions (section pointers)
+        // Note: Using VsfField::flatten() for cleaner separator handling
         let mut field_offset_indices = Vec::new();
         let mut field_size_indices = Vec::new();
 
         for (i, section) in self.sections.iter().enumerate() {
-            vsf[header_index].push(b'(');
-            vsf[header_index].extend_from_slice(&VsfType::d(section.name.clone()).flatten());
+            // Create field with placeholder values
+            let field = crate::file_format::VsfField::new(&section.name)
+                .with_value(VsfType::o(0))        // offset placeholder
+                .with_value(VsfType::b(0, false)) // size placeholder
+                .with_value(VsfType::n(section.fields.len())); // child count
 
-            // Separator after section name
-            vsf[header_index].push(b':');
+            let field_bytes = field.flatten();
 
-            // Offset placeholder
+            // Track indices for stabilization loop
+            // We'll need to rebuild entire field when updating
             field_offset_indices.push((i, vsf.len()));
-            let mut offset_vec = VsfType::o(0).flatten();
-            offset_vec.push(b',');  // Append separator to offset
-            vsf.push(offset_vec);
-
-            // Size placeholder (not inclusive - section size, not self-referential)
             field_size_indices.push((i, vsf.len()));
-            let mut size_vec = VsfType::b(0, false).flatten();
-            size_vec.push(b',');  // Append separator to size
-            vsf.push(size_vec);
 
-            // Child count (actual value)
             header_index = vsf.len();
-            vsf.push(VsfType::n(section.fields.len()).flatten());
-            vsf[header_index].push(b')');
+            vsf.push(field_bytes);
         }
 
         // Unboxed sections
         for (i, (name, _)) in self.unboxed.iter().enumerate() {
-            vsf[header_index].push(b'(');
-            vsf[header_index].extend_from_slice(&VsfType::d(name.clone()).flatten());
-
-            // Separator after section name
-            vsf[header_index].push(b':');
-
-            // Offset placeholder
             let unboxed_index = self.sections.len() + i;
+
+            let field = crate::file_format::VsfField::new(name)
+                .with_value(VsfType::o(0))        // offset placeholder
+                .with_value(VsfType::b(0, false)) // size placeholder
+                .with_value(VsfType::n(0));       // no children for unboxed
+
+            let field_bytes = field.flatten();
+
             field_offset_indices.push((unboxed_index, vsf.len()));
-            let mut offset_vec = VsfType::o(0).flatten();
-            offset_vec.push(b',');  // Append separator to offset
-            vsf.push(offset_vec);
-
-            // Size placeholder (not inclusive - section size, not self-referential)
             field_size_indices.push((unboxed_index, vsf.len()));
-            let mut size_vec = VsfType::b(0, false).flatten();
-            size_vec.push(b',');  // Append separator to size
-            vsf.push(size_vec);
 
-            // Child count = 0 for unboxed
             header_index = vsf.len();
-            vsf.push(VsfType::n(0).flatten());
-            vsf[header_index].push(b')');
+            vsf.push(field_bytes);
         }
 
-        // Close header
-        vsf[header_index].push(b'>');
+        // Close header with '>' as a separate chunk (so it's included in header_length)
+        vsf.push(vec![b'>']);
         let header_end_index = vsf.len();
 
         // Add section data
@@ -218,14 +210,6 @@ impl VsfBuilder {
             for (idx, (field_idx, vsf_idx)) in field_offset_indices.iter().enumerate() {
                 let offset_bytes = current_offset;
 
-                if offset_bytes != prev_offsets[idx] {
-                    let mut offset_vec = VsfType::o(offset_bytes).flatten();
-                    offset_vec.push(b',');  // Preserve trailing comma
-                    vsf[*vsf_idx] = offset_vec;
-                    prev_offsets[idx] = offset_bytes;
-                    changed = true;
-                }
-
                 // Calculate size
                 let size_bytes = if *field_idx < self.sections.len() {
                     // Structured section
@@ -236,10 +220,25 @@ impl VsfBuilder {
                     self.unboxed[unboxed_idx].1.len()
                 };
 
-                if size_bytes != prev_sizes[idx] {
-                    let mut size_vec = VsfType::b(size_bytes, false).flatten();
-                    size_vec.push(b',');  // Preserve trailing comma
-                    vsf[field_size_indices[idx].1] = size_vec;
+                // Rebuild entire field if offset or size changed
+                if offset_bytes != prev_offsets[idx] || size_bytes != prev_sizes[idx] {
+                    // Get section name and child count
+                    let (name, child_count) = if *field_idx < self.sections.len() {
+                        (&self.sections[*field_idx].name, self.sections[*field_idx].fields.len())
+                    } else {
+                        let unboxed_idx = field_idx - self.sections.len();
+                        (&self.unboxed[unboxed_idx].0, 0)
+                    };
+
+                    // Rebuild field with updated values using VsfField API
+                    let field = crate::file_format::VsfField::new(name)
+                        .with_value(VsfType::o(offset_bytes))
+                        .with_value(VsfType::b(size_bytes, false))
+                        .with_value(VsfType::n(child_count));
+
+                    vsf[*vsf_idx] = field.flatten();
+
+                    prev_offsets[idx] = offset_bytes;
                     prev_sizes[idx] = size_bytes;
                     changed = true;
                 }
@@ -267,10 +266,18 @@ impl VsfBuilder {
         }
 
         // Now structure is finalized - compute and write all crypto primitives
-        use crate::verification::{compute_file_hash, write_file_hash};
+        use crate::verification::{
+            compute_provenance_hash, write_provenance_hash,
+            compute_file_hash, write_file_hash
+        };
 
-        let hash = compute_file_hash(&result)?;
-        result = write_file_hash(result, &hash)?;
+        // 1. Compute and write provenance hash (hp) first
+        let prov_hash = compute_provenance_hash(&result)?;
+        result = write_provenance_hash(result, &prov_hash)?;
+
+        // 2. Compute and write rolling hash (hb) after provenance hash is set
+        let file_hash = compute_file_hash(&result)?;
+        result = write_file_hash(result, &file_hash)?;
 
         // If signed, signature would get computed and written here
 
@@ -353,8 +360,16 @@ mod tests {
         assert!(result.is_ok());
         let bytes = result.unwrap();
 
-        // Should have two bracketed sections
-        let bracket_count = bytes.iter().filter(|&&b| b == b'[').count();
-        assert_eq!(bracket_count, 2);
+        // Verify file structure (instead of counting all '[' bytes which may appear in binary data)
+        // Should have magic number
+        assert_eq!(&bytes[0..3], "RÅ".as_bytes());
+
+        // Should have header
+        assert_eq!(bytes[3], b'<');
+
+        // Should find section names in the output
+        let output_str = String::from_utf8_lossy(&bytes);
+        assert!(output_str.contains("section1"));
+        assert!(output_str.contains("section2"));
     }
 }

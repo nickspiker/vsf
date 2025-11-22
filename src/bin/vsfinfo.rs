@@ -83,10 +83,10 @@ fn main() {
 struct VsfHeader {
     version: usize,
     backward_compat: usize,
-    creation_time: Option<VsfType>,   // ef5 creation timestamp
-    provenance_hash: Option<VsfType>, // hp: BLAKE3 provenance hash (required in v3+)
-    signature: Option<VsfType>,       // ge: Ed25519 signature (optional)
-    rolling_hash: Option<VsfType>,    // hb: BLAKE3 rolling hash (optional)
+    modified_time: Option<VsfType>,   // Timestamp
+    provenance_hash: Option<VsfType>, // BLAKE3 provenance hash (required)
+    signature: Option<VsfType>,       // Ed25519 signature (optional)
+    rolling_hash: Option<VsfType>,    // BLAKE3 rolling hash (optional, but not both signature and rolling)
     labels: Vec<LabelInfo>,
 }
 
@@ -156,7 +156,7 @@ impl VsfHeader {
                     return Ok(Self {
                         version,
                         backward_compat,
-                        creation_time,
+                        modified_time: creation_time,
                         provenance_hash: None,
                         signature: None,
                         rolling_hash: Some(hash_type),
@@ -285,7 +285,7 @@ impl VsfHeader {
         Ok(VsfHeader {
             version,
             backward_compat,
-            creation_time,
+            modified_time: creation_time,
             provenance_hash,
             signature,
             rolling_hash,
@@ -901,7 +901,7 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
         );
 
         // Display creation time with encoding
-        if let Some(ref creation) = header.creation_time {
+        if let Some(ref creation) = header.modified_time {
             if let VsfType::e(ref et) = creation {
                 let timestamp = match et {
                     vsf::types::EtType::f5(v) => *v as f64,
@@ -998,7 +998,7 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
         );
 
         // Display creation time if present
-        if let Some(ref creation) = header.creation_time {
+        if let Some(ref creation) = header.modified_time {
             if let VsfType::e(ref et) = creation {
                 println!(" {} {}", "Created".cyan(), format_et(et).white());
             }

@@ -27,17 +27,17 @@ use crate::file_format::HeaderField;
 use crate::types::VsfType;
 
 /// Helper struct for complete header information
-struct ParsedHeader {
-    version: usize,
-    backward_compat: usize,
-    rolling_hash: Option<VsfType>,
-    fields: Vec<HeaderField>,
-    header_end: usize, // Byte position where header ends (after '>')
+pub struct ParsedHeader {
+    pub version: usize,
+    pub backward_compat: usize,
+    pub rolling_hash: Option<VsfType>,
+    pub fields: Vec<HeaderField>,
+    pub header_end: usize, // Byte position where header ends (after '>')
 }
 
 /// Parse complete VSF header including all header field crypto metadata
 /// Robust, order-independent parser using existing VSF tools
-fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
+pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     if data.len() < 4 {
         return Err("File too small".to_string());
     }
@@ -122,79 +122,57 @@ fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
 }
 
 /// Parse a single header field with validation
-/// Uses existing tools and validation functions for robustness
+/// Uses VsfField::parse() for generic parsing, then extracts and validates values
 fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, String> {
-    use crate::file_format::validate_name;
+    use crate::file_format::{validate_name, VsfField};
 
-    if data[*ptr] != b'(' {
-        return Err("Expected '(' for header field".to_string());
-    }
-    *ptr += 1;
+    // Use generic field parser
+    let field = VsfField::parse(data, ptr)
+        .map_err(|e| format!("Failed to parse header field: {}", e))?;
 
-    // Parse name (required)
-    let name = match parse(data, ptr).map_err(|e| format!("Failed to parse field name: {}", e))? {
-        VsfType::d(n) => {
-            validate_name(&n)?; // Use existing validation!
-            n
-        }
-        _ => return Err("Expected d type for field name".to_string()),
-    };
+    // Validate field name
+    validate_name(&field.name)?;
 
-    // Parse optional crypto fields (order-independent!)
-    // Keep parsing until we hit 'o' (offset marker)
+    // Extract values by type
     let mut hash = None;
     let mut signature = None;
     let mut key = None;
     let mut wrap = None;
+    let mut offset_bytes = None;
+    let mut size_bytes = None;
+    let mut child_count = None;
 
-    while *ptr < data.len() && data[*ptr] != b'o' {
-        let field = parse(data, ptr).map_err(|e| format!("Failed to parse crypto field: {}", e))?;
-
-        match field {
-            VsfType::hb(_) | VsfType::hs(_) => hash = Some(field),
-            VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => signature = Some(field),
+    for value in field.values {
+        match value {
+            // Crypto fields
+            VsfType::hb(_) | VsfType::hs(_) | VsfType::hp(_) => hash = Some(value),
+            VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => signature = Some(value),
             VsfType::ke(_) | VsfType::kx(_) | VsfType::kp(_) | VsfType::kc(_) | VsfType::ka(_) => {
-                key = Some(field)
+                key = Some(value)
             }
-            VsfType::v(_, _) => wrap = Some(field),
-            _ => {
-                // Forward compatibility: ignore unknown types
-                // This allows future extensions without breaking old parsers
-            }
+            VsfType::v(_, _) => wrap = Some(value),
+            // Positional fields
+            VsfType::o(bytes) => offset_bytes = Some(bytes),
+            VsfType::b(bytes, _) => size_bytes = Some(bytes),
+            VsfType::n(count) => child_count = Some(count),
+            // Forward compatibility: ignore unknown types
+            _ => {}
         }
     }
 
-    // Parse offset (required, marks start of positional fields)
-    let offset_bytes =
-        match parse(data, ptr).map_err(|e| format!("Failed to parse offset: {}", e))? {
-            VsfType::o(bytes) => bytes,
-            _ => return Err("Expected o type for offset".to_string()),
-        };
+    // Validate required fields
+    let offset_bytes = offset_bytes.ok_or("Missing required offset (o) field")?;
+    let size_bytes = size_bytes.ok_or("Missing required size (b) field")?;
 
-    // Parse size (required)
-    let size_bytes = match parse(data, ptr).map_err(|e| format!("Failed to parse size: {}", e))? {
-        VsfType::b(bytes, _) => bytes,
-        _ => return Err("Expected b type for size".to_string()),
-    };
-
-    // Parse child count (optional if encrypted)
+    // Child count is optional if encrypted (wrap present)
     let child_count = if wrap.is_some() {
-        // Encrypted sections have implied n[0]
-        0
+        0 // Encrypted sections have implied n[0]
     } else {
-        match parse(data, ptr).map_err(|e| format!("Failed to parse child count: {}", e))? {
-            VsfType::n(count) => count,
-            _ => return Err("Expected n type for child count".to_string()),
-        }
+        child_count.ok_or("Missing required child count (n) field for unencrypted section")?
     };
-
-    if data[*ptr] != b')' {
-        return Err("Expected ')' after header field".to_string());
-    }
-    *ptr += 1;
 
     Ok(HeaderField {
-        name,
+        name: field.name,
         hash,
         signature,
         key,
