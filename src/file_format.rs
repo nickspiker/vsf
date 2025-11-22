@@ -644,6 +644,129 @@ pub struct VsfField {
     pub values: Vec<VsfType>, // Empty vec = flag, 1 elem = single value, N elems = multi-value
 }
 
+impl VsfField {
+    /// Create a new field with the given name and no values
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            values: Vec::new(),
+        }
+    }
+
+    /// Create a field with name and values
+    pub fn with_values(name: impl Into<String>, values: Vec<VsfType>) -> Self {
+        Self {
+            name: name.into(),
+            values,
+        }
+    }
+
+    /// Add a value to the field (builder pattern)
+    pub fn with_value(mut self, value: VsfType) -> Self {
+        self.values.push(value);
+        self
+    }
+
+    /// Add a value to the field (mutable)
+    pub fn add_value(&mut self, value: VsfType) -> &mut Self {
+        self.values.push(value);
+        self
+    }
+
+    /// Flatten field to bytes with automatic separator handling
+    ///
+    /// Format: (name:value1,value2,value3)
+    /// - '(' starts the field
+    /// - name is encoded as VsfType::d
+    /// - ':' separates name from values (only if values present)
+    /// - ',' separates values from each other
+    /// - ')' ends the field
+    pub fn flatten(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        bytes.push(b'(');
+        bytes.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
+
+        if !self.values.is_empty() {
+            bytes.push(b':');
+
+            for (i, value) in self.values.iter().enumerate() {
+                if i > 0 {
+                    bytes.push(b',');
+                }
+                bytes.extend_from_slice(&value.flatten());
+            }
+        }
+
+        bytes.push(b')');
+        bytes
+    }
+
+    /// Parse a field from bytes
+    ///
+    /// Expects format: (name:value1,value2,value3)
+    /// Updates ptr to point after the closing ')'
+    pub fn parse(data: &[u8], ptr: &mut usize) -> Result<Self, String> {
+        // Expect '('
+        if *ptr >= data.len() || data[*ptr] != b'(' {
+            return Err(format!(
+                "Expected '(' at position {}, found {:?}",
+                ptr,
+                data.get(*ptr)
+            ));
+        }
+        *ptr += 1;
+
+        // Parse field name
+        let name = match crate::parse(data, ptr).map_err(|e| e.to_string())? {
+            VsfType::d(s) => s,
+            other => return Err(format!("Expected field name (d type), found {:?}", other)),
+        };
+
+        let mut values = Vec::new();
+
+        // Check for ':' separator (values present)
+        if *ptr < data.len() && data[*ptr] == b':' {
+            *ptr += 1;
+
+            // Parse values until ')'
+            loop {
+                if *ptr >= data.len() {
+                    return Err("Unexpected end of data in field".to_string());
+                }
+
+                if data[*ptr] == b')' {
+                    break;
+                }
+
+                // Skip comma separator
+                if data[*ptr] == b',' {
+                    *ptr += 1;
+                    if *ptr >= data.len() {
+                        return Err("Unexpected end of data after comma".to_string());
+                    }
+                }
+
+                // Parse value
+                let value = crate::parse(data, ptr).map_err(|e| e.to_string())?;
+                values.push(value);
+            }
+        }
+
+        // Expect ')'
+        if *ptr >= data.len() || data[*ptr] != b')' {
+            return Err(format!(
+                "Expected ')' at position {}, found {:?}",
+                ptr,
+                data.get(*ptr)
+            ));
+        }
+        *ptr += 1;
+
+        Ok(Self { name, values })
+    }
+}
+
 impl VsfSection {
     /// Create new section with validated name
     ///
@@ -772,34 +895,72 @@ impl VsfSection {
         // Section name (namespace for all fields)
         bytes.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
 
-        // Encode each field
+        // Encode each field using VsfField::flatten()
         for field in &self.fields {
-            bytes.push(b'(');
-
-            // Field name (simple identifier, no dots - namespace comes from section)
-            bytes.extend_from_slice(&VsfType::d(field.name.clone()).flatten());
-
-            // Handle values based on count
-            if !field.values.is_empty() {
-                // Add separator only if there are values
-                bytes.push(b':');
-
-                // Encode values with comma separators
-                for (i, value) in field.values.iter().enumerate() {
-                    if i > 0 {
-                        bytes.push(b',');
-                    }
-                    bytes.extend_from_slice(&value.flatten());
-                }
-            }
-
-            bytes.push(b')');
+            bytes.extend_from_slice(&field.flatten());
         }
 
         // Section end
         bytes.push(b']');
 
         bytes
+    }
+
+    /// Parse a section from bytes
+    ///
+    /// Expects format: [dsection_name(field:value)...]
+    /// Updates ptr to point after the closing ']'
+    pub fn parse(data: &[u8], ptr: &mut usize) -> Result<Self, String> {
+        // Expect '['
+        if *ptr >= data.len() || data[*ptr] != b'[' {
+            return Err(format!(
+                "Expected '[' at position {}, found {:?}",
+                ptr,
+                data.get(*ptr)
+            ));
+        }
+        *ptr += 1;
+
+        // Parse section name
+        let name = match crate::parse(data, ptr).map_err(|e| e.to_string())? {
+            VsfType::d(s) => s,
+            other => return Err(format!("Expected section name (d type), found {:?}", other)),
+        };
+
+        let mut fields = Vec::new();
+
+        // Parse fields until ']'
+        while *ptr < data.len() && data[*ptr] != b']' {
+            if data[*ptr] == b'(' {
+                let field = VsfField::parse(data, ptr)?;
+                fields.push(field);
+            } else {
+                // Skip whitespace or unexpected bytes
+                *ptr += 1;
+            }
+        }
+
+        // Expect ']'
+        if *ptr >= data.len() || data[*ptr] != b']' {
+            return Err(format!(
+                "Expected ']' at position {}, found {:?}",
+                ptr,
+                data.get(*ptr)
+            ));
+        }
+        *ptr += 1;
+
+        Ok(Self { name, fields })
+    }
+
+    /// Get a field by name
+    pub fn get_field(&self, name: &str) -> Option<&VsfField> {
+        self.fields.iter().find(|f| f.name == name)
+    }
+
+    /// Get all fields with a given name (for repeated fields like "peer")
+    pub fn get_fields(&self, name: &str) -> Vec<&VsfField> {
+        self.fields.iter().filter(|f| f.name == name).collect()
     }
 }
 
@@ -1027,5 +1188,35 @@ mod tests {
         let result = VsfHeader::decode(invalid);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Data too short"));
+    }
+
+    #[test]
+    fn test_section_parse_roundtrip() {
+        let mut section = VsfSection::new("test_section");
+        section.add_field("width", VsfType::u(1920, false));
+        section.add_field("height", VsfType::u(1080, false));
+        section.add_field("key", VsfType::ke(vec![1, 2, 3, 4, 5, 6, 7, 8]));
+
+        // Encode to bytes
+        let encoded = section.encode();
+
+        // Parse back
+        let mut ptr = 0;
+        let parsed = VsfSection::parse(&encoded, &mut ptr).unwrap();
+
+        // Verify roundtrip
+        assert_eq!(parsed.name, "test_section");
+        assert_eq!(parsed.fields.len(), 3);
+        assert_eq!(parsed.fields[0].name, "width");
+        assert_eq!(parsed.fields[1].name, "height");
+        assert_eq!(parsed.fields[2].name, "key");
+
+        // Test get_field helper
+        let width = parsed.get_field("width").unwrap();
+        assert_eq!(width.values.len(), 1);
+
+        // Test get_fields for multiple
+        let all_fields = parsed.get_fields("width");
+        assert_eq!(all_fields.len(), 1);
     }
 }
