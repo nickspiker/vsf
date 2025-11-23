@@ -1,3 +1,7 @@
+// Allow deprecated items within the crate - VSF must handle legacy types internally.
+// External users will still see deprecation warnings when they use legacy APIs.
+#![allow(deprecated)]
+
 //! # VSF (Versatile Storage Format)
 //!
 //! Self-describing binary format with hierarchical structure, strong typing, and cryptographic primitives.
