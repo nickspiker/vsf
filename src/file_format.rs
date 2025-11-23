@@ -118,7 +118,9 @@ pub struct VsfHeader {
     pub backward_compat: usize,
     pub creation_time: VsfType, // Creation timestamp (ef5 for ~2min precision)
     pub provenance_hash: VsfType, // Required: BLAKE3 hash of immutable content (hp)
-    pub rolling_hash: Option<VsfType>, // Optional: BLAKE3 hash of current state (hb)
+    pub rolling_hash: Option<VsfType>, // Optional: BLAKE3 hash of current state (hb) - OR signature
+    pub signer_pubkey: Option<VsfType>, // Optional: Ed25519 public key (ke) - for signed files
+    pub signature: Option<VsfType>, // Optional: Ed25519 signature (ge) - replaces rolling_hash
     pub fields: Vec<HeaderField>,
 }
 
@@ -156,6 +158,8 @@ impl VsfHeader {
             creation_time,
             provenance_hash: VsfType::hp(vec![0u8; 32]), // Placeholder, filled during build
             rolling_hash: None,
+            signer_pubkey: None,
+            signature: None,
             fields: Vec::new(),
         }
     }
@@ -191,8 +195,14 @@ impl VsfHeader {
         // Provenance hash (always present)
         header.extend_from_slice(&self.provenance_hash.flatten());
 
-        // Rolling hash (optional)
-        if let Some(ref hash) = self.rolling_hash {
+        // Rolling hash OR signature (mutually exclusive)
+        // If signature present, include ke (pubkey) + ge (signature) instead of hb
+        if let Some(ref pubkey) = self.signer_pubkey {
+            header.extend_from_slice(&pubkey.flatten());
+        }
+        if let Some(ref sig) = self.signature {
+            header.extend_from_slice(&sig.flatten());
+        } else if let Some(ref hash) = self.rolling_hash {
             header.extend_from_slice(&hash.flatten());
         }
 
@@ -343,22 +353,42 @@ impl VsfHeader {
             ));
         }
 
-        // Check for optional rolling hash (hb) or field count (n)
+        // Check for optional signer_pubkey (ke), signature (ge), or rolling hash (hb)
+        // These are mutually exclusive: either (ke + ge) OR (hb), but not both
         let mut rolling_hash = None;
-        let field_count_type = if ptr < data.len() && data[ptr] == b'h' {
-            // Optional rolling hash present
-            rolling_hash = Some(
-                parse(data, &mut ptr)
-                    .map_err(|e| format!("Failed to parse rolling_hash: {}", e))?,
-            );
+        let mut signer_pubkey = None;
+        let mut signature = None;
 
-            // Now parse field count
-            parse(data, &mut ptr)
-                .map_err(|e| format!("Failed to parse field_count after rolling_hash: {}", e))?
-        } else {
-            // No rolling hash, parse field count directly
-            parse(data, &mut ptr).map_err(|e| format!("Failed to parse field_count: {}", e))?
-        };
+        // Parse optional crypto fields until we hit 'n' (field count)
+        while ptr < data.len() && data[ptr] != b'n' {
+            match data[ptr] {
+                b'k' => {
+                    // Signer pubkey (ke)
+                    signer_pubkey = Some(
+                        parse(data, &mut ptr)
+                            .map_err(|e| format!("Failed to parse signer_pubkey: {}", e))?,
+                    );
+                }
+                b'g' => {
+                    // Signature (ge)
+                    signature = Some(
+                        parse(data, &mut ptr)
+                            .map_err(|e| format!("Failed to parse signature: {}", e))?,
+                    );
+                }
+                b'h' => {
+                    // Rolling hash (hb) - only if no signature
+                    rolling_hash = Some(
+                        parse(data, &mut ptr)
+                            .map_err(|e| format!("Failed to parse rolling_hash: {}", e))?,
+                    );
+                }
+                _ => break, // Unknown field, stop parsing crypto
+            }
+        }
+
+        let field_count_type = parse(data, &mut ptr)
+            .map_err(|e| format!("Failed to parse field_count: {}", e))?;
 
         let field_count = match field_count_type {
             VsfType::n(count) => count,
@@ -396,10 +426,27 @@ impl VsfHeader {
                 }
             };
 
-            // Expect ':' separator after section name
+            // Check for empty section (just name, no values) vs regular section
+            if ptr < data.len() && data[ptr] == b')' {
+                // Empty section - just name, no offset/size/child_count
+                ptr += 1; // consume ')'
+                fields.push(HeaderField {
+                    name,
+                    hash: None,
+                    signature: None,
+                    key: None,
+                    wrap: None,
+                    offset_bytes: 0,
+                    size_bytes: 0,
+                    child_count: 0,
+                });
+                continue;
+            }
+
+            // Expect ':' separator for non-empty sections
             if ptr >= data.len() || data[ptr] != b':' {
                 return Err(format!(
-                    "Expected ':' after section name for field {}, found {:?}",
+                    "Expected ':' or ')' after section name for field {}, found {:?}",
                     i,
                     data.get(ptr)
                 ));
@@ -554,6 +601,8 @@ impl VsfHeader {
                 creation_time,
                 provenance_hash,
                 rolling_hash,
+                signer_pubkey,
+                signature,
                 fields,
             },
             ptr, // Return number of bytes consumed
@@ -887,6 +936,13 @@ impl VsfSection {
     /// - Single value: (dfield:value)
     /// - Multi-value: (dfield:v1,v2,v3)
     pub fn encode(&self) -> Vec<u8> {
+        // Empty sections have no body - the header already declares them
+        // This saves bytes for things like ping/pong where the section name
+        // in the header IS the message type identifier
+        if self.fields.is_empty() {
+            return Vec::new();
+        }
+
         let mut bytes = Vec::new();
 
         // Section start

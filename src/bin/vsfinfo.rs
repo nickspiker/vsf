@@ -9,6 +9,7 @@ use colored::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use vsf::decoding::parse::parse;
+use vsf::file_format::VsfHeader as LibVsfHeader;
 use vsf::schema::SchemaRegistry;
 use vsf::types::VsfType;
 
@@ -19,7 +20,7 @@ use vsf::types::VsfType;
 struct Cli {
     /// VSF file to inspect
     #[arg(value_name = "FILE")]
-    file: PathBuf,
+    file: Option<PathBuf>,
 
     /// Show detailed encoding information
     #[arg(short, long)]
@@ -56,8 +57,19 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
 
+    // If no file provided, print help and exit
+    let file = match cli.file {
+        Some(f) => f,
+        None => {
+            use clap::CommandFactory;
+            Cli::command().print_help().unwrap();
+            println!();
+            std::process::exit(0);
+        }
+    };
+
     // Read the file
-    let data = match fs::read(&cli.file) {
+    let data = match fs::read(&file) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("Error reading file: {}", e);
@@ -79,14 +91,15 @@ fn main() {
     }
 }
 
-/// Parse VSF header and return structured information
+/// VSF header wrapper for display - uses library's VsfHeader::decode()
 struct VsfHeader {
     version: usize,
     backward_compat: usize,
     modified_time: Option<VsfType>,   // Timestamp
     provenance_hash: Option<VsfType>, // BLAKE3 provenance hash (required)
-    signature: Option<VsfType>,       // Ed25519 signature (optional)
-    rolling_hash: Option<VsfType>,    // BLAKE3 rolling hash (optional, but not both signature and rolling)
+    signer_pubkey: Option<VsfType>,   // Ed25519 public key (optional, ke)
+    signature: Option<VsfType>,       // Ed25519 signature (optional, ge)
+    rolling_hash: Option<VsfType>,    // BLAKE3 rolling hash (optional)
     labels: Vec<LabelInfo>,
 }
 
@@ -103,288 +116,35 @@ struct LabelInfo {
 
 impl VsfHeader {
     fn parse(data: &[u8]) -> Result<Self, String> {
-        // Verify magic number
-        if data.len() < 4 {
-            return Err("File too small to be valid VSF".to_string());
-        }
-        if &data[0..3] != "RÅ".as_bytes() || data[3] != b'<' {
-            return Err("Invalid VSF magic number".to_string());
-        }
+        // Use the library's VsfHeader::decode() for parsing
+        let (lib_header, _bytes_consumed) = LibVsfHeader::decode(data)?;
 
-        let mut pointer = 4; // Skip "RÅ<"
-
-        // Parse version and backward compat FIRST (VSF v4+ format)
-        let version_type =
-            parse(data, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
-        let version = match version_type {
-            VsfType::z(v) => v,
-            _ => return Err("Expected z type for version".to_string()),
-        };
-
-        let backward_type = parse(data, &mut pointer)
-            .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
-        let backward_compat = match backward_type {
-            VsfType::y(v) => v,
-            _ => return Err("Expected y type for backward compat".to_string()),
-        };
-
-        // Parse header length (in bits)
-        let header_length_type = parse(data, &mut pointer)
-            .map_err(|e| format!("Failed to parse header length: {}", e))?;
-        let _header_length_bytes = match header_length_type {
-            VsfType::b(bytes, _) => bytes,
-            _ => return Err("Expected b type for header length".to_string()),
-        };
-
-        // Parse creation time (optional for backward compatibility)
-        let creation_time = if pointer < data.len() && data[pointer] == b'e' {
-            let time_type = parse(data, &mut pointer)
-                .map_err(|e| format!("Failed to parse creation time: {}", e))?;
-            Some(time_type)
-        } else {
-            None
-        };
-
-        // Parse provenance hash (hp - required in v3+, optional in v2)
-        let provenance_hash = if pointer < data.len() && data[pointer] == b'h' {
-            let hash_type = parse(data, &mut pointer)
-                .map_err(|e| format!("Failed to parse provenance hash: {}", e))?;
-            match hash_type {
-                VsfType::hp(_) => Some(hash_type),
-                VsfType::hb(_) => {
-                    // Old v2 file - this is the rolling hash, not provenance
-                    return Ok(Self {
-                        version,
-                        backward_compat,
-                        modified_time: creation_time,
-                        provenance_hash: None,
-                        signature: None,
-                        rolling_hash: Some(hash_type),
-                        labels: Self::parse_labels(data, &mut pointer)?,
-                    });
-                }
-                _ => None,
-            }
-        } else {
-            None
-        };
-
-        // Parse optional signature (ge - version 3+)
-        let signature = if pointer < data.len() && data[pointer] == b'g' {
-            let sig_type = parse(data, &mut pointer)
-                .map_err(|e| format!("Failed to parse signature: {}", e))?;
-            Some(sig_type)
-        } else {
-            None
-        };
-
-        // Parse optional rolling hash (hb - version 3+)
-        let rolling_hash = if pointer < data.len() && data[pointer] == b'h' {
-            let hash_type = parse(data, &mut pointer)
-                .map_err(|e| format!("Failed to parse rolling hash: {}", e))?;
-            Some(hash_type)
-        } else {
-            None
-        };
-
-        // Parse label count
-        let label_count_type =
-            parse(data, &mut pointer).map_err(|e| format!("Failed to parse label count: {}", e))?;
-        let label_count = match label_count_type {
-            VsfType::n(count) => count,
-            _ => return Err("Expected n type for label count".to_string()),
-        };
-
-        // Parse each label definition
-        let mut labels = Vec::new();
-        for _ in 0..label_count {
-            if data[pointer] != b'(' {
-                return Err("Expected '(' for label definition".to_string());
-            }
-            pointer += 1;
-
-            let label_name_type = parse(data, &mut pointer)
-                .map_err(|e| format!("Failed to parse label name: {}", e))?;
-            let label_name = match label_name_type {
-                VsfType::d(name) => name,
-                _ => return Err("Expected d type for label name".to_string()),
-            };
-
-            // Parse optional crypto fields (h, g, k, v)
-            let mut hash = None;
-            let mut signature = None;
-            let mut key = None;
-            let mut wrap = None;
-
-            // Keep parsing crypto fields until we hit 'o' (offset)
-            while pointer < data.len() && data[pointer] != b'o' && data[pointer] != b')' {
-                let next_type = parse(data, &mut pointer)
-                    .map_err(|e| format!("Failed to parse label crypto field: {}", e))?;
-                match next_type {
-                    VsfType::hb(_) | VsfType::hs(_) => hash = Some(next_type),
-                    VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => signature = Some(next_type),
-                    VsfType::ke(_)
-                    | VsfType::kx(_)
-                    | VsfType::kp(_)
-                    | VsfType::kc(_)
-                    | VsfType::ka(_) => key = Some(next_type),
-                    VsfType::v(_, _) => wrap = Some(next_type),
-                    _ => {
-                        return Err(format!(
-                            "Unexpected type in label definition, expected h/g/k/v or o"
-                        ))
-                    }
-                }
-            }
-
-            let offset_type =
-                parse(data, &mut pointer).map_err(|e| format!("Failed to parse offset: {}", e))?;
-            let offset_bytes = match offset_type {
-                VsfType::o(bytes) => bytes,
-                _ => return Err("Expected o type for offset".to_string()),
-            };
-
-            let size_type =
-                parse(data, &mut pointer).map_err(|e| format!("Failed to parse size: {}", e))?;
-            let size_bytes = match size_type {
-                VsfType::b(bytes, _) => bytes,
-                _ => return Err("Expected b type for size".to_string()),
-            };
-
-            // Child count is optional if encrypted (has wrap field)
-            let field_count = if wrap.is_some() {
-                // Encrypted blobs have no child count (implied n[0])
-                0
-            } else {
-                // Parse child count
-                let field_count_type = parse(data, &mut pointer)
-                    .map_err(|e| format!("Failed to parse field count: {}", e))?;
-                match field_count_type {
-                    VsfType::n(count) => count,
-                    _ => return Err("Expected n type for field count".to_string()),
-                }
-            };
-
-            if data[pointer] != b')' {
-                return Err("Expected ')' after label definition".to_string());
-            }
-            pointer += 1;
-
-            labels.push(LabelInfo {
-                name: label_name,
-                hash,
-                signature,
-                key,
-                wrap,
-                offset: offset_bytes,
-                size: size_bytes,
-                child_count: field_count,
-            });
-        }
+        // Convert library header to local format for display
+        let labels = lib_header
+            .fields
+            .iter()
+            .map(|field| LabelInfo {
+                name: field.name.clone(),
+                hash: field.hash.clone(),
+                signature: field.signature.clone(),
+                key: field.key.clone(),
+                wrap: field.wrap.clone(),
+                offset: field.offset_bytes,
+                size: field.size_bytes,
+                child_count: field.child_count,
+            })
+            .collect();
 
         Ok(VsfHeader {
-            version,
-            backward_compat,
-            modified_time: creation_time,
-            provenance_hash,
-            signature,
-            rolling_hash,
+            version: lib_header.version,
+            backward_compat: lib_header.backward_compat,
+            modified_time: Some(lib_header.creation_time),
+            provenance_hash: Some(lib_header.provenance_hash),
+            signer_pubkey: lib_header.signer_pubkey,
+            signature: lib_header.signature,
+            rolling_hash: lib_header.rolling_hash,
             labels,
         })
-    }
-
-    fn parse_labels(data: &[u8], pointer: &mut usize) -> Result<Vec<LabelInfo>, String> {
-        // Parse label count
-        let label_count_type =
-            parse(data, pointer).map_err(|e| format!("Failed to parse label count: {}", e))?;
-        let label_count = match label_count_type {
-            VsfType::n(count) => count,
-            _ => return Err("Expected n type for label count".to_string()),
-        };
-
-        let mut labels = Vec::new();
-        for _ in 0..label_count {
-            if data[*pointer] != b'(' {
-                return Err("Expected '(' for label definition".to_string());
-            }
-            *pointer += 1;
-
-            let label_name_type =
-                parse(data, pointer).map_err(|e| format!("Failed to parse label name: {}", e))?;
-            let label_name = match label_name_type {
-                VsfType::d(name) => name,
-                _ => return Err("Expected d type for label name".to_string()),
-            };
-
-            // Parse optional crypto fields (h, g, k, v)
-            let mut hash = None;
-            let mut signature = None;
-            let mut key = None;
-            let mut wrap = None;
-
-            while *pointer < data.len() && data[*pointer] != b'o' && data[*pointer] != b')' {
-                let next_type = parse(data, pointer)
-                    .map_err(|e| format!("Failed to parse label crypto field: {}", e))?;
-                match next_type {
-                    VsfType::hp(_) | VsfType::hb(_) | VsfType::hs(_) => hash = Some(next_type),
-                    VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => signature = Some(next_type),
-                    VsfType::ke(_)
-                    | VsfType::kx(_)
-                    | VsfType::kp(_)
-                    | VsfType::kc(_)
-                    | VsfType::ka(_) => key = Some(next_type),
-                    VsfType::v(_, _) => wrap = Some(next_type),
-                    _ => {
-                        return Err(format!(
-                            "Unexpected type in label definition, expected h/g/k/v or o"
-                        ))
-                    }
-                }
-            }
-
-            let offset_type =
-                parse(data, pointer).map_err(|e| format!("Failed to parse offset: {}", e))?;
-            let offset_bytes = match offset_type {
-                VsfType::o(bytes) => bytes,
-                _ => return Err("Expected o type for offset".to_string()),
-            };
-
-            let size_type =
-                parse(data, pointer).map_err(|e| format!("Failed to parse size: {}", e))?;
-            let size_bytes = match size_type {
-                VsfType::b(bytes, _) => bytes,
-                _ => return Err("Expected b type for size".to_string()),
-            };
-
-            let field_count = if wrap.is_some() {
-                0
-            } else {
-                let field_count_type = parse(data, pointer)
-                    .map_err(|e| format!("Failed to parse field count: {}", e))?;
-                match field_count_type {
-                    VsfType::n(count) => count,
-                    _ => return Err("Expected n type for field count".to_string()),
-                }
-            };
-
-            if data[*pointer] != b')' {
-                return Err("Expected ')' after label definition".to_string());
-            }
-            *pointer += 1;
-
-            labels.push(LabelInfo {
-                name: label_name,
-                hash,
-                signature,
-                key,
-                wrap,
-                offset: offset_bytes,
-                size: size_bytes,
-                child_count: field_count,
-            });
-        }
-
-        Ok(labels)
     }
 }
 
@@ -934,6 +694,23 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
             }
         }
 
+        // Display signer pubkey (ke) with encoding
+        if let Some(ref pk) = header.signer_pubkey {
+            if let VsfType::ke(pk_bytes) = pk {
+                let preview = if pk_bytes.len() >= 8 {
+                    format!("{}...", hex::encode(&pk_bytes[..8]).to_uppercase())
+                } else {
+                    hex::encode(pk_bytes).to_uppercase()
+                };
+                println!(
+                    " {:<24} {} 0x{}",
+                    format!("ke3 1f [{} Bytes]", pk_bytes.len()).truecolor(128, 128, 128),
+                    "Signer pubkey:".cyan(),
+                    preview.white()
+                );
+            }
+        }
+
         // Display Ed25519 signature with encoding
         if let Some(ref sig) = header.signature {
             if let VsfType::ge(sig_bytes) = sig {
@@ -1073,8 +850,10 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
             crypto_parts.join(", ")
         };
 
-        // Field count string
-        let field_str = if label.child_count == 0 {
+        // Field count string - empty sections (size=0) are intentionally empty
+        let field_str = if label.size == 0 {
+            String::new() // Empty section - no field info needed
+        } else if label.child_count == 0 {
             "with unknown".to_string()
         } else if label.child_count == 1 {
             "with 1 field".to_string()
@@ -1084,35 +863,50 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
 
         // Print with alignment
         print!(" {}", "(".truecolor(128, 128, 128));
-        print!("{:>width$}", size_str.bright_yellow(), width = max_size_len);
-        print!("      ");
-        print!(
-            "{:<width$}",
-            label.name.white().bold(),
-            width = max_name_len
-        );
-        print!("    @");
-        print!(
-            "{:>width$}",
-            offset_str.truecolor(64, 50, 255),
-            width = max_offset_str_len
-        );
-        print!("   ");
-        print!("{:<15}", field_str.cyan());
-        print!(" ");
-        print!("{:<33}", crypto_str.magenta());
+        if label.size == 0 {
+            // Empty section - just show name
+            print!("{}", label.name.white().bold());
+        } else {
+            // Regular section with size/offset info
+            print!("{:>width$}", size_str.bright_yellow(), width = max_size_len);
+            print!("      ");
+            print!(
+                "{:<width$}",
+                label.name.white().bold(),
+                width = max_name_len
+            );
+            print!("    @");
+            print!(
+                "{:>width$}",
+                offset_str.truecolor(64, 50, 255),
+                width = max_offset_str_len
+            );
+            print!("   ");
+            print!("{:<15}", field_str.cyan());
+            print!(" ");
+            print!("{:<33}", crypto_str.magenta());
+        }
         println!("{}", ")".truecolor(128, 128, 128));
     }
 
-    print!("{}", ">".truecolor(128, 128, 128));
-    println!("{}", "┐".white());
+    // Check if there are any non-empty sections to display
+    let has_nonempty_sections = header.labels.iter().any(|l| l.size > 0);
+
+    if has_nonempty_sections {
+        print!("{}", ">".truecolor(128, 128, 128));
+        println!("{}", "┐".white());
+    } else {
+        // All sections are empty - just show the closing bracket
+        println!("{}", ">".truecolor(128, 128, 128));
+    }
 
     // Track validation errors
     let mut has_errors = false;
 
-    // Show sections with their actual structure
-    for (i, label) in header.labels.iter().enumerate() {
-        let is_last = i == header.labels.len() - 1;
+    // Show sections with their actual structure (skip empty sections)
+    let nonempty_labels: Vec<_> = header.labels.iter().filter(|l| l.size > 0).collect();
+    for (i, label) in nonempty_labels.iter().enumerate() {
+        let is_last = i == nonempty_labels.len() - 1;
         let connector = if is_last { " └─" } else { " ├─" };
 
         // Show section (crypto is in header label now, not preamble)
@@ -1147,47 +941,75 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
         if label.child_count == 0 {
             let field_prefix = if is_last { "   " } else { " │ " };
 
-            // Try to decrypt if we have a key and this is encrypted
-            #[cfg(feature = "crypto")]
-            let decrypted = if let Some(ref kp) = keypair {
-                // Extract section data
-                let section_start = label.offset;
-                let section_end = section_start + label.size;
-                if section_end <= data.len() {
-                    let section_data = &data[section_start..section_end];
+            // Check if this is an empty section vs opaque blob
+            // Empty section: [dname] with no content after the name
+            // Opaque blob: [dname <content>] with encrypted/binary data
+            let section_start = label.offset;
+            let section_end = section_start + label.size;
+            let is_empty_section = if section_end <= data.len() {
+                let section_data = &data[section_start..section_end];
+                // Parse [dname] and check if ] comes right after
+                let mut ptr = 0;
+                if ptr < section_data.len() && section_data[ptr] == b'[' {
+                    ptr += 1;
+                    if parse(section_data, &mut ptr).is_ok() {
+                        // After parsing dname, should be at ]
+                        ptr < section_data.len() && section_data[ptr] == b']'
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
 
-                    // Parse the section to extract the v'e' wrapper with encrypted content
-                    // Structure: [ d"name" v'e'[encrypted_bytes] ]
-                    let mut ptr = 0;
-                    if ptr < section_data.len() && section_data[ptr] == b'[' {
-                        ptr += 1;
+            if is_empty_section {
+                // Empty section - don't display anything
+            } else {
+                // Try to decrypt if we have a key and this is encrypted
+                #[cfg(feature = "crypto")]
+                let decrypted = if let Some(ref kp) = keypair {
+                    // Extract section data
+                    if section_end <= data.len() {
+                        let section_data = &data[section_start..section_end];
 
-                        // Skip section name
-                        if let Ok(_) = parse(section_data, &mut ptr) {
-                            // Try to parse a v'e' wrapper
-                            if let Ok(VsfType::v(b'e', encrypted_bytes)) = parse(section_data, &mut ptr) {
-                                match vsf::decrypt::decrypt_ve(&encrypted_bytes, &kp.x25519_secret) {
-                                    Ok(plaintext) => {
-                                        println!("{}  {} Decrypted content:", field_prefix, "🔓".green());
-                                        // Parse and display decrypted VSF content
-                                        let mut ptr = 0;
-                                        while ptr < plaintext.len() {
-                                            match parse(&plaintext, &mut ptr) {
-                                                Ok(val) => {
-                                                    println!("{}    {}", field_prefix, format_value_short(&val));
-                                                }
-                                                Err(e) => {
-                                                    println!("{}    <parse error: {}>", field_prefix, e);
-                                                    break;
+                        // Parse the section to extract the v'e' wrapper with encrypted content
+                        // Structure: [ d"name" v'e'[encrypted_bytes] ]
+                        let mut ptr = 0;
+                        if ptr < section_data.len() && section_data[ptr] == b'[' {
+                            ptr += 1;
+
+                            // Skip section name
+                            if parse(section_data, &mut ptr).is_ok() {
+                                // Try to parse a v'e' wrapper
+                                if let Ok(VsfType::v(b'e', encrypted_bytes)) = parse(section_data, &mut ptr) {
+                                    match vsf::decrypt::decrypt_ve(&encrypted_bytes, &kp.x25519_secret) {
+                                        Ok(plaintext) => {
+                                            println!("{}  {} Decrypted content:", field_prefix, "🔓".green());
+                                            // Parse and display decrypted VSF content
+                                            let mut ptr = 0;
+                                            while ptr < plaintext.len() {
+                                                match parse(&plaintext, &mut ptr) {
+                                                    Ok(val) => {
+                                                        println!("{}    {}", field_prefix, format_value_short(&val));
+                                                    }
+                                                    Err(e) => {
+                                                        println!("{}    <parse error: {}>", field_prefix, e);
+                                                        break;
+                                                    }
                                                 }
                                             }
+                                            Some(())
                                         }
-                                        Some(())
+                                        Err(e) => {
+                                            println!("{}  {} Decryption failed: {}", field_prefix, "✗".red(), e);
+                                            None
+                                        }
                                     }
-                                    Err(e) => {
-                                        println!("{}  {} Decryption failed: {}", field_prefix, "✗".red(), e);
-                                        None
-                                    }
+                                } else {
+                                    None
                                 }
                             } else {
                                 None
@@ -1200,24 +1022,22 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
                     }
                 } else {
                     None
-                }
-            } else {
-                None
-            };
+                };
 
-            #[cfg(feature = "crypto")]
-            if decrypted.is_none() {
+                #[cfg(feature = "crypto")]
+                if decrypted.is_none() {
+                    println!(
+                        "{}  (opaque blob - encrypted or unstructured)",
+                        field_prefix
+                    );
+                }
+
+                #[cfg(not(feature = "crypto"))]
                 println!(
                     "{}  (opaque blob - encrypted or unstructured)",
                     field_prefix
                 );
             }
-
-            #[cfg(not(feature = "crypto"))]
-            println!(
-                "{}  (opaque blob - encrypted or unstructured)",
-                field_prefix
-            );
         } else {
             match parse_section_fields(data, label) {
                 Ok(fields) => {
@@ -1271,14 +1091,11 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
 /// Returns true if all integrity checks pass
 fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<bool, String> {
     let mut all_checks_pass = true;
-    // Display and verify provenance hash (hp)
+
+    // Display provenance hash (hp) - NO verification, it's for identity/linking only
     if let Some(ref hp) = header.provenance_hash {
         match hp {
             VsfType::hp(stored_hash) => {
-                let computed =
-                    vsf::verification::compute_provenance_hash(data).unwrap_or_else(|_| [0u8; 32]);
-                let verified = computed.as_slice() == stored_hash.as_slice();
-
                 println!(
                     " {}-Byte {} {}:",
                     stored_hash.len().to_string().white(),
@@ -1290,17 +1107,10 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<bool, Str
                     print!("{:02X}", byte);
                 }
                 println!();
-                print!(" {} ", "Verification:".cyan());
-                if verified {
-                    println!("{}", "PASS".truecolor(0, 255, 0));
-                } else {
-                    all_checks_pass = false;
-                    println!("{}", "FAIL".truecolor(255, 0, 0));
-                }
                 println!(
                     " {} {}",
                     "Semantics:".cyan(),
-                    "Content identifier, links challenge → response in FGTW protocol"
+                    "Content identifier for linking (not verified)"
                         .truecolor(200, 200, 200)
                 );
             }
@@ -1308,7 +1118,31 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<bool, Str
         }
     }
 
-    // Display and verify optional signature (ge)
+    // Display signer pubkey (ke) if present
+    if let Some(ref pk) = header.signer_pubkey {
+        match pk {
+            VsfType::ke(pk_bytes) => {
+                println!(
+                    " {}-Byte {} {}:",
+                    pk_bytes.len().to_string().white(),
+                    "Ed25519".green(),
+                    "signer pubkey".cyan()
+                );
+                print!(" {} ", "0x".truecolor(64, 50, 255));
+                for byte in pk_bytes.iter() {
+                    print!("{:02X}", byte);
+                }
+                println!();
+            }
+            _ => {}
+        }
+    }
+
+    // Display optional signature (ge)
+    // NOTE: We can't verify the signature here because we don't know what was signed.
+    // The signed data is protocol-specific (e.g., for status pings it's the provenance hash,
+    // but for other protocols it could be the file content, a subset of fields, etc.)
+    // Rolling hash (hb) is the correct mechanism for file-level integrity verification.
     if let Some(ref sig) = header.signature {
         match sig {
             VsfType::ge(sig_bytes) => {
@@ -1326,6 +1160,11 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<bool, Str
                     print!("...");
                 }
                 println!();
+                println!(
+                    " {} {}",
+                    "Semantics:".cyan(),
+                    "Protocol-specific (signed data unknown)".truecolor(200, 200, 200)
+                );
             }
             _ => {}
         }

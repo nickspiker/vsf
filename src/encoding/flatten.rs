@@ -386,7 +386,7 @@ impl VsfType {
             VsfType::hp(value) => {
                 let mut flat = vec![b'h', b'p'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.resize(flat.len() + value.len(), 0); // Write zeros as placeholders
+                flat.extend_from_slice(value); // Write actual hash bytes
                 flat
             }
 
@@ -408,21 +408,21 @@ impl VsfType {
             VsfType::ge(value) => {
                 let mut flat = vec![b'g', b'e'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.resize(flat.len() + value.len(), 0); // Write zeros as placeholders
+                flat.extend_from_slice(value); // Write actual signature bytes
                 flat
             }
 
             VsfType::gp(value) => {
                 let mut flat = vec![b'g', b'p'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.resize(flat.len() + value.len(), 0); // Write zeros as placeholders
+                flat.extend_from_slice(value); // Write actual signature bytes
                 flat
             }
 
             VsfType::gr(value) => {
                 let mut flat = vec![b'g', b'r'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.resize(flat.len() + value.len(), 0); // Write zeros as placeholders
+                flat.extend_from_slice(value); // Write actual signature bytes
                 flat
             }
 

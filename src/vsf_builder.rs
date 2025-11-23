@@ -18,10 +18,13 @@ use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
 pub struct VsfBuilder {
     version: usize,
     backward_compat: usize,
-    creation_time: VsfType, // Creation timestamp (ef5 for ~2min precision)
+    creation_time: VsfType, // Creation timestamp (ef5 for ~2min precision, ef6 for nanos)
     sections: Vec<VsfSection>,
     unboxed: Vec<(String, Vec<u8>)>,
-    include_file_hash: bool, // Always true - BLAKE3 hash is mandatory for all VSF files
+    include_file_hash: bool, // True for rolling hash, false if signed
+    custom_provenance: Option<[u8; 32]>, // Custom provenance hash (immutable identity)
+    signer_pubkey: Option<VsfType>, // Signer's Ed25519 pubkey (ke) - for signature verification
+    signature: Option<(VsfType, [u8; 64])>, // (signature type, signature bytes) - replaces hb
 }
 
 impl VsfBuilder {
@@ -50,8 +53,42 @@ impl VsfBuilder {
             creation_time: VsfType::e(EtType::f5(et_f32)),
             sections: Vec::new(),
             unboxed: Vec::new(),
-            include_file_hash: true, // Always hash - required for all VSF files
+            include_file_hash: true, // True for rolling hash, false if signed
+            custom_provenance: None,
+            signer_pubkey: None,
+            signature: None,
         }
+    }
+
+    /// Set creation time with nanosecond precision (ef6)
+    /// Use this for protocols that need unique timestamps for replay protection
+    pub fn creation_time_nanos(mut self, eagle_time: f64) -> Self {
+        use crate::types::EtType;
+        self.creation_time = VsfType::e(EtType::f6(eagle_time));
+        self
+    }
+
+    /// Set a custom provenance hash (immutable content identity)
+    ///
+    /// Use this when the provenance hash has specific meaning in your protocol,
+    /// such as linking a response to a challenge. The provenance hash will NOT
+    /// be recomputed during build() - it stays exactly as you set it.
+    pub fn provenance_hash(mut self, hash: [u8; 32]) -> Self {
+        self.custom_provenance = Some(hash);
+        self
+    }
+
+    /// Add an Ed25519 signature to the header (replaces rolling hash)
+    ///
+    /// The signature should sign the provenance hash. When a signature is present,
+    /// no rolling hash (hb) is included - the signature provides integrity verification.
+    ///
+    /// Both pubkey (ke) and signature (ge) are included in the header for verification.
+    pub fn signature_ed25519(mut self, pubkey: [u8; 32], signature: [u8; 64]) -> Self {
+        self.signer_pubkey = Some(VsfType::ke(pubkey.to_vec()));
+        self.signature = Some((VsfType::ge(signature.to_vec()), signature));
+        self.include_file_hash = false; // Signature replaces rolling hash
+        self
     }
 
     /// Set version numbers
@@ -117,15 +154,25 @@ impl VsfBuilder {
         header_index = vsf.len();
         vsf.push(self.creation_time.flatten());
 
-        // Provenance hash placeholder (required, always BLAKE3)
-        vsf[header_index].extend_from_slice(&hash_placeholder(b'p', 32));
-
-        // Rolling hash placeholder OR signature placeholder (optional, default enabled)
-        if self.include_file_hash {
-            vsf[header_index].extend_from_slice(&hash_placeholder(b'b', 32));
+        // Provenance hash - use custom if set, otherwise placeholder for auto-compute
+        if let Some(custom_hp) = &self.custom_provenance {
+            vsf[header_index].extend_from_slice(&VsfType::hp(custom_hp.to_vec()).flatten());
+        } else {
+            vsf[header_index].extend_from_slice(&hash_placeholder(b'p', 32));
         }
 
-        // If signed, signature would replace hp bytes here (ge replaces hp)
+        // Signature (ke + ge) OR rolling hash (hb) - mutually exclusive
+        if let Some(ref pubkey) = &self.signer_pubkey {
+            // Include signer's public key before signature
+            vsf[header_index].extend_from_slice(&pubkey.flatten());
+        }
+        if let Some((sig_type, _)) = &self.signature {
+            // Signature replaces rolling hash
+            vsf[header_index].extend_from_slice(&sig_type.flatten());
+        } else if self.include_file_hash {
+            // Rolling hash placeholder for auto-compute
+            vsf[header_index].extend_from_slice(&hash_placeholder(b'b', 32));
+        }
 
         // Header field count (number of section pointers)
         let total_fields = self.sections.len() + self.unboxed.len();
@@ -137,6 +184,14 @@ impl VsfBuilder {
         let mut field_size_indices = Vec::new();
 
         for (i, section) in self.sections.iter().enumerate() {
+            // Empty sections have no body - just the name in header
+            if section.fields.is_empty() {
+                let field = crate::file_format::VsfField::new(&section.name);
+                header_index = vsf.len();
+                vsf.push(field.flatten());
+                continue;
+            }
+
             // Create field with placeholder values
             let field = crate::file_format::VsfField::new(&section.name)
                 .with_value(VsfType::o(0))        // offset placeholder
@@ -265,21 +320,23 @@ impl VsfBuilder {
             result.extend_from_slice(&data);
         }
 
-        // Now structure is finalized - compute and write all crypto primitives
-        use crate::verification::{
-            compute_provenance_hash, write_provenance_hash,
-            compute_file_hash, write_file_hash
-        };
+        // Now structure is finalized - compute and write crypto primitives
+        // Skip if custom values were provided (they're already in the header)
 
-        // 1. Compute and write provenance hash (hp) first
-        let prov_hash = compute_provenance_hash(&result)?;
-        result = write_provenance_hash(result, &prov_hash)?;
+        if self.custom_provenance.is_none() {
+            // Auto-compute provenance hash
+            use crate::verification::{compute_provenance_hash, write_provenance_hash};
+            let prov_hash = compute_provenance_hash(&result)?;
+            result = write_provenance_hash(result, &prov_hash)?;
+        }
 
-        // 2. Compute and write rolling hash (hb) after provenance hash is set
-        let file_hash = compute_file_hash(&result)?;
-        result = write_file_hash(result, &file_hash)?;
-
-        // If signed, signature would get computed and written here
+        if self.signature.is_none() && self.include_file_hash {
+            // Auto-compute rolling hash (only if no signature)
+            use crate::verification::{compute_file_hash, write_file_hash};
+            let file_hash = compute_file_hash(&result)?;
+            result = write_file_hash(result, &file_hash)?;
+        }
+        // If signature was provided, it's already written in the header
 
         Ok(result)
     }
