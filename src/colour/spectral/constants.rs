@@ -1402,6 +1402,3 @@ pub const LMS2PHOTOPIC: [f32; 3] = [
     1.0, // m cone weight
     0.0, // s cone weight (S-cones don't contribute to photopic luminance)
 ];
-
-// Rec.2020 transformation matrices are now in the rec2020 module
-// See: src/colour/rec2020/constants.rs

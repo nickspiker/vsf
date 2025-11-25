@@ -1049,6 +1049,89 @@ pub fn lumis_raw_capture(samples: Vec<u64>, iso: f32, shutter_s: f32) -> Result<
     )
 }
 
+// ==================== COMPRESSED IMAGE ====================
+
+/// AV1 encoding marker for v-wrapped data
+pub const ENCODING_AV1: u8 = b'a';
+
+/// Build a compressed image (AV1 payload in VSF RGB colorspace)
+///
+/// Creates a minimal VSF file with:
+/// - Provenance hash only (no rolling hash, no signature)
+/// - AV1-compressed pixel data wrapped in v type (`va`)
+///
+/// The `va` encoding tells us it's AV1, and AV1 bitstream contains dimensions.
+/// Provenance hash ensures integrity. No redundant metadata needed.
+///
+/// Assumes VSF RGB colorspace (gamma 2, Rec.2020 primaries).
+///
+/// # Arguments
+/// * `av1_data` - AV1-encoded pixel data
+///
+/// # Returns
+/// Complete VSF file bytes ready to write to disk
+pub fn compressed_image(av1_data: Vec<u8>) -> Result<Vec<u8>, String> {
+    VsfBuilder::new()
+        .provenance_only()
+        .add_section("image", vec![
+            ("pixels".to_string(), VsfType::v(ENCODING_AV1, av1_data)),
+        ])
+        .build()
+}
+
+/// Parsed compressed image from a VSF file
+pub struct ParsedCompressedImage {
+    pub encoding: u8,
+    pub data: Vec<u8>,
+}
+
+/// Parse a compressed image VSF file
+///
+/// Extracts encoding type and compressed pixel data.
+/// Dimensions come from decoding the AV1 bitstream.
+///
+/// # Arguments
+/// * `data` - Complete VSF file bytes
+///
+/// # Returns
+/// ParsedCompressedImage or error
+pub fn parse_compressed_image(data: &[u8]) -> Result<ParsedCompressedImage, String> {
+    use crate::file_format::{VsfHeader, VsfSection};
+
+    // Parse header using library function
+    let (header, _) = VsfHeader::decode(data)?;
+
+    // Find the "image" section
+    let image_field = header
+        .fields
+        .iter()
+        .find(|f| f.name == "image")
+        .ok_or("Required 'image' section not found")?;
+
+    // Parse section at offset
+    let mut ptr = image_field.offset_bytes;
+    let section = VsfSection::parse(data, &mut ptr)?;
+
+    // Extract pixels field
+    let pixels_field = section
+        .get_field("pixels")
+        .ok_or("Missing 'pixels' field in image section")?;
+
+    // Get first value (the v-wrapped data)
+    let value = pixels_field
+        .values
+        .first()
+        .ok_or("Empty 'pixels' field")?;
+
+    match value {
+        VsfType::v(encoding, pixel_data) => Ok(ParsedCompressedImage {
+            encoding: *encoding,
+            data: pixel_data.clone(),
+        }),
+        _ => Err("Expected v type for pixels field".to_string()),
+    }
+}
+
 // ==================== RAW IMAGE PARSER ====================
 
 /// Parsed RAW image data from a VSF file
@@ -1083,122 +1166,35 @@ fn to_usize(vsf_type: &VsfType) -> Option<usize> {
 /// # Returns
 /// ParsedRawImage containing the image and optional metadata, or an error
 pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
-    use crate::decoding::parse::parse;
+    use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
+    use crate::file_format::{VsfHeader, VsfSection};
 
-    // Verify magic number
-    if data.len() < 4 {
-        return Err("File too small to be valid VSF".to_string());
+    // Parse header using library function
+    let (header, _) = VsfHeader::decode(data)?;
+
+    // Find the "raw" section
+    let raw_field = header
+        .fields
+        .iter()
+        .find(|f| f.name == "raw")
+        .ok_or("Required 'raw' section not found")?;
+
+    // Parse section at offset
+    let mut ptr = raw_field.offset_bytes;
+    let section = VsfSection::parse(data, &mut ptr)?;
+
+    // Helper to get first value from a field
+    fn get_first_value<'a>(section: &'a VsfSection, name: &str) -> Option<&'a VsfType> {
+        section.get_field(name)?.values.first()
     }
-    if &data[0..3] != "RÅ".as_bytes() || data[3] != b'<' {
-        return Err("Invalid VSF magic number".to_string());
-    }
 
-    let mut pointer = 4; // Skip "RÅ<"
-
-    // Parse version and backward compat (v4 wire format: version-first!)
-    let _version =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
-    let _backward =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse backward compat: {}", e))?;
-
-    // Parse header length (in bits)
-    let header_length_type =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse header length: {}", e))?;
-    let _header_length_bits = match header_length_type {
-        VsfType::b(bits, _) => bits,
-        _ => return Err("Expected b type for header length".to_string()),
+    // Extract image (required)
+    let image = match get_first_value(&section, "image") {
+        Some(VsfType::p(tensor)) => tensor.clone(),
+        _ => return Err("Missing required 'image' field".to_string()),
     };
 
-    // Parse creation time (v4 format)
-    let _creation_time =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse creation time: {}", e))?;
-
-    // Parse provenance hash (hp)
-    let _provenance_hash =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse provenance hash: {}", e))?;
-
-    // Parse rolling file hash (hb - optional but usually present)
-    let _file_hash =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse file hash: {}", e))?;
-
-    // Parse label count
-    let label_count_type =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse label count: {}", e))?;
-    let label_count = match label_count_type {
-        VsfType::n(count) => count,
-        _ => return Err("Expected n type for label count".to_string()),
-    };
-
-    // Find the "raw" label
-    let mut raw_offset_bytes: Option<usize> = None;
-    let mut raw_field_count: Option<usize> = None;
-
-    for _ in 0..label_count {
-        // Parse label definition: (d[name] o[offset] b[size] n[count])
-        if data[pointer] != b'(' {
-            return Err("Expected '(' for label definition".to_string());
-        }
-        pointer += 1;
-
-        let label_name_type =
-            parse(data, &mut pointer).map_err(|e| format!("Failed to parse label name: {}", e))?;
-        let label_name = match label_name_type {
-            VsfType::d(name) => name,
-            _ => return Err("Expected d type for label name".to_string()),
-        };
-
-        let offset_type =
-            parse(data, &mut pointer).map_err(|e| format!("Failed to parse offset: {}", e))?;
-        let offset_bytes = match offset_type {
-            VsfType::o(bytes) => bytes,
-            _ => return Err("Expected o type for offset".to_string()),
-        };
-
-        let size_type =
-            parse(data, &mut pointer).map_err(|e| format!("Failed to parse size: {}", e))?;
-        let _size_bytes = match size_type {
-            VsfType::b(bytes, _) => bytes,
-            _ => return Err("Expected b type for size".to_string()),
-        };
-
-        let field_count_type =
-            parse(data, &mut pointer).map_err(|e| format!("Failed to parse field count: {}", e))?;
-        let field_count = match field_count_type {
-            VsfType::n(count) => count,
-            _ => return Err("Expected n type for field count".to_string()),
-        };
-
-        if data[pointer] != b')' {
-            return Err("Expected ')' after label definition".to_string());
-        }
-        pointer += 1;
-
-        // Store label info
-        match label_name.as_str() {
-            "raw" => {
-                raw_offset_bytes = Some(offset_bytes);
-                raw_field_count = Some(field_count);
-            }
-            _ => {} // Ignore other labels
-        }
-    }
-
-    // Ensure we found the raw label
-    let (raw_offset, raw_count) = match (raw_offset_bytes, raw_field_count) {
-        (Some(o), Some(c)) => (o, c),
-        _ => return Err("Required 'raw' label not found".to_string()),
-    };
-
-    // Skip to end of header
-    if data[pointer] != b'>' {
-        return Err("Expected '>' for header end".to_string());
-    }
-    // Note: pointer is not incremented here since we seek directly to section_start_byte below
-
-    // Initialize all field variables
-    let mut image: Option<BitPackedTensor> = None;
-
-    // Raw metadata fields
+    // Initialize metadata fields
     let mut cfa_pattern: Option<Vec<u8>> = None;
     let mut black_level: Option<f32> = None;
     let mut white_level: Option<f32> = None;
@@ -1209,7 +1205,6 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     let mut distortion_correction_hash: Option<(u8, Vec<u8>)> = None;
     let mut magic_9: Option<Vec<f32>> = None;
 
-    // Camera settings fields
     let mut camera_make: Option<String> = None;
     let mut camera_model: Option<String> = None;
     let mut camera_serial: Option<String> = None;
@@ -1222,7 +1217,6 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     let mut flash_fired: Option<bool> = None;
     let mut metering_mode: Option<String> = None;
 
-    // Lens info fields
     let mut lens_make: Option<String> = None;
     let mut lens_model: Option<String> = None;
     let mut lens_serial: Option<String> = None;
@@ -1231,277 +1225,143 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     let mut lens_min_aperture: Option<f32> = None;
     let mut lens_max_aperture: Option<f32> = None;
 
-    // Parse the "raw" section
-    let section_start_byte = raw_offset; // Offset is already in bytes
-    if section_start_byte >= data.len() {
-        return Err(format!(
-            "Raw section offset {} exceeds file size {}",
-            section_start_byte,
-            data.len()
-        ));
-    }
-    pointer = section_start_byte;
-
-    // Parse section start
-    if data[pointer] != b'[' {
-        return Err(format!(
-            "Expected '[' for raw section at byte {}, found {:?}",
-            pointer, data[pointer] as char
-        ));
-    }
-    pointer += 1;
-
-    // Parse section name
-    let section_name_type = parse(data, &mut pointer)
-        .map_err(|e| format!("Failed to parse raw section name: {}", e))?;
-    let _section_name = match section_name_type {
-        VsfType::d(name) => name,
-        _ => return Err("Expected d type for raw section name".to_string()),
-    };
-
-    // Parse raw section fields
-    for i in 0..raw_count {
-        if data[pointer] != b'(' {
-            return Err(format!("Expected '(' for field {}", i));
+    // Helper to parse hash fields
+    fn parse_hash(value: &VsfType) -> Option<(u8, Vec<u8>)> {
+        match value {
+            VsfType::hb(v) => Some((HASH_BLAKE3, v.clone())),
+            VsfType::hs(v) => {
+                let algo = if v.len() == 32 { HASH_SHA256 } else { HASH_SHA512 };
+                Some((algo, v.clone()))
+            }
+            _ => None,
         }
-        pointer += 1;
+    }
 
-        // Parse field name
-        let field_name_type = parse(data, &mut pointer)
-            .map_err(|e| format!("Failed to parse field {} name: {}", i, e))?;
-        let field_name = match field_name_type {
-            VsfType::d(name) => name,
-            _ => return Err(format!("Expected d type for field {} name", i)),
+    // Extract optional fields from section
+    for field in &section.fields {
+        let value = match field.values.first() {
+            Some(v) => v,
+            None => continue,
         };
 
-        // Expect ':'
-        if data[pointer] != b':' {
-            return Err(format!("Expected ':' after field name '{}'", field_name));
-        }
-        pointer += 1;
-
-        // Parse field value
-        let field_value = parse(data, &mut pointer)
-            .map_err(|e| format!("Failed to parse field '{}': {}", field_name, e))?;
-
-        // Store the value based on field name
-        match field_name.as_str() {
-            "image" => {
-                if let VsfType::p(tensor) = field_value {
-                    image = Some(tensor);
-                }
-            }
+        match field.name.as_str() {
             // Raw metadata
             "cfa_pattern" => {
-                if let VsfType::t_u3(tensor) = field_value {
-                    cfa_pattern = Some(tensor.data);
+                if let VsfType::t_u3(tensor) = value {
+                    cfa_pattern = Some(tensor.data.clone());
                 }
             }
             "black_level" => {
-                if let VsfType::f5(v) = field_value {
-                    black_level = Some(v);
+                if let VsfType::f5(v) = value {
+                    black_level = Some(*v);
                 }
             }
             "white_level" => {
-                if let VsfType::f5(v) = field_value {
-                    white_level = Some(v);
+                if let VsfType::f5(v) = value {
+                    white_level = Some(*v);
                 }
             }
-            "dark_frame_hash" => {
-                use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
-                match field_value {
-                    VsfType::hb(v) => dark_frame_hash = Some((HASH_BLAKE3, v)),
-                    VsfType::hs(v) => {
-                        // For hs, we need to determine if it's SHA-256 or SHA-512 based on length
-                        let algo = if v.len() == 32 {
-                            HASH_SHA256
-                        } else {
-                            HASH_SHA512
-                        };
-                        dark_frame_hash = Some((algo, v))
-                    }
-                    _ => {}
-                }
-            }
-            "flat_field_hash" => {
-                use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
-                match field_value {
-                    VsfType::hb(v) => flat_field_hash = Some((HASH_BLAKE3, v)),
-                    VsfType::hs(v) => {
-                        let algo = if v.len() == 32 {
-                            HASH_SHA256
-                        } else {
-                            HASH_SHA512
-                        };
-                        flat_field_hash = Some((algo, v))
-                    }
-                    _ => {}
-                }
-            }
-            "bias_frame_hash" => {
-                use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
-                match field_value {
-                    VsfType::hb(v) => bias_frame_hash = Some((HASH_BLAKE3, v)),
-                    VsfType::hs(v) => {
-                        let algo = if v.len() == 32 {
-                            HASH_SHA256
-                        } else {
-                            HASH_SHA512
-                        };
-                        bias_frame_hash = Some((algo, v))
-                    }
-                    _ => {}
-                }
-            }
-            "vignette_correction_hash" => {
-                use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
-                match field_value {
-                    VsfType::hb(v) => vignette_correction_hash = Some((HASH_BLAKE3, v)),
-                    VsfType::hs(v) => {
-                        let algo = if v.len() == 32 {
-                            HASH_SHA256
-                        } else {
-                            HASH_SHA512
-                        };
-                        vignette_correction_hash = Some((algo, v))
-                    }
-                    _ => {}
-                }
-            }
-            "distortion_correction_hash" => {
-                use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
-                match field_value {
-                    VsfType::hb(v) => distortion_correction_hash = Some((HASH_BLAKE3, v)),
-                    VsfType::hs(v) => {
-                        let algo = if v.len() == 32 {
-                            HASH_SHA256
-                        } else {
-                            HASH_SHA512
-                        };
-                        distortion_correction_hash = Some((algo, v))
-                    }
-                    _ => {}
-                }
-            }
+            "dark_frame_hash" => dark_frame_hash = parse_hash(value),
+            "flat_field_hash" => flat_field_hash = parse_hash(value),
+            "bias_frame_hash" => bias_frame_hash = parse_hash(value),
+            "vignette_correction_hash" => vignette_correction_hash = parse_hash(value),
+            "distortion_correction_hash" => distortion_correction_hash = parse_hash(value),
             "magic_9" => {
-                if let VsfType::t_f5(tensor) = field_value {
-                    magic_9 = Some(tensor.data);
+                if let VsfType::t_f5(tensor) = value {
+                    magic_9 = Some(tensor.data.clone());
                 }
             }
             // Camera settings
             "camera_make" => {
-                if let VsfType::x(v) = field_value {
-                    camera_make = Some(v);
+                if let VsfType::x(v) = value {
+                    camera_make = Some(v.clone());
                 }
             }
             "camera_model" => {
-                if let VsfType::x(v) = field_value {
-                    camera_model = Some(v);
+                if let VsfType::x(v) = value {
+                    camera_model = Some(v.clone());
                 }
             }
             "camera_serial" => {
-                if let VsfType::x(v) = field_value {
-                    camera_serial = Some(v);
+                if let VsfType::x(v) = value {
+                    camera_serial = Some(v.clone());
                 }
             }
             "iso_speed" => {
-                if let VsfType::f5(v) = field_value {
-                    iso_speed = Some(v);
+                if let VsfType::f5(v) = value {
+                    iso_speed = Some(*v);
                 }
             }
             "shutter_time_s" => {
-                if let VsfType::f5(v) = field_value {
-                    shutter_time_s = Some(v);
+                if let VsfType::f5(v) = value {
+                    shutter_time_s = Some(*v);
                 }
             }
             "aperture_f_number" => {
-                if let VsfType::f5(v) = field_value {
-                    aperture_f_number = Some(v);
+                if let VsfType::f5(v) = value {
+                    aperture_f_number = Some(*v);
                 }
             }
             "focal_length_m" => {
-                if let VsfType::f5(v) = field_value {
-                    focal_length_m = Some(v);
+                if let VsfType::f5(v) = value {
+                    focal_length_m = Some(*v);
                 }
             }
             "exposure_compensation" => {
-                if let VsfType::f5(v) = field_value {
-                    exposure_compensation = Some(v);
+                if let VsfType::f5(v) = value {
+                    exposure_compensation = Some(*v);
                 }
             }
             "focus_distance_m" => {
-                if let VsfType::f5(v) = field_value {
-                    focus_distance_m = Some(v);
+                if let VsfType::f5(v) = value {
+                    focus_distance_m = Some(*v);
                 }
             }
-            "flash_fired" => flash_fired = to_usize(&field_value).map(|v| v != 0),
+            "flash_fired" => flash_fired = to_usize(value).map(|v| v != 0),
             "metering_mode" => {
-                if let VsfType::x(v) = field_value {
-                    metering_mode = Some(v);
+                if let VsfType::x(v) = value {
+                    metering_mode = Some(v.clone());
                 }
             }
             // Lens info
             "lens_make" => {
-                if let VsfType::x(v) = field_value {
-                    lens_make = Some(v);
+                if let VsfType::x(v) = value {
+                    lens_make = Some(v.clone());
                 }
             }
             "lens_model" => {
-                if let VsfType::x(v) = field_value {
-                    lens_model = Some(v);
+                if let VsfType::x(v) = value {
+                    lens_model = Some(v.clone());
                 }
             }
             "lens_serial" => {
-                if let VsfType::x(v) = field_value {
-                    lens_serial = Some(v);
+                if let VsfType::x(v) = value {
+                    lens_serial = Some(v.clone());
                 }
             }
             "lens_min_focal_m" => {
-                if let VsfType::f5(v) = field_value {
-                    lens_min_focal_m = Some(v);
+                if let VsfType::f5(v) = value {
+                    lens_min_focal_m = Some(*v);
                 }
             }
             "lens_max_focal_m" => {
-                if let VsfType::f5(v) = field_value {
-                    lens_max_focal_m = Some(v);
+                if let VsfType::f5(v) = value {
+                    lens_max_focal_m = Some(*v);
                 }
             }
             "lens_min_aperture" => {
-                if let VsfType::f5(v) = field_value {
-                    lens_min_aperture = Some(v);
+                if let VsfType::f5(v) = value {
+                    lens_min_aperture = Some(*v);
                 }
             }
             "lens_max_aperture" => {
-                if let VsfType::f5(v) = field_value {
-                    lens_max_aperture = Some(v);
+                if let VsfType::f5(v) = value {
+                    lens_max_aperture = Some(*v);
                 }
             }
-            _ => {
-                // Unknown field, skip
-            }
+            _ => {} // Unknown field, skip
         }
-
-        if pointer >= data.len() {
-            return Err(format!(
-                "Unexpected EOF after parsing raw field '{}' (field {} of {})",
-                field_name, i, raw_count
-            ));
-        }
-        if data[pointer] != b')' {
-            return Err(format!(
-                "Expected ')' after field '{}' at byte {}, found {:?}",
-                field_name, pointer, data[pointer] as char
-            ));
-        }
-        pointer += 1;
     }
-
-    if data[pointer] != b']' {
-        return Err("Expected ']' for section end".to_string());
-    }
-
-    // Extract the image
-    let image = image.ok_or("Missing required 'image' field")?;
 
     // Build metadata structs from parsed fields (converting to newtypes)
     let raw_metadata = if cfa_pattern.is_some()

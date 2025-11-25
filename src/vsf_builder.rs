@@ -91,6 +91,15 @@ impl VsfBuilder {
         self
     }
 
+    /// Disable rolling hash - use provenance hash only
+    ///
+    /// Use this for files that don't need mutable state tracking or signatures.
+    /// The provenance hash (hp) will still be computed for content identity.
+    pub fn provenance_only(mut self) -> Self {
+        self.include_file_hash = false;
+        self
+    }
+
     /// Set version numbers
     pub fn version(mut self, version: usize, backward_compat: usize) -> Self {
         self.version = version;
