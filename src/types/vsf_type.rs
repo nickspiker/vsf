@@ -665,7 +665,7 @@ pub enum VsfType {
     /// Binary format: [t][n][count][type][data...]
     /// Where n indicates 1D (count) vs multi-dimensional (shape)
     /// Primitive element types
-    v_u0(Vector<bool>),      // Bit-packed bools (8 per byte)
+    v_u0(Vector<bool>), // Bit-packed bools (8 per byte)
     v_u3(Vector<u8>),
     v_u4(Vector<u16>),
     v_u5(Vector<u32>),
@@ -687,6 +687,7 @@ pub enum VsfType {
     /// Format: v[encoding][encoded_data]
     ///
     /// Encoding identifiers (single ASCII character):
+    /// - 'a' = AV1 video codec (image/video compression)
     /// - 'z' = zstd compression
     /// - 'r' = Reed-Solomon error correction
     /// - 'x' = XZ/LZMA compression

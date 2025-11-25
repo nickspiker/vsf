@@ -225,10 +225,14 @@ fn format_number(n: usize) -> String {
 }
 
 /// Format Eagle Time (ET) in human-readable format: 2025-OCT-29 6:42:21.813 PM
+/// Displays in local timezone (Eagle Time → UTC → Local)
 fn format_et(et: &vsf::types::EtType) -> String {
-    // Convert EtType to EagleTime and then to DateTime using chrono
+    use chrono::Local;
+
+    // Convert EtType to EagleTime and then to DateTime (UTC), then to local
     let eagle_time = vsf::types::EagleTime::new(et.clone());
-    let dt = eagle_time.to_datetime();
+    let dt_utc = eagle_time.to_datetime();
+    let dt = dt_utc.with_timezone(&Local);
 
     // Extract milliseconds from fractional seconds if available
     let milliseconds = match et {
@@ -455,8 +459,15 @@ fn format_value(vsf: &VsfType) -> String {
         VsfType::ac(mac) => format!("ac[CMAC-AES {} Bytes] {}...", mac.len(), hex_preview(mac)),
 
         VsfType::v(algo, data) => {
-            use vsf::crypto_algorithms::wrap_algorithm_name;
-            let algo_name = wrap_algorithm_name(*algo).unwrap_or("unknown");
+            let algo_name = match *algo {
+                b'a' => "AV1",
+                b'z' => "zstd",
+                b'r' => "Reed-Solomon",
+                b'x' => "XZ/LZMA",
+                b'e' => "Encrypted",
+                b'u' => "Units",
+                _ => "unknown",
+            };
             format!(
                 "wrap[{} {} Bytes] {}",
                 algo_name,
@@ -917,26 +928,6 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
             label.name.bold()
         );
 
-        // Show schema validation if available
-        let field_prefix = if is_last { "   " } else { " │ " };
-        let registry = SchemaRegistry::global();
-        if let Ok(schema) = registry.get(&label.name) {
-            if let Some(ref desc) = schema.description {
-                println!(
-                    "{}  {} {}",
-                    field_prefix,
-                    "Schema:".cyan(),
-                    desc.truecolor(200, 200, 200)
-                );
-            }
-            println!(
-                "{}  {} {} fields defined",
-                field_prefix,
-                "✓".truecolor(0, 255, 0),
-                schema.fields.len()
-            );
-        }
-
         // Parse and show fields (skip for n[0] unboxed blobs)
         if label.child_count == 0 {
             let field_prefix = if is_last { "   " } else { " │ " };
@@ -1107,12 +1098,6 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<bool, Str
                     print!("{:02X}", byte);
                 }
                 println!();
-                println!(
-                    " {} {}",
-                    "Semantics:".cyan(),
-                    "Content identifier for linking (not verified)"
-                        .truecolor(200, 200, 200)
-                );
             }
             _ => {}
         }
