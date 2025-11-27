@@ -283,8 +283,8 @@ pub mod colour;
 
 // Re-export main types
 pub use types::{
-    datetime_to_eagle_time, EagleTime, EtType, LayoutOrder, StridedTensor, Tensor, VsfType,
-    WorldCoord,
+    datetime_to_eagle_time, eagle_time_nanos, EagleTime, EtType, LayoutOrder, StridedTensor,
+    Tensor, VsfType, WorldCoord,
 };
 
 // Re-export colour conversion types

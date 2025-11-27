@@ -400,181 +400,68 @@ impl VsfHeader {
             }
         };
 
-        // Parse header fields (section pointers)
+        // Parse header fields using VsfField::parse() - same format as section fields
+        // Format: (dname:value,value,value) or (dname) for empty
         let mut fields = Vec::with_capacity(field_count);
         for i in 0..field_count {
-            // Expect opening '('
-            if ptr >= data.len() || data[ptr] != b'(' {
-                return Err(format!(
-                    "Expected '(' for header field {}, found {:?}",
-                    i,
-                    data.get(ptr)
-                ));
-            }
-            ptr += 1;
+            let field = VsfField::parse(data, &mut ptr)
+                .map_err(|e| format!("Failed to parse header field {}: {}", i, e))?;
 
-            // Parse section name (d)
-            let name_type = parse(data, &mut ptr)
-                .map_err(|e| format!("Failed to parse field {} name: {}", i, e))?;
-            let name = match name_type {
-                VsfType::d(n) => n,
-                _ => {
-                    return Err(format!(
-                        "Expected section name (d) for field {}, got {:?}",
-                        i, name_type
-                    ))
-                }
-            };
-
-            // Check for empty section (just name, no values) vs regular section
-            if ptr < data.len() && data[ptr] == b')' {
-                // Empty section - just name, no offset/size/child_count
-                ptr += 1; // consume ')'
-                fields.push(HeaderField {
-                    name,
-                    hash: None,
-                    signature: None,
-                    key: None,
-                    wrap: None,
-                    offset_bytes: 0,
-                    size_bytes: 0,
-                    child_count: 0,
-                });
-                continue;
-            }
-
-            // Expect ':' separator for non-empty sections
-            if ptr >= data.len() || data[ptr] != b':' {
-                return Err(format!(
-                    "Expected ':' or ')' after section name for field {}, found {:?}",
-                    i,
-                    data.get(ptr)
-                ));
-            }
-            ptr += 1;
-
-            // Parse optional hash, signature, key, wrap
+            // Extract typed values from the parsed field
             let mut hash = None;
             let mut signature = None;
             let mut key = None;
             let mut wrap = None;
+            let mut offset_bytes = 0;
+            let mut size_bytes = 0;
+            let mut child_count = 0;
+            let mut has_offset = false;
 
-            // Parse optional crypto fields until we hit 'o' (offset)
-            while ptr < data.len() && data[ptr] != b'o' {
-                match data[ptr] {
-                    b'h' => {
-                        hash =
-                            Some(parse(data, &mut ptr).map_err(|e| {
-                                format!("Failed to parse hash for field {}: {}", i, e)
-                            })?);
-                        // Skip ',' separator
-                        if ptr < data.len() && data[ptr] == b',' {
-                            ptr += 1;
-                        }
+            for value in &field.values {
+                match value {
+                    // Hash types
+                    VsfType::hp(_) | VsfType::hb(_) | VsfType::hs(_) => {
+                        hash = Some(value.clone());
                     }
-                    b'g' => {
-                        signature = Some(parse(data, &mut ptr).map_err(|e| {
-                            format!("Failed to parse signature for field {}: {}", i, e)
-                        })?);
-                        // Skip ',' separator
-                        if ptr < data.len() && data[ptr] == b',' {
-                            ptr += 1;
-                        }
+                    // Signature types
+                    VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => {
+                        signature = Some(value.clone());
                     }
-                    b'k' => {
-                        key =
-                            Some(parse(data, &mut ptr).map_err(|e| {
-                                format!("Failed to parse key for field {}: {}", i, e)
-                            })?);
-                        // Skip ',' separator
-                        if ptr < data.len() && data[ptr] == b',' {
-                            ptr += 1;
-                        }
+                    // Key types
+                    VsfType::ke(_) | VsfType::kx(_) | VsfType::kc(_) | VsfType::ka(_) => {
+                        key = Some(value.clone());
                     }
-                    b'v' => {
-                        wrap =
-                            Some(parse(data, &mut ptr).map_err(|e| {
-                                format!("Failed to parse wrap for field {}: {}", i, e)
-                            })?);
-                        // Skip ',' separator
-                        if ptr < data.len() && data[ptr] == b',' {
-                            ptr += 1;
-                        }
+                    // Wrapped/encrypted marker
+                    VsfType::v(_, _) => {
+                        wrap = Some(value.clone());
                     }
-                    b')' => break, // End of field
-                    _ => {
-                        return Err(format!(
-                            "Unexpected byte '{}' in header field {}",
-                            data[ptr] as char, i
-                        ))
+                    // Offset - indicates this field points to a section body
+                    VsfType::o(o) => {
+                        offset_bytes = *o;
+                        has_offset = true;
                     }
+                    // Size in bytes
+                    VsfType::b(b, _) => {
+                        size_bytes = *b;
+                    }
+                    // Child count
+                    VsfType::n(n) => {
+                        child_count = *n;
+                    }
+                    _ => {} // Ignore other types
                 }
             }
 
-            // Parse offset (o)
-            let offset_type = parse(data, &mut ptr)
-                .map_err(|e| format!("Failed to parse offset for field {}: {}", i, e))?;
-            let offset_bytes = match offset_type {
-                VsfType::o(offset) => offset,
-                _ => {
-                    return Err(format!(
-                        "Expected offset (o) for field {}, got {:?}",
-                        i, offset_type
-                    ))
-                }
-            };
-
-            // Skip ',' separator after offset
-            if ptr < data.len() && data[ptr] == b',' {
-                ptr += 1;
+            // If no offset, this is a metadata-only field (no section body)
+            // offset_bytes stays 0, size_bytes stays 0, child_count stays 0
+            if !has_offset {
+                offset_bytes = 0;
+                size_bytes = 0;
+                child_count = 0;
             }
-
-            // Parse size (b)
-            let size_type = parse(data, &mut ptr)
-                .map_err(|e| format!("Failed to parse size for field {}: {}", i, e))?;
-            let size_bytes = match size_type {
-                VsfType::b(size, _) => size,
-                _ => {
-                    return Err(format!(
-                        "Expected size (b) for field {}, got {:?}",
-                        i, size_type
-                    ))
-                }
-            };
-
-            // Parse child count (n) - optional if encrypted (wrap present)
-            let child_count = if wrap.is_some() {
-                0 // Encrypted sections have implicit n[0]
-            } else {
-                // Skip ',' separator before count
-                if ptr < data.len() && data[ptr] == b',' {
-                    ptr += 1;
-                }
-                let count_type = parse(data, &mut ptr)
-                    .map_err(|e| format!("Failed to parse count for field {}: {}", i, e))?;
-                match count_type {
-                    VsfType::n(count) => count,
-                    _ => {
-                        return Err(format!(
-                            "Expected count (n) for field {}, got {:?}",
-                            i, count_type
-                        ))
-                    }
-                }
-            };
-
-            // Expect closing ')'
-            if ptr >= data.len() || data[ptr] != b')' {
-                return Err(format!(
-                    "Expected ')' for header field {}, found {:?}",
-                    i,
-                    data.get(ptr)
-                ));
-            }
-            ptr += 1;
 
             fields.push(HeaderField {
-                name,
+                name: field.name,
                 hash,
                 signature,
                 key,

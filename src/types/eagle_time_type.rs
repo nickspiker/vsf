@@ -154,6 +154,16 @@ pub fn datetime_to_eagle_time(dt: DateTime<Utc>) -> EagleTime {
     EagleTime::new(EtType::f6(et_seconds))
 }
 
+/// Get current Eagle Time with nanosecond precision (f64 seconds since Apollo 11 landing)
+///
+/// Eagle epoch: July 20, 1969, 20:17:40 UTC - the moment "The Eagle has landed" was transmitted.
+pub fn eagle_time_nanos() -> f64 {
+    let now = Utc::now();
+    let eagle = Utc.with_ymd_and_hms(1969, 7, 20, 20, 17, 40).unwrap();
+    let duration = now - eagle;
+    duration.num_seconds() as f64 + duration.subsec_nanos() as f64 / 1_000_000_000.
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,7 +189,7 @@ mod tests {
     fn test_eagle_time_comparison() {
         let time1 = EagleTime::new(EtType::u(1000));
         let time2 = EagleTime::new(EtType::u(2000));
-        let time3 = EagleTime::new(EtType::f6(1000.0));
+        let time3 = EagleTime::new(EtType::f6(1000.));
 
         // Test ordering
         assert!(time1 < time2);
@@ -189,7 +199,7 @@ mod tests {
         assert_eq!(time1, time3);
 
         // Test with mixed types
-        let time_f5 = EagleTime::new(EtType::f5(1500.0));
+        let time_f5 = EagleTime::new(EtType::f5(1500.));
         assert!(time1 < time_f5);
         assert!(time_f5 < time2);
     }
@@ -198,16 +208,16 @@ mod tests {
     fn test_eagle_time_sorting() {
         let mut times = vec![
             EagleTime::new(EtType::u(3000)),
-            EagleTime::new(EtType::f6(1000.0)),
+            EagleTime::new(EtType::f6(1000.)),
             EagleTime::new(EtType::i(2000)),
-            EagleTime::new(EtType::f5(500.0)),
+            EagleTime::new(EtType::f5(500.)),
         ];
 
         times.sort();
 
-        assert_eq!(times[0].to_f64(), 500.0);
-        assert_eq!(times[1].to_f64(), 1000.0);
-        assert_eq!(times[2].to_f64(), 2000.0);
-        assert_eq!(times[3].to_f64(), 3000.0);
+        assert_eq!(times[0].to_f64(), 500.);
+        assert_eq!(times[1].to_f64(), 1000.);
+        assert_eq!(times[2].to_f64(), 2000.);
+        assert_eq!(times[3].to_f64(), 3000.);
     }
 }
