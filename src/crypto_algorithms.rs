@@ -36,7 +36,7 @@ pub const MAC_HMAC_SHA256: u8 = b'h';
 /// **Fixed output:** 64 bytes (512 bits)
 /// **Performance:** Fast on 64-bit systems
 /// **Security:** 256-bit security level
-pub const MAC_HMAC_SHA512: u8 = b's';
+pub const MAC_HMAC_SHA512: u8 = b't'; // 't' for "twelve-eight" (512 bits)
 
 /// Poly1305
 ///
@@ -213,25 +213,59 @@ pub const KEY_ED25519: u8 = b'e';
 ///          (Even though it uses the same underlying curve as Ed25519)
 pub const KEY_X25519: u8 = b'x';
 
-/// ECDSA P-256 public key
+/// P-curve ECDSA/ECDH public key (P-256, P-384)
 ///
-/// **Algorithm:** NIST P-256 elliptic curve public key
-/// **Variable size:** 33 bytes (compressed) or 65 bytes (uncompressed)
-/// **Use with:** ECDSA P-256 signatures (SIG_ECDSA_P256)
-/// **Security:** ~128-bit security level
-/// **Note:** Different curve family than Ed25519/X25519 (Weierstrass vs Edwards/Montgomery)
-pub const KEY_P256: u8 = b'p';
+/// **Algorithm:** NIST P-curve elliptic curve public key
+/// **Variable size:** 33/65 bytes (P-256), 49/97 bytes (P-384) - size disambiguates
+/// **Use with:** ECDSA signatures or ECDH key agreement
+/// **Security:** ~128-bit (P-256) or ~192-bit (P-384) security level
+pub const KEY_P_CURVE: u8 = b'p';
 
-/// RSA-2048 public key
+/// secp256k1 public key (Bitcoin curve)
 ///
-/// **Algorithm:** RSA public key with 2048-bit modulus
-/// **Variable size:** ~270 bytes (depends on encoding format)
-/// **Use with:** RSA-2048 signatures (SIG_RSA_2048)
-/// **Security:** ~112-bit security level
-/// **Note:** RSA-2048 and RSA-4096 are the same algorithm, just different key/modulus sizes
-pub const KEY_RSA_2048: u8 = b'r';
+/// **Algorithm:** Koblitz curve used in Bitcoin/Ethereum
+/// **Fixed size:** 33 bytes (compressed)
+/// **Use case:** ECDH key agreement
+/// **Origin:** Certicom (2000)
+pub const KEY_SECP256K1: u8 = b'k';
 
-// Reserved key slots: a, b, c, d, f, g, h, i, j, k, l, m, n, o, q, s, t, u, v, w, y, z
+/// ChaCha20-Poly1305 symmetric key
+pub const KEY_CHACHA20_POLY1305: u8 = b'c';
+
+/// AES-256-GCM symmetric key
+pub const KEY_AES256_GCM: u8 = b'a';
+
+/// ML-KEM public key (FIPS 203 - formerly Kyber)
+///
+/// **Algorithm:** Module-Learning with Errors Key Encapsulation Mechanism
+/// **Variable size:** 800B (ML-KEM-512), 1184B (ML-KEM-768), 1568B (ML-KEM-1024)
+/// **Security:** Post-quantum lattice-based
+/// **Origin:** IBM/European consortium (2017), NIST standardized 2024
+pub const KEY_ML_KEM: u8 = b'm';
+
+/// FrodoKEM public key
+///
+/// **Algorithm:** Unstructured LWE-based key encapsulation
+/// **Variable size:** 9616B (640), 15632B (976), 21520B (1344) - size disambiguates
+/// **Security:** Post-quantum, conservative (no ring structure to exploit)
+/// **Origin:** Microsoft Research (2016)
+pub const KEY_FRODO: u8 = b'f';
+
+/// Classic McEliece public key
+///
+/// **Algorithm:** Code-based key encapsulation (Goppa codes)
+/// **Variable size:** 261KB to 1MB depending on variant
+/// **Security:** Post-quantum, 47+ years of cryptanalysis
+/// **Origin:** McEliece (1978), modern variants by Bernstein/Lange
+/// **Note:** Extremely large public keys, small ciphertexts
+pub const KEY_MCELIECE: u8 = b'l';
+
+/// Shared secret / derived key material
+///
+/// **Usage:** Output of key agreement (ECDH, KEM decapsulation)
+/// **Typical size:** 32 bytes
+/// **Note:** Algorithm-agnostic - just raw key material
+pub const KEY_SHARED_SECRET: u8 = b's';
 
 /// Get key algorithm name from ID
 ///
@@ -241,11 +275,14 @@ pub fn key_algorithm_name(id: u8) -> Option<&'static str> {
     match id {
         KEY_ED25519 => Some("Ed25519"),
         KEY_X25519 => Some("X25519"),
-        KEY_P256 => Some("ECDSA-P256"),
-        KEY_RSA_2048 => Some("RSA-2048"),
-        // Symmetric encryption keys (reuse wrap algorithm IDs)
-        WRAP_CHACHA20POLY1305 => Some("ChaCha20-Poly1305"),
-        WRAP_AES256_GCM => Some("AES-256-GCM"),
+        KEY_P_CURVE => Some("P-curve (P-256/P-384)"),
+        KEY_SECP256K1 => Some("secp256k1"),
+        KEY_CHACHA20_POLY1305 => Some("ChaCha20-Poly1305"),
+        KEY_AES256_GCM => Some("AES-256-GCM"),
+        KEY_ML_KEM => Some("ML-KEM"),
+        KEY_FRODO => Some("FrodoKEM"),
+        KEY_MCELIECE => Some("Classic McEliece"),
+        KEY_SHARED_SECRET => Some("Shared Secret"),
         _ => None,
     }
 }
@@ -255,8 +292,14 @@ pub fn key_length(id: u8) -> Option<usize> {
     match id {
         KEY_ED25519 => Some(32),
         KEY_X25519 => Some(32),
-        KEY_P256 => None,     // Can be 33 (compressed) or 65 (uncompressed)
-        KEY_RSA_2048 => None, // Variable, typically ~270 bytes
+        KEY_P_CURVE => None,           // 33/65 (P-256) or 49/97 (P-384)
+        KEY_SECP256K1 => Some(33),     // Compressed
+        KEY_CHACHA20_POLY1305 => Some(32),
+        KEY_AES256_GCM => Some(32),
+        KEY_ML_KEM => None,            // 800/1184/1568 depending on variant
+        KEY_FRODO => None,             // 9616/15632/21520 depending on variant
+        KEY_MCELIECE => None,          // 261KB to 1MB depending on variant
+        KEY_SHARED_SECRET => Some(32), // Typically 32 bytes
         _ => None,
     }
 }

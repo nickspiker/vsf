@@ -647,18 +647,25 @@ pub enum VsfType {
     gr(Vec<u8>), // RSA signature (deprecated)
 
     // Cryptographic keys
-    ke(Vec<u8>), // Ed25519 public key
-    kx(Vec<u8>), // X25519 key
-    kp(Vec<u8>), // ECDSA-P256 key
-    kc(Vec<u8>), // ChaCha20-Poly1305 key
-    ka(Vec<u8>), // AES-256-GCM key
+    ke(Vec<u8>), // Ed25519 public key (32B)
+    kx(Vec<u8>), // X25519 public key (32B)
+    kp(Vec<u8>), // ECDSA/ECDH P-curve keys (33/65B P-256, 49/97B P-384 - size disambiguates)
+    kk(Vec<u8>), // secp256k1 public key (33B compressed)
+    kc(Vec<u8>), // ChaCha20-Poly1305 symmetric key (32B)
+    ka(Vec<u8>), // AES-256-GCM symmetric key (32B)
+    km(Vec<u8>), // ML-KEM public key (800/1184/1568B for 512/768/1024 - size disambiguates)
+    kf(Vec<u8>), // FrodoKEM public key (9616/15632/21520B for 640/976/1344 - size disambiguates)
+    kl(Vec<u8>), // Classic McEliece public key (up to ~1MB - size disambiguates variant)
+
+    // Shared secret (output of key agreement/decapsulation)
+    ks(Vec<u8>), // Shared secret / derived key material (typically 32B)
 
     // MAC (Message Authentication Code)
-    ah(Vec<u8>),  // HMAC-SHA256
-    as_(Vec<u8>), // HMAC-SHA512
-    ap(Vec<u8>),  // Poly1305
-    ab(Vec<u8>),  // BLAKE3-keyed
-    ac(Vec<u8>),  // CMAC-AES
+    ah(Vec<u8>), // HMAC-SHA256 (32B)
+    at(Vec<u8>), // HMAC-SHA512 (64B) - 't' for "twelve-eight" (512 bits)
+    ap(Vec<u8>), // Poly1305 (16B)
+    ab(Vec<u8>), // BLAKE3-keyed (variable, default 32B)
+    ac(Vec<u8>), // CMAC-AES (16B)
 
     // ==================== VECTORS (1D CONTIGUOUS) ====================
     /// 1D contiguous vectors - compact encoding with count marker
