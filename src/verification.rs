@@ -69,29 +69,38 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse creation time: {}", e))?;
 
     // Parse provenance primitives in FIXED order (version determines format)
-    // Always: hp (provenance hash) - may be replaced by ge (signature)
-    // Optional: hb (rolling hash)
+    // Required: hp (provenance hash)
+    // Optional: ke (signer pubkey) + ge (signature) OR hb (rolling hash)
 
-    // Parse hp or ge (required - one must be present)
+    // Parse hp (required)
     let prov_type =
-        parse(data, &mut ptr).map_err(|e| format!("Failed to parse provenance hash/sig: {}", e))?;
+        parse(data, &mut ptr).map_err(|e| format!("Failed to parse provenance hash: {}", e))?;
     match prov_type {
-        VsfType::hp(_) => {}                                   // Provenance hash
-        VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => {} // Signature (replaces hp)
+        VsfType::hp(_) => {} // Provenance hash
         _ => {
             return Err(format!(
-                "Expected hp or ge after creation time, got: {:?}",
+                "Expected hp after creation time, got: {:?}",
                 prov_type
             ))
         }
     }
 
-    // Optional: hb (rolling hash) - only if next byte is 'h'
-    let rolling_hash = if ptr < data.len() && data[ptr] == b'h' {
-        Some(parse(data, &mut ptr).map_err(|e| format!("Failed to parse rolling hash: {}", e))?)
-    } else {
-        None
-    };
+    // Optional: ke (signer pubkey) + ge (signature) OR hb (rolling hash)
+    let mut rolling_hash = None;
+
+    // Check for ke (signer pubkey) - starts with 'k'
+    if ptr < data.len() && data[ptr] == b'k' {
+        let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse signer pubkey: {}", e))?;
+
+        // ke must be followed by ge (signature)
+        if ptr < data.len() && data[ptr] == b'g' {
+            let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse signature: {}", e))?;
+        }
+    }
+    // Check for hb (rolling hash) - starts with 'h'
+    else if ptr < data.len() && data[ptr] == b'h' {
+        rolling_hash = Some(parse(data, &mut ptr).map_err(|e| format!("Failed to parse rolling hash: {}", e))?);
+    }
 
     // Parse header field count
     let field_count =

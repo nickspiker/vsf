@@ -1187,17 +1187,17 @@ pub fn vsf_rgb_to_photopic(r: f32, g: f32, b: f32) -> f32 {
 /// Linearize a gamma 2 encoded value (0-1 range)
 ///
 /// Converts from gamma-encoded to linear light. For VSF RGB gamma 2,
-/// this is simply the square root operation.
+/// this is simply squaring the value.
 pub fn linearize_gamma2(encoded: f32) -> f32 {
-    encoded.sqrt()
+    encoded * encoded
 }
 
 /// Delinearize a linear value to gamma 2 (0-1 range)
 ///
 /// Converts from linear light to gamma-encoded. For VSF RGB gamma 2,
-/// this is simply squaring the value.
+/// this is simply the square root operation.
 pub fn delinearize_gamma2(linear: f32) -> f32 {
-    linear * linear
+    linear.sqrt()
 }
 
 /// Linearize an 8-bit gamma 2 encoded value

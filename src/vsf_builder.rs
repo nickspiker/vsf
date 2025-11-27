@@ -25,6 +25,7 @@ pub struct VsfBuilder {
     custom_provenance: Option<[u8; 32]>, // Custom provenance hash (immutable identity)
     signer_pubkey: Option<VsfType>, // Signer's Ed25519 pubkey (ke) - for signature verification
     signature: Option<(VsfType, [u8; 64])>, // (signature type, signature bytes) - replaces hb
+    avatar_hash: Option<[u8; 32]>, // Optional avatar provenance hash as header field
 }
 
 impl VsfBuilder {
@@ -57,6 +58,7 @@ impl VsfBuilder {
             custom_provenance: None,
             signer_pubkey: None,
             signature: None,
+            avatar_hash: None,
         }
     }
 
@@ -88,6 +90,16 @@ impl VsfBuilder {
         self.signer_pubkey = Some(VsfType::ke(pubkey.to_vec()));
         self.signature = Some((VsfType::ge(signature.to_vec()), signature));
         self.include_file_hash = false; // Signature replaces rolling hash
+        self
+    }
+
+    /// Add an avatar provenance hash as a header field (davatar_id:hp[hash])
+    ///
+    /// This is the BLAKE3 provenance hash of the sender's avatar VSF file.
+    /// Used in ping/pong messages to sync avatar state between peers.
+    /// Stored as a metadata-only header field with name "avatar_id".
+    pub fn avatar_hash(mut self, hash: [u8; 32]) -> Self {
+        self.avatar_hash = Some(hash);
         self
     }
 
@@ -183,8 +195,9 @@ impl VsfBuilder {
             vsf[header_index].extend_from_slice(&hash_placeholder(b'b', 32));
         }
 
-        // Header field count (number of section pointers)
-        let total_fields = self.sections.len() + self.unboxed.len();
+        // Header field count (sections + unboxed + optional avatar_id)
+        let avatar_field_count = if self.avatar_hash.is_some() { 1 } else { 0 };
+        let total_fields = self.sections.len() + self.unboxed.len() + avatar_field_count;
         vsf[header_index].extend_from_slice(&VsfType::n(total_fields).flatten());
 
         // Create header field definitions (section pointers)
@@ -234,6 +247,15 @@ impl VsfBuilder {
 
             header_index = vsf.len();
             vsf.push(field_bytes);
+        }
+
+        // Avatar ID metadata-only field (if set)
+        // Format: (davatar_id:hp[hash]) - no offset/size/count, just name + provenance hash
+        if let Some(hash) = &self.avatar_hash {
+            let field = crate::file_format::VsfField::new("avatar_id")
+                .with_value(VsfType::hp(hash.to_vec()));
+            header_index = vsf.len();
+            vsf.push(field.flatten());
         }
 
         // Close header with '>' as a separate chunk (so it's included in header_length)
