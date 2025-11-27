@@ -462,6 +462,42 @@ impl VsfType {
                 flat
             }
 
+            VsfType::kk(value) => {
+                let mut flat = vec![b'k', b'k'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::km(value) => {
+                let mut flat = vec![b'k', b'm'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::kf(value) => {
+                let mut flat = vec![b'k', b'f'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::kl(value) => {
+                let mut flat = vec![b'k', b'l'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            // ==================== SHARED SECRET ====================
+            VsfType::ks(value) => {
+                let mut flat = vec![b'k', b's'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
             // ==================== MAC (MESSAGE AUTHENTICATION CODE) ====================
             VsfType::ah(value) => {
                 let mut flat = vec![b'a', b'h'];
@@ -470,8 +506,8 @@ impl VsfType {
                 flat
             }
 
-            VsfType::as_(value) => {
-                let mut flat = vec![b'a', b's'];
+            VsfType::at(value) => {
+                let mut flat = vec![b'a', b't'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
@@ -4017,14 +4053,19 @@ impl VsfType {
             VsfType::ke(bytes)
             | VsfType::kx(bytes)
             | VsfType::kp(bytes)
+            | VsfType::kk(bytes)
             | VsfType::kc(bytes)
-            | VsfType::ka(bytes) => {
+            | VsfType::ka(bytes)
+            | VsfType::km(bytes)
+            | VsfType::kf(bytes)
+            | VsfType::kl(bytes)
+            | VsfType::ks(bytes) => {
                 // prefix + encoded_length + data
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
             }
 
             VsfType::ah(bytes)
-            | VsfType::as_(bytes)
+            | VsfType::at(bytes)
             | VsfType::ap(bytes)
             | VsfType::ab(bytes)
             | VsfType::ac(bytes) => {

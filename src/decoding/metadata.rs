@@ -274,7 +274,7 @@ pub fn parse_mac(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
     // Return appropriate MAC type based on algorithm
     match algo {
         b'h' => Ok(VsfType::ah(mac_tag)),
-        b's' => Ok(VsfType::as_(mac_tag)),
+        b't' => Ok(VsfType::at(mac_tag)), // HMAC-SHA512 ('t' for 512-bit)
         b'p' => Ok(VsfType::ap(mac_tag)),
         b'b' => Ok(VsfType::ab(mac_tag)),
         b'c' => Ok(VsfType::ac(mac_tag)),
@@ -386,8 +386,13 @@ pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
         b'e' => Ok(VsfType::ke(key)),
         b'x' => Ok(VsfType::kx(key)),
         b'p' => Ok(VsfType::kp(key)),
+        b'k' => Ok(VsfType::kk(key)),
         b'c' => Ok(VsfType::kc(key)),
         b'a' => Ok(VsfType::ka(key)),
+        b'm' => Ok(VsfType::km(key)),
+        b'f' => Ok(VsfType::kf(key)),
+        b'l' => Ok(VsfType::kl(key)),
+        b's' => Ok(VsfType::ks(key)), // Shared secret
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Unknown key algorithm: {}", algo as char),
