@@ -56,7 +56,7 @@ use spirix::{
     ScalarF7E7,
 };
 
-use super::eagle_time_type::EtType;
+use super::eagle_time::EtType;
 use super::tensor::{BitPackedTensor, StridedTensor, Tensor, Vector};
 use super::world_coord::WorldCoord;
 

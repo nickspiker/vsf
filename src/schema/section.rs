@@ -303,6 +303,32 @@ impl SectionBuilder {
         Ok(self)
     }
 
+    /// Append a new field with multiple values (does NOT replace existing fields)
+    /// Use this for repeated fields like (contact: a, b, c)(contact: d, e, f)
+    pub fn append_multi<T: IntoVsfType>(
+        mut self,
+        name: impl AsRef<str>,
+        values: Vec<T>,
+    ) -> ValidationResult<Self> {
+        let name = name.as_ref();
+
+        // Validate field exists in schema
+        let field_schema = self.schema.validate_field(name)?;
+
+        // Convert and validate all values
+        let mut vsf_values = Vec::new();
+        for value in values {
+            let vsf_value = value.into_vsf_type();
+            field_schema.validate(&vsf_value)?;
+            vsf_values.push(vsf_value);
+        }
+
+        // Add new field (keep existing fields with same name)
+        self.fields.push(FieldValue::new(name, vsf_values));
+
+        Ok(self)
+    }
+
     /// Add a value to an existing field (creates field if not present)
     pub fn add_value<T: IntoVsfType>(
         mut self,
@@ -351,6 +377,12 @@ impl SectionBuilder {
         Ok(self.get(name)?.clone())
     }
 
+    /// Get all fields with a given name (for repeated fields)
+    /// Returns a Vec of references to FieldValue, each containing its values
+    pub fn get_fields(&self, name: &str) -> Vec<&FieldValue> {
+        self.fields.iter().filter(|f| f.name == name).collect()
+    }
+
     /// Encode to VSF bytes
     /// Format: [d"section_name" (d"field1":val1,val2) (d"field2") ...]
     /// Uses FieldValue.flatten() for each field
@@ -387,8 +419,14 @@ impl SectionBuilder {
         Ok(bytes)
     }
 
-    /// Parse a section from VSF bytes into this builder
-    /// This enables the parse → modify → encode workflow
+    /// Parse a section from VSF bytes into this builder (high-level, schema-validated)
+    ///
+    /// This is the **high-level** parsing API that validates against a schema.
+    /// Enables the parse → modify → encode workflow with type safety.
+    ///
+    /// For **low-level** schema-agnostic parsing without validation,
+    /// use [`crate::VsfSection::parse()`] instead. That API extracts raw data
+    /// and gives the caller control over the read pointer.
     ///
     /// # Format
     /// Fields can have:
@@ -399,6 +437,16 @@ impl SectionBuilder {
     /// ```text
     /// [d"section_name" (d"field1":val1,val2) (d"field2") (d"field3":val)]
     /// ```
+    ///
+    /// # Validation
+    /// - Section name must match schema name
+    /// - Each field value is validated against the schema's type constraints
+    /// - Unknown fields are allowed (schema defines minimum requirements)
+    ///
+    /// # Use Cases
+    /// - Type-safe applications with defined schemas
+    /// - Modifying existing sections and re-encoding
+    /// - When validation and type constraints matter
     pub fn parse(schema: SectionSchema, section_bytes: &[u8]) -> ValidationResult<Self> {
         use crate::decoding::parse::parse;
 

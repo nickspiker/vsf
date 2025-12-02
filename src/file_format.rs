@@ -849,10 +849,23 @@ impl VsfSection {
         bytes
     }
 
-    /// Parse a section from bytes
+    /// Parse a section from bytes (low-level, schema-agnostic)
     ///
-    /// Expects format: [dsection_name(field:value)...]
-    /// Updates ptr to point after the closing ']'
+    /// Expects format: `[d"section_name"(d"field":value)...]`
+    /// Updates ptr to point after the closing `]`
+    ///
+    /// This is the **low-level** parsing API that extracts raw data without validation.
+    /// Each field is stored as a single `VsfField` with one value.
+    ///
+    /// For **schema-validated** parsing with type constraints and multi-value field support,
+    /// use [`crate::schema::SectionBuilder::parse()`] instead. That API validates against
+    /// a schema and returns a builder for the parse→modify→encode workflow.
+    ///
+    /// # Use Cases
+    /// - Reading unknown/arbitrary VSF data
+    /// - Debugging or inspecting files
+    /// - Building tooling that handles any section type
+    /// - When you don't have or need a schema
     pub fn parse(data: &[u8], ptr: &mut usize) -> Result<Self, String> {
         // Expect '['
         if *ptr >= data.len() || data[*ptr] != b'[' {

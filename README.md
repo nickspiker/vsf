@@ -4,7 +4,7 @@
 
 # VSF (Versatile Storage Format)
 
-A self-describing binary format designed for optimal integer encoding, mathematical correctness, and type safety.
+A self-describing binary format designed for optimal integer encoding and type safety.
 
 VSF addresses a fundamental challenge in binary formats: how to efficiently encode integers of any size while maintaining O(1) skip-ability. The solution enables efficient storage of everything from a single photon's wavelength to the number of atoms in the observable universe (and yes, both fit comfortably).
 
@@ -254,9 +254,9 @@ VsfType::g(algorithm, signature)  // Signature (Ed25519, ECDSA, RSA)
 VsfType::k(algorithm, pubkey)     // Public key
 ```
 
-### 2. Mathematically Correct Arithmetic (Spirix Integration)
+### 2. Two's Complement Floating-Point (Spirix Integration)
 
-VSF natively supports Spirix - two's complement floating-point that legitimately preserves mathematical identities:
+VSF natively supports Spirix - two's complement floating-point as an alternative to IEEE-754:
 
 ```rust
 VsfType::s53(spirix_scalar)  // 32-bit fraction, 8-bit exponent Scalar (F5E3)
@@ -353,12 +353,14 @@ VsfType::x(text)  // Automatically compressed
 - Variable-length integer encoding
 - Big-endian byte order
 
-✅ **Huffman text compression**
+✅ **Huffman text compression** (requires `text` feature)
 - Global Unicode frequency table
 - 36% compression typical, not just English
 - Low overhead
+- Enable with: `cargo build --features text`
+- Without feature: use `VsfType::l` for ASCII labels instead of `VsfType::x`
 
-✅ **Cryptographic support**
+✅ **Cryptographic support** (requires `crypto` feature)
 - Hash algorithms: BLAKE3 (default), SHA-256, SHA-512
 - Signatures: Ed25519, ECDSA-P256, RSA-2048
 - Keys: Ed25519, X25519, P-256, RSA-2048
@@ -393,6 +395,12 @@ VsfType::x(text)  // Automatically compressed
 - Parse → modify → re-encode workflow
 - Official schemas: image, camera, audio, network_peer, announce
 - See [schema/README.md](src/schema/README.md) for examples
+
+✅ **Two-tier parsing API**
+- **Low-level** (`VsfSection::parse`): Schema-agnostic, extracts raw data, no validation
+- **High-level** (`SectionBuilder::parse`): Schema-validated, type-safe, modify→re-encode workflow
+- Both parse the same binary format; high-level adds enforcement layer
+- See "Parsing APIs" section below for details
 
 ### Coming Next (v0.2.0)
 
@@ -431,6 +439,94 @@ let hash = VsfType::h(HASH3, hash_bytes);
 let decoded = VsfType::parse(&encoded)?;
 assert_eq!(original, decoded);
 ```
+
+### Feature Flags
+
+VSF uses optional features to keep the default build minimal:
+
+```toml
+[dependencies]
+vsf = "0.1"                    # Core only (no optional features)
+vsf = { version = "0.1", features = ["text"] }    # + Huffman compression
+vsf = { version = "0.1", features = ["crypto"] }  # + Ed25519, X25519, AES-GCM
+vsf = { version = "0.1", features = ["spirix"] }  # + Spirix arithmetic
+```
+
+| Feature | Enables | Use Case |
+|---------|---------|----------|
+| (none) | Core types, tensors, encoding/decoding | Basic serialization |
+| `text` | `VsfType::x` Huffman-compressed strings | Human-readable text storage |
+| `crypto` | Ed25519 signatures, X25519 key exchange, AES-GCM | Signed/encrypted data |
+| `spirix` | Spirix two's-complement floats (`s33`-`s77`, `c33`-`c77`) | Two's complement floating-point |
+
+**Note:** Without `text`, use `VsfType::l` for ASCII labels. Without `crypto`, hash types (`h`) still work (BLAKE3 is always available), but signatures (`g`) and encryption require the feature.
+
+### Parsing APIs: Two Tiers
+
+VSF provides two approaches to parsing sections, each suited to different use cases:
+
+#### Low-Level: `VsfSection::parse()`
+
+Schema-agnostic parsing that extracts raw data without validation. Located in `src/file_format.rs`.
+
+```rust
+use vsf::VsfSection;
+
+let mut ptr = 0;
+let section = VsfSection::parse(&bytes, &mut ptr)?;
+// Returns VsfSection { name: String, fields: Vec<VsfField> }
+// No schema required, no validation performed
+// Caller controls pointer position (useful for streaming)
+```
+
+**Use when:**
+- Reading unknown/arbitrary VSF data
+- Debugging or inspecting files
+- Building tooling that handles any section type
+- You don't have or need a schema
+
+#### High-Level: `SectionBuilder::parse()`
+
+Schema-validated parsing for type-safe workflows. Located in `src/schema/section.rs`.
+
+```rust
+use vsf::schema::{SectionSchema, SectionBuilder, TypeConstraint};
+
+// Define expected structure
+let schema = SectionSchema::new("camera")
+    .field("iso", TypeConstraint::AnyUnsigned)
+    .field("shutter", TypeConstraint::AnyFloat)
+    .field("model", TypeConstraint::AnyString);
+
+// Parse with validation
+let builder = SectionBuilder::parse(schema, &section_bytes)?;
+// Validates section name matches schema
+// Validates each field value against type constraints
+// Returns SectionBuilder for modify → re-encode workflow
+
+// Modify and re-encode
+builder.set("iso", 1600u32)?;
+let new_bytes = builder.encode()?;
+```
+
+**Use when:**
+- You know the expected structure
+- Type safety and validation matter
+- You need to modify and re-encode sections
+- Building applications with defined schemas
+
+#### Comparison
+
+| Aspect | `VsfSection::parse()` | `SectionBuilder::parse()` |
+|--------|----------------------|---------------------------|
+| Schema required | No | Yes |
+| Validates types | No | Yes |
+| Field storage | Single value per field | Multi-value per field |
+| Pointer control | External (`&mut usize`) | Internal |
+| Returns | `VsfSection` | `SectionBuilder` |
+| Use case | General parsing, tooling | Type-safe applications |
+
+Both parse the same `[d"name"(d"field":value)...]` binary format—`SectionBuilder::parse()` adds schema enforcement on top.
 
 ### Minimal Camera RAW
 
@@ -707,9 +803,9 @@ Variable-width encoding that's provably optimal for byte-aligned systems. Small 
 
 211 strongly-typed variants with complete pattern matching. Compiler verifies every case is handled.
 
-### 2. Mathematical Correctness
+### 2. Two's Complement Floats
 
-Integrates Spirix for arithmetic that preserves mathematical identities. Eagle Time for physics-bounded timestamps.
+Optional Spirix integration for two's complement floating-point. Eagle Time for physics-bounded timestamps.
 
 ### 3. Cryptographic Foundation
 

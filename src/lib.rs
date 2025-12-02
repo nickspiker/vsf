@@ -222,14 +222,63 @@
 //! `parse()` to read individual fields. A future schema system will provide type-safe
 //! header and section parsing with automatic validation.
 //!
+//! ## Parsing APIs: Two Tiers
+//!
+//! VSF provides two parsing approaches for sections, each suited to different use cases:
+//!
+//! ### Low-Level: `VsfSection::parse()` ([file_format.rs](src/file_format.rs))
+//!
+//! Schema-agnostic parsing that extracts raw data without validation:
+//!
+//! ```ignore
+//! use vsf::VsfSection;
+//!
+//! let mut ptr = 0;
+//! let section = VsfSection::parse(&bytes, &mut ptr)?;
+//! // Returns VsfSection with name and Vec<VsfField>
+//! // No schema required, no validation performed
+//! ```
+//!
+//! **Use when:**
+//! - Reading unknown/arbitrary VSF data
+//! - Debugging or inspecting files
+//! - Building tooling that handles any section type
+//! - You don't have or need a schema
+//!
+//! ### High-Level: `SectionBuilder::parse()` ([schema/section.rs](src/schema/section.rs))
+//!
+//! Schema-validated parsing for type-safe workflows:
+//!
+//! ```ignore
+//! use vsf::schema::{SectionSchema, SectionBuilder, TypeConstraint};
+//!
+//! let schema = SectionSchema::new("camera")
+//!     .field("iso", TypeConstraint::AnyUnsigned)
+//!     .field("shutter", TypeConstraint::AnyFloat);
+//!
+//! let builder = SectionBuilder::parse(schema, &section_bytes)?;
+//! // Validates section name matches schema
+//! // Validates each field against type constraints
+//! // Returns SectionBuilder for modify → re-encode workflow
+//! ```
+//!
+//! **Use when:**
+//! - You know the expected structure
+//! - Type safety and validation matter
+//! - You need to modify and re-encode sections
+//! - Building applications with defined schemas
+//!
+//! Both parse the same `[d"name"(d"field":value)...]` binary format—`SectionBuilder`
+//! adds schema enforcement on top of the low-level parsing.
+//!
 //! ## Module Structure
 //!
 //! - `types` - Core type definitions (VsfType, Tensor, EagleTime, WorldCoord)
 //! - `encoding` - Binary serialization (exponential-width integers, flatten)
 //! - `decoding` - Binary parsing with `parse()` function
-//! - `file_format` - VSF file headers and sections (VsfHeader)
+//! - `file_format` - VSF file headers and sections (VsfHeader, VsfSection)
 //! - `vsf_builder` - High-level builder for complete files
-//! - `schema` - **(Coming soon)** Type-safe section schemas with field validation
+//! - `schema` - Type-safe section schemas with field validation and parse→modify→encode
 //! - `verification` - Cryptographic hashing and signing
 //! - `text_encoding` - Huffman compression for Unicode strings
 //! - `colour` - Colourspace conversions (VSF RGB, Rec.2020, sRGB, XYZ)
@@ -281,6 +330,10 @@ pub mod decrypt;
 // Colour system (spectral and legacy colourspaces)
 pub mod colour;
 
+// Inspection and formatting utilities (colored output)
+#[cfg(feature = "inspect")]
+pub mod inspect;
+
 // Re-export main types
 pub use types::{
     datetime_to_eagle_time, eagle_time_nanos, EagleTime, EtType, LayoutOrder, StridedTensor,
@@ -298,7 +351,7 @@ pub use decoding::parse;
 
 // Re-export file format and builder
 pub use file_format::{validate_name, HeaderField, VsfField, VsfHeader, VsfSection};
-pub use vsf_builder::VsfBuilder;
+pub use vsf_builder::{SectionMeta, VsfBuilder};
 
 // RAW image builders and parser
 pub use builders::{
@@ -608,7 +661,7 @@ mod tests {
 
     #[test]
     fn test_roundtrip_tensor_1d() {
-        // 1D tensor of i32
+        // 1D tensor of i32 - encodes as tensor, decodes as vector (1D optimization)
         let data = vec![-100i32, 0, 100, 200, -50];
         let tensor = Tensor::new(vec![5], data.clone());
         let val = VsfType::t_i5(tensor);
@@ -617,11 +670,11 @@ mod tests {
         let mut ptr = 0;
         let parsed = parse(&flat, &mut ptr).unwrap();
 
-        if let VsfType::t_i5(t) = parsed {
-            assert_eq!(t.shape, vec![5]);
-            assert_eq!(t.data, data);
+        // 1D tensors decode as vectors (compact representation)
+        if let VsfType::v_i5(v) = parsed {
+            assert_eq!(v.data, data);
         } else {
-            panic!("Expected t_i5 tensor");
+            panic!("Expected v_i5 vector, got {:?}", parsed);
         }
     }
 
@@ -630,7 +683,10 @@ mod tests {
     #[test]
     fn test_1d_vector_optimization_unsigned() {
         // Test all unsigned types with 1D vector optimization
-        // u8 vector
+        // 1D tensors encode with 'tn' format and decode as vectors
+        // Exception: u8 stays as tensor (since Vec<u8> == raw bytes)
+
+        // u8 vector - special case: stays as tensor
         let data_u8 = vec![1u8, 2, 3, 4, 5, 10, 20, 30, 40, 50, 100, 200];
         let tensor_u8 = Tensor::new(vec![12], data_u8.clone());
         let val_u8 = VsfType::t_u3(tensor_u8);
@@ -642,12 +698,13 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_u8 = parse(&flat_u8, &mut ptr).unwrap();
+        // u8 is special: decodes back as tensor (raw byte compatibility)
         if let VsfType::t_u3(t) = parsed_u8 {
             assert_eq!(t.shape, vec![12]);
             assert_eq!(t.data, data_u8);
             assert_eq!(ptr, flat_u8.len());
         } else {
-            panic!("Expected t_u3 tensor");
+            panic!("Expected t_u3 tensor, got {:?}", parsed_u8);
         }
 
         // u16 vector
@@ -661,11 +718,10 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_u16 = parse(&flat_u16, &mut ptr).unwrap();
-        if let VsfType::t_u4(t) = parsed_u16 {
-            assert_eq!(t.shape, vec![8]);
-            assert_eq!(t.data, data_u16);
+        if let VsfType::v_u4(v) = parsed_u16 {
+            assert_eq!(v.data, data_u16);
         } else {
-            panic!("Expected t_u4 tensor");
+            panic!("Expected v_u4 vector, got {:?}", parsed_u16);
         }
 
         // u32 vector
@@ -679,11 +735,10 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_u32 = parse(&flat_u32, &mut ptr).unwrap();
-        if let VsfType::t_u5(t) = parsed_u32 {
-            assert_eq!(t.shape, vec![5]);
-            assert_eq!(t.data, data_u32);
+        if let VsfType::v_u5(v) = parsed_u32 {
+            assert_eq!(v.data, data_u32);
         } else {
-            panic!("Expected t_u5 tensor");
+            panic!("Expected v_u5 vector, got {:?}", parsed_u32);
         }
 
         // u64 vector
@@ -697,17 +752,18 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_u64 = parse(&flat_u64, &mut ptr).unwrap();
-        if let VsfType::t_u6(t) = parsed_u64 {
-            assert_eq!(t.shape, vec![3]);
-            assert_eq!(t.data, data_u64);
+        if let VsfType::v_u6(v) = parsed_u64 {
+            assert_eq!(v.data, data_u64);
         } else {
-            panic!("Expected t_u6 tensor");
+            panic!("Expected v_u6 vector, got {:?}", parsed_u64);
         }
     }
 
     #[test]
     fn test_1d_vector_optimization_signed() {
         // Test all signed types with 1D vector optimization
+        // 1D tensors encode with 'tn' format and decode as vectors
+
         // i8 vector
         let data_i8 = vec![-10i8, -5, 0, 5, 10, 20, -20, 30];
         let tensor_i8 = Tensor::new(vec![8], data_i8.clone());
@@ -719,11 +775,10 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_i8 = parse(&flat_i8, &mut ptr).unwrap();
-        if let VsfType::t_i3(t) = parsed_i8 {
-            assert_eq!(t.shape, vec![8]);
-            assert_eq!(t.data, data_i8);
+        if let VsfType::v_i3(v) = parsed_i8 {
+            assert_eq!(v.data, data_i8);
         } else {
-            panic!("Expected t_i3 tensor");
+            panic!("Expected v_i3 vector, got {:?}", parsed_i8);
         }
 
         // i16 vector
@@ -737,11 +792,10 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_i16 = parse(&flat_i16, &mut ptr).unwrap();
-        if let VsfType::t_i4(t) = parsed_i16 {
-            assert_eq!(t.shape, vec![5]);
-            assert_eq!(t.data, data_i16);
+        if let VsfType::v_i4(v) = parsed_i16 {
+            assert_eq!(v.data, data_i16);
         } else {
-            panic!("Expected t_i4 tensor");
+            panic!("Expected v_i4 vector, got {:?}", parsed_i16);
         }
 
         // i32 vector
@@ -755,11 +809,10 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_i32 = parse(&flat_i32, &mut ptr).unwrap();
-        if let VsfType::t_i5(t) = parsed_i32 {
-            assert_eq!(t.shape, vec![5]);
-            assert_eq!(t.data, data_i32);
+        if let VsfType::v_i5(v) = parsed_i32 {
+            assert_eq!(v.data, data_i32);
         } else {
-            panic!("Expected t_i5 tensor");
+            panic!("Expected v_i5 vector, got {:?}", parsed_i32);
         }
     }
 
