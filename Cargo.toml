@@ -1,6 +1,6 @@
 [package]
 name = "vsf"
-version = "0.1.18"
+version = "0.2.0"
 edition = "2021"
 authors = ["Nick Spiker <nick@verichrome.cc>"]
 description = "Versatile Storage Format"
@@ -48,3 +48,19 @@ text = ["dep:clap", "inspect"]
 
 [build-dependencies]
 ureq = "2"
+
+[[example]]
+name = "compress_file"
+required-features = ["text"]
+
+[[example]]
+name = "test_vsf_huffman"
+required-features = ["text"]
+
+[[example]]
+name = "show_shortcode_colours"
+required-features = ["inspect"]
+
+[[example]]
+name = "test_signing"
+required-features = ["crypto"]
