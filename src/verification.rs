@@ -169,27 +169,45 @@ fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, Strin
         }
     }
 
-    // Validate required fields
-    let offset_bytes = offset_bytes.ok_or("Missing required offset (o) field")?;
-    let size_bytes = size_bytes.ok_or("Missing required size (b) field")?;
+    // Metadata-only fields have no positional data (no o/b/n)
+    // This is valid for empty sections or header metadata like avatar_id, ping, etc.
+    let is_metadata_only = offset_bytes.is_none() && size_bytes.is_none();
 
-    // Child count is optional if encrypted (wrap present)
-    let child_count = if wrap.is_some() {
-        0 // Encrypted sections have implied n[0]
+    if is_metadata_only {
+        // Metadata-only field - no section body
+        Ok(HeaderField {
+            name: field.name,
+            hash,
+            signature,
+            key,
+            wrap,
+            offset_bytes: 0,
+            size_bytes: 0,
+            child_count: 0,
+        })
     } else {
-        child_count.ok_or("Missing required child count (n) field for unencrypted section")?
-    };
+        // Section field - require all positional data
+        let offset_bytes = offset_bytes.ok_or("Missing required offset (o) field")?;
+        let size_bytes = size_bytes.ok_or("Missing required size (b) field")?;
 
-    Ok(HeaderField {
-        name: field.name,
-        hash,
-        signature,
-        key,
-        wrap,
-        offset_bytes,
-        size_bytes,
-        child_count,
-    })
+        // Child count is optional if encrypted (wrap present)
+        let child_count = if wrap.is_some() {
+            0 // Encrypted sections have implied n[0]
+        } else {
+            child_count.ok_or("Missing required child count (n) field for unencrypted section")?
+        };
+
+        Ok(HeaderField {
+            name: field.name,
+            hash,
+            signature,
+            key,
+            wrap,
+            offset_bytes,
+            size_bytes,
+            child_count,
+        })
+    }
 }
 
 /// Rebuild VSF file with modified header fields
@@ -411,9 +429,7 @@ fn zero_all_signatures(vsf_bytes: &mut Vec<u8>) -> Result<(), String> {
             match sig_type {
                 VsfType::ge(sig_bytes) | VsfType::gp(sig_bytes) | VsfType::gr(sig_bytes) => {
                     let sig_len = sig_bytes.len();
-                    if let Ok(sig_start) =
-                        find_signature_value_position(vsf_bytes, sig_position, sig_len)
-                    {
+                    if let Ok(sig_start) = find_signature_value_position(vsf_bytes, sig_position) {
                         // Zero out signature
                         for i in 0..sig_len {
                             vsf_bytes[sig_start + i] = 0;
@@ -430,11 +446,7 @@ fn zero_all_signatures(vsf_bytes: &mut Vec<u8>) -> Result<(), String> {
 }
 
 /// Find the position of signature value bytes within the encoded signature type
-fn find_signature_value_position(
-    data: &[u8],
-    sig_marker_pos: usize,
-    sig_len: usize,
-) -> Result<usize, String> {
+fn find_signature_value_position(data: &[u8], sig_marker_pos: usize) -> Result<usize, String> {
     let mut pos = sig_marker_pos;
     let sig_type =
         parse(data, &mut pos).map_err(|e| format!("Failed to parse signature: {}", e))?;
@@ -798,67 +810,6 @@ fn write_header_field_signatures_from_list(
     Ok(vsf_bytes)
 }
 
-fn write_header_field_signatures(mut vsf_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
-    // Parse the full header to get all fields with their signatures
-    let header = parse_full_header(&vsf_bytes)?;
-
-    // Get all signature bytes from header fields
-    let mut signatures = Vec::new();
-    for field in &header.fields {
-        if let Some(ref sig_vsf) = field.signature {
-            let sig_bytes = match sig_vsf {
-                VsfType::ge(bytes) => bytes.clone(),
-                VsfType::gp(bytes) => bytes.clone(),
-                VsfType::gr(bytes) => bytes.clone(),
-                _ => continue,
-            };
-            signatures.push(sig_bytes);
-        }
-    }
-
-    // Now scan header for signature placeholders and write them
-    // We scan only up to header_end
-    let header_end = header.header_end;
-    let mut sig_index = 0;
-
-    let mut pos = 0;
-    while pos < header_end - 1 && sig_index < signatures.len() {
-        if vsf_bytes[pos] == b'g'
-            && (vsf_bytes[pos + 1] == b'e'
-                || vsf_bytes[pos + 1] == b'p'
-                || vsf_bytes[pos + 1] == b'r')
-        {
-            // Found potential signature marker
-            let mut test_ptr = pos;
-            if let Ok(sig_type) = parse(&vsf_bytes, &mut test_ptr) {
-                match sig_type {
-                    VsfType::ge(test_bytes) | VsfType::gp(test_bytes) | VsfType::gr(test_bytes) => {
-                        // Check if this is all zeros (placeholder)
-                        if test_bytes.iter().all(|&b| b == 0)
-                            && test_bytes.len() == signatures[sig_index].len()
-                        {
-                            // Found a placeholder - write the signature
-                            let sig_start = test_ptr - test_bytes.len();
-                            vsf_bytes[sig_start..sig_start + signatures[sig_index].len()]
-                                .copy_from_slice(&signatures[sig_index]);
-                            sig_index += 1;
-                        }
-                        pos = test_ptr; // Continue after this signature
-                    }
-                    _ => {
-                        pos += 1;
-                    }
-                }
-            } else {
-                pos += 1;
-            }
-        } else {
-            pos += 1;
-        }
-    }
-
-    Ok(vsf_bytes)
-}
 
 ///
 /// This function:
@@ -884,6 +835,45 @@ fn write_header_field_signatures(mut vsf_bytes: Vec<u8>) -> Result<Vec<u8>, Stri
 /// let signing_key = SigningKey::generate(&mut OsRng);
 /// let bytes = sign_section(bytes, "raw", signing_key.as_bytes())?;
 /// ```
+/// Sign a VSF file and add the signature to the header.
+///
+/// # VSF Signature Scheme
+///
+/// VSF uses a two-stage hash scheme for signatures:
+///
+/// 1. **Provenance hash (hp)**: Computed over the entire file with all crypto
+///    fields zeroed (hp=0, sig=0). This is the immutable content identity.
+///
+/// 2. **Signature**: Signs the hash of the entire file WITH provenance filled
+///    in but signature still zeroed. This binds the signer to both the content
+///    AND its provenance.
+///
+/// ```text
+/// Creation:
+///   file[hp=0, sig=0] → BLAKE3 → hp
+///   file[hp=✓, sig=0] → BLAKE3 → sign() → sig
+///
+/// Update (re-signing):
+///   file[hp=✓, sig=0] → BLAKE3 → sign() → new_sig
+///   (hp stays the same - it's the original content identity)
+/// ```
+///
+/// # Signature vs Rolling Hash
+///
+/// VSF supports TWO mutually exclusive integrity mechanisms:
+/// - **hb (rolling hash)**: Anonymous integrity - just verifies content hasn't changed
+/// - **ge (signature)**: Authenticated integrity - proves WHO created/signed it
+///
+/// When signing, we use signature (ge) instead of rolling hash (hb).
+/// Both cover file integrity; signature additionally proves authorship.
+///
+/// # Arguments
+/// * `vsf_bytes` - Complete VSF file with hp already computed
+/// * `section_name` - Section to associate signature with in header
+/// * `signing_key` - Ed25519 signing key (32 bytes)
+///
+/// # Returns
+/// VSF file bytes with signature added to header
 #[cfg(feature = "crypto")]
 pub fn sign_section(
     vsf_bytes: Vec<u8>,
@@ -901,49 +891,193 @@ pub fn sign_section(
     })?;
     let signing_key = SigningKey::from_bytes(&key_bytes);
 
-    // Parse complete header
+    // Parse complete header to verify section exists
     let header = parse_full_header(&vsf_bytes)?;
+    let _section_field = header
+        .fields
+        .iter()
+        .find(|f| f.name == section_name)
+        .ok_or_else(|| format!("Section '{}' not found", section_name))?;
 
-    // Find target section
+    // Add signature placeholder to header, then compute hash of file-with-provenance
+    // The signature placeholder ensures header size is stable before we hash
+    let mut new_fields = header.fields.clone();
+    for field in &mut new_fields {
+        if field.name == section_name {
+            // 64-byte Ed25519 signature placeholder (zeros)
+            field.signature = Some(VsfType::ge(vec![0u8; 64]));
+            break;
+        }
+    }
+
+    // Rebuild file with signature placeholder (no rolling hash - signature replaces it)
+    let file_with_placeholder = rebuild_with_header(
+        &vsf_bytes,
+        new_fields.clone(),
+        header.version,
+        header.backward_compat,
+        header.header_end,
+        false, // No rolling hash - signature provides integrity + authentication
+    )?;
+
+    // Compute hash of file with provenance filled, signature zeroed
+    // This is what we sign - binding signer to content AND its provenance
+    let hash_to_sign = compute_signature_hash(&file_with_placeholder, section_name)?;
+
+    // Sign the hash
+    let signature = signing_key.sign(&hash_to_sign);
+    let sig_bytes = signature.to_bytes().to_vec();
+
+    // Write actual signature into the placeholder
+    write_section_signature(file_with_placeholder, section_name, &sig_bytes)
+}
+
+/// Compute the hash that gets signed for a section.
+///
+/// This hashes the entire file with:
+/// - Provenance hash (hp) filled in (binds signature to content identity)
+/// - Signature field zeroed (the thing we're computing)
+///
+/// The result is what the signer signs, proving they attest to this
+/// specific content with this specific provenance.
+#[cfg(feature = "crypto")]
+fn compute_signature_hash(vsf_bytes: &[u8], section_name: &str) -> Result<[u8; 32], String> {
+    // Find and zero the signature bytes for this section
+    let header = parse_full_header(vsf_bytes)?;
+
     let section_field = header
         .fields
         .iter()
         .find(|f| f.name == section_name)
         .ok_or_else(|| format!("Section '{}' not found", section_name))?;
 
-    let section_offset = section_field.offset_bytes;
-    let section_size = section_field.size_bytes;
+    // Find signature position in the header
+    let sig_position = match &section_field.signature {
+        Some(VsfType::ge(_)) => {
+            // Need to find where this signature is in the raw bytes
+            find_section_signature_position(vsf_bytes, section_name)?
+        }
+        _ => return Err("Section has no signature placeholder".to_string()),
+    };
 
-    // Extract and sign section bytes
-    if section_offset + section_size > vsf_bytes.len() {
-        return Err("Section exceeds file bounds".to_string());
+    // Clone and zero the signature bytes
+    let mut temp_bytes = vsf_bytes.to_vec();
+    for i in 0..64 {
+        temp_bytes[sig_position + i] = 0;
     }
-    let section_bytes = &vsf_bytes[section_offset..section_offset + section_size];
-    let signature = signing_key.sign(section_bytes);
 
-    // Create signature VsfType (Ed25519 signature is always 64 bytes)
-    let sig_bytes = signature.to_bytes().to_vec();
-    let sig_vsf = VsfType::ge(sig_bytes);
+    // Hash the file with signature zeroed, provenance intact
+    Ok(*blake3::hash(&temp_bytes).as_bytes())
+}
 
-    // Update header fields - add signature to target section
-    let mut new_fields = header.fields.clone();
-    for field in &mut new_fields {
-        if field.name == section_name {
-            field.signature = Some(sig_vsf);
-            break;
+/// Find the byte position of a section's signature value in the header.
+#[cfg(feature = "crypto")]
+fn find_section_signature_position(vsf_bytes: &[u8], section_name: &str) -> Result<usize, String> {
+    // Parse through header to find the section's signature field
+    let mut pointer = 4; // Skip magic "RÅ<"
+
+    // Skip version, backward compat, header length
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+
+    // Skip creation time
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+
+    // Skip provenance hash (hp)
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+
+    // Skip header-level signature if present (ge/gp/gr at header level)
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'g' {
+        let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+    }
+
+    // Skip header-level signer key if present (ke/kx/kp at header level)
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'k' {
+        let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+    }
+
+    // Skip optional rolling hash (hb) - but we shouldn't have one when signing
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'h' {
+        let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+    }
+
+    // Now parse field count and fields
+    let field_count = match parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())? {
+        VsfType::n(count) => count,
+        _ => return Err("Expected field count".to_string()),
+    };
+
+    // Parse each field looking for our section
+    for _ in 0..field_count {
+        if pointer >= vsf_bytes.len() || vsf_bytes[pointer] != b'(' {
+            return Err("Expected field start '('".to_string());
+        }
+        pointer += 1; // skip '('
+
+        // Parse field name
+        let field_name = match parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())? {
+            VsfType::d(name) => name,
+            _ => return Err("Expected field name".to_string()),
+        };
+
+        // Skip colon separator between name and values (if present)
+        if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b':' {
+            pointer += 1;
+        }
+
+        // Parse field values until we hit ')'
+        let mut found_sig_position = None;
+        while pointer < vsf_bytes.len() && vsf_bytes[pointer] != b')' {
+            // Skip comma separators between values
+            if vsf_bytes[pointer] == b',' {
+                pointer += 1;
+                continue;
+            }
+
+            let value = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+
+            // If this is a signature and we're in the right section
+            if field_name == section_name {
+                if let VsfType::ge(sig_bytes) = value {
+                    // Position is after the 'ge' prefix, at the actual bytes
+                    // ge encoding: 'g' + subtype + length + bytes
+                    // We need to find where the 64 bytes start
+                    found_sig_position = Some(pointer - sig_bytes.len());
+                }
+            }
+        }
+
+        if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b')' {
+            pointer += 1; // skip ')'
+        }
+
+        if field_name == section_name {
+            if let Some(pos) = found_sig_position {
+                return Ok(pos);
+            }
+            return Err(format!("Section '{}' has no signature field", section_name));
         }
     }
 
-    // Rebuild file with modified header
-    // Don't include rolling hash when signing - the signature provides cryptographic integrity
-    rebuild_with_header(
-        &vsf_bytes,
-        new_fields,
-        header.version,
-        header.backward_compat,
-        header.header_end,
-        false, // Don't include rolling hash - signature is stronger
-    )
+    Err(format!("Section '{}' not found in header", section_name))
+}
+
+/// Write signature bytes into a section's signature placeholder.
+#[cfg(feature = "crypto")]
+fn write_section_signature(
+    mut vsf_bytes: Vec<u8>,
+    section_name: &str,
+    signature: &[u8],
+) -> Result<Vec<u8>, String> {
+    if signature.len() != 64 {
+        return Err(format!("Signature must be 64 bytes, got {}", signature.len()));
+    }
+
+    let sig_position = find_section_signature_position(&vsf_bytes, section_name)?;
+    vsf_bytes[sig_position..sig_position + 64].copy_from_slice(signature);
+
+    Ok(vsf_bytes)
 }
 
 /// Add encryption metadata to a section's header field
@@ -1140,6 +1274,54 @@ mod tests {
     use super::*;
     use crate::builders::RawImageBuilder;
     use crate::types::BitPackedTensor;
+
+    #[cfg(feature = "crypto")]
+    #[test]
+    fn test_sign_section_with_metadata() {
+        use crate::vsf_builder::{SectionMeta, VsfBuilder};
+
+        // Build a simple VSF file similar to what Photon does
+        let meta = SectionMeta::new(
+            VsfType::ke(vec![0u8; 32]),    // Ed25519 device public key
+            VsfType::v(b'e', vec![]),       // Empty vec = metadata only
+        );
+
+        let encrypted = vec![0u8; 100]; // Fake encrypted data
+
+        let unsigned_bytes = VsfBuilder::new()
+            .add_section_with_meta(
+                "announce",
+                vec![("payload".to_string(), VsfType::v(b'e', encrypted))],
+                meta,
+            )
+            .build()
+            .expect("Failed to build VSF");
+
+        println!("Built unsigned VSF: {} bytes", unsigned_bytes.len());
+
+        // Print hex dump for debugging
+        println!("Hex dump:");
+        for (i, b) in unsigned_bytes.iter().enumerate() {
+            if i % 32 == 0 {
+                println!();
+                print!("{:04x}: ", i);
+            }
+            print!("{:02x} ", b);
+        }
+        println!();
+
+        // Try to sign it
+        let signing_key = [1u8; 32]; // Non-zero key for valid Ed25519
+        match sign_section(unsigned_bytes.clone(), "announce", &signing_key) {
+            Ok(signed) => {
+                println!("\nSigned VSF: {} bytes", signed.len());
+                assert!(signed.len() > unsigned_bytes.len(), "Signed should be larger");
+            }
+            Err(e) => {
+                panic!("Sign error: {}", e);
+            }
+        }
+    }
 
     #[test]
     fn test_add_and_verify_file_hash() {

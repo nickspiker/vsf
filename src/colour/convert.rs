@@ -1432,7 +1432,15 @@ mod tests {
         for &v in &values {
             let delinearized = delinearize_gamma2(v);
             let linearized = linearize_gamma2(delinearized);
-            assert!(linearized == v);
+            // Use epsilon comparison for floating point
+            assert!(
+                (linearized - v).abs() < 1e-7,
+                "v={} → {} → {} (diff={})",
+                v,
+                delinearized,
+                linearized,
+                (linearized - v).abs()
+            );
         }
     }
 

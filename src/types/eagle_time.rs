@@ -106,8 +106,8 @@ impl EagleTime {
         &self.et_seconds
     }
 
-    /// Converts the EtType to f64 for comparison purposes
-    fn to_f64(&self) -> f64 {
+    /// Converts the EtType to f64 (Eagle seconds as floating point)
+    pub fn to_f64(&self) -> f64 {
         match self.et_seconds {
             EtType::f5(v) => v as f64,
             EtType::f6(v) => v,

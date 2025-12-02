@@ -8,13 +8,13 @@
 //! - StridedTensor: Strided tensor types
 //! - WorldCoord: Dymaxion geographic coordinates
 
-pub mod eagle_time_type;
+pub mod eagle_time;
 pub mod tensor;
 pub mod vsf_type;
 pub mod world_coord;
 
 // Re-export main types
-pub use eagle_time_type::{datetime_to_eagle_time, eagle_time_nanos, EagleTime, EtType};
+pub use eagle_time::{datetime_to_eagle_time, eagle_time_nanos, EagleTime, EtType};
 pub use tensor::{BitPackedTensor, LayoutOrder, StridedTensor, Tensor, Vector};
 pub use vsf_type::VsfType;
 pub use world_coord::WorldCoord;

@@ -3,14 +3,16 @@
 //! Similar to exiftool for images, vsfinfo provides detailed inspection of VSF files
 //! including metadata, structure verification, and field extraction.
 
-use chrono::{Datelike, Timelike};
 use clap::{Parser, Subcommand};
 use colored::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use vsf::decoding::parse::parse;
-use vsf::file_format::VsfHeader as LibVsfHeader;
-use vsf::schema::SchemaRegistry;
+use vsf::file_format::VsfHeader;
+use vsf::inspect::{
+    format_bytes, format_eagle_time, format_number, format_value, format_value_short,
+    labels_from_header, parse_section_fields, LabelInfo,
+};
 use vsf::types::VsfType;
 
 #[derive(Parser)]
@@ -29,6 +31,19 @@ struct Cli {
     /// Path to VSF keypair file for decrypting encrypted sections
     #[arg(short, long)]
     key: Option<PathBuf>,
+
+    /// Symmetric key (hex) for ChaCha20-Poly1305 encrypted files
+    #[arg(long, value_name = "HEX")]
+    symmetric_key: Option<String>,
+
+    /// Identity seed (hex) - derives symmetric key for Photon contact list
+    #[arg(long, value_name = "HEX")]
+    identity_seed: Option<String>,
+
+    /// Their identity seed (hex) - for Photon per-contact state files
+    /// Key = BLAKE3("photon_contact_state_v2" || our_seed || their_seed)
+    #[arg(long, value_name = "HEX")]
+    their_seed: Option<String>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -52,10 +67,28 @@ enum Commands {
 
     /// Show file structure as a tree
     Tree,
+
+    /// Derive Photon identity seed from a handle string
+    /// Formula: BLAKE3(VsfType::x(handle).flatten())
+    #[command(name = "seed")]
+    DeriveSeed {
+        /// Handle string to derive seed from
+        #[arg(value_name = "HANDLE")]
+        handle: String,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
+
+    // Handle seed command separately (doesn't need a file)
+    if let Some(Commands::DeriveSeed { handle }) = cli.command {
+        if let Err(e) = derive_seed(&handle) {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
 
     // If no file provided, print help and exit
     let file = match cli.file {
@@ -69,12 +102,46 @@ fn main() {
     };
 
     // Read the file
-    let data = match fs::read(&file) {
+    let raw_data = match fs::read(&file) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("Error reading file: {}", e);
             std::process::exit(1);
         }
+    };
+
+    // Decrypt if symmetric key provided
+    let data = if let (Some(ref our_seed_hex), Some(ref their_seed_hex)) =
+        (&cli.identity_seed, &cli.their_seed)
+    {
+        // Derive key for per-contact state: BLAKE3("photon_contact_state_v2" || our || their)
+        match decrypt_photon_contact_state(&raw_data, our_seed_hex, their_seed_hex) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("Decryption error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else if let Some(ref seed_hex) = cli.identity_seed {
+        // Derive key from identity seed (Photon contact list format)
+        match decrypt_photon_contacts(&raw_data, seed_hex) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("Decryption error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else if let Some(ref key_hex) = cli.symmetric_key {
+        // Use raw symmetric key
+        match decrypt_symmetric(&raw_data, key_hex) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("Decryption error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        raw_data
     };
 
     // Execute the appropriate command
@@ -83,6 +150,7 @@ fn main() {
         Some(Commands::Verify) => verify_file(&data),
         Some(Commands::Extract { field_path }) => extract_field(&data, &field_path),
         Some(Commands::Tree) => show_tree(&data),
+        Some(Commands::DeriveSeed { handle }) => derive_seed(&handle),
     };
 
     if let Err(e) = result {
@@ -91,517 +159,115 @@ fn main() {
     }
 }
 
-/// VSF header wrapper for display - uses library's VsfHeader::decode()
-struct VsfHeader {
-    version: usize,
-    backward_compat: usize,
-    modified_time: Option<VsfType>,   // Timestamp
-    provenance_hash: Option<VsfType>, // BLAKE3 provenance hash (required)
-    signer_pubkey: Option<VsfType>,   // Ed25519 public key (optional, ke)
-    signature: Option<VsfType>,       // Ed25519 signature (optional, ge)
-    rolling_hash: Option<VsfType>,    // BLAKE3 rolling hash (optional)
-    labels: Vec<LabelInfo>,
+/// Decrypt Photon contact list using identity seed
+/// Key derivation: BLAKE3("photon_contact_list_v2" || seed)
+/// Format: [12-byte nonce][ciphertext + 16-byte auth tag]
+#[cfg(feature = "crypto")]
+fn decrypt_photon_contacts(encrypted: &[u8], seed_hex: &str) -> Result<Vec<u8>, String> {
+    use blake3::Hasher;
+
+    let seed = hex::decode(seed_hex).map_err(|e| format!("Invalid hex: {}", e))?;
+    if seed.len() != 32 {
+        return Err(format!("Seed must be 32 bytes (got {})", seed.len()));
+    }
+
+    // Derive key using same domain separation as Photon
+    let mut hasher = Hasher::new();
+    hasher.update(b"photon_contact_list_v2");
+    hasher.update(&seed);
+    let key = hasher.finalize();
+
+    decrypt_chacha20poly1305(encrypted, key.as_bytes())
 }
 
-struct LabelInfo {
-    name: String,
-    hash: Option<VsfType>,
-    signature: Option<VsfType>,
-    key: Option<VsfType>,
-    wrap: Option<VsfType>, // v: wrapped/encrypted data marker
-    offset: usize,
-    size: usize,
-    child_count: usize,
+#[cfg(not(feature = "crypto"))]
+fn decrypt_photon_contacts(_encrypted: &[u8], _seed_hex: &str) -> Result<Vec<u8>, String> {
+    Err("Crypto feature not enabled - rebuild with --features crypto".to_string())
 }
 
-impl VsfHeader {
-    fn parse(data: &[u8]) -> Result<Self, String> {
-        // Use the library's VsfHeader::decode() for parsing
-        let (lib_header, _bytes_consumed) = LibVsfHeader::decode(data)?;
+/// Decrypt Photon per-contact state using both identity seeds
+/// Key derivation: BLAKE3("photon_contact_state_v2" || our_seed || their_seed)
+/// Format: [12-byte nonce][ciphertext + 16-byte auth tag]
+#[cfg(feature = "crypto")]
+fn decrypt_photon_contact_state(
+    encrypted: &[u8],
+    our_seed_hex: &str,
+    their_seed_hex: &str,
+) -> Result<Vec<u8>, String> {
+    use blake3::Hasher;
 
-        // Convert library header to local format for display
-        let labels = lib_header
-            .fields
-            .iter()
-            .map(|field| LabelInfo {
-                name: field.name.clone(),
-                hash: field.hash.clone(),
-                signature: field.signature.clone(),
-                key: field.key.clone(),
-                wrap: field.wrap.clone(),
-                offset: field.offset_bytes,
-                size: field.size_bytes,
-                child_count: field.child_count,
-            })
-            .collect();
+    let our_seed = hex::decode(our_seed_hex).map_err(|e| format!("Invalid our_seed hex: {}", e))?;
+    let their_seed =
+        hex::decode(their_seed_hex).map_err(|e| format!("Invalid their_seed hex: {}", e))?;
 
-        Ok(VsfHeader {
-            version: lib_header.version,
-            backward_compat: lib_header.backward_compat,
-            modified_time: Some(lib_header.creation_time),
-            provenance_hash: Some(lib_header.provenance_hash),
-            signer_pubkey: lib_header.signer_pubkey,
-            signature: lib_header.signature,
-            rolling_hash: lib_header.rolling_hash,
-            labels,
-        })
+    if our_seed.len() != 32 {
+        return Err(format!("Our seed must be 32 bytes (got {})", our_seed.len()));
     }
-}
-
-/// Format bytes with proper units and 4 significant figures
-fn format_bytes(bytes: usize) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    const TB: f64 = GB * 1024.0;
-    const PB: f64 = TB * 1024.0;
-
-    let bytes_f64 = bytes as f64;
-
-    if bytes_f64 >= PB {
-        let pb = bytes_f64 / PB;
-        if pb >= 100.0 {
-            format!("{:.1} PB", pb)
-        } else if pb >= 10.0 {
-            format!("{:.2} PB", pb)
-        } else {
-            format!("{:.3} PB", pb)
-        }
-    } else if bytes_f64 >= TB {
-        let tb = bytes_f64 / TB;
-        if tb >= 100.0 {
-            format!("{:.1} TB", tb)
-        } else if tb >= 10.0 {
-            format!("{:.2} TB", tb)
-        } else {
-            format!("{:.3} TB", tb)
-        }
-    } else if bytes_f64 >= GB {
-        let gb = bytes_f64 / GB;
-        if gb >= 100.0 {
-            format!("{:.1} GB", gb)
-        } else if gb >= 10.0 {
-            format!("{:.2} GB", gb)
-        } else {
-            format!("{:.3} GB", gb)
-        }
-    } else if bytes_f64 >= MB {
-        let mb = bytes_f64 / MB;
-        if mb >= 100.0 {
-            format!("{:.1} MB", mb)
-        } else if mb >= 10.0 {
-            format!("{:.2} MB", mb)
-        } else {
-            format!("{:.3} MB", mb)
-        }
-    } else if bytes_f64 >= KB {
-        let kb = bytes_f64 / KB;
-        if kb >= 100.0 {
-            format!("{:.1} KB", kb)
-        } else if kb >= 10.0 {
-            format!("{:.2} KB", kb)
-        } else {
-            format!("{:.3} KB", kb)
-        }
-    } else {
-        format!("{} Bytes", bytes)
-    }
-}
-
-/// Format number with spaces every 3 digits (e.g., 1 000 000)
-fn format_number(n: usize) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    let chars: Vec<char> = s.chars().collect();
-
-    for (i, c) in chars.iter().enumerate() {
-        if i > 0 && (chars.len() - i) % 3 == 0 {
-            result.push(' ');
-        }
-        result.push(*c);
-    }
-
-    result
-}
-
-/// Format Eagle Time (ET) in human-readable format: 2025-OCT-29 6:42:21.813 PM
-/// Displays in local timezone (Eagle Time → UTC → Local)
-fn format_et(et: &vsf::types::EtType) -> String {
-    use chrono::Local;
-
-    // Convert EtType to EagleTime and then to DateTime (UTC), then to local
-    let eagle_time = vsf::types::EagleTime::new(et.clone());
-    let dt_utc = eagle_time.to_datetime();
-    let dt = dt_utc.with_timezone(&Local);
-
-    // Extract milliseconds from fractional seconds if available
-    let milliseconds = match et {
-        vsf::types::EtType::f5(v) => ((v.fract().abs() * 1000.0) as u32) % 1000,
-        vsf::types::EtType::f6(v) => ((v.fract().abs() * 1000.0) as u32) % 1000,
-        _ => 0,
-    };
-
-    let year = dt.year();
-    let month = dt.month();
-    let day = dt.day();
-    let hour = dt.hour();
-    let minute = dt.minute();
-    let second = dt.second();
-
-    // Convert to 12-hour format
-    let (hour_12, am_pm) = if hour == 0 {
-        (12, "AM")
-    } else if hour < 12 {
-        (hour, "AM")
-    } else if hour == 12 {
-        (12, "PM")
-    } else {
-        (hour - 12, "PM")
-    };
-
-    let month_name = match month {
-        1 => "JAN",
-        2 => "FEB",
-        3 => "MAR",
-        4 => "APR",
-        5 => "MAY",
-        6 => "JUN",
-        7 => "JUL",
-        8 => "AUG",
-        9 => "SEP",
-        10 => "OCT",
-        11 => "NOV",
-        12 => "DEC",
-        _ => "UNK",
-    };
-
-    format!(
-        "{}-{}-{:02} {}:{:02}:{:02}.{:03} {}",
-        year, month_name, day, hour_12, minute, second, milliseconds, am_pm
-    )
-}
-
-/// Quick file hash verification
-fn verify_file_hash(data: &[u8]) -> bool {
-    if data.len() < 4 {
-        return false;
-    }
-
-    let mut pointer = 4; // Skip "RÅ<"
-
-    // Skip header length
-    if parse(data, &mut pointer).is_err() {
-        return false;
-    }
-
-    // Skip version and backward compat
-    if parse(data, &mut pointer).is_err() {
-        return false;
-    }
-    if parse(data, &mut pointer).is_err() {
-        return false;
-    }
-
-    // Check if hash exists
-    if pointer >= data.len() || data[pointer] != b'h' {
-        return false;
-    }
-
-    let hash_position = pointer;
-
-    // Parse hash
-    let hash_type = match parse(data, &mut pointer) {
-        Ok(h) => h,
-        Err(_) => return false,
-    };
-
-    let stored_hash = match hash_type {
-        VsfType::hb(hash) => hash,
-        _ => return false,
-    };
-
-    // Find where hash bytes start by reparsing
-    let mut temp_pointer = hash_position;
-    let _ = parse(data, &mut temp_pointer);
-    let hash_bytes_start = temp_pointer - stored_hash.len();
-
-    // Create copy with zeroed hash
-    let mut temp_data = data.to_vec();
-    for i in 0..stored_hash.len() {
-        temp_data[hash_bytes_start + i] = 0;
-    }
-
-    // Compute and compare
-    let computed = blake3::hash(&temp_data);
-    computed.as_bytes() == stored_hash.as_slice()
-}
-
-/// Format a VsfType value for display
-fn format_value(vsf: &VsfType) -> String {
-    match vsf {
-        VsfType::u0(b) => format!("{}", b),
-        VsfType::u(v, _) => format!("{}", v),
-        VsfType::u3(v) => format!("{}", v),
-        VsfType::u4(v) => format!("{}", v),
-        VsfType::u5(v) => format!("{}", v),
-        VsfType::u6(v) => format!("{}", v),
-        VsfType::u7(v) => format!("{}", v),
-        VsfType::i(v) => format!("{}", v),
-        VsfType::i3(v) => format!("{}", v),
-        VsfType::i4(v) => format!("{}", v),
-        VsfType::i5(v) => format!("{}", v),
-        VsfType::i6(v) => format!("{}", v),
-        VsfType::i7(v) => format!("{}", v),
-        VsfType::f5(v) => format!("{:.4}", v),
-        VsfType::f6(v) => format!("{:.8}", v),
-        VsfType::x(s) => s.clone(),
-        VsfType::p(tensor) => {
-            let shape_str = tensor
-                .shape
-                .iter()
-                .map(|d| format_number(*d))
-                .collect::<Vec<_>>()
-                .join(" × ");
-            format!(
-                "{}, {}-bit packed tensor ({} Bytes)",
-                shape_str,
-                tensor.bit_depth,
-                format_number(tensor.data.len())
-            )
-        }
-        VsfType::t_u3(tensor) => {
-            let shape_str = tensor
-                .shape
-                .iter()
-                .map(|d| format_number(*d))
-                .collect::<Vec<_>>()
-                .join(" × ");
-            let format_hint = if tensor.ndim() == 1 {
-                " [1D vector]"
-            } else {
-                ""
-            };
-            format!(
-                "{}, 8-bit tensor{} ({} Bytes)",
-                shape_str,
-                format_hint,
-                format_number(tensor.data.len())
-            )
-        }
-        VsfType::t_f5(tensor) => {
-            let shape_str = tensor
-                .shape
-                .iter()
-                .map(|d| d.to_string())
-                .collect::<Vec<_>>()
-                .join("×");
-            format!("t_f5[{}] {} elements", shape_str, tensor.data.len())
-        }
-        VsfType::w(coord) => {
-            let (lat, lon) = coord.to_lat_lon();
-            format!("({:.4}°N, {:.4}°W)", lat, lon)
-        }
-        VsfType::e(et) => format_et(et),
-        VsfType::hp(hash) => format!(
-            "hp[BLAKE3 Provenance {} Bytes] {}...",
-            hash.len(),
-            hex_preview(hash)
-        ),
-        VsfType::hb(hash) => format!(
-            "hb[BLAKE3 Rolling {} Bytes] {}...",
-            hash.len(),
-            hex_preview(hash)
-        ),
-        VsfType::hs(hash) => format!("hs[SHA-2 {} Bytes] {}...", hash.len(), hex_preview(hash)),
-
-        VsfType::ge(sig) => format!("ge[Ed25519 {} Bytes] {}...", sig.len(), hex_preview(sig)),
-        VsfType::gp(sig) => format!("gp[ECDSA-P256 {} Bytes] {}...", sig.len(), hex_preview(sig)),
-        VsfType::gr(sig) => format!("gr[RSA {} Bytes] {}...", sig.len(), hex_preview(sig)),
-
-        VsfType::ke(key) => format!(
-            "ke[Ed25519 key {} Bytes] {}...",
-            key.len(),
-            hex_preview(key)
-        ),
-        VsfType::kx(key) => format!("kx[X25519 key {} Bytes] {}...", key.len(), hex_preview(key)),
-        VsfType::kp(key) => format!(
-            "kp[ECDSA-P256 key {} Bytes] {}...",
-            key.len(),
-            hex_preview(key)
-        ),
-        VsfType::kc(key) => format!(
-            "kc[ChaCha20-Poly1305 key {} Bytes] {}...",
-            key.len(),
-            hex_preview(key)
-        ),
-        VsfType::ka(key) => format!(
-            "ka[AES-256-GCM key {} Bytes] {}...",
-            key.len(),
-            hex_preview(key)
-        ),
-
-        VsfType::ah(mac) => format!(
-            "ah[HMAC-SHA256 {} Bytes] {}...",
-            mac.len(),
-            hex_preview(mac)
-        ),
-        VsfType::as_(mac) => format!(
-            "as_[HMAC-SHA512 {} Bytes] {}...",
-            mac.len(),
-            hex_preview(mac)
-        ),
-        VsfType::ap(mac) => format!("ap[Poly1305 {} Bytes] {}...", mac.len(), hex_preview(mac)),
-        VsfType::ab(mac) => format!(
-            "ab[BLAKE3-keyed {} Bytes] {}...",
-            mac.len(),
-            hex_preview(mac)
-        ),
-        VsfType::ac(mac) => format!("ac[CMAC-AES {} Bytes] {}...", mac.len(), hex_preview(mac)),
-
-        VsfType::v(algo, data) => {
-            let algo_name = match *algo {
-                b'a' => "AV1",
-                b'z' => "zstd",
-                b'r' => "Reed-Solomon",
-                b'x' => "XZ/LZMA",
-                b'e' => "Encrypted",
-                b'u' => "Units",
-                _ => "unknown",
-            };
-            format!(
-                "wrap[{} {} Bytes] {}",
-                algo_name,
-                data.len(),
-                if data.is_empty() {
-                    ""
-                } else {
-                    &hex_preview(data)
-                }
-            )
-        }
-        _ => format!("{:?}", vsf),
-    }
-}
-
-/// Format a VsfType value for short display (tree view)
-fn format_value_short(vsf: &VsfType) -> String {
-    match vsf {
-        VsfType::p(tensor) => {
-            let shape_str = tensor
-                .shape
-                .iter()
-                .map(|d| format_number(*d))
-                .collect::<Vec<_>>()
-                .join(" × ");
-            format!(
-                "{}, {}-bit packed tensor ({} Bytes)",
-                shape_str,
-                tensor.bit_depth,
-                format_number(tensor.data.len())
-            )
-        }
-        VsfType::x(s) if s.len() > 30 => format!("{}...", &s[..27]),
-        _ => format_value(vsf),
-    }
-}
-
-/// Generate hex preview of bytes
-fn hex_preview(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .take(4)
-        .map(|b| format!("{:02X}", b))
-        .collect::<Vec<_>>()
-        .join("")
-}
-
-/// Parse section fields and return as vec of (name, value) tuples
-fn parse_section_fields(data: &[u8], label: &LabelInfo) -> Result<Vec<(String, VsfType)>, String> {
-    let mut pointer = label.offset;
-    let mut fields = Vec::new();
-
-    // Parse fields
-    if pointer >= data.len() {
+    if their_seed.len() != 32 {
         return Err(format!(
-            "Offset {} beyond file length {}",
-            pointer,
-            data.len()
+            "Their seed must be 32 bytes (got {})",
+            their_seed.len()
         ));
     }
 
-    if data[pointer] != b'[' {
-        return Err(format!(
-            "Expected '[' at offset {}, found '{}'",
-            pointer, data[pointer] as char
-        ));
+    // Derive key using same domain separation as Photon
+    let mut hasher = Hasher::new();
+    hasher.update(b"photon_contact_state_v2");
+    hasher.update(&our_seed);
+    hasher.update(&their_seed);
+    let key = hasher.finalize();
+
+    decrypt_chacha20poly1305(encrypted, key.as_bytes())
+}
+
+#[cfg(not(feature = "crypto"))]
+fn decrypt_photon_contact_state(
+    _encrypted: &[u8],
+    _our_seed_hex: &str,
+    _their_seed_hex: &str,
+) -> Result<Vec<u8>, String> {
+    Err("Crypto feature not enabled - rebuild with --features crypto".to_string())
+}
+
+/// Decrypt using raw symmetric key (ChaCha20-Poly1305)
+/// Format: [12-byte nonce][ciphertext + 16-byte auth tag]
+#[cfg(feature = "crypto")]
+fn decrypt_symmetric(encrypted: &[u8], key_hex: &str) -> Result<Vec<u8>, String> {
+    let key = hex::decode(key_hex).map_err(|e| format!("Invalid hex: {}", e))?;
+    if key.len() != 32 {
+        return Err(format!("Key must be 32 bytes (got {})", key.len()));
     }
 
-    pointer += 1;
+    let key_array: [u8; 32] = key.try_into().unwrap();
+    decrypt_chacha20poly1305(encrypted, &key_array)
+}
 
-    // Parse section name
-    let section_name_type =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse section name: {}", e))?;
-    let _section_name = match section_name_type {
-        VsfType::d(name) => name,
-        _ => return Err("Expected d type for section name".to_string()),
-    };
+#[cfg(not(feature = "crypto"))]
+fn decrypt_symmetric(_encrypted: &[u8], _key_hex: &str) -> Result<Vec<u8>, String> {
+    Err("Crypto feature not enabled - rebuild with --features crypto".to_string())
+}
 
-    for i in 0..label.child_count {
-        if pointer >= data.len() {
-            return Err(format!(
-                "Unexpected end of file at field {}/{}",
-                i, label.child_count
-            ));
-        }
+/// ChaCha20-Poly1305 decryption helper
+#[cfg(feature = "crypto")]
+fn decrypt_chacha20poly1305(encrypted: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
+    use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, KeyInit, Nonce};
 
-        if data[pointer] != b'(' {
-            return Err(format!(
-                "Expected '(' at field {}, found '{}'",
-                i, data[pointer] as char
-            ));
-        }
-        pointer += 1;
-
-        let field_name_type = parse(data, &mut pointer)
-            .map_err(|e| format!("Failed to parse field name at field {}: {}", i, e))?;
-
-        let name = match field_name_type {
-            VsfType::d(n) => n,
-            _ => return Err(format!("Expected d type for field name at field {}", i)),
-        };
-
-        if pointer >= data.len() || data[pointer] != b':' {
-            return Err(format!(
-                "Expected ':' after field name '{}', found '{}'",
-                name,
-                if pointer < data.len() {
-                    data[pointer] as char
-                } else {
-                    '?'
-                }
-            ));
-        }
-        pointer += 1;
-
-        let field_value = parse(data, &mut pointer)
-            .map_err(|e| format!("Failed to parse value for field '{}': {}", name, e))?;
-
-        fields.push((name, field_value));
-
-        if pointer >= data.len() || data[pointer] != b')' {
-            return Err(format!(
-                "Expected ')' after field value, found '{}'",
-                if pointer < data.len() {
-                    data[pointer] as char
-                } else {
-                    '?'
-                }
-            ));
-        }
-        pointer += 1;
+    if encrypted.len() < 12 + 16 {
+        return Err("File too short for ChaCha20-Poly1305 (need at least 28 bytes)".to_string());
     }
 
-    Ok(fields)
+    let cipher = ChaCha20Poly1305::new_from_slice(key)
+        .map_err(|e| format!("Key init error: {}", e))?;
+
+    let nonce_bytes: [u8; 12] = encrypted[..12]
+        .try_into()
+        .map_err(|_| "Invalid nonce length")?;
+    let nonce: Nonce = nonce_bytes.into();
+    let ciphertext = &encrypted[12..];
+
+    cipher
+        .decrypt(&nonce, ciphertext)
+        .map_err(|e| format!("Decryption failed: {} (wrong key?)", e))
 }
 
 /// Show basic file information (default mode)
@@ -613,36 +279,27 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
     } else {
         None
     };
+    #[cfg(not(feature = "crypto"))]
+    let _ = key_path;
 
-    let header = VsfHeader::parse(data)?;
+    let (header, _consumed) = VsfHeader::decode(data)?;
+    let labels = labels_from_header(&header);
 
     // Calculate actual header length by parsing
     let mut pointer = 4; // After "RÅ<"
 
     // Parse version and backward_compat first (VSF v4+ format)
     let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
-    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+    let _ =
+        parse(data, &mut pointer).map_err(|e| format!("Failed to parse backward compat: {}", e))?;
 
     // Now parse header length
     let header_length_type =
         parse(data, &mut pointer).map_err(|e| format!("Failed to parse header length: {}", e))?;
-    // Header length is encoded inclusively (with overhead baked in)
-    // Need to subtract the encoding overhead to get actual header size
     let header_length_bytes_encoded = match header_length_type {
         VsfType::b(bytes, _) => bytes,
         _ => return Err("Expected b type for header length".to_string()),
     };
-
-    // Determine overhead based on encoded size (in bytes)
-    let overhead = if header_length_bytes_encoded < 256 {
-        2 // b[3][value] = 2 bytes overhead
-    } else if header_length_bytes_encoded < 65536 {
-        3 // b[4][value] = 3 bytes overhead
-    } else {
-        5 // b[5][value] = 5 bytes overhead
-    };
-
-    let _header_length_bytes = header_length_bytes_encoded - overhead;
 
     // Title
     println!("{}", "VSF File".cyan().bold());
@@ -656,8 +313,16 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
     // Header section
     if detailed {
         // Detailed mode - show raw encoding
-        println!("{:<25} {}", "RÅ".truecolor(128, 128, 128), "Magic".truecolor(128, 128, 128));
-        println!("{:<25} {}", "<".truecolor(128, 128, 128), "Header start".truecolor(128, 128, 128));
+        println!(
+            "{:<25} {}",
+            "RÅ".truecolor(128, 128, 128),
+            "Magic".truecolor(128, 128, 128)
+        );
+        println!(
+            "{:<25} {}",
+            "<".truecolor(128, 128, 128),
+            "Header start".truecolor(128, 128, 128)
+        );
         println!(
             " {:<24} {} {}",
             format!("z3 {:02x}", header.version).truecolor(128, 128, 128),
@@ -672,92 +337,82 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
         );
 
         // Display creation time with encoding
-        if let Some(ref creation) = header.modified_time {
-            if let VsfType::e(ref et) = creation {
-                let timestamp = match et {
-                    vsf::types::EtType::f5(v) => *v as f64,
-                    vsf::types::EtType::f6(v) => *v,
-                    _ => 0.0,
-                };
-                println!(
-                    " {:<24} {} {}",
-                    format!("ef6 {:.10}", timestamp).truecolor(128, 128, 128),
-                    "Created".cyan(),
-                    format_et(et).white()
-                );
-            }
+        if let VsfType::e(ref et) = header.creation_time {
+            let timestamp = match et {
+                vsf::types::EtType::f5(v) => *v as f64,
+                vsf::types::EtType::f6(v) => *v,
+                _ => 0.0,
+            };
+            println!(
+                " {:<24} {} {}",
+                format!("ef6 {:.10}", timestamp).truecolor(128, 128, 128),
+                "Created".cyan(),
+                format_eagle_time(et).white()
+            );
         }
 
         // Display provenance hash with encoding
-        if let Some(ref hp) = header.provenance_hash {
-            if let VsfType::hp(hash_bytes) = hp {
-                let preview = if hash_bytes.len() >= 8 {
-                    format!("{}...", hex::encode(&hash_bytes[..8]).to_uppercase())
-                } else {
-                    hex::encode(hash_bytes).to_uppercase()
-                };
-                println!(
-                    " {:<24} {} 0x{}",
-                    format!("hp3 1f [{} Bytes]", hash_bytes.len()).truecolor(128, 128, 128),
-                    "Provenance hash:".cyan(),
-                    preview.white()
-                );
-            }
+        if let VsfType::hp(ref hash_bytes) = header.provenance_hash {
+            let preview = if hash_bytes.len() >= 8 {
+                format!("{}...", hex::encode(&hash_bytes[..8]).to_uppercase())
+            } else {
+                hex::encode(hash_bytes).to_uppercase()
+            };
+            println!(
+                " {:<24} {} 0x{}",
+                format!("hp3 1f [{} Bytes]", hash_bytes.len()).truecolor(128, 128, 128),
+                "Provenance hash:".cyan(),
+                preview.white()
+            );
         }
 
         // Display signer pubkey (ke) with encoding
-        if let Some(ref pk) = header.signer_pubkey {
-            if let VsfType::ke(pk_bytes) = pk {
-                let preview = if pk_bytes.len() >= 8 {
-                    format!("{}...", hex::encode(&pk_bytes[..8]).to_uppercase())
-                } else {
-                    hex::encode(pk_bytes).to_uppercase()
-                };
-                println!(
-                    " {:<24} {} 0x{}",
-                    format!("ke3 1f [{} Bytes]", pk_bytes.len()).truecolor(128, 128, 128),
-                    "Signer pubkey:".cyan(),
-                    preview.white()
-                );
-            }
+        if let Some(VsfType::ke(ref pk_bytes)) = header.signer_pubkey {
+            let preview = if pk_bytes.len() >= 8 {
+                format!("{}...", hex::encode(&pk_bytes[..8]).to_uppercase())
+            } else {
+                hex::encode(pk_bytes).to_uppercase()
+            };
+            println!(
+                " {:<24} {} 0x{}",
+                format!("ke3 1f [{} Bytes]", pk_bytes.len()).truecolor(128, 128, 128),
+                "Signer pubkey:".cyan(),
+                preview.white()
+            );
         }
 
         // Display Ed25519 signature with encoding
-        if let Some(ref sig) = header.signature {
-            if let VsfType::ge(sig_bytes) = sig {
-                let preview = if sig_bytes.len() >= 8 {
-                    format!("{}...", hex::encode(&sig_bytes[..8]).to_uppercase())
-                } else {
-                    hex::encode(sig_bytes).to_uppercase()
-                };
-                println!(
-                    " {:<24} {} 0x{}",
-                    format!("ge3 3f [{} Bytes]", sig_bytes.len()).truecolor(128, 128, 128),
-                    "Ed25519 signature:".cyan(),
-                    preview.white()
-                );
-            }
+        if let Some(VsfType::ge(ref sig_bytes)) = header.signature {
+            let preview = if sig_bytes.len() >= 8 {
+                format!("{}...", hex::encode(&sig_bytes[..8]).to_uppercase())
+            } else {
+                hex::encode(sig_bytes).to_uppercase()
+            };
+            println!(
+                " {:<24} {} 0x{}",
+                format!("ge3 3f [{} Bytes]", sig_bytes.len()).truecolor(128, 128, 128),
+                "Ed25519 signature:".cyan(),
+                preview.white()
+            );
         }
 
         // Display rolling hash with encoding
-        if let Some(ref hb) = header.rolling_hash {
-            if let VsfType::hb(hash_bytes) = hb {
-                let preview = if hash_bytes.len() >= 8 {
-                    format!("{}...", hex::encode(&hash_bytes[..8]).to_uppercase())
-                } else {
-                    hex::encode(hash_bytes).to_uppercase()
-                };
-                println!(
-                    " {:<24} {} 0x{}",
-                    format!("hb3 1f [{} Bytes]", hash_bytes.len()).truecolor(128, 128, 128),
-                    "Rolling hash:".cyan(),
-                    preview.white()
-                );
-            }
+        if let Some(VsfType::hb(ref hash_bytes)) = header.rolling_hash {
+            let preview = if hash_bytes.len() >= 8 {
+                format!("{}...", hex::encode(&hash_bytes[..8]).to_uppercase())
+            } else {
+                hex::encode(hash_bytes).to_uppercase()
+            };
+            println!(
+                " {:<24} {} 0x{}",
+                format!("hb3 1f [{} Bytes]", hash_bytes.len()).truecolor(128, 128, 128),
+                "Rolling hash:".cyan(),
+                preview.white()
+            );
         }
 
         // Display label count with encoding
-        let label_count = header.labels.len();
+        let label_count = labels.len();
         let encoding = if label_count <= 63 {
             format!("n3 {:02x}", label_count)
         } else if label_count <= 255 {
@@ -786,10 +441,8 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
         );
 
         // Display creation time if present
-        if let Some(ref creation) = header.modified_time {
-            if let VsfType::e(ref et) = creation {
-                println!(" {} {}", "Created".cyan(), format_et(et).white());
-            }
+        if let VsfType::e(ref et) = header.creation_time {
+            println!(" {} {}", "Created".cyan(), format_eagle_time(et).white());
         }
     }
 
@@ -800,37 +453,27 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
     );
 
     // Integrity check (includes hash display)
-    let integrity_ok = verify_integrity_summary(data, &header)?;
+    let integrity_ok = verify_integrity_summary(data, &header, &labels)?;
 
     println!();
 
     // Labels section
-    println!(
-        " {} labels",
-        header.labels.len().to_string().yellow().bold()
-    );
+    println!(" {} labels", labels.len().to_string().yellow().bold());
 
     // Calculate max widths
-    let max_size_len = header
-        .labels
+    let max_size_len = labels
         .iter()
         .map(|l| format_bytes(l.size).len())
         .max()
         .unwrap_or(0);
-    let max_name_len = header
-        .labels
-        .iter()
-        .map(|l| l.name.len())
-        .max()
-        .unwrap_or(0);
-    let max_offset_str_len = header
-        .labels
+    let max_name_len = labels.iter().map(|l| l.name.len()).max().unwrap_or(0);
+    let max_offset_str_len = labels
         .iter()
         .map(|l| format_number(l.offset).len())
         .max()
         .unwrap_or(0);
 
-    for label in &header.labels {
+    for label in &labels {
         let size_str = format_bytes(label.size);
         let offset_str = format_number(label.offset);
 
@@ -901,7 +544,7 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
     }
 
     // Check if there are any non-empty sections to display
-    let has_nonempty_sections = header.labels.iter().any(|l| l.size > 0);
+    let has_nonempty_sections = labels.iter().any(|l| l.size > 0);
 
     if has_nonempty_sections {
         print!("{}", ">".truecolor(128, 128, 128));
@@ -915,7 +558,7 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
     let mut has_errors = false;
 
     // Show sections with their actual structure (skip empty sections)
-    let nonempty_labels: Vec<_> = header.labels.iter().filter(|l| l.size > 0).collect();
+    let nonempty_labels: Vec<_> = labels.iter().filter(|l| l.size > 0).collect();
     for (i, label) in nonempty_labels.iter().enumerate() {
         let is_last = i == nonempty_labels.len() - 1;
         let connector = if is_last { " └─" } else { " ├─" };
@@ -933,18 +576,14 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
             let field_prefix = if is_last { "   " } else { " │ " };
 
             // Check if this is an empty section vs opaque blob
-            // Empty section: [dname] with no content after the name
-            // Opaque blob: [dname <content>] with encrypted/binary data
             let section_start = label.offset;
             let section_end = section_start + label.size;
             let is_empty_section = if section_end <= data.len() {
                 let section_data = &data[section_start..section_end];
-                // Parse [dname] and check if ] comes right after
                 let mut ptr = 0;
                 if ptr < section_data.len() && section_data[ptr] == b'[' {
                     ptr += 1;
                     if parse(section_data, &mut ptr).is_ok() {
-                        // After parsing dname, should be at ]
                         ptr < section_data.len() && section_data[ptr] == b']'
                     } else {
                         false
@@ -962,32 +601,38 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
                 // Try to decrypt if we have a key and this is encrypted
                 #[cfg(feature = "crypto")]
                 let decrypted = if let Some(ref kp) = keypair {
-                    // Extract section data
                     if section_end <= data.len() {
                         let section_data = &data[section_start..section_end];
-
-                        // Parse the section to extract the v'e' wrapper with encrypted content
-                        // Structure: [ d"name" v'e'[encrypted_bytes] ]
                         let mut ptr = 0;
                         if ptr < section_data.len() && section_data[ptr] == b'[' {
                             ptr += 1;
-
-                            // Skip section name
                             if parse(section_data, &mut ptr).is_ok() {
-                                // Try to parse a v'e' wrapper
-                                if let Ok(VsfType::v(b'e', encrypted_bytes)) = parse(section_data, &mut ptr) {
-                                    match vsf::decrypt::decrypt_ve(&encrypted_bytes, &kp.x25519_secret) {
+                                if let Ok(VsfType::v(b'e', encrypted_bytes)) =
+                                    parse(section_data, &mut ptr)
+                                {
+                                    match vsf::decrypt::decrypt_ve(&encrypted_bytes, &kp.x25519_secret)
+                                    {
                                         Ok(plaintext) => {
-                                            println!("{}  {} Decrypted content:", field_prefix, "🔓".green());
-                                            // Parse and display decrypted VSF content
+                                            println!(
+                                                "{}  {} Decrypted content:",
+                                                field_prefix,
+                                                "🔓".green()
+                                            );
                                             let mut ptr = 0;
                                             while ptr < plaintext.len() {
                                                 match parse(&plaintext, &mut ptr) {
                                                     Ok(val) => {
-                                                        println!("{}    {}", field_prefix, format_value_short(&val));
+                                                        println!(
+                                                            "{}    {}",
+                                                            field_prefix,
+                                                            format_value_short(&val)
+                                                        );
                                                     }
                                                     Err(e) => {
-                                                        println!("{}    <parse error: {}>", field_prefix, e);
+                                                        println!(
+                                                            "{}    <parse error: {}>",
+                                                            field_prefix, e
+                                                        );
                                                         break;
                                                     }
                                                 }
@@ -995,7 +640,12 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
                                             Some(())
                                         }
                                         Err(e) => {
-                                            println!("{}  {} Decryption failed: {}", field_prefix, "✗".red(), e);
+                                            println!(
+                                                "{}  {} Decryption failed: {}",
+                                                field_prefix,
+                                                "✗".red(),
+                                                e
+                                            );
                                             None
                                         }
                                     }
@@ -1079,106 +729,84 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
 }
 
 /// Quick integrity summary (used by show_info)
-/// Returns true if all integrity checks pass
-fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<bool, String> {
+fn verify_integrity_summary(
+    data: &[u8],
+    header: &VsfHeader,
+    labels: &[LabelInfo],
+) -> Result<bool, String> {
     let mut all_checks_pass = true;
 
-    // Display provenance hash (hp) - NO verification, it's for identity/linking only
-    if let Some(ref hp) = header.provenance_hash {
-        match hp {
-            VsfType::hp(stored_hash) => {
-                println!(
-                    " {}-Byte {} {}:",
-                    stored_hash.len().to_string().white(),
-                    "BLAKE3".green(),
-                    "provenance hash".cyan()
-                );
-                print!(" {} ", "0x".truecolor(64, 50, 255));
-                for byte in stored_hash.iter() {
-                    print!("{:02X}", byte);
-                }
-                println!();
-            }
-            _ => {}
+    // Display provenance hash (hp)
+    if let VsfType::hp(ref stored_hash) = header.provenance_hash {
+        println!(
+            " {}-Byte {} {}:",
+            stored_hash.len().to_string().white(),
+            "BLAKE3".green(),
+            "provenance hash".cyan()
+        );
+        print!(" {} ", "0x".truecolor(64, 50, 255));
+        for byte in stored_hash.iter() {
+            print!("{:02X}", byte);
         }
+        println!();
     }
 
     // Display signer pubkey (ke) if present
-    if let Some(ref pk) = header.signer_pubkey {
-        match pk {
-            VsfType::ke(pk_bytes) => {
-                println!(
-                    " {}-Byte {} {}:",
-                    pk_bytes.len().to_string().white(),
-                    "Ed25519".green(),
-                    "signer pubkey".cyan()
-                );
-                print!(" {} ", "0x".truecolor(64, 50, 255));
-                for byte in pk_bytes.iter() {
-                    print!("{:02X}", byte);
-                }
-                println!();
-            }
-            _ => {}
+    if let Some(VsfType::ke(ref pk_bytes)) = header.signer_pubkey {
+        println!(
+            " {}-Byte {} {}:",
+            pk_bytes.len().to_string().white(),
+            "Ed25519".green(),
+            "signer pubkey".cyan()
+        );
+        print!(" {} ", "0x".truecolor(64, 50, 255));
+        for byte in pk_bytes.iter() {
+            print!("{:02X}", byte);
         }
+        println!();
     }
 
     // Display optional signature (ge)
-    // NOTE: We can't verify the signature here because we don't know what was signed.
-    // The signed data is protocol-specific (e.g., for status pings it's the provenance hash,
-    // but for other protocols it could be the file content, a subset of fields, etc.)
-    // Rolling hash (hb) is the correct mechanism for file-level integrity verification.
-    if let Some(ref sig) = header.signature {
-        match sig {
-            VsfType::ge(sig_bytes) => {
-                println!(
-                    " {}-Byte {} {}:",
-                    sig_bytes.len().to_string().white(),
-                    "Ed25519".green(),
-                    "signature".cyan()
-                );
-                print!(" {} ", "0x".truecolor(64, 50, 255));
-                for byte in sig_bytes.iter().take(32) {
-                    print!("{:02X}", byte);
-                }
-                if sig_bytes.len() > 32 {
-                    print!("...");
-                }
-                println!();
-                println!(
-                    " {} {}",
-                    "Semantics:".cyan(),
-                    "Protocol-specific (signed data unknown)".truecolor(200, 200, 200)
-                );
-            }
-            _ => {}
+    if let Some(VsfType::ge(ref sig_bytes)) = header.signature {
+        println!(
+            " {}-Byte {} {}:",
+            sig_bytes.len().to_string().white(),
+            "Ed25519".green(),
+            "signature".cyan()
+        );
+        print!(" {} ", "0x".truecolor(64, 50, 255));
+        for byte in sig_bytes.iter().take(32) {
+            print!("{:02X}", byte);
         }
+        if sig_bytes.len() > 32 {
+            print!("...");
+        }
+        println!();
+        println!(
+            " {} {}",
+            "Semantics:".cyan(),
+            "Protocol-specific (signed data unknown)".truecolor(200, 200, 200)
+        );
     }
 
     // Display and verify rolling hash (hb)
-    let (file_hash_verified, stored_hash, computed_hash) = if let Some(ref hb) = header.rolling_hash
-    {
-        match hb {
-            VsfType::hb(stored_hash) => {
-                let computed =
-                    vsf::verification::compute_file_hash(data).unwrap_or_else(|_| [0u8; 32]);
-                let verified = computed.as_slice() == stored_hash.as_slice();
-                (verified, Some(stored_hash.clone()), Some(computed.to_vec()))
-            }
-            _ => (false, None, None),
-        }
-    } else {
-        (false, None, None)
-    };
+    let (file_hash_verified, stored_hash, computed_hash) =
+        if let Some(VsfType::hb(ref stored_hash)) = header.rolling_hash {
+            let computed =
+                vsf::verification::compute_file_hash(data).unwrap_or_else(|_| [0u8; 32]);
+            let verified = computed.as_slice() == stored_hash.as_slice();
+            (verified, Some(stored_hash.clone()), Some(computed.to_vec()))
+        } else {
+            (false, None, None)
+        };
 
     // Check section-level hashes
     let mut verified_sections = 0;
     let mut total_sections = 0;
 
-    for label in &header.labels {
+    for label in labels {
         if label.child_count > 0 {
             total_sections += 1;
-            // Hash is now in the label, not preamble
             if let Some(ref hash_vsf) = label.hash {
                 let hash_bytes = match hash_vsf {
                     VsfType::hp(ref bytes) | VsfType::hb(ref bytes) | VsfType::hs(ref bytes) => {
@@ -1198,6 +826,7 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<bool, Str
             }
         }
     }
+    let _ = (verified_sections, total_sections); // Suppress unused warnings
 
     // Display rolling hash (hb) if present
     if stored_hash.is_some() {
@@ -1210,7 +839,6 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<bool, Str
     }
 
     if file_hash_verified {
-        // Show only the hash if it passes
         if let Some(hash) = stored_hash {
             print!(" {} ", "0x".truecolor(64, 50, 255));
             for byte in hash.iter() {
@@ -1221,7 +849,6 @@ fn verify_integrity_summary(data: &[u8], header: &VsfHeader) -> Result<bool, Str
         print!(" {} ", "Verification:".cyan());
         println!("{}", "PASS".truecolor(0, 255, 0));
     } else if stored_hash.is_some() {
-        // Show both expected and computed hashes on failure
         all_checks_pass = false;
         if let (Some(expected), Some(computed)) = (stored_hash, computed_hash) {
             print!(" {} {} ", "Expected:".cyan(), "0x".truecolor(64, 50, 255));
@@ -1258,7 +885,7 @@ fn verify_file(data: &[u8]) -> Result<(), String> {
     }
 
     // Parse header
-    let header = match VsfHeader::parse(data) {
+    let (header, _) = match VsfHeader::decode(data) {
         Ok(h) => {
             println!("✓ Header structure valid");
             h
@@ -1269,11 +896,10 @@ fn verify_file(data: &[u8]) -> Result<(), String> {
             return Err("Cannot continue verification".into());
         }
     };
+    let labels = labels_from_header(&header);
 
     // Verify each section
-    for label in &header.labels {
-        let mut pointer = label.offset;
-
+    for label in &labels {
         // Check section hash (now in label, not preamble)
         if let Some(ref hash_vsf) = label.hash {
             let hash_bytes = match hash_vsf {
@@ -1308,10 +934,9 @@ fn verify_file(data: &[u8]) -> Result<(), String> {
     }
 
     // Look for TOKEN signature
-    if let Some(_token_section) = header
-        .labels
+    if labels
         .iter()
-        .find(|l| l.name == "token_auth" || l.name == "token auth")
+        .any(|l| l.name == "token_auth" || l.name == "token auth")
     {
         println!("\n✓ Found TOKEN auth section");
         println!("  (Full signature verification TBD)");
@@ -1334,7 +959,6 @@ fn verify_file(data: &[u8]) -> Result<(), String> {
 
 /// Extract a specific field value
 fn extract_field(data: &[u8], field_path: &str) -> Result<(), String> {
-    // field_path like "raw.iso_speed" or "token_auth.location"
     let parts: Vec<&str> = field_path.split('.').collect();
 
     if parts.len() != 2 {
@@ -1344,11 +968,11 @@ fn extract_field(data: &[u8], field_path: &str) -> Result<(), String> {
     let section_name = parts[0];
     let field_name = parts[1];
 
-    let header = VsfHeader::parse(data)?;
+    let (header, _) = VsfHeader::decode(data)?;
+    let labels = labels_from_header(&header);
 
     // Find section (handle both space and underscore variants)
-    let section = header
-        .labels
+    let section = labels
         .iter()
         .find(|l| {
             l.name == section_name
@@ -1379,14 +1003,15 @@ fn extract_field(data: &[u8], field_path: &str) -> Result<(), String> {
 
 /// Show file structure as a tree
 fn show_tree(data: &[u8]) -> Result<(), String> {
-    let header = VsfHeader::parse(data)?;
+    let (header, _) = VsfHeader::decode(data)?;
+    let labels = labels_from_header(&header);
 
     println!("VSF File Tree");
     println!("{}", "=".repeat(50));
     println!();
 
-    for (i, label) in header.labels.iter().enumerate() {
-        let is_last = i == header.labels.len() - 1;
+    for (i, label) in labels.iter().enumerate() {
+        let is_last = i == labels.len() - 1;
         let prefix = if is_last { "└── " } else { "├── " };
 
         println!(
@@ -1399,11 +1024,7 @@ fn show_tree(data: &[u8]) -> Result<(), String> {
             for (j, (field_name, field_value)) in fields.iter().enumerate() {
                 let is_field_last = j == fields.len() - 1;
                 let field_prefix = if is_last { "    " } else { "│   " };
-                let field_marker = if is_field_last {
-                    "└── "
-                } else {
-                    "├── "
-                };
+                let field_marker = if is_field_last { "└── " } else { "├── " };
 
                 println!(
                     "{}{}{}: {}",
@@ -1419,6 +1040,56 @@ fn show_tree(data: &[u8]) -> Result<(), String> {
             println!("│");
         }
     }
+
+    Ok(())
+}
+
+/// Derive Photon identity seed from a handle string
+/// Formula: BLAKE3(VsfType::x(handle).flatten())
+fn derive_seed(handle: &str) -> Result<(), String> {
+    use blake3::Hasher;
+
+    let vsf_bytes = VsfType::x(handle.to_string()).flatten();
+    let hash = blake3::hash(&vsf_bytes);
+    let seed = hash.as_bytes();
+
+    // Derive the contact list encryption key
+    let mut hasher = Hasher::new();
+    hasher.update(b"photon_contact_list_v2");
+    hasher.update(seed);
+    let list_key = hasher.finalize();
+
+    println!("{}", "Photon Identity Seed Derivation".cyan().bold());
+    println!();
+    println!(" {} {}", "Handle:".cyan(), handle.white());
+    println!(
+        " {} {} Bytes",
+        "VSF encoding:".cyan(),
+        vsf_bytes.len().to_string().white()
+    );
+    println!();
+    println!(
+        " {} {}",
+        "Identity seed:".cyan(),
+        hex::encode(seed).to_uppercase().yellow()
+    );
+    println!(
+        " {} {}",
+        "Directory:".cyan(),
+        hex::encode(&seed[..8]).white()
+    );
+    println!();
+    println!(
+        " {} {}",
+        "Contact list key:".cyan(),
+        hex::encode(list_key.as_bytes()).to_uppercase().green()
+    );
+    println!();
+    println!("{}", "Usage:".cyan().bold());
+    println!(
+        "  vsfinfo --symmetric-key {} index.enc",
+        hex::encode(list_key.as_bytes()).to_uppercase()
+    );
 
     Ok(())
 }

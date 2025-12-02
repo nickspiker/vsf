@@ -12,6 +12,45 @@ use crate::file_format::VsfSection;
 use crate::types::VsfType;
 use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
 
+/// Per-section cryptographic metadata for header fields
+///
+/// This allows setting key (k) and wrap (v) fields on individual sections.
+/// Used for encrypted sections where the header field needs to indicate
+/// the encryption key and wrapper type.
+#[derive(Clone, Default)]
+pub struct SectionMeta {
+    /// Cryptographic key associated with this section (ke for Ed25519, kx for X25519)
+    pub key: Option<VsfType>,
+    /// Wrapper/encryption marker (e.g., v'e' for encrypted)
+    pub wrap: Option<VsfType>,
+}
+
+impl SectionMeta {
+    /// Create new section metadata with a key
+    pub fn with_key(key: VsfType) -> Self {
+        Self {
+            key: Some(key),
+            wrap: None,
+        }
+    }
+
+    /// Create new section metadata with a wrap marker
+    pub fn with_wrap(wrap: VsfType) -> Self {
+        Self {
+            key: None,
+            wrap: Some(wrap),
+        }
+    }
+
+    /// Create new section metadata with both key and wrap
+    pub fn new(key: VsfType, wrap: VsfType) -> Self {
+        Self {
+            key: Some(key),
+            wrap: Some(wrap),
+        }
+    }
+}
+
 /// Builder for complete VSF files with headers and sections
 ///
 /// All VSF files automatically include a BLAKE3 hash for integrity verification.
@@ -19,8 +58,8 @@ pub struct VsfBuilder {
     version: usize,
     backward_compat: usize,
     creation_time: VsfType, // Creation timestamp (ef5 for ~2min precision, ef6 for nanos)
-    sections: Vec<VsfSection>,
-    unboxed: Vec<(String, Vec<u8>)>,
+    sections: Vec<(VsfSection, SectionMeta)>, // Section with optional crypto metadata
+    unboxed: Vec<(String, Vec<u8>, SectionMeta)>, // Name, data, and optional crypto metadata
     include_file_hash: bool, // True for rolling hash, false if signed
     custom_provenance: Option<[u8; 32]>, // Custom provenance hash (immutable identity)
     signer_pubkey: Option<VsfType>, // Signer's Ed25519 pubkey (ke) - for signature verification
@@ -125,20 +164,73 @@ impl VsfBuilder {
         for (field_name, value) in fields {
             section.add_field(field_name, value);
         }
-        self.sections.push(section);
+        self.sections.push((section, SectionMeta::default()));
+        self
+    }
+
+    /// Add a structured section with cryptographic metadata (key/wrap)
+    ///
+    /// Use this for encrypted sections where the header field needs to indicate:
+    /// - `key`: The cryptographic key (ke for Ed25519, kx for X25519)
+    /// - `wrap`: The encryption wrapper (e.g., `VsfType::v(b'e', vec![])` for encrypted)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let builder = VsfBuilder::new()
+    ///     .add_section_with_meta(
+    ///         "encrypted_data",
+    ///         vec![("payload".to_string(), VsfType::v(b'e', encrypted_bytes))],
+    ///         SectionMeta::new(
+    ///             VsfType::ke(pubkey.to_vec()),  // Ed25519 key
+    ///             VsfType::v(b'e', vec![]),      // Encrypted marker
+    ///         ),
+    ///     );
+    /// ```
+    pub fn add_section_with_meta(
+        mut self,
+        name: impl Into<String>,
+        fields: Vec<(String, VsfType)>,
+        meta: SectionMeta,
+    ) -> Self {
+        let mut section = VsfSection::new(name);
+        for (field_name, value) in fields {
+            section.add_field(field_name, value);
+        }
+        self.sections.push((section, meta));
         self
     }
 
     /// Add a pre-built VsfSection directly
     /// Use this when you need fields with multiple values (Vec<VsfType>)
     pub fn add_section_direct(mut self, section: VsfSection) -> Self {
-        self.sections.push(section);
+        self.sections.push((section, SectionMeta::default()));
+        self
+    }
+
+    /// Add a pre-built VsfSection with cryptographic metadata
+    pub fn add_section_direct_with_meta(mut self, section: VsfSection, meta: SectionMeta) -> Self {
+        self.sections.push((section, meta));
         self
     }
 
     /// Add an unboxed data blob (zero-copy section)
     pub fn add_unboxed(mut self, name: impl Into<String>, data: Vec<u8>) -> Self {
-        self.unboxed.push((name.into(), data));
+        self.unboxed
+            .push((name.into(), data, SectionMeta::default()));
+        self
+    }
+
+    /// Add an unboxed data blob with cryptographic metadata
+    ///
+    /// Use this for encrypted sections where the header field needs to indicate
+    /// the encryption key and wrapper type, but the section body is raw bytes.
+    pub fn add_unboxed_with_meta(
+        mut self,
+        name: impl Into<String>,
+        data: Vec<u8>,
+        meta: SectionMeta,
+    ) -> Self {
+        self.unboxed.push((name.into(), data, meta));
         self
     }
 
@@ -146,7 +238,7 @@ impl VsfBuilder {
     pub fn build(self) -> Result<Vec<u8>, String> {
         // Pre-encode all sections to know their sizes
         let mut section_data: Vec<Vec<u8>> = Vec::new();
-        for section in &self.sections {
+        for (section, _meta) in &self.sections {
             section_data.push(section.encode());
         }
 
@@ -205,18 +297,32 @@ impl VsfBuilder {
         let mut field_offset_indices = Vec::new();
         let mut field_size_indices = Vec::new();
 
-        for (i, section) in self.sections.iter().enumerate() {
+        for (i, (section, meta)) in self.sections.iter().enumerate() {
             // Empty sections have no body - just the name in header
             if section.fields.is_empty() {
-                let field = crate::file_format::VsfField::new(&section.name);
-                header_index = vsf.len();
+                let mut field = crate::file_format::VsfField::new(&section.name);
+                // Add key/wrap metadata if present
+                if let Some(ref key) = meta.key {
+                    field = field.with_value(key.clone());
+                }
+                if let Some(ref wrap) = meta.wrap {
+                    field = field.with_value(wrap.clone());
+                }
                 vsf.push(field.flatten());
                 continue;
             }
 
             // Create field with placeholder values
-            let field = crate::file_format::VsfField::new(&section.name)
-                .with_value(VsfType::o(0))        // offset placeholder
+            let mut field = crate::file_format::VsfField::new(&section.name);
+            // Add key/wrap metadata if present (before offset/size/n)
+            if let Some(ref key) = meta.key {
+                field = field.with_value(key.clone());
+            }
+            if let Some(ref wrap) = meta.wrap {
+                field = field.with_value(wrap.clone());
+            }
+            field = field
+                .with_value(VsfType::o(0)) // offset placeholder
                 .with_value(VsfType::b(0, false)) // size placeholder
                 .with_value(VsfType::n(section.fields.len())); // child count
 
@@ -227,25 +333,31 @@ impl VsfBuilder {
             field_offset_indices.push((i, vsf.len()));
             field_size_indices.push((i, vsf.len()));
 
-            header_index = vsf.len();
             vsf.push(field_bytes);
         }
 
         // Unboxed sections
-        for (i, (name, _)) in self.unboxed.iter().enumerate() {
+        for (i, (name, _, meta)) in self.unboxed.iter().enumerate() {
             let unboxed_index = self.sections.len() + i;
 
-            let field = crate::file_format::VsfField::new(name)
-                .with_value(VsfType::o(0))        // offset placeholder
+            let mut field = crate::file_format::VsfField::new(name);
+            // Add key/wrap metadata if present (before offset/size/n)
+            if let Some(ref key) = meta.key {
+                field = field.with_value(key.clone());
+            }
+            if let Some(ref wrap) = meta.wrap {
+                field = field.with_value(wrap.clone());
+            }
+            field = field
+                .with_value(VsfType::o(0)) // offset placeholder
                 .with_value(VsfType::b(0, false)) // size placeholder
-                .with_value(VsfType::n(0));       // no children for unboxed
+                .with_value(VsfType::n(0)); // no children for unboxed
 
             let field_bytes = field.flatten();
 
             field_offset_indices.push((unboxed_index, vsf.len()));
             field_size_indices.push((unboxed_index, vsf.len()));
 
-            header_index = vsf.len();
             vsf.push(field_bytes);
         }
 
@@ -254,7 +366,6 @@ impl VsfBuilder {
         if let Some(hash) = &self.avatar_hash {
             let field = crate::file_format::VsfField::new("avatar_id")
                 .with_value(VsfType::hp(hash.to_vec()));
-            header_index = vsf.len();
             vsf.push(field.flatten());
         }
 
@@ -308,16 +419,29 @@ impl VsfBuilder {
 
                 // Rebuild entire field if offset or size changed
                 if offset_bytes != prev_offsets[idx] || size_bytes != prev_sizes[idx] {
-                    // Get section name and child count
-                    let (name, child_count) = if *field_idx < self.sections.len() {
-                        (&self.sections[*field_idx].name, self.sections[*field_idx].fields.len())
-                    } else {
-                        let unboxed_idx = field_idx - self.sections.len();
-                        (&self.unboxed[unboxed_idx].0, 0)
-                    };
+                    // Get section name, child count, and metadata
+                    let (name, child_count, meta): (&String, usize, Option<&SectionMeta>) =
+                        if *field_idx < self.sections.len() {
+                            let (section, meta) = &self.sections[*field_idx];
+                            (&section.name, section.fields.len(), Some(meta))
+                        } else {
+                            let unboxed_idx = field_idx - self.sections.len();
+                            let (name, _, meta) = &self.unboxed[unboxed_idx];
+                            (name, 0, Some(meta))
+                        };
 
                     // Rebuild field with updated values using VsfField API
-                    let field = crate::file_format::VsfField::new(name)
+                    let mut field = crate::file_format::VsfField::new(name);
+                    // Add key/wrap metadata if present (before offset/size/n)
+                    if let Some(meta) = meta {
+                        if let Some(ref key) = meta.key {
+                            field = field.with_value(key.clone());
+                        }
+                        if let Some(ref wrap) = meta.wrap {
+                            field = field.with_value(wrap.clone());
+                        }
+                    }
+                    field = field
                         .with_value(VsfType::o(offset_bytes))
                         .with_value(VsfType::b(size_bytes, false))
                         .with_value(VsfType::n(child_count));
@@ -347,7 +471,7 @@ impl VsfBuilder {
         let mut result: Vec<u8> = vsf.into_iter().flatten().collect();
 
         // Append unboxed data
-        for (_, data) in self.unboxed {
+        for (_, data, _) in self.unboxed {
             result.extend_from_slice(&data);
         }
 
