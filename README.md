@@ -402,7 +402,7 @@ VsfType::x(text)  // Automatically compressed
 - Both parse the same binary format; high-level adds enforcement layer
 - See "Parsing APIs" section below for details
 
-### Coming Next (v0.2.0)
+### Coming Next (v0.3.0)
 
 🚧 **Structured capability tokens** - Formal capability types built on existing crypto primitives (`g`, `k`, `h`, `a`)
 
@@ -446,10 +446,10 @@ VSF uses optional features to keep the default build minimal:
 
 ```toml
 [dependencies]
-vsf = "0.1"                    # Core only (no optional features)
-vsf = { version = "0.1", features = ["text"] }    # + Huffman compression
-vsf = { version = "0.1", features = ["crypto"] }  # + Ed25519, X25519, AES-GCM
-vsf = { version = "0.1", features = ["spirix"] }  # + Spirix arithmetic
+vsf = "0.2"                    # Core only (no optional features)
+vsf = { version = "0.2", features = ["text"] }    # + Huffman compression
+vsf = { version = "0.2", features = ["crypto"] }  # + Ed25519, X25519, AES-GCM
+vsf = { version = "0.2", features = ["spirix"] }  # + Spirix arithmetic
 ```
 
 | Feature | Enables | Use Case |
@@ -772,7 +772,7 @@ VSF's cryptographic types aren't just for verification - they're the foundation 
 - Works across distributed systems with TOKEN identities
 
 ```rust
-// v0.2+ will enable:
+// v0.3+ will enable:
 let capability = Capability {
     resource: VsfType::h(HASH_BLAKE3, file_hash),
     permission: "read",
@@ -789,7 +789,7 @@ let signed_cap = VsfType::g(SIG_ED25519, sign(&capability, camera_private_key));
 // Capability is self-contained, unforgeable, delegatable
 ```
 
-VSF v0.1 provides the cryptographic primitives (`g`, `k`, `h`, `a`). v0.2 will add structured capability types built on these foundations.
+VSF v0.2 provides the cryptographic primitives (`g`, `k`, `h`, `a`). v0.3 will add structured capability types built on these foundations.
 
 ---
 

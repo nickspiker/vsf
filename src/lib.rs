@@ -280,17 +280,20 @@
 //! - `vsf_builder` - High-level builder for complete files
 //! - `schema` - Type-safe section schemas with field validation and parse→modify→encode
 //! - `verification` - Cryptographic hashing and signing
-//! - `text_encoding` - Huffman compression for Unicode strings
+//! - `crypto_algorithms` - Algorithm identifiers for hashes, signatures, keys, MACs
+//! - `decrypt` - Decryption utilities (requires `crypto` feature)
+//! - `text_encoding` - Huffman compression for Unicode strings (requires `text` feature)
 //! - `colour` - Colourspace conversions (VSF RGB, Rec.2020, sRGB, XYZ)
 //! - `builders` - Domain-specific builders (RAW images)
+//! - `inspect` - Inspection and formatting utilities (requires `inspect` feature)
 //!
 
 // VSF format version constants
 /// Current VSF format version
-pub const VSF_VERSION: usize = 4;
+pub const VSF_VERSION: usize = 5;
 
 /// Backward compatibility version (oldest version this implementation can read)
-pub const VSF_BACKWARD_COMPAT: usize = 2;
+pub const VSF_BACKWARD_COMPAT: usize = 5;
 
 // Core type system
 pub mod types;

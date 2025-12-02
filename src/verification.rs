@@ -62,6 +62,14 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
         _ => return Err("Expected y type for backward compat".to_string()),
     };
 
+    // Reject files that require a newer implementation than we are
+    if backward_compat > crate::VSF_VERSION {
+        return Err(format!(
+            "File requires VSF v{} but this implementation is v{}",
+            backward_compat, crate::VSF_VERSION
+        ));
+    }
+
     // Parse header length (now we know how to decode it!)
     let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse header length: {}", e))?;
 
