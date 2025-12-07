@@ -689,16 +689,22 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
                             field_prefix, label.child_count
                         );
                     }
-                    for (j, (field_name, field_value)) in fields.iter().enumerate() {
+                    for (j, field) in fields.iter().enumerate() {
                         let is_field_last = j == fields.len() - 1;
                         let field_prefix = if is_last { "   " } else { " │ " };
                         let field_connector = if is_field_last { "└─" } else { "├─" };
+                        // Format multi-value fields as: name: val1, val2, val3
+                        let values_str: Vec<String> = field
+                            .values
+                            .iter()
+                            .map(|v| format_value_short(v))
+                            .collect();
                         println!(
                             "{}{} {}: {}",
                             field_prefix,
                             field_connector,
-                            field_name,
-                            format_value_short(field_value)
+                            field.name,
+                            values_str.join(", ")
                         );
                     }
                 }
@@ -985,12 +991,14 @@ fn extract_field(data: &[u8], field_path: &str) -> Result<(), String> {
     let fields = parse_section_fields(data, section)?;
 
     // Find the requested field (handle both space and underscore variants)
-    for (name, value) in fields {
-        if name == field_name
-            || name.replace(' ', "_") == field_name
-            || name.replace('_', " ") == field_name
+    for field in fields {
+        if field.name == field_name
+            || field.name.replace(' ', "_") == field_name
+            || field.name.replace('_', " ") == field_name
         {
-            println!("{}", format_value(&value));
+            // Format multi-value fields as comma-separated
+            let values_str: Vec<String> = field.values.iter().map(|v| format_value(v)).collect();
+            println!("{}", values_str.join(", "));
             return Ok(());
         }
     }
@@ -1021,17 +1029,23 @@ fn show_tree(data: &[u8]) -> Result<(), String> {
 
         // Parse fields
         if let Ok(fields) = parse_section_fields(data, label) {
-            for (j, (field_name, field_value)) in fields.iter().enumerate() {
+            for (j, field) in fields.iter().enumerate() {
                 let is_field_last = j == fields.len() - 1;
                 let field_prefix = if is_last { "    " } else { "│   " };
                 let field_marker = if is_field_last { "└── " } else { "├── " };
 
+                // Format multi-value fields as: name: val1, val2, val3
+                let values_str: Vec<String> = field
+                    .values
+                    .iter()
+                    .map(|v| format_value_short(v))
+                    .collect();
                 println!(
                     "{}{}{}: {}",
                     field_prefix,
                     field_marker,
-                    field_name,
-                    format_value_short(field_value)
+                    field.name,
+                    values_str.join(", ")
                 );
             }
         }

@@ -1,13 +1,250 @@
 //! VSF inspection and formatting utilities
 //!
-//! Provides human-readable colored formatting for VSF types, headers, and sections.
+//! Provides human-readable coloured formatting for VSF types, headers, and sections.
 //! Used by vsfinfo CLI and can be embedded in other applications (photon, etc.).
 
 use crate::decoding::parse::parse;
-use crate::file_format::VsfHeader;
+use crate::file_format::{VsfField, VsfHeader};
 use crate::types::{EagleTime, EtType, VsfType};
 use chrono::{Datelike, Local, Timelike};
 use colored::*;
+
+// Box-drawing characters (heavy variants for consistent stroke weight)
+const BOX_VERT: &str = "┃";      // U+2503 Heavy vertical
+const BOX_CORNER: &str = "┗";   // U+2517 Heavy up and right
+const BOX_TEE: &str = "┣";      // U+2523 Heavy vertical and right
+const BOX_HORIZ: &str = "━";    // U+2501 Heavy horizontal
+
+// Tree drawing helpers - dark grey (64,64,64) for subtlety
+fn tree_vert() -> ColoredString { BOX_VERT.truecolor(64, 64, 64) }
+fn tree_corner() -> ColoredString { format!("{}{}", BOX_CORNER, BOX_HORIZ).truecolor(64, 64, 64) }
+fn tree_tee() -> ColoredString { format!("{}{}", BOX_TEE, BOX_HORIZ).truecolor(64, 64, 64) }
+
+/// Format hex data as lines of 16 bytes (32 hex chars each)
+/// Returns a Vec of hex line strings for caller to join with appropriate indent
+fn format_hex_lines(data: &[u8]) -> Vec<String> {
+    let hex_str = hex::encode(data).to_uppercase();
+    if data.len() <= 16 {
+        vec![hex_str]
+    } else {
+        hex_str
+            .as_bytes()
+            .chunks(32)
+            .map(|chunk| std::str::from_utf8(chunk).unwrap().to_string())
+            .collect()
+    }
+}
+
+/// Format hex data with newlines every 16 bytes (for header display)
+fn format_hex_wrapped(data: &[u8]) -> String {
+    format_hex_lines(data).join("\n")
+}
+
+/// Format crypto field with colour coding: type{size}0xHEX
+/// type=cyan, size=yellow, 0x=gray, hex=white
+/// For multi-line hex, lines are joined with CRYPTO_LINE_SEP marker for later replacement
+const CRYPTO_LINE_SEP: &str = "\x00HEXLINE\x00";
+
+fn format_crypto_hex(type_name: &str, data: &[u8]) -> String {
+    let hex_lines = format_hex_lines(data);
+    let size_str = format!("{{{}}}", data.len());
+
+    if hex_lines.len() == 1 {
+        // Single line - inline
+        format!(
+            "{}{}{}{}",
+            type_name.cyan(),
+            size_str.truecolor(200, 200, 100),
+            "0x".truecolor(100, 100, 100),
+            hex_lines[0].white()
+        )
+    } else {
+        // Multi-line - use separator for later replacement with proper indent
+        format!(
+            "{}{}{}{}{}",
+            type_name.cyan(),
+            size_str.truecolor(200, 200, 100),
+            "0x".truecolor(100, 100, 100),
+            CRYPTO_LINE_SEP,
+            hex_lines.iter().map(|l| l.white().to_string()).collect::<Vec<_>>().join(CRYPTO_LINE_SEP)
+        )
+    }
+}
+
+/// Format v wrapper type with colour coding: ve{size}0xHEX
+/// For large data, shows preview with ...
+fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
+    let size_str = format!("{{{}}}", data.len());
+
+    if data.len() <= 32 {
+        // Show full hex with line separator
+        let hex_lines = format_hex_lines(data);
+        if hex_lines.len() == 1 {
+            format!(
+                "{}{}{}{}",
+                format!("v{}", algo as char).cyan(),
+                size_str.truecolor(200, 200, 100),
+                "0x".truecolor(100, 100, 100),
+                hex_lines[0].white()
+            )
+        } else {
+            format!(
+                "{}{}{}{}{}",
+                format!("v{}", algo as char).cyan(),
+                size_str.truecolor(200, 200, 100),
+                "0x".truecolor(100, 100, 100),
+                CRYPTO_LINE_SEP,
+                hex_lines.iter().map(|l| l.white().to_string()).collect::<Vec<_>>().join(CRYPTO_LINE_SEP)
+            )
+        }
+    } else {
+        // Show first 16 bytes with ...
+        let hex_preview = hex::encode(&data[..16]).to_uppercase();
+        format!(
+            "{}{}{}{}{}",
+            format!("v{}", algo as char).cyan(),
+            size_str.truecolor(200, 200, 100),
+            "0x".truecolor(100, 100, 100),
+            hex_preview.white(),
+            "...".truecolor(100, 100, 100)
+        )
+    }
+}
+
+/// Get the VSF size marker for a length value
+/// Returns '3' for u8, '4' for u16, '5' for u32, '6' for u64, '7' for u128
+fn size_marker(len: usize) -> char {
+    if len <= 255 {
+        '3'
+    } else if len <= 65535 {
+        '4'
+    } else if len <= 0xFFFFFFFF {
+        '5'
+    } else if len <= 0xFFFFFFFFFFFFFFFF {
+        '6'
+    } else {
+        '7'
+    }
+}
+
+/// Format a VsfType as literal VSF wire notation with colour coding
+/// Shows actual encoding: type code, size marker, length/value, content
+///
+/// Examples:
+/// - `l3{7}"message"` for an ASCII string
+/// - `d3{5}"error"` for a dictionary key
+/// - `u3{42}` for an unsigned int
+pub fn format_value_literal(vsf: &VsfType) -> String {
+    match vsf {
+        // Text types: type + size_marker + {length} + "content"
+        VsfType::d(s) => {
+            format!(
+                "{}{}{}",
+                format!("d{}", size_marker(s.len())).cyan(),
+                format!("{{{}}}", s.len()).truecolor(200, 200, 100),
+                s.white()
+            )
+        }
+        VsfType::l(s) => {
+            format!(
+                "{}{}{}",
+                format!("l{}", size_marker(s.len())).cyan(),
+                format!("{{{}}}", s.len()).truecolor(200, 200, 100),
+                s.white()
+            )
+        }
+        VsfType::x(s) => {
+            format!(
+                "{}{}{}",
+                format!("x{}", size_marker(s.len())).cyan(),
+                format!("{{{}}}", s.len()).truecolor(200, 200, 100),
+                s.white()
+            )
+        }
+
+        // Unsigned integers: type{value}
+        VsfType::u0(b) => format!("{}{}", "u0".cyan(), if *b { "1" } else { "0" }.truecolor(200, 200, 100)),
+        VsfType::u3(v) => format!("{}{}", "u3".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::u4(v) => format!("{}{}", "u4".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::u5(v) => format!("{}{}", "u5".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::u6(v) => format!("{}{}", "u6".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::u7(v) => format!("{}{}", "u7".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::u(v, _) => format!("{}{}", format!("u{}", size_marker(*v)).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+
+        // Signed integers: type{value}
+        VsfType::i(v) => format!("{}{}", format!("i{}", size_marker(v.unsigned_abs())).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::i3(v) => format!("{}{}", "i3".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::i4(v) => format!("{}{}", "i4".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::i5(v) => format!("{}{}", "i5".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::i6(v) => format!("{}{}", "i6".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::i7(v) => format!("{}{}", "i7".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+
+        // Floats
+        VsfType::f5(v) => format!("{}{}", "f5".cyan(), format!("{{{:.6}}}", v).truecolor(200, 200, 100)),
+        VsfType::f6(v) => format!("{}{}", "f6".cyan(), format!("{{{:.10}}}", v).truecolor(200, 200, 100)),
+
+        // Metadata types
+        VsfType::n(v) => format!("{}{}", format!("n{}", size_marker(*v)).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::b(v, _) => format!("{}{}", format!("b{}", size_marker(*v)).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::o(v) => format!("{}{}", format!("o{}", size_marker(*v)).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::z(v) => format!("{}{}", format!("z{}", size_marker(*v)).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        VsfType::y(v) => format!("{}{}", format!("y{}", size_marker(*v)).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+
+        // Crypto types - use existing format
+        VsfType::hp(h) => format_crypto_hex("hp", h),
+        VsfType::hb(h) => format_crypto_hex("hb", h),
+        VsfType::hs(h) => format_crypto_hex("hs", h),
+        VsfType::ke(k) => format_crypto_hex("ke", k),
+        VsfType::kx(k) => format_crypto_hex("kx", k),
+        VsfType::kp(k) => format_crypto_hex("kp", k),
+        VsfType::kc(k) => format_crypto_hex("kc", k),
+        VsfType::ka(k) => format_crypto_hex("ka", k),
+        VsfType::ge(s) => format_crypto_hex("ge", s),
+        VsfType::gp(s) => format_crypto_hex("gp", s),
+        VsfType::gr(s) => format_crypto_hex("gr", s),
+        VsfType::v(algo, data) => format_crypto_wrap(*algo, data),
+
+        // Tensors
+        VsfType::t_u3(tensor) => {
+            // Special case: 16-byte 1D tensor = IPv6 address
+            if tensor.shape == vec![16] && tensor.data.len() == 16 {
+                let bytes: [u8; 16] = tensor.data.as_slice().try_into().unwrap_or([0u8; 16]);
+                let ipv6 = std::net::Ipv6Addr::from(bytes);
+                // Format IPv6 with uppercase hex segments
+                let ipv6_upper = ipv6.segments()
+                    .iter()
+                    .map(|s| format!("{:X}", s))
+                    .collect::<Vec<_>>()
+                    .join(":");
+                format!("{}{{{}}}", "t_u3".cyan(), ipv6_upper.white())
+            } else {
+                let shape_str = tensor
+                    .shape
+                    .iter()
+                    .map(|d| d.to_string())
+                    .collect::<Vec<_>>()
+                    .join("×");
+                format!("{}{}{}{}{}{}",
+                    "t_u3".cyan(),
+                    "[".truecolor(100, 100, 100),
+                    shape_str.truecolor(200, 200, 100),
+                    "]".truecolor(100, 100, 100),
+                    "(".truecolor(100, 100, 100),
+                    format!("{} bytes)", tensor.data.len()).truecolor(200, 200, 100)
+                )
+            }
+        }
+
+        // Eagle Time - show human-readable date/time
+        VsfType::e(et) => {
+            let formatted = format_eagle_time(et);
+            format!("{}{{{}}}", "e".cyan(), formatted.white())
+        }
+
+        // Fall back to debug for unhandled types
+        _ => format!("{:?}", vsf),
+    }
+}
 
 /// Section label info for display
 pub struct LabelInfo {
@@ -196,19 +433,21 @@ pub fn format_value(vsf: &VsfType) -> String {
             )
         }
         VsfType::t_u3(tensor) => {
-            let shape_str = tensor
-                .shape
-                .iter()
-                .map(|d| format_number(*d))
-                .collect::<Vec<_>>()
-                .join(" × ");
-            let format_hint = if tensor.ndim() == 1 { " [1D vector]" } else { "" };
-            format!(
-                "{}, 8-bit tensor{} ({} Bytes)",
-                shape_str,
-                format_hint,
-                format_number(tensor.data.len())
-            )
+            // Special case: 16-byte 1D tensor = IPv6 address
+            if tensor.shape == vec![16] && tensor.data.len() == 16 {
+                let bytes: [u8; 16] = tensor.data.as_slice().try_into().unwrap_or([0u8; 16]);
+                let ipv6 = std::net::Ipv6Addr::from(bytes);
+                format!("t u3{{{}}}", ipv6)
+            } else {
+                // Generic tensor: t_u3{shape}(data preview)
+                let shape_str = tensor
+                    .shape
+                    .iter()
+                    .map(|d| d.to_string())
+                    .collect::<Vec<_>>()
+                    .join("×");
+                format!("t_u3[{}]({} bytes)", shape_str, tensor.data.len())
+            }
         }
         VsfType::t_f5(tensor) => {
             let shape_str = tensor
@@ -223,89 +462,43 @@ pub fn format_value(vsf: &VsfType) -> String {
             let (lat, lon) = coord.to_lat_lon();
             format!("({:.4}°N, {:.4}°W)", lat, lon)
         }
-        VsfType::e(et) => format_eagle_time(et),
-        VsfType::hp(hash) => format!(
-            "hp[BLAKE3 Provenance {} Bytes] {}...",
-            hash.len(),
-            hex_preview(hash)
-        ),
-        VsfType::hb(hash) => format!(
-            "hb[BLAKE3 Rolling {} Bytes] {}...",
-            hash.len(),
-            hex_preview(hash)
-        ),
-        VsfType::hs(hash) => format!("hs[SHA-2 {} Bytes] {}...", hash.len(), hex_preview(hash)),
-
-        VsfType::ge(sig) => format!("ge[Ed25519 {} Bytes] {}...", sig.len(), hex_preview(sig)),
-        VsfType::gp(sig) => {
-            format!("gp[ECDSA-P256 {} Bytes] {}...", sig.len(), hex_preview(sig))
+        VsfType::e(et) => {
+            // Wire literal format: ef5{value} or ef6{value}
+            match et {
+                EtType::f5(v) => format!("ef5{{{:.2}}}", v),
+                EtType::f6(v) => format!("ef6{{{:.2}}}", v),
+                _ => format!("e{{{:?}}}", et),
+            }
         }
-        VsfType::gr(sig) => format!("gr[RSA {} Bytes] {}...", sig.len(), hex_preview(sig)),
-
-        VsfType::ke(key) => format!(
-            "ke[Ed25519 key {} Bytes] {}...",
-            key.len(),
-            hex_preview(key)
-        ),
-        VsfType::kx(key) => {
-            format!("kx[X25519 key {} Bytes] {}...", key.len(), hex_preview(key))
-        }
-        VsfType::kp(key) => format!(
-            "kp[ECDSA-P256 key {} Bytes] {}...",
-            key.len(),
-            hex_preview(key)
-        ),
-        VsfType::kc(key) => format!(
-            "kc[ChaCha20-Poly1305 key {} Bytes] {}...",
-            key.len(),
-            hex_preview(key)
-        ),
-        VsfType::ka(key) => format!(
-            "ka[AES-256-GCM key {} Bytes] {}...",
-            key.len(),
-            hex_preview(key)
-        ),
-
-        VsfType::ah(mac) => format!(
-            "ah[HMAC-SHA256 {} Bytes] {}...",
-            mac.len(),
-            hex_preview(mac)
-        ),
-        VsfType::at(mac) => format!(
-            "at[HMAC-SHA512 {} Bytes] {}...",
-            mac.len(),
-            hex_preview(mac)
-        ),
-        VsfType::ap(mac) => format!("ap[Poly1305 {} Bytes] {}...", mac.len(), hex_preview(mac)),
-        VsfType::ab(mac) => format!(
-            "ab[BLAKE3-keyed {} Bytes] {}...",
-            mac.len(),
-            hex_preview(mac)
-        ),
-        VsfType::ac(mac) => format!("ac[CMAC-AES {} Bytes] {}...", mac.len(), hex_preview(mac)),
+        VsfType::hp(hash) => format!("hp{{{}}}0x{}...", hash.len(), hex_preview(hash)),
+        // Literal VSF notation for all crypto types
+        VsfType::hb(hash) => format!("hb{{{}}}0x{}...", hash.len(), hex_preview(hash)),
+        VsfType::hs(hash) => format!("hs{{{}}}0x{}...", hash.len(), hex_preview(hash)),
+        VsfType::ge(sig) => format!("ge{{{}}}0x{}...", sig.len(), hex_preview(sig)),
+        VsfType::gp(sig) => format!("gp{{{}}}0x{}...", sig.len(), hex_preview(sig)),
+        VsfType::gr(sig) => format!("gr{{{}}}0x{}...", sig.len(), hex_preview(sig)),
+        VsfType::ke(key) => format!("ke{{{}}}0x{}...", key.len(), hex_preview(key)),
+        VsfType::kx(key) => format!("kx{{{}}}0x{}...", key.len(), hex_preview(key)),
+        VsfType::kp(key) => format!("kp{{{}}}0x{}...", key.len(), hex_preview(key)),
+        VsfType::kc(key) => format!("kc{{{}}}0x{}...", key.len(), hex_preview(key)),
+        VsfType::ka(key) => format!("ka{{{}}}0x{}...", key.len(), hex_preview(key)),
+        VsfType::ah(mac) => format!("ah{{{}}}0x{}...", mac.len(), hex_preview(mac)),
+        VsfType::at(mac) => format!("at{{{}}}0x{}...", mac.len(), hex_preview(mac)),
+        VsfType::ap(mac) => format!("ap{{{}}}0x{}...", mac.len(), hex_preview(mac)),
+        VsfType::ab(mac) => format!("ab{{{}}}0x{}...", mac.len(), hex_preview(mac)),
+        VsfType::ac(mac) => format!("ac{{{}}}0x{}...", mac.len(), hex_preview(mac)),
 
         VsfType::v(algo, data) => {
-            let algo_name = match *algo {
-                b'a' => "AV1",
-                b'z' => "zstd",
-                b'r' => "Reed-Solomon",
-                b'x' => "XZ/LZMA",
-                b'e' => "Encrypted",
-                b'u' => "Units",
-                _ => "unknown",
+            // Show literal VSF notation: ve{size}0xHEX...
+            let hex_preview = if data.len() <= 64 {
+                hex::encode(data).to_uppercase()
+            } else {
+                format!("{}...", hex::encode(&data[..32]).to_uppercase())
             };
-            format!(
-                "wrap[{} {} Bytes] {}",
-                algo_name,
-                data.len(),
-                if data.is_empty() {
-                    String::new()
-                } else {
-                    hex_preview(data)
-                }
-            )
+            format!("v{}{{{}}}0x{}", *algo as char, data.len(), hex_preview)
         }
         VsfType::d(name) => format!("d\"{}\"", name),
+        VsfType::l(s) => s.clone(),
         VsfType::o(offset) => format!("o[{}]", offset),
         VsfType::n(count) => format!("n[{}]", count),
         VsfType::b(size, _) => format!("b[{}]", size),
@@ -332,56 +525,26 @@ pub fn format_value_short(vsf: &VsfType) -> String {
             )
         }
         VsfType::x(s) if s.len() > 30 => format!("{}...", &s[..27]),
-        // Show full hex for crypto fields (important for debugging protocols)
-        VsfType::hp(hash) => format!(
-            "hp[BLAKE3 {} Bytes] {}",
-            hash.len(),
-            hex::encode(hash).to_uppercase()
-        ),
-        VsfType::hb(hash) => format!(
-            "hb[BLAKE3 {} Bytes] {}",
-            hash.len(),
-            hex::encode(hash).to_uppercase()
-        ),
-        VsfType::hs(hash) => format!(
-            "hs[SHA-2 {} Bytes] {}",
-            hash.len(),
-            hex::encode(hash).to_uppercase()
-        ),
-        VsfType::ke(key) => format!(
-            "ke[Ed25519 {} Bytes] {}",
-            key.len(),
-            hex::encode(key).to_uppercase()
-        ),
-        VsfType::kx(key) => format!(
-            "kx[X25519 {} Bytes] {}",
-            key.len(),
-            hex::encode(key).to_uppercase()
-        ),
-        VsfType::kp(key) => format!(
-            "kp[ECDSA-P256 {} Bytes] {}",
-            key.len(),
-            hex::encode(key).to_uppercase()
-        ),
-        VsfType::ge(sig) => format!(
-            "ge[Ed25519 {} Bytes] {}",
-            sig.len(),
-            hex::encode(sig).to_uppercase()
-        ),
-        VsfType::gp(sig) => format!(
-            "gp[ECDSA-P256 {} Bytes] {}",
-            sig.len(),
-            hex::encode(sig).to_uppercase()
-        ),
+        // Show literal VSF notation for crypto fields with colour coding
+        // type{size}0xHEX - type=cyan, size=yellow, 0x=gray, hex=white
+        VsfType::hp(hash) => format_crypto_hex("hp", hash),
+        VsfType::hb(hash) => format_crypto_hex("hb", hash),
+        VsfType::hs(hash) => format_crypto_hex("hs", hash),
+        VsfType::ke(key) => format_crypto_hex("ke", key),
+        VsfType::kx(key) => format_crypto_hex("kx", key),
+        VsfType::kp(key) => format_crypto_hex("kp", key),
+        VsfType::kc(key) => format_crypto_hex("kc", key),
+        VsfType::ka(key) => format_crypto_hex("ka", key),
+        VsfType::ge(sig) => format_crypto_hex("ge", sig),
+        VsfType::gp(sig) => format_crypto_hex("gp", sig),
+        VsfType::gr(sig) => format_crypto_hex("gr", sig),
+        VsfType::v(algo, data) => format_crypto_wrap(*algo, data),
         _ => format_value(vsf),
     }
 }
 
-/// Parse section fields and return as vec of (name, value) tuples
-pub fn parse_section_fields(
-    data: &[u8],
-    label: &LabelInfo,
-) -> Result<Vec<(String, VsfType)>, String> {
+/// Parse section fields and return as vec of VsfField (supports multi-value fields)
+pub fn parse_section_fields(data: &[u8], label: &LabelInfo) -> Result<Vec<VsfField>, String> {
     let mut pointer = label.offset;
     let mut fields = Vec::new();
 
@@ -410,6 +573,7 @@ pub fn parse_section_fields(
         _ => return Err("Expected d type for section name".to_string()),
     };
 
+    // Parse fields using VsfField::parse() which handles multi-value fields
     for i in 0..label.child_count {
         if pointer >= data.len() {
             return Err(format!(
@@ -418,51 +582,41 @@ pub fn parse_section_fields(
             ));
         }
 
-        if data[pointer] != b'(' {
-            return Err(format!(
-                "Expected '(' at field {}, found '{}'",
-                i, data[pointer] as char
-            ));
-        }
-        pointer += 1;
+        let field =
+            VsfField::parse(data, &mut pointer).map_err(|e| format!("Field {}: {}", i, e))?;
+        fields.push(field);
+    }
 
-        let field_name_type = parse(data, &mut pointer)
-            .map_err(|e| format!("Failed to parse field name at field {}: {}", i, e))?;
+    Ok(fields)
+}
 
-        let name = match field_name_type {
-            VsfType::d(n) => n,
-            _ => return Err(format!("Expected d type for field name at field {}", i)),
-        };
+/// Try to parse section fields without knowing child_count - parse until ']'
+/// Used for sections with wrap/signature where child_count is omitted from header
+pub fn try_parse_section_fields(data: &[u8], offset: usize) -> Result<Vec<VsfField>, String> {
+    let mut pointer = offset;
+    let mut fields = Vec::new();
 
-        if pointer >= data.len() || data[pointer] != b':' {
-            return Err(format!(
-                "Expected ':' after field name '{}', found '{}'",
-                name,
-                if pointer < data.len() {
-                    data[pointer] as char
-                } else {
-                    '?'
-                }
-            ));
-        }
-        pointer += 1;
+    if pointer >= data.len() {
+        return Err("Offset beyond file length".into());
+    }
 
-        let field_value = parse(data, &mut pointer)
-            .map_err(|e| format!("Failed to parse value for field '{}': {}", name, e))?;
+    if data[pointer] != b'[' {
+        return Err("Expected '[' at section start".into());
+    }
+    pointer += 1;
 
-        fields.push((name, field_value));
+    // Parse section name
+    let section_name_type =
+        parse(data, &mut pointer).map_err(|e| format!("Failed to parse section name: {}", e))?;
+    let _section_name = match section_name_type {
+        VsfType::d(_) => {}
+        _ => return Err("Expected d type for section name".into()),
+    };
 
-        if pointer >= data.len() || data[pointer] != b')' {
-            return Err(format!(
-                "Expected ')' after field value, found '{}'",
-                if pointer < data.len() {
-                    data[pointer] as char
-                } else {
-                    '?'
-                }
-            ));
-        }
-        pointer += 1;
+    // Parse fields until we hit ']' using VsfField::parse()
+    while pointer < data.len() && data[pointer] != b']' {
+        let field = VsfField::parse(data, &mut pointer)?;
+        fields.push(field);
     }
 
     Ok(fields)
@@ -486,12 +640,12 @@ pub fn labels_from_header(header: &VsfHeader) -> Vec<LabelInfo> {
         .collect()
 }
 
-/// Format complete VSF file for inspection (colored output with tree structure)
+/// Format complete VSF stream for inspection (coloured output with tree structure)
 /// Returns multi-line string with header info, labels, and section tree
 pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     // Check magic number
     if data.len() < 4 {
-        return Err("Data too short for VSF file".into());
+        return Err("Data too short for Versatile Storage Format".into());
     }
     if &data[0..3] != "RÅ".as_bytes() || data[3] != b'<' {
         return Err("Invalid VSF magic number".into());
@@ -513,11 +667,14 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     let mut out = String::new();
 
     // Title
-    out.push_str(&format!("{}\n", "VSF File".cyan().bold()));
+    out.push_str(&format!("{}\n", "Versatile Storage Format".white().bold()));
     out.push_str(&format!(
-        "{} ({} Bytes)\n",
-        format_bytes(data.len()).yellow(),
-        format_number(data.len()).truecolor(64, 50, 255)
+        "{} {}{} {}{}\n",
+        format_bytes(data.len()).white(),
+        "(".truecolor(100, 100, 100),
+        format_number(data.len()).truecolor(200, 200, 100),
+        "Bytes".truecolor(128, 128, 128),
+        ")".truecolor(100, 100, 100)
     ));
     out.push('\n');
 
@@ -527,12 +684,12 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     // Version info
     out.push_str(&format!(
         " {} {}\n",
-        "Version".cyan(),
+        "Version".truecolor(128, 128, 128),
         header.version.to_string().white()
     ));
     out.push_str(&format!(
         " {} {}\n",
-        "Backward compat".cyan(),
+        "Backward compat".truecolor(128, 128, 128),
         header.backward_compat.to_string().white()
     ));
 
@@ -540,7 +697,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     if let VsfType::e(ref et) = header.creation_time {
         out.push_str(&format!(
             " {} {}\n",
-            "Created".cyan(),
+            "Created".truecolor(128, 128, 128),
             format_eagle_time(et).white()
         ));
     }
@@ -548,102 +705,99 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     // Header size
     out.push_str(&format!(
         " {} {} Bytes\n",
-        "Header size:".cyan(),
+        "Header size:".truecolor(128, 128, 128),
         header_length_bytes.to_string().white()
     ));
 
     // Provenance hash (full)
     if let VsfType::hp(ref hash) = header.provenance_hash {
         out.push_str(&format!(
-            " {}-Byte {} {}:\n",
-            hash.len().to_string().white(),
-            "BLAKE3".green(),
-            "provenance hash".cyan()
+            " {}{}{} {} {} {}\n",
+            hash.len().to_string().truecolor(200, 200, 100),
+            "-".truecolor(100, 100, 100),
+            "Byte".truecolor(128, 128, 128),
+            "BLAKE3".cyan(),
+            "provenance hash".truecolor(128, 128, 128),
+            "hex".truecolor(100, 100, 100)
         ));
-        out.push_str(&format!(
-            " {} {}\n",
-            "0x".truecolor(64, 50, 255),
-            hex::encode(hash).to_uppercase()
-        ));
+        let hash_lines = format_hex_lines(hash);
+        for line in &hash_lines {
+            out.push_str(&format!("    {}\n", line.white()));
+        }
     }
 
-    // Signer pubkey (full)
+    // Signer pubkey (full, wrapped at 16 bytes)
     if let Some(VsfType::ke(ref key)) = header.signer_pubkey {
         out.push_str(&format!(
-            " {}-Byte {} {}:\n",
-            key.len().to_string().white(),
-            "Ed25519".green(),
-            "signer pubkey".cyan()
+            " {}{}{} {} {} {}\n",
+            key.len().to_string().truecolor(200, 200, 100),
+            "-".truecolor(100, 100, 100),
+            "Byte".truecolor(128, 128, 128),
+            "Ed25519".cyan(),
+            "signer pubkey".truecolor(128, 128, 128),
+            "hex".truecolor(100, 100, 100)
         ));
-        out.push_str(&format!(
-            " {} {}\n",
-            "0x".truecolor(64, 50, 255),
-            hex::encode(key).to_uppercase().magenta()
-        ));
+        let key_lines = format_hex_lines(key);
+        for line in &key_lines {
+            out.push_str(&format!("    {}\n", line.white()));
+        }
     }
 
-    // Signature (truncated for display)
+    // Signature (full, wrapped at 16 bytes)
     if let Some(VsfType::ge(ref sig)) = header.signature {
         out.push_str(&format!(
-            " {}-Byte {} {}:\n",
-            sig.len().to_string().white(),
-            "Ed25519".green(),
-            "signature".cyan()
+            " {}{}{} {} {} {}\n",
+            sig.len().to_string().truecolor(200, 200, 100),
+            "-".truecolor(100, 100, 100),
+            "Byte".truecolor(128, 128, 128),
+            "Ed25519".cyan(),
+            "signature".truecolor(128, 128, 128),
+            "hex".truecolor(100, 100, 100)
         ));
-        let sig_preview = if sig.len() > 32 {
-            format!("{}...", hex::encode(&sig[..32]).to_uppercase())
-        } else {
-            hex::encode(sig).to_uppercase()
-        };
-        out.push_str(&format!(
-            " {} {}\n",
-            "0x".truecolor(64, 50, 255),
-            sig_preview.magenta()
-        ));
-        out.push_str(&format!(
-            " {} {}\n",
-            "Semantics:".cyan(),
-            "Protocol-specific (signed data unknown)".truecolor(200, 200, 200)
-        ));
+        let sig_lines = format_hex_lines(sig);
+        for line in &sig_lines {
+            out.push_str(&format!("    {}\n", line.white()));
+        }
     }
 
-    // Rolling hash if present
+    // Rolling hash if present (wrapped at 16 bytes)
     if let Some(VsfType::hb(ref hash)) = header.rolling_hash {
         out.push_str(&format!(
-            " {}-Byte {} {}:\n",
-            hash.len().to_string().white(),
-            "BLAKE3".green(),
-            "rolling hash".cyan()
+            " {}{}{} {} {} {}\n",
+            hash.len().to_string().truecolor(200, 200, 100),
+            "-".truecolor(100, 100, 100),
+            "Byte".truecolor(128, 128, 128),
+            "BLAKE3".cyan(),
+            "rolling hash".truecolor(128, 128, 128),
+            "hex".truecolor(100, 100, 100)
         ));
-        out.push_str(&format!(
-            " {} {}\n",
-            "0x".truecolor(64, 50, 255),
-            hex::encode(hash).to_uppercase()
-        ));
+        let hash_lines = format_hex_lines(hash);
+        for line in &hash_lines {
+            out.push_str(&format!("    {}\n", line.white()));
+        }
         // Verify rolling hash
         if let Ok(computed) = crate::verification::compute_file_hash(data) {
             if computed.as_slice() == hash.as_slice() {
                 out.push_str(&format!(
                     " {} {}\n",
-                    "Verification:".cyan(),
-                    "PASS".truecolor(0, 255, 0)
+                    "Verification:".truecolor(128, 128, 128),
+                    "PASS".truecolor(100, 220, 100)
                 ));
             } else {
                 out.push_str(&format!(
                     " {} {}\n",
-                    "Verification:".cyan(),
-                    "FAIL".truecolor(255, 0, 0)
+                    "Verification:".truecolor(128, 128, 128),
+                    "FAIL".truecolor(220, 100, 100)
                 ));
             }
         }
     }
 
-    out.push('\n');
-
     // Labels section
     out.push_str(&format!(
-        " {} labels\n",
-        labels.len().to_string().yellow().bold()
+        " {} {}\n",
+        labels.len().to_string().truecolor(200, 200, 100),
+        "labels".truecolor(128, 128, 128)
     ));
 
     // Calculate max widths for alignment
@@ -663,162 +817,323 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         let size_str = format_bytes(label.size);
         let offset_str = format_number(label.offset);
 
-        // Build crypto suffix
+        // Build crypto suffix with algorithm annotations (matching header style)
         let mut crypto_parts = Vec::new();
-        if let Some(ref sig) = label.signature {
-            match sig {
-                VsfType::ge(_) => crypto_parts.push("Ed25519".to_string()),
-                VsfType::gp(_) => crypto_parts.push("ECDSA-P256".to_string()),
-                VsfType::gr(_) => crypto_parts.push("RSA".to_string()),
-                _ => {}
-            }
-        }
-        if label.wrap.is_some() {
-            if let Some(ref key) = label.key {
-                match key {
-                    VsfType::kc(_) => crypto_parts.push("ChaCha20".to_string()),
-                    VsfType::ka(_) => crypto_parts.push("AES-GCM".to_string()),
-                    _ => {}
+        if let Some(ref key) = label.key {
+            // Annotate ke with algorithm name
+            if let VsfType::ke(k) = key {
+                crypto_parts.push(format!(
+                    "{}{}{} {} {} {}",
+                    k.len().to_string().truecolor(200, 200, 100),
+                    "-".truecolor(100, 100, 100),
+                    "Byte".truecolor(128, 128, 128),
+                    "Ed25519".cyan(),
+                    "pubkey".truecolor(128, 128, 128),
+                    "hex".truecolor(100, 100, 100)
+                ));
+                let hex_lines = format_hex_lines(k);
+                for line in &hex_lines {
+                    crypto_parts.push(format!("    {}", line.white()));
                 }
+            } else {
+                crypto_parts.push(format_value_short(key));
             }
         }
-        let crypto_str = if crypto_parts.is_empty() {
-            String::new()
+        if let Some(ref sig) = label.signature {
+            // Annotate ge with algorithm name
+            if let VsfType::ge(s) = sig {
+                crypto_parts.push(format!(
+                    "{}{}{} {} {} {}",
+                    s.len().to_string().truecolor(200, 200, 100),
+                    "-".truecolor(100, 100, 100),
+                    "Byte".truecolor(128, 128, 128),
+                    "Ed25519".cyan(),
+                    "signature".truecolor(128, 128, 128),
+                    "hex".truecolor(100, 100, 100)
+                ));
+                let hex_lines = format_hex_lines(s);
+                for line in &hex_lines {
+                    crypto_parts.push(format!("    {}", line.white()));
+                }
+            } else {
+                crypto_parts.push(format_value_short(sig));
+            }
+        }
+        if let Some(ref wrap) = label.wrap {
+            // wrap is VsfType::v(algo, data) - show ve with explanation
+            if let VsfType::v(algo, _) = wrap {
+                crypto_parts.push(format!(
+                    "{}{} {}",
+                    "v".cyan(),
+                    (*algo as char).to_string().cyan(),
+                    "(encrypted body)".truecolor(128, 128, 128)
+                ));
+            }
+        }
+
+        // Field count string - try to determine actual count for signed sections
+        let actual_count = if label.child_count == 0 && label.size > 0 {
+            // Try to parse and count fields for signed sections
+            try_parse_section_fields(data, label.offset)
+                .map(|fields| fields.len())
+                .ok()
         } else {
-            crypto_parts.join(", ")
+            None
         };
 
-        // Field count string
         let field_str = if label.size == 0 {
             String::new()
+        } else if let Some(count) = actual_count {
+            if count == 1 {
+                format!("{} {}", "1".truecolor(200, 200, 100), "field".truecolor(128, 128, 128))
+            } else {
+                format!("{} {}", count.to_string().truecolor(200, 200, 100), "fields".truecolor(128, 128, 128))
+            }
         } else if label.child_count == 0 {
-            "with unknown".to_string()
+            format!("{} {}", "?".truecolor(200, 200, 100), "fields".truecolor(128, 128, 128))
         } else if label.child_count == 1 {
-            "with 1 field".to_string()
+            format!("{} {}", "1".truecolor(200, 200, 100), "field".truecolor(128, 128, 128))
         } else {
-            format!("with {} fields", label.child_count)
+            format!("{} {}", label.child_count.to_string().truecolor(200, 200, 100), "fields".truecolor(128, 128, 128))
         };
 
-        // Print label line with alignment
-        out.push_str(&format!(" {}", "(".truecolor(128, 128, 128)));
+        // Print label line - compact format
+        out.push_str(&format!(" {}", "(".truecolor(100, 100, 100)));
         if label.size == 0 {
             out.push_str(&format!("{}", label.name.white().bold()));
         } else {
-            out.push_str(&format!("{:>width$}", size_str.bright_yellow(), width = max_size_len));
-            out.push_str("      ");
-            out.push_str(&format!("{:<width$}", label.name.white().bold(), width = max_name_len));
-            out.push_str("    @");
-            out.push_str(&format!("{:>width$}", offset_str.truecolor(64, 50, 255), width = max_offset_len));
-            out.push_str("   ");
-            out.push_str(&format!("{:<15}", field_str.cyan()));
+            out.push_str(&format!("{:>width$}", size_str.white(), width = max_size_len));
             out.push_str(" ");
-            out.push_str(&format!("{:<33}", crypto_str.magenta()));
+            out.push_str(&format!("{:<width$}", label.name.white().bold(), width = max_name_len));
+            out.push_str(&format!(" {}{}", "@".truecolor(100, 100, 100), offset_str.truecolor(200, 200, 100)));
+            out.push_str(&format!(" {}", field_str));
         }
-        out.push_str(&format!("{}\n", ")".truecolor(128, 128, 128)));
+        out.push_str(&format!("{}\n", ")".truecolor(100, 100, 100)));
+
+        // Print crypto fields on separate indented lines
+        for part in &crypto_parts {
+            out.push_str(&format!("   {}\n", part));
+        }
     }
 
     // Check if there are any non-empty sections
     let has_nonempty_sections = labels.iter().any(|l| l.size > 0);
 
     if has_nonempty_sections {
-        out.push_str(&format!("{}{}\n", ">".truecolor(128, 128, 128), "┐".white()));
+        out.push_str(&format!("{}{}\n", ">".truecolor(64, 64, 64), "┓".truecolor(64, 64, 64))); // Heavy down and left
     } else {
-        out.push_str(&format!("{}\n", ">".truecolor(128, 128, 128)));
+        out.push_str(&format!("{}\n", ">".truecolor(64, 64, 64)));
     }
 
     // Show sections with tree structure (skip empty sections)
     let nonempty_labels: Vec<_> = labels.iter().filter(|l| l.size > 0).collect();
     for (i, label) in nonempty_labels.iter().enumerate() {
         let is_last = i == nonempty_labels.len() - 1;
-        let connector = if is_last { " └─" } else { " ├─" };
+        let connector = if is_last { format!(" {}", tree_corner()) } else { format!(" {}", tree_tee()) };
 
-        out.push_str(&format!(
-            "{}{}{}\n",
-            connector,
-            "[".truecolor(128, 128, 128),
-            label.name.bold()
-        ));
-
-        // Parse and show fields for sections with child_count > 0
-        if label.child_count == 0 {
-            let field_prefix = if is_last { "   " } else { " │ " };
-
-            // Check if empty section or opaque blob
-            let section_start = label.offset;
-            let section_end = section_start + label.size;
-            let is_empty_section = if section_end <= data.len() {
-                let section_data = &data[section_start..section_end];
-                let mut ptr = 0;
-                if ptr < section_data.len() && section_data[ptr] == b'[' {
-                    ptr += 1;
-                    if parse(section_data, &mut ptr).is_ok() {
-                        ptr < section_data.len() && section_data[ptr] == b']'
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-
-            if !is_empty_section {
-                out.push_str(&format!(
-                    "{}  (opaque blob - encrypted or unstructured)\n",
-                    field_prefix
-                ));
-            }
+        // For sections < 1MB, just show `[` - name is already in header labels
+        // For sections >= 1MB, show `[name n{count}b{size}` for navigation
+        if label.size < 1024 * 1024 {
+            out.push_str(&format!(
+                "{}{}\n",
+                connector,
+                "[".truecolor(64, 64, 64)
+            ));
         } else {
-            match parse_section_fields(data, label) {
-                Ok(fields) => {
-                    if fields.is_empty() && label.child_count > 0 {
-                        let field_prefix = if is_last { "   " } else { " │ " };
-                        out.push_str(&format!(
-                            "{}  <parsing error: expected {} fields>\n",
-                            field_prefix, label.child_count
-                        ));
+            out.push_str(&format!(
+                "{}{}{} {}{}{}{}{}{}{}b{}{}\n",
+                connector,
+                "[".truecolor(64, 64, 64),
+                label.name.white().bold(),
+                "n".truecolor(128, 128, 128),
+                "{".truecolor(100, 100, 100),
+                label.child_count.to_string().truecolor(200, 200, 100),
+                "}".truecolor(100, 100, 100),
+                " ".normal(),
+                "b".truecolor(128, 128, 128),
+                "{".truecolor(100, 100, 100),
+                label.size.to_string().truecolor(200, 200, 100),
+                "}".truecolor(100, 100, 100)
+            ));
+        }
+
+        // Parse and show fields
+        // For child_count == 0 (signed/wrapped sections), try dynamic parsing
+        // For child_count > 0, use the known count
+        let field_prefix = if is_last { "   " } else { &format!(" {} ", tree_vert()) };
+
+        let fields_result = if label.child_count == 0 {
+            // Try to parse fields dynamically (for signed sections where count is omitted)
+            try_parse_section_fields(data, label.offset)
+        } else {
+            parse_section_fields(data, label)
+        };
+
+        match fields_result {
+            Ok(fields) if fields.is_empty() => {
+                // Empty section - check if it's truly empty [name] or has unparseable content
+                let section_start = label.offset;
+                let section_end = section_start + label.size;
+                if section_end <= data.len() && section_end > section_start {
+                    let section_data = &data[section_start..section_end];
+                    // Skip past [name] to see if there's content
+                    let mut ptr = 0;
+                    if ptr < section_data.len() && section_data[ptr] == b'[' {
+                        ptr += 1;
+                        if parse(section_data, &mut ptr).is_ok() {
+                            // Check if immediately followed by ]
+                            if ptr < section_data.len() && section_data[ptr] == b']' {
+                                // Truly empty section, don't show anything
+                            } else {
+                                // Has content we couldn't parse - show hex dump
+                                let content_data = &section_data[ptr..];
+                                let hex_preview: String = content_data
+                                    .iter()
+                                    .take(32)
+                                    .map(|b| format!("{:02X}", b))
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                let suffix = if content_data.len() > 32 { "..." } else { "" };
+                                out.push_str(&format!(
+                                    "{}  {}{}\n",
+                                    field_prefix,
+                                    hex_preview.truecolor(128, 128, 128),
+                                    suffix
+                                ));
+                            }
+                        }
                     }
-                    for (j, (field_name, field_value)) in fields.iter().enumerate() {
-                        let is_field_last = j == fields.len() - 1;
-                        let field_prefix = if is_last { "   " } else { " │ " };
-                        let field_connector = if is_field_last { "└─" } else { "├─" };
+                }
+            }
+            Ok(fields) => {
+                // Show parsed fields in literal VSF notation
+                for (j, field) in fields.iter().enumerate() {
+                    let is_field_last = j == fields.len() - 1;
+                    let field_connector = if is_field_last { tree_corner() } else { tree_tee() };
+                    let continuation_bar = if is_field_last { "   " } else { &format!("{}  ", tree_vert()) };
+                    let name_literal = format_value_literal(&VsfType::d(field.name.clone()));
+                    let values_literal: Vec<String> = field
+                        .values
+                        .iter()
+                        .map(|v| format_value_literal(v))
+                        .collect();
+
+                    if values_literal.len() == 1 {
+                        // Single value: (name : value) - handle multi-line hex
+                        let val = &values_literal[0];
+                        if val.contains(CRYPTO_LINE_SEP) {
+                            // Multi-line crypto value
+                            let hex_indent = format!("{}{}    ", field_prefix, continuation_bar);
+                            let formatted = val.replace(CRYPTO_LINE_SEP, &format!("\n{}", hex_indent));
+                            out.push_str(&format!(
+                                "{}{} {}{} {} {}{}\n",
+                                field_prefix,
+                                field_connector,
+                                "(".truecolor(64, 64, 64),
+                                name_literal,
+                                ":".truecolor(64, 64, 64),
+                                formatted,
+                                ")".truecolor(64, 64, 64),
+                            ));
+                        } else {
+                            out.push_str(&format!(
+                                "{}{} {}{} {} {}{}\n",
+                                field_prefix,
+                                field_connector,
+                                "(".truecolor(64, 64, 64),
+                                name_literal,
+                                ":".truecolor(64, 64, 64),
+                                val,
+                                ")".truecolor(64, 64, 64),
+                            ));
+                        }
+                    } else {
+                        // Multi-value: vertical layout with continuation bars
                         out.push_str(&format!(
-                            "{}{} {}: {}\n",
+                            "{}{} {}{}:\n",
                             field_prefix,
                             field_connector,
-                            field_name,
-                            format_value_short(field_value)
+                            "(".truecolor(64, 64, 64),
+                            name_literal,
                         ));
+                        for (k, val) in values_literal.iter().enumerate() {
+                            let is_val_last = k == values_literal.len() - 1;
+                            let separator = if is_val_last { ")" } else { "," };
+                            // Handle multi-line hex values
+                            if val.contains(CRYPTO_LINE_SEP) {
+                                let hex_indent = format!("{}{}    ", field_prefix, continuation_bar);
+                                let formatted = val.replace(CRYPTO_LINE_SEP, &format!("\n{}", hex_indent));
+                                out.push_str(&format!(
+                                    "{}{}  {}{}\n",
+                                    field_prefix,
+                                    continuation_bar,
+                                    formatted,
+                                    separator.truecolor(64, 64, 64),
+                                ));
+                            } else {
+                                out.push_str(&format!(
+                                    "{}{}  {}{}\n",
+                                    field_prefix,
+                                    continuation_bar,
+                                    val,
+                                    separator.truecolor(64, 64, 64),
+                                ));
+                            }
+                        }
                     }
                 }
-                Err(e) => {
-                    let field_prefix = if is_last { "   " } else { " │ " };
-                    out.push_str(&format!("{}  <error parsing: {}>\n", field_prefix, e));
+            }
+            Err(e) => {
+                // Couldn't parse fields - show hex dump of section content
+                out.push_str(&format!("{}  <parse error: {}>\n", field_prefix, e));
+                let section_start = label.offset;
+                let section_end = section_start + label.size;
+                if section_end <= data.len() && section_end > section_start {
+                    let section_data = &data[section_start..section_end];
+                    let hex_preview: String = section_data
+                        .iter()
+                        .take(32)
+                        .map(|b| format!("{:02X}", b))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let suffix = if section_data.len() > 32 { "..." } else { "" };
+                    out.push_str(&format!(
+                        "{}  {}{}\n",
+                        field_prefix,
+                        hex_preview.truecolor(128, 128, 128),
+                        suffix
+                    ));
                 }
             }
         }
 
         out.push_str(&format!(
             "{}{}\n",
-            if is_last { "   " } else { " │ " },
-            "]".truecolor(128, 128, 128)
+            if is_last { "   " } else { &format!(" {} ", tree_vert()) },
+            "]".truecolor(64, 64, 64)
         ));
 
         if !is_last {
-            out.push_str(" │\n");
+            out.push_str(&format!(" {}\n", tree_vert()));
         }
     }
 
     // Valid indicator at end
     out.push('\n');
-    out.push_str(&format!("{}\n", "Valid".truecolor(0, 255, 0).bold()));
+    out.push_str(&format!("{}\n", "Valid".truecolor(100, 220, 100)));
 
     Ok(out)
 }
 
 /// Format a section fragment (starts with '[')
 /// Used for inspecting VSF section bytes before they're wrapped in a file
+///
+/// Shows literal VSF wire notation:
+/// ```text
+/// [error
+///   └─ (d3{7}message : l3{24}handle claimed elsewhere)
+/// ]
+/// ```
 pub fn inspect_section(data: &[u8]) -> Result<String, String> {
     if data.is_empty() || data[0] != b'[' {
         return Err("Not a section fragment (doesn't start with '[')".into());
@@ -827,25 +1142,128 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
     let mut out = String::new();
     let mut pointer = 1usize; // Skip '['
 
-    // Parse section name
+    // Parse section name first
     let section_name = match parse(data, &mut pointer) {
         Ok(VsfType::d(name)) => name,
         Ok(_) => return Err("Expected d type for section name".into()),
         Err(e) => return Err(format!("Failed to parse section name: {}", e)),
     };
 
-    out.push_str(&format!("[{}]\n", section_name.white().bold()));
+    // Check for optional n{count}b{length} suffix AFTER name (large sections)
+    let mut length_hint: Option<usize> = None;
+    let mut count_hint: Option<usize> = None;
+
+    if pointer < data.len() && data[pointer] == b'n' {
+        match parse(data, &mut pointer) {
+            Ok(VsfType::n(count)) => count_hint = Some(count),
+            _ => {}
+        }
+        if pointer < data.len() && data[pointer] == b'b' {
+            match parse(data, &mut pointer) {
+                Ok(VsfType::b(len, _)) => length_hint = Some(len),
+                _ => {}
+            }
+        }
+    }
+
+    // Build header line with validation if hints present
+    let mut header = format!("{}{}", "[".truecolor(128, 128, 128), section_name.white().bold());
+    if let Some(count) = count_hint {
+        header.push_str(&format!(" n{{{}}}", count).truecolor(128, 128, 128).to_string());
+    }
+    if let Some(len) = length_hint {
+        header.push_str(&format!(" b{{{}}}", len).truecolor(128, 128, 128).to_string());
+    }
+    header.push('\n');
+    out.push_str(&header);
+
+    // Collect all items to determine which is last
+    let mut items: Vec<String> = Vec::new();
 
     // Parse remaining values until ']' or end
     while pointer < data.len() && data[pointer] != b']' {
-        match parse(data, &mut pointer) {
-            Ok(value) => {
-                out.push_str(&format!("  {}\n", format_value_short(&value)));
+        // Check if this is a field tuple: (name : val1, val2, ...)
+        if data[pointer] == b'(' {
+            // Use VsfField::parse() which handles multi-value fields
+            match VsfField::parse(data, &mut pointer) {
+                Ok(field) => {
+                    // Format as literal: (name : val1, val2, val3)
+                    let name_literal = format_value_literal(&VsfType::d(field.name));
+                    let values_literal: Vec<String> = field
+                        .values
+                        .iter()
+                        .map(|v| format_value_literal(v))
+                        .collect();
+                    items.push(format!(
+                        "{}{} {} {}{}",
+                        "(".truecolor(128, 128, 128),
+                        name_literal,
+                        ":".truecolor(128, 128, 128),
+                        values_literal.join(&", ".truecolor(128, 128, 128).to_string()),
+                        ")".truecolor(128, 128, 128)
+                    ));
+                }
+                Err(e) => {
+                    items.push(format!("<parse error in field: {}>", e));
+                    break;
+                }
             }
-            Err(e) => {
-                out.push_str(&format!("  <parse error: {}>\n", e));
-                break;
+        } else {
+            // Raw value (crypto fields like ke, ge, ve)
+            match parse(data, &mut pointer) {
+                Ok(value) => {
+                    items.push(format_value_literal(&value));
+                }
+                Err(e) => {
+                    items.push(format!("<parse error: {}>", e));
+                    break;
+                }
             }
+        }
+    }
+
+    // Output items with tree formatting
+    for (i, item) in items.iter().enumerate() {
+        let is_last = i == items.len() - 1;
+        let connector = if is_last { tree_corner() } else { tree_tee() };
+        out.push_str(&format!("  {} {}\n", connector, item));
+    }
+
+    // Closing bracket
+    out.push_str(&format!("{}\n", "]".truecolor(64, 64, 64)));
+
+    // Add validation line if hints were present
+    if length_hint.is_some() || count_hint.is_some() {
+        let actual_len = if pointer < data.len() && data[pointer] == b']' {
+            pointer + 1 // Include closing ']'
+        } else {
+            pointer
+        };
+
+        let mut validation = String::new();
+        let mut valid = true;
+
+        if let Some(expected_len) = length_hint {
+            if actual_len == expected_len {
+                validation.push_str(&format!(" {}B", actual_len).truecolor(100, 220, 100).to_string());
+            } else {
+                validation.push_str(
+                    &format!(" {}B/{}", actual_len, expected_len)
+                        .truecolor(220, 100, 100)
+                        .to_string(),
+                );
+                valid = false;
+            }
+        }
+
+        if let Some(expected_count) = count_hint {
+            validation.push_str(&format!(" n={}", expected_count).truecolor(128, 128, 128).to_string());
+        }
+
+        if valid {
+            out.push_str(&format!("  {}\n", "✓".truecolor(100, 220, 100)));
+        } else {
+            out.push_str(&format!("  {} MISMATCH{}\n", "✗".truecolor(220, 100, 100), validation));
         }
     }
 

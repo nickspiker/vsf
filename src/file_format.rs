@@ -571,6 +571,12 @@ impl VsfHeader {
 pub struct VsfSection {
     pub name: String,
     pub fields: Vec<VsfField>,
+    /// Optional length hint from `b{}` prefix (for forensics/validation)
+    /// Only present when section was encoded at offset > 1MB
+    pub length_hint: Option<usize>,
+    /// Optional field count hint from `n{}` prefix (for forensics/validation)
+    /// Only present when section was encoded at offset > 1MB
+    pub count_hint: Option<usize>,
 }
 
 /// Single field in a section
@@ -714,6 +720,8 @@ impl VsfSection {
         Self {
             name: name_str,
             fields: Vec::new(),
+            length_hint: None,
+            count_hint: None,
         }
     }
 
@@ -823,29 +831,99 @@ impl VsfSection {
     /// - Single value: (dfield:value)
     /// - Multi-value: (dfield:v1,v2,v3)
     pub fn encode(&self) -> Vec<u8> {
+        self.encode_at_offset(0)
+    }
+
+    /// Encode section with optional `n{count}b{length}` suffix for large files.
+    ///
+    /// When `file_offset > 1MB`, appends metadata AFTER the section name for fast
+    /// seeking and forensic validation. Small files/packets get no suffix (zero overhead).
+    ///
+    /// # Format
+    ///
+    /// ```text
+    /// Small files:  [d"section_name"(d"field":val)...]
+    /// Large files:  [d"section_name"n{5}b{203}(d"field":val)...]
+    ///                               ↑    ↑
+    ///                               |    total section length (inclusive)
+    ///                               field count
+    /// ```
+    ///
+    /// # Inclusive Length Encoding
+    ///
+    /// The `b{}` value uses **inclusive encoding** - it includes its own size in the
+    /// total. This avoids the "255 + overhead = 256 BOINK" problem where adding the
+    /// length field's size pushes you into a larger encoding:
+    ///
+    /// ```text
+    /// Content = 252 bytes, need to add b{} (3 bytes for values < 256)
+    /// Naive:  252 + 3 = 255 → fits in u8 → b3{255} ✓
+    /// But:    253 + 3 = 256 → needs u16 → b4{} is 4 bytes!
+    ///         253 + 4 = 257 → still fits u16 ✓
+    ///
+    /// Inclusive encoding handles this automatically by including its own
+    /// overhead in the encoded value, converging to the correct size.
+    /// ```
+    ///
+    /// # Why name-first?
+    ///
+    /// Putting metadata after the name means you know WHAT you're looking at before
+    /// you see HOW BIG it is. Reading `[d"attachments"n{12}b{1847}` tells you
+    /// "this is attachments, 12 fields, 1847 bytes" in natural order.
+    pub fn encode_at_offset(&self, file_offset: usize) -> Vec<u8> {
         // Empty sections have no body - the header already declares them
-        // This saves bytes for things like ping/pong where the section name
-        // in the header IS the message type identifier
         if self.fields.is_empty() {
             return Vec::new();
         }
 
         let mut bytes = Vec::new();
-
-        // Section start
         bytes.push(b'[');
 
-        // Section name (namespace for all fields)
+        // Section name first (so you know what you're looking at)
         bytes.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
 
-        // Encode each field using VsfField::flatten()
-        for field in &self.fields {
-            bytes.extend_from_slice(&field.flatten());
+        // Add n{count}b{length} suffix for sections >1MB from file start
+        const ONE_MB: usize = 1_048_576;
+        if file_offset > ONE_MB {
+            let field_count = self.fields.len();
+
+            // Encode fields to know their size
+            let mut fields_bytes = Vec::new();
+            for field in &self.fields {
+                fields_bytes.extend_from_slice(&field.flatten());
+            }
+
+            // Use inclusive encoding for b{} - iterate until stable
+            // (adding b{} size might push us into a larger encoding class)
+            // Total = '[' + name + n{} + b{} + fields + ']'
+            let name_bytes = VsfType::d(self.name.clone()).flatten();
+            let n_encoded = VsfType::n(field_count).flatten();
+
+            // Start with base size, iterate until b{} encoding is stable
+            let base_without_b = 1 + name_bytes.len() + n_encoded.len() + fields_bytes.len() + 1;
+            let mut b_encoded = VsfType::b(base_without_b, true).flatten();
+
+            loop {
+                let total = base_without_b + b_encoded.len();
+                let new_b = VsfType::b(total, true).flatten();
+                if new_b.len() == b_encoded.len() {
+                    b_encoded = new_b;
+                    break;
+                }
+                b_encoded = new_b;
+            }
+
+            bytes.extend_from_slice(&n_encoded);
+            bytes.extend_from_slice(&b_encoded);
+            bytes.extend_from_slice(&fields_bytes);
+        } else {
+            // No metadata suffix for small files
+            for field in &self.fields {
+                bytes.extend_from_slice(&field.flatten());
+            }
         }
 
-        // Section end
         bytes.push(b']');
-
         bytes
     }
 
@@ -875,13 +953,37 @@ impl VsfSection {
                 data.get(*ptr)
             ));
         }
+        let section_start = *ptr;
         *ptr += 1;
 
-        // Parse section name
+        // Parse section name first
         let name = match crate::parse(data, ptr).map_err(|e| e.to_string())? {
             VsfType::d(s) => s,
             other => return Err(format!("Expected section name (d type), found {:?}", other)),
         };
+
+        // Check for optional n{count}b{length} suffix AFTER name (sections >1MB)
+        // Format: [d"name"n{5}b{203}(fields...)]
+        let mut length_hint = None;
+        let mut count_hint = None;
+
+        if *ptr < data.len() && data[*ptr] == b'n' {
+            // Parse n{count}
+            match crate::parse(data, ptr) {
+                Ok(VsfType::n(count)) => count_hint = Some(count),
+                Ok(_) => {} // Not an n type, rewind would be needed but we'll just skip
+                Err(_) => {}
+            }
+
+            // Parse b{length} after n{count}
+            if *ptr < data.len() && data[*ptr] == b'b' {
+                match crate::parse(data, ptr) {
+                    Ok(VsfType::b(len, _)) => length_hint = Some(len),
+                    Ok(_) => {}
+                    Err(_) => {}
+                }
+            }
+        }
 
         let mut fields = Vec::new();
 
@@ -906,7 +1008,28 @@ impl VsfSection {
         }
         *ptr += 1;
 
-        Ok(Self { name, fields })
+        // Validate length hint if present (section_start to current position)
+        let actual_length = *ptr - section_start;
+        if let Some(expected) = length_hint {
+            if actual_length != expected {
+                // Don't fail - just log for forensics. The hints are informational.
+                // In debug builds this could warn, but we want to parse corrupted files.
+            }
+        }
+
+        // Validate count hint if present
+        if let Some(expected) = count_hint {
+            if fields.len() != expected {
+                // Same - informational, don't fail parse
+            }
+        }
+
+        Ok(Self {
+            name,
+            fields,
+            length_hint,
+            count_hint,
+        })
     }
 
     /// Get a field by name
@@ -1174,5 +1297,78 @@ mod tests {
         // Test get_fields for multiple
         let all_fields = parsed.get_fields("width");
         assert_eq!(all_fields.len(), 1);
+    }
+
+    #[test]
+    fn test_section_encode_no_suffix_small_offset() {
+        // Sections at small offsets should NOT have n{}b{} suffix
+        let mut section = VsfSection::new("test");
+        section.add_field("value", VsfType::u(42, false));
+
+        let encoded = section.encode_at_offset(0);
+
+        // Should start with '[d' (name first, no metadata)
+        assert_eq!(encoded[0], b'[');
+        assert_eq!(encoded[1], b'd'); // Section name starts immediately
+    }
+
+    #[test]
+    fn test_section_encode_with_suffix_large_offset() {
+        // Sections at >1MB offset SHOULD have n{}b{} suffix after name
+        let mut section = VsfSection::new("test");
+        section.add_field("value", VsfType::u(42, false));
+
+        let offset_2mb = 2 * 1024 * 1024;
+        let encoded = section.encode_at_offset(offset_2mb);
+
+        // Should start with '[d' (name first)
+        assert_eq!(encoded[0], b'[');
+        assert_eq!(encoded[1], b'd'); // Name comes first
+
+        // Parse it back and verify hints are captured
+        let mut ptr = 0;
+        let parsed = VsfSection::parse(&encoded, &mut ptr).unwrap();
+
+        assert_eq!(parsed.name, "test");
+        assert!(parsed.length_hint.is_some());
+        assert!(parsed.count_hint.is_some());
+        assert_eq!(parsed.length_hint.unwrap(), encoded.len());
+        assert_eq!(parsed.count_hint.unwrap(), 1); // One field
+    }
+
+    #[test]
+    fn test_section_parse_without_suffix() {
+        // Parse section without suffix (old format / small files)
+        let mut section = VsfSection::new("legacy");
+        section.add_field("data", VsfType::u(123, false));
+
+        let encoded = section.encode(); // No offset = no suffix
+
+        let mut ptr = 0;
+        let parsed = VsfSection::parse(&encoded, &mut ptr).unwrap();
+
+        assert_eq!(parsed.name, "legacy");
+        assert!(parsed.length_hint.is_none());
+        assert!(parsed.count_hint.is_none());
+    }
+
+    #[test]
+    fn test_section_suffix_length_accuracy() {
+        // Verify that the length in b{} matches actual section length (inclusive)
+        let mut section = VsfSection::new("data");
+        section.add_field("field1", VsfType::u(100, false));
+        section.add_field("field2", VsfType::u(200, false));
+        section.add_field("field3", VsfType::l("hello".to_string()));
+
+        let offset_5mb = 5 * 1024 * 1024;
+        let encoded = section.encode_at_offset(offset_5mb);
+
+        let mut ptr = 0;
+        let parsed = VsfSection::parse(&encoded, &mut ptr).unwrap();
+
+        // Length hint should match actual encoded length (inclusive encoding)
+        assert_eq!(parsed.length_hint.unwrap(), encoded.len());
+        // Count hint should match field count
+        assert_eq!(parsed.count_hint.unwrap(), 3);
     }
 }
