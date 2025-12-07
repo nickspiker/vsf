@@ -1173,55 +1173,51 @@ pub fn add_encryption_metadata(
     )
 }
 
-/// Verify the provenance hash (hp) in a VSF header
+/// Check if a VSF file is an unmodified original by verifying the provenance hash (hp).
+///
+/// The provenance hash identifies the original content. This function verifies that
+/// the file content matches its claimed identity - i.e., it hasn't been modified
+/// since creation.
+///
+/// Note: This does NOT verify integrity of signed/updated files. For files that have
+/// been signed or updated, use signature verification instead. The provenance hash
+/// is computed with crypto fields zeroed, so it represents the original content
+/// identity regardless of later signatures.
 ///
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file bytes
 ///
 /// # Returns
-/// `Ok(())` if hash is valid, `Err` with description if invalid or missing
-pub fn verify_provenance_hash(vsf_bytes: &[u8]) -> Result<(), String> {
+/// `Ok(())` if file is an unmodified original, `Err` if modified or invalid
+pub fn is_original(vsf_bytes: &[u8]) -> Result<(), String> {
+    use crate::file_format::VsfHeader;
+
     let computed_hash = compute_provenance_hash(vsf_bytes)?;
 
-    // Parse to get stored hash
-    let mut pointer = 4; // Skip "RÅ<"
+    let (header, _) = VsfHeader::decode(vsf_bytes)?;
 
-    let _header_length = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse header length: {}", e))?;
-    let _version =
-        parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
-    let _backward = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
-    let _creation_time = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse creation time: {}", e))?;
-
-    let hash_type = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse provenance hash: {}", e))?;
-
-    let stored_hash = match hash_type {
+    let stored_hash = match &header.provenance_hash {
+        VsfType::hp(hash_bytes) if hash_bytes.len() == 32 => hash_bytes,
         VsfType::hp(hash_bytes) => {
-            if hash_bytes.len() != 32 {
-                return Err(format!(
-                    "Invalid hash size: expected 32 bytes, found {}",
-                    hash_bytes.len()
-                ));
-            }
-            hash_bytes
+            return Err(format!(
+                "Invalid provenance hash size: expected 32 bytes, found {}",
+                hash_bytes.len()
+            ))
         }
-        _ => return Err("Expected BLAKE3 provenance hash type (hp) in header".to_string()),
+        _ => return Err("Missing provenance hash (hp) in header".to_string()),
     };
 
     if computed_hash.as_slice() == stored_hash.as_slice() {
         Ok(())
     } else {
-        Err(
-            "Provenance hash verification failed: computed hash does not match stored hash"
-                .to_string(),
-        )
+        Err("File has been modified - provenance hash does not match content".to_string())
     }
 }
 
-/// Verify the rolling hash (hb) in a VSF header
+/// Verify the rolling hash (hb) in a VSF header.
+///
+/// The rolling hash covers the entire file including any modifications/signatures,
+/// providing integrity verification for the current file state.
 ///
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file bytes
@@ -1229,51 +1225,27 @@ pub fn verify_provenance_hash(vsf_bytes: &[u8]) -> Result<(), String> {
 /// # Returns
 /// `Ok(())` if hash is valid, `Err` with description if invalid or missing
 pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
+    use crate::file_format::VsfHeader;
+
     let computed_hash = compute_file_hash(vsf_bytes)?;
 
-    // Parse to get stored hash
-    let mut pointer = 4; // Skip "RÅ<"
+    let (header, _) = VsfHeader::decode(vsf_bytes)?;
 
-    let _header_length = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse header length: {}", e))?;
-    let _version =
-        parse(vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
-    let _backward = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
-    let _creation_time = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse creation time: {}", e))?;
-    let _hp = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse provenance hash: {}", e))?;
-
-    // Skip optional signature
-    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'g' {
-        let _sig = parse(vsf_bytes, &mut pointer)
-            .map_err(|e| format!("Failed to parse signature: {}", e))?;
-    }
-
-    let hash_type = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse rolling hash: {}", e))?;
-
-    let stored_hash = match hash_type {
-        VsfType::hb(hash_bytes) => {
-            if hash_bytes.len() != 32 {
-                return Err(format!(
-                    "Invalid hash size: expected 32 bytes, found {}",
-                    hash_bytes.len()
-                ));
-            }
-            hash_bytes
+    let stored_hash = match &header.rolling_hash {
+        Some(VsfType::hb(hash_bytes)) if hash_bytes.len() == 32 => hash_bytes,
+        Some(VsfType::hb(hash_bytes)) => {
+            return Err(format!(
+                "Invalid rolling hash size: expected 32 bytes, found {}",
+                hash_bytes.len()
+            ))
         }
-        _ => return Err("Expected BLAKE3 rolling hash type (hb) in header".to_string()),
+        _ => return Err("Missing rolling hash (hb) in header".to_string()),
     };
 
     if computed_hash.as_slice() == stored_hash.as_slice() {
         Ok(())
     } else {
-        Err(
-            "Rolling hash verification failed: computed hash does not match stored hash"
-                .to_string(),
-        )
+        Err("Rolling hash verification failed: file has been modified".to_string())
     }
 }
 

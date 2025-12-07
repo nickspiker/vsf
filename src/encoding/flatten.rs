@@ -490,6 +490,20 @@ impl VsfType {
                 flat
             }
 
+            VsfType::kn(value) => {
+                let mut flat = vec![b'k', b'n'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::kh(value) => {
+                let mut flat = vec![b'k', b'h'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
             // ==================== SHARED SECRET ====================
             VsfType::ks(value) => {
                 let mut flat = vec![b'k', b's'];
@@ -4059,6 +4073,8 @@ impl VsfType {
             | VsfType::km(bytes)
             | VsfType::kf(bytes)
             | VsfType::kl(bytes)
+            | VsfType::kn(bytes)
+            | VsfType::kh(bytes)
             | VsfType::ks(bytes) => {
                 // prefix + encoded_length + data
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
