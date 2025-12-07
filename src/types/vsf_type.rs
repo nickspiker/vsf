@@ -656,6 +656,8 @@ pub enum VsfType {
     km(Vec<u8>), // ML-KEM public key (800/1184/1568B for 512/768/1024 - size disambiguates)
     kf(Vec<u8>), // FrodoKEM public key (9616/15632/21520B for 640/976/1344 - size disambiguates)
     kl(Vec<u8>), // Classic McEliece public key (up to ~1MB - size disambiguates variant)
+    kn(Vec<u8>), // NTRU public key (699/930/1230B for HPS-509/677/821, 1138B for HRSS-701)
+    kh(Vec<u8>), // HQC public key (2249/4522/7245B for 128/192/256 - size disambiguates)
 
     // Shared secret (output of key agreement/decapsulation)
     ks(Vec<u8>), // Shared secret / derived key material (typically 32B)
@@ -701,6 +703,12 @@ pub enum VsfType {
     /// - 'e' = Encryption (algorithm-specific)
     /// - 'u' = Measurement in specified units
     ///
+    /// KEM ciphertext identifiers (for key encapsulation):
+    /// - 'f' = FrodoKEM ciphertext (15744/21632/31296B for 640/976/1344)
+    /// - 'n' = NTRU ciphertext (699/930/1230B for HPS, 1138B for HRSS-701)
+    /// - 'l' = Classic McEliece ciphertext (128/188/240B depending on variant)
+    /// - 'h' = HQC ciphertext (4481/9026/14469B for 128/192/256)
+    ///
     /// Example usage:
     /// ```ignore
     /// // Compress VSF Bytes with zstd
@@ -711,6 +719,9 @@ pub enum VsfType {
     /// // Can nest wrappers (compress then error-correct)
     /// let inner = VsfType::v(b'z', compressed_bytes);
     /// let outer = VsfType::v(b'r', reed_solomon_encode(&inner.flatten()));
+    ///
+    /// // KEM ciphertext (FrodoKEM-976 encapsulation output)
+    /// let ciphertext = VsfType::v(b'f', frodo_ciphertext_bytes);
     /// ```
     ///
     /// Use when your application needs compression, error correction, encryption, units or other encoding.

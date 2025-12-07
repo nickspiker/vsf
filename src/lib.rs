@@ -65,8 +65,8 @@
 //!   ...
 //! >                                    Header end
 //!
-//! [draw_image (section_fields...)]           Section data at offset
-//! [dthumbnail (section_fields...)]
+//! [d{raw_image} (section_fields...)]           Section data at offset
+//! [d{thumbnail} (section_fields...)]
 //! ```
 //!
 //! **Hash Strategy (Always BLAKE3):**
@@ -96,10 +96,10 @@
 //! A section with hierarchical fields for camera metadata:
 //!
 //! ```text
-//! [dImaging
-//!   (lshutter_speed:f6{0.01})      // 1/100s as f64
-//!   (laperture:f5{2.8})            // f/2.8 as f32
-//!   (liso:u4{400})                 // ISO 400
+//! [d{Imaging}
+//!   (l{shutter_speed}:f6{0.01})      // 1/100s as f64
+//!   (l{aperture}:f5{2.8})            // f/2.8 as f32
+//!   (l{iso}:u4{400})                 // ISO 400
 //! ]
 //! ```
 //!

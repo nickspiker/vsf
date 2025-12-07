@@ -392,6 +392,8 @@ pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
         b'm' => Ok(VsfType::km(key)),
         b'f' => Ok(VsfType::kf(key)),
         b'l' => Ok(VsfType::kl(key)),
+        b'n' => Ok(VsfType::kn(key)), // NTRU public key
+        b'h' => Ok(VsfType::kh(key)), // HQC public key
         b's' => Ok(VsfType::ks(key)), // Shared secret
         _ => Err(Error::new(
             ErrorKind::InvalidData,
