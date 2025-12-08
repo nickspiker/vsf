@@ -1,13 +1,285 @@
 //! VSF inspection and formatting utilities
 //!
 //! Provides human-readable coloured formatting for VSF types, headers, and sections.
-//! Used by vsfinfo CLI and can be embedded in other applications (photon, etc.).
+//! Used by vsfinfo CLI and can be embedded in other applications (photon, fgtw, etc.).
+//!
+//! Supports multiple output formats via `OutputFormat`:
+//! - `Terminal` - ANSI escape codes for terminal display
+//! - `Html` - CSS-styled spans for web display
+//! - `Plain` - No colour codes, just text
 
 use crate::decoding::parse::parse;
 use crate::file_format::{VsfField, VsfHeader};
 use crate::types::{EagleTime, EtType, VsfType};
 use chrono::{Datelike, Local, Timelike};
 use colored::*;
+
+/// Output format for VSF inspection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputFormat {
+    /// ANSI escape codes for terminal display
+    #[default]
+    Terminal,
+    /// HTML with inline CSS styles
+    Html,
+    /// Plain text, no colour codes
+    Plain,
+    // Future formats:
+    // Rtf,      // Rich Text Format
+    // Pdf,      // PDF with colour
+    // Spectral, // VSF-native spectral colour encoding
+}
+
+/// Colour roles for semantic styling
+#[derive(Debug, Clone, Copy)]
+pub enum Colour {
+    /// Data values - brightest (white)
+    Data,
+    /// Type markers - cyan
+    Type,
+    /// Size/count values - soft yellow
+    Size,
+    /// Labels and descriptions - mid grey
+    Label,
+    /// Punctuation - dark grey
+    Punct,
+    /// Tree lines - darkest grey
+    Tree,
+    /// Success status - soft green
+    Pass,
+    /// Error status - soft red
+    Fail,
+    /// Bold variant of Data
+    DataBold,
+}
+
+/// Styler for format-agnostic colour output
+#[derive(Debug, Clone, Copy)]
+pub struct Styler {
+    format: OutputFormat,
+}
+
+impl Styler {
+    pub fn new(format: OutputFormat) -> Self {
+        Self { format }
+    }
+
+    /// Apply colour to text based on output format
+    pub fn style(&self, text: &str, colour: Colour) -> String {
+        match self.format {
+            OutputFormat::Terminal => self.terminal_style(text, colour),
+            OutputFormat::Html => self.html_style(text, colour),
+            OutputFormat::Plain => text.to_string(),
+        }
+    }
+
+    fn terminal_style(&self, text: &str, colour: Colour) -> String {
+        match colour {
+            Colour::Data => text.white().to_string(),
+            Colour::DataBold => text.white().bold().to_string(),
+            Colour::Type => text.cyan().to_string(),
+            Colour::Size => text.truecolor(200, 200, 100).to_string(),
+            Colour::Label => text.truecolor(128, 128, 128).to_string(),
+            Colour::Punct => text.truecolor(100, 100, 100).to_string(),
+            Colour::Tree => text.truecolor(64, 64, 64).to_string(),
+            Colour::Pass => text.truecolor(100, 220, 100).to_string(),
+            Colour::Fail => text.truecolor(220, 100, 100).to_string(),
+        }
+    }
+
+    fn html_style(&self, text: &str, colour: Colour) -> String {
+        let css = match colour {
+            Colour::Data => "color:#ffffff",
+            Colour::DataBold => "color:#ffffff;font-weight:bold",
+            Colour::Type => "color:#4ec9b0",
+            Colour::Size => "color:#c8c864",
+            Colour::Label => "color:#808080",
+            Colour::Punct => "color:#646464",
+            Colour::Tree => "color:#404040",
+            Colour::Pass => "color:#64dc64",
+            Colour::Fail => "color:#dc6464",
+        };
+        // Escape HTML entities
+        let escaped = text
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+        format!("<span style='{}'>{}</span>", css, escaped)
+    }
+
+    /// Tree drawing characters with appropriate styling
+    pub fn tree_vert(&self) -> String {
+        self.style(BOX_VERT, Colour::Tree)
+    }
+
+    pub fn tree_corner(&self) -> String {
+        self.style(&format!("{}{}", BOX_CORNER, BOX_HORIZ), Colour::Tree)
+    }
+
+    pub fn tree_tee(&self) -> String {
+        self.style(&format!("{}{}", BOX_TEE, BOX_HORIZ), Colour::Tree)
+    }
+}
+
+/// Convert ANSI escape codes to HTML spans
+/// Supports truecolor (38;2;r;g;b), basic colors, and bold
+pub fn ansi_to_html(input: &str) -> String {
+    let mut output = String::with_capacity(input.len() * 2);
+    let mut chars = input.chars().peekable();
+    let mut in_span = false;
+
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Start of escape sequence
+            if chars.peek() == Some(&'[') {
+                chars.next(); // consume '['
+                let mut params = String::new();
+                while let Some(&pc) = chars.peek() {
+                    if pc.is_ascii_digit() || pc == ';' {
+                        params.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                if chars.peek() == Some(&'m') {
+                    chars.next(); // consume 'm'
+
+                    // Close any existing span
+                    if in_span {
+                        output.push_str("</span>");
+                        in_span = false;
+                    }
+
+                    // Parse SGR parameters
+                    if params == "0" || params.is_empty() {
+                        // Reset - don't open new span
+                    } else {
+                        let css = parse_sgr_to_css(&params);
+                        if !css.is_empty() {
+                            output.push_str(&format!("<span style='{}'>", css));
+                            in_span = true;
+                        }
+                    }
+                }
+            }
+        } else {
+            // Escape HTML entities
+            match c {
+                '<' => output.push_str("&lt;"),
+                '>' => output.push_str("&gt;"),
+                '&' => output.push_str("&amp;"),
+                '\n' => {
+                    if in_span {
+                        output.push_str("</span>");
+                    }
+                    output.push('\n');
+                    if in_span {
+                        // Re-open span on new line (for pre blocks)
+                        // Actually, let's not - cleaner HTML
+                        in_span = false;
+                    }
+                }
+                _ => output.push(c),
+            }
+        }
+    }
+
+    if in_span {
+        output.push_str("</span>");
+    }
+
+    output
+}
+
+/// Parse SGR (Select Graphic Rendition) parameters to CSS
+fn parse_sgr_to_css(params: &str) -> String {
+    let parts: Vec<&str> = params.split(';').collect();
+    let mut css = Vec::new();
+    let mut i = 0;
+
+    while i < parts.len() {
+        match parts[i] {
+            "0" => {} // Reset
+            "1" => css.push("font-weight:bold".to_string()),
+            "38" if i + 4 < parts.len() && parts[i + 1] == "2" => {
+                // Truecolor foreground: 38;2;r;g;b
+                let r = parts[i + 2];
+                let g = parts[i + 3];
+                let b = parts[i + 4];
+                css.push(format!("color:rgb({},{},{})", r, g, b));
+                i += 4;
+            }
+            "48" if i + 4 < parts.len() && parts[i + 1] == "2" => {
+                // Truecolor background: 48;2;r;g;b
+                let r = parts[i + 2];
+                let g = parts[i + 3];
+                let b = parts[i + 4];
+                css.push(format!("background:rgb({},{},{})", r, g, b));
+                i += 4;
+            }
+            // Basic colors (30-37 foreground, 40-47 background)
+            "30" => css.push("color:#000".to_string()),
+            "31" => css.push("color:#c00".to_string()),
+            "32" => css.push("color:#0c0".to_string()),
+            "33" => css.push("color:#cc0".to_string()),
+            "34" => css.push("color:#00c".to_string()),
+            "35" => css.push("color:#c0c".to_string()),
+            "36" => css.push("color:#0cc".to_string()),
+            "37" => css.push("color:#ccc".to_string()),
+            // Bright colors (90-97)
+            "90" => css.push("color:#666".to_string()),
+            "91" => css.push("color:#f66".to_string()),
+            "92" => css.push("color:#6f6".to_string()),
+            "93" => css.push("color:#ff6".to_string()),
+            "94" => css.push("color:#66f".to_string()),
+            "95" => css.push("color:#f6f".to_string()),
+            "96" => css.push("color:#6ff".to_string()),
+            "97" => css.push("color:#fff".to_string()),
+            _ => {}
+        }
+        i += 1;
+    }
+
+    css.join(";")
+}
+
+/// Inspect VSF and return HTML-formatted output
+pub fn inspect_vsf_html(data: &[u8]) -> Result<String, String> {
+    let terminal_output = inspect_vsf(data)?;
+    Ok(ansi_to_html(&terminal_output))
+}
+
+/// Inspect VSF and return plain text (no colours)
+pub fn inspect_vsf_plain(data: &[u8]) -> Result<String, String> {
+    let terminal_output = inspect_vsf(data)?;
+    Ok(strip_ansi(&terminal_output))
+}
+
+/// Strip ANSI escape codes from string
+pub fn strip_ansi(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Skip escape sequence
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                while let Some(&pc) = chars.peek() {
+                    if pc == 'm' {
+                        chars.next();
+                        break;
+                    }
+                    chars.next();
+                }
+            }
+        } else {
+            output.push(c);
+        }
+    }
+
+    output
+}
 
 // Box-drawing characters (heavy variants for consistent stroke weight)
 const BOX_VERT: &str = "┃";      // U+2503 Heavy vertical
