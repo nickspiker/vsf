@@ -1166,12 +1166,15 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             }
         }
         if let Some(ref wrap) = label.wrap {
-            // wrap is VsfType::v(algo, data) - show ve with explanation
-            if let VsfType::v(algo, _) = wrap {
+            // wrap is VsfType::v(algo, data) - show ve{size} with explanation
+            if let VsfType::v(algo, data) = wrap {
                 crypto_parts.push(format!(
-                    "{}{} {}",
+                    "{}{}{}{}{} {}",
                     "v".cyan(),
                     (*algo as char).to_string().cyan(),
+                    tc("{", 100, 100, 100),
+                    data.len().to_string().truecolor(200, 200, 100),
+                    tc("}", 100, 100, 100),
                     tc("(encrypted body)", 128, 128, 128)
                 ));
             }
