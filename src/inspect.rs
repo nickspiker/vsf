@@ -245,6 +245,8 @@ fn parse_sgr_to_css(params: &str) -> String {
 
 /// Inspect VSF and return HTML-formatted output
 pub fn inspect_vsf_html(data: &[u8]) -> Result<String, String> {
+    // Force colour output even when not connected to a TTY (e.g., WASM)
+    colored::control::set_override(true);
     let terminal_output = inspect_vsf(data)?;
     Ok(ansi_to_html(&terminal_output))
 }
