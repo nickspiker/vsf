@@ -404,6 +404,20 @@ impl VsfType {
                 flat
             }
 
+            VsfType::hc(value) => {
+                let mut flat = vec![b'h', b'c'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(&value);
+                flat
+            }
+
+            VsfType::hk(value) => {
+                let mut flat = vec![b'h', b'k'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(&value);
+                flat
+            }
+
             // ==================== SIGNATURES ====================
             VsfType::ge(value) => {
                 let mut flat = vec![b'g', b'e'];
@@ -423,6 +437,27 @@ impl VsfType {
                 let mut flat = vec![b'g', b'r'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value); // Write actual signature bytes
+                flat
+            }
+
+            VsfType::gd(value) => {
+                let mut flat = vec![b'g', b'd'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::gs(value) => {
+                let mut flat = vec![b'g', b's'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::gf(value) => {
+                let mut flat = vec![b'g', b'f'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
                 flat
             }
 
@@ -504,6 +539,20 @@ impl VsfType {
                 flat
             }
 
+            VsfType::kd(value) => {
+                let mut flat = vec![b'k', b'd'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::kb(value) => {
+                let mut flat = vec![b'k', b'b'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
             // ==================== SHARED SECRET ====================
             VsfType::ks(value) => {
                 let mut flat = vec![b'k', b's'];
@@ -515,13 +564,6 @@ impl VsfType {
             // ==================== MAC (MESSAGE AUTHENTICATION CODE) ====================
             VsfType::ah(value) => {
                 let mut flat = vec![b'a', b'h'];
-                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
-                flat.extend_from_slice(value);
-                flat
-            }
-
-            VsfType::at(value) => {
-                let mut flat = vec![b'a', b't'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
@@ -4081,7 +4123,6 @@ impl VsfType {
             }
 
             VsfType::ah(bytes)
-            | VsfType::at(bytes)
             | VsfType::ap(bytes)
             | VsfType::ab(bytes)
             | VsfType::ac(bytes) => {

@@ -133,7 +133,6 @@ pub struct HeaderField {
     pub hash: Option<VsfType>, // h: optional hash of section data (VsfType::h)
     pub signature: Option<VsfType>, // g: optional signature of section data (VsfType::g)
     pub key: Option<VsfType>,  // k: optional cryptographic key (VsfType::k)
-    pub wrap: Option<VsfType>, // v: optional wrapped/encrypted marker (VsfType::v)
     pub offset_bytes: usize,   // Offset in bytes (byte-aligned)
     pub size_bytes: usize,     // Size in bytes (byte-aligned)
     pub child_count: usize,    // 0 = unboxed blob, N = N structured children
@@ -237,24 +236,16 @@ impl VsfHeader {
                 header.push(b',');
             }
 
-            // Optional wrap (VsfType::v with algorithm)
-            if let Some(ref wrap_type) = field.wrap {
-                header.extend_from_slice(&wrap_type.flatten());
-                header.push(b',');
-            }
-
             // Offset (in bytes)
             header.extend_from_slice(&VsfType::o(field.offset_bytes).flatten());
             header.push(b',');
 
             // Size (in bytes)
             header.extend_from_slice(&VsfType::b(field.size_bytes, false).flatten());
+            header.push(b',');
 
-            // Child count - omit if encrypted (implied to be n[0])
-            if field.wrap.is_none() {
-                header.push(b',');
-                header.extend_from_slice(&VsfType::n(field.child_count).flatten());
-            }
+            // Child count
+            header.extend_from_slice(&VsfType::n(field.child_count).flatten());
 
             header.push(b')');
         }
@@ -411,7 +402,6 @@ impl VsfHeader {
             let mut hash = None;
             let mut signature = None;
             let mut key = None;
-            let mut wrap = None;
             let mut offset_bytes = 0;
             let mut size_bytes = 0;
             let mut child_count = 0;
@@ -431,10 +421,6 @@ impl VsfHeader {
                     VsfType::ke(_) | VsfType::kx(_) | VsfType::kc(_) | VsfType::ka(_) => {
                         key = Some(value.clone());
                     }
-                    // Wrapped/encrypted marker
-                    VsfType::v(_, _) => {
-                        wrap = Some(value.clone());
-                    }
                     // Offset - indicates this field points to a section body
                     VsfType::o(o) => {
                         offset_bytes = *o;
@@ -448,7 +434,7 @@ impl VsfHeader {
                     VsfType::n(n) => {
                         child_count = *n;
                     }
-                    _ => {} // Ignore other types
+                    _ => {} // Ignore other types (including legacy wrap markers)
                 }
             }
 
@@ -465,7 +451,6 @@ impl VsfHeader {
                 hash,
                 signature,
                 key,
-                wrap,
                 offset_bytes,
                 size_bytes,
                 child_count,
@@ -834,6 +819,54 @@ impl VsfSection {
         self.encode_at_offset(0)
     }
 
+    /// Encode section for encryption (always includes n{count}b{length})
+    ///
+    /// Use this when encoding a section that will be encrypted and sent without
+    /// a VSF header. The `n` and `b` fields allow validation after decryption.
+    ///
+    /// Format: [d{name}n{count}b{length}(field:value)...]
+    pub fn encode_encrypted(&self) -> Vec<u8> {
+        if self.fields.is_empty() {
+            return Vec::new();
+        }
+
+        let mut bytes = Vec::new();
+        bytes.push(b'[');
+
+        // Section name
+        let name_bytes = VsfType::d(self.name.clone()).flatten();
+        bytes.extend_from_slice(&name_bytes);
+
+        // Encode fields to know their size
+        let mut fields_bytes = Vec::new();
+        for field in &self.fields {
+            fields_bytes.extend_from_slice(&field.flatten());
+        }
+
+        // n{count}
+        let n_encoded = VsfType::n(self.fields.len()).flatten();
+
+        // b{length} with inclusive encoding (includes its own size)
+        let base_without_b = 1 + name_bytes.len() + n_encoded.len() + fields_bytes.len() + 1;
+        let mut b_encoded = VsfType::b(base_without_b, true).flatten();
+
+        loop {
+            let total = base_without_b + b_encoded.len();
+            let new_b = VsfType::b(total, true).flatten();
+            if new_b.len() == b_encoded.len() {
+                b_encoded = new_b;
+                break;
+            }
+            b_encoded = new_b;
+        }
+
+        bytes.extend_from_slice(&n_encoded);
+        bytes.extend_from_slice(&b_encoded);
+        bytes.extend_from_slice(&fields_bytes);
+        bytes.push(b']');
+        bytes
+    }
+
     /// Encode section with optional `n{count}b{length}` suffix for large files.
     ///
     /// When `file_offset > 1MB`, appends metadata AFTER the section name for fast
@@ -1055,7 +1088,6 @@ mod tests {
             hash: None,
             signature: None,
             key: None,
-            wrap: None,
             offset_bytes: 512,
             size_bytes: 256,
             child_count: 3,
@@ -1197,7 +1229,6 @@ mod tests {
             hash: None,
             signature: None,
             key: None,
-            wrap: None,
             offset_bytes: 256,
             size_bytes: 128,
             child_count: 2,
@@ -1229,10 +1260,9 @@ mod tests {
             hash: Some(VsfType::hb(vec![0u8; 32])), // BLAKE3 rolling hash
             signature: Some(VsfType::ge(vec![0u8; 64])), // Ed25519 signature
             key: Some(VsfType::kx(vec![0u8; 32])),  // X25519 key
-            wrap: Some(VsfType::v(0, vec![0u8; 0])), // Encrypted marker
             offset_bytes: 512,
             size_bytes: 1024,
-            child_count: 0, // Encrypted sections have n[0]
+            child_count: 0,
         });
 
         // Encode it
@@ -1248,7 +1278,6 @@ mod tests {
         assert!(decoded.fields[0].hash.is_some());
         assert!(decoded.fields[0].signature.is_some());
         assert!(decoded.fields[0].key.is_some());
-        assert!(decoded.fields[0].wrap.is_some());
         assert_eq!(decoded.fields[0].child_count, 0);
         assert_eq!(bytes_consumed, encoded.len());
     }

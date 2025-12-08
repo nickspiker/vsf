@@ -113,6 +113,60 @@ use super::world_coord::WorldCoord;
 #[derive(Debug, Clone)]
 #[allow(non_camel_case_types)]
 pub enum VsfType {
+    // VSF Structure
+    d(String),      // Dictionary key (internal naming: section names, field names, keys)
+    l(String),      // ASCII text (user-facing, ASCII-only alternative to x)
+    o(usize),       // Offset in Bytes
+    b(usize, bool), // Length in Bytes (value, inclusive_mode)
+    n(usize),       // Number/count
+    z(usize),       // Version
+    y(usize),       // Backward version
+    m(usize),       // Marker
+
+    // ==================== CRYPTOGRAPHIC TYPES ====================
+    // Hash algorithms
+    hp(Vec<u8>), // BLAKE3 provenance hash (immutable content identity)
+    hb(Vec<u8>), // BLAKE3 rolling hash (current file state)
+    hs(Vec<u8>), // SHA hash (SHA-256, SHA-512, etc.)
+    hc(Vec<u8>), // SHA-3/Keccak
+    hk(Vec<u8>), // BLAKE2
+
+    // Signature algorithms
+    ge(Vec<u8>), // Ed25519 signature
+    gp(Vec<u8>), // ECDSA-P256 signature
+    gd(Vec<u8>), // Dilithium/ML-DSA
+    gs(Vec<u8>), // Sphincs+
+    gf(Vec<u8>), // Falcon
+    #[deprecated(
+        since = "0.1.7",
+        note = "RSA is legacy - prefer Ed25519 for new applications"
+    )]
+    gr(Vec<u8>), // RSA signature (deprecated)
+
+    // Cryptographic keys
+    ke(Vec<u8>), // Ed25519 public key (32B)
+    kx(Vec<u8>), // X25519 public key (32B)
+    kp(Vec<u8>), // ECDSA/ECDH P-curve keys (33/65B P-256, 49/97B P-384 - size disambiguates)
+    kk(Vec<u8>), // secp256k1 public key (33B compressed)
+    kc(Vec<u8>), // ChaCha20-Poly1305 symmetric key (32B)
+    ka(Vec<u8>), // AES-256-GCM symmetric key (32B)
+    km(Vec<u8>), // ML-KEM public key (800/1184/1568B for 512/768/1024 - size disambiguates)
+    kf(Vec<u8>), // FrodoKEM public key (9616/15632/21520B for 640/976/1344 - size disambiguates)
+    kl(Vec<u8>), // Classic McEliece public key (up to ~1MB - size disambiguates variant)
+    kn(Vec<u8>), // NTRU public key (699/930/1230B for HPS-509/677/821, 1138B for HRSS-701)
+    kh(Vec<u8>), // HQC public key (2249/4522/7245B for 128/192/256 - size disambiguates)
+    kd(Vec<u8>), // Dilithium/ML-DSA public key
+    kb(Vec<u8>), // BIKE public key
+
+    // Shared secret (output of key agreement/decapsulation)
+    ks(Vec<u8>), // Shared secret / derived key material (typically 32B)
+
+    // MAC (Message Authentication Code)
+    ah(Vec<u8>), // HMAC-SHA256 (32B or 64B)
+    ap(Vec<u8>), // Poly1305 (16B)
+    ab(Vec<u8>), // BLAKE3-keyed (variable, default 32B)
+    ac(Vec<u8>), // CMAC-AES (16B)
+
     // ==================== UNSIGNED INTEGERS ====================
     u0(bool),       // Boolean
     u(usize, bool), // Auto-sized unsigned (value, inclusive_mode)
@@ -137,6 +191,166 @@ pub enum VsfType {
     // ==================== IEEE COMPLEX ====================
     j5(Complex<f32>), // Complex<f32>
     j6(Complex<f64>), // Complex<f64>
+
+    // ==================== METADATA & SPECIAL TYPES ====================
+    x(String),     // UTF-8 text (Unicode, user-facing, Huffman compressed)
+    e(EtType),     // Eagle Time
+    w(WorldCoord), // World coordinate (Dymaxion icosahedral)
+
+    // ==================== VECTORS (1D CONTIGUOUS) ====================
+    /// 1D contiguous vectors - compact encoding with count marker
+    /// Binary format: [t][n][count][type][data...]
+    /// Where n indicates 1D (count) vs multi-dimensional (shape)
+    /// Primitive element types
+    v_u0(Vector<bool>), // Bit-packed bools (8 per byte)
+    v_u3(Vector<u8>),
+    v_u4(Vector<u16>),
+    v_u5(Vector<u32>),
+    v_u6(Vector<u64>),
+    v_u7(Vector<u128>),
+    v_i3(Vector<i8>),
+    v_i4(Vector<i16>),
+    v_i5(Vector<i32>),
+    v_i6(Vector<i64>),
+    v_i7(Vector<i128>),
+    v_f5(Vector<f32>),
+    v_f6(Vector<f64>),
+    v_j5(Vector<Complex<f32>>),
+    v_j6(Vector<Complex<f64>>),
+
+    // ==================== WRAPPED/ENCODED DATA ====================
+    /// Wrapped/encoded VSF data with compression, error correction, encryption, units or other encoding
+    ///
+    /// Format: v[encoding][encoded_data]
+    ///
+    /// Encoding identifiers (single ASCII character):
+    /// - 'a' = AV1 video codec (image/video compression)
+    /// - 'z' = zstd compression
+    /// - 'r' = Reed-Solomon error correction
+    /// - 'x' = XZ/LZMA compression
+    /// - 'e' = Encryption (algorithm-specific)
+    /// - 'u' = Measurement in specified units
+    ///
+    /// KEM ciphertext identifiers (for key encapsulation):
+    /// - 'f' = FrodoKEM ciphertext (15744/21632/31296B for 640/976/1344)
+    /// - 'n' = NTRU ciphertext (699/930/1230B for HPS, 1138B for HRSS-701)
+    /// - 'l' = Classic McEliece ciphertext (128/188/240B depending on variant)
+    /// - 'h' = HQC ciphertext (4481/9026/14469B for 128/192/256)
+    ///
+    /// Example usage:
+    /// ```ignore
+    /// // Compress VSF Bytes with zstd
+    /// let original = VsfType::t_u3(tensor);
+    /// let compressed = compress_zstd(&original.flatten());
+    /// let wrapped = VsfType::v(b'z', compressed);
+    ///
+    /// // Can nest wrappers (compress then error-correct)
+    /// let inner = VsfType::v(b'z', compressed_bytes);
+    /// let outer = VsfType::v(b'r', reed_solomon_encode(&inner.flatten()));
+    ///
+    /// // KEM ciphertext (FrodoKEM-976 encapsulation output)
+    /// let ciphertext = VsfType::v(b'f', frodo_ciphertext_bytes);
+    /// ```
+    ///
+    /// Use when your application needs compression, error correction, encryption, units or other encoding.
+    v(u8, Vec<u8>), // Wrapped data (encoding byte, encoded Bytes)
+
+    // ==================== COLOUR TYPES ====================
+    /// VSF Colour Encoding
+    ///
+    /// # Format Overview
+    ///
+    /// ## 0. General Format: `r[channels][depth][data]`
+    /// - **channels**: Single byte base-36 digit (0-9, A-Z) = 0-35 channels
+    /// - **depth**: Single byte digit (0-9) where bits_per_channel = 2^depth
+    ///   - 0 → 1 bit, 1 → 2 bits, 2 → 4 bits, 3 → 8 bits
+    ///   - 4 → 16 bits, 5 → 32 bits, 6 → 64 bits, 7 → 128 bits, 8 → 256 bits, 9 → 512 bits. Uppercase letters might be used for depths > 9 or float types in future versions.
+    /// - **data**: channel_count × (2^depth / 8) bytes
+    ///
+    /// Examples:
+    /// - `r33[3 bytes]` = 3 channels × 8 bits = RGB
+    /// - `r45[8 bytes]` = 4 channels × 32 bits = RGBA (integer)
+    /// - `rG3[16 bytes]` = 16 channels × 8 bits = multispectral
+    ///
+    /// ## 1. Named Shortcuts (zero-data, 2 bytes total)
+    /// - `rb` = Blue       - `rc` = Cyan      - `rg` = Middle grey (50%)
+    /// - `rj` = Magenta    - `rk` = Black     - `rl` = Lime
+    /// - `rn` = Green      - `ro` = Orange    - `rq` = Aqua
+    /// - `rr` = Red        - `rv` = Violet    - `rw` = White
+    /// - `ry` = Yellow
+    ///
+    /// ## 2. Format Shortcuts (with data, where {#} indicates size in Bytes)
+    /// Greyscale:
+    /// - `re{1}` = 8-bit greyscale
+    /// - `rx{2}` = 16-bit greyscale
+    /// - `rz{4}` = 32-bit float greyscale
+    ///
+    /// Packed RGB:
+    /// - `ri{1}` = 8-bit packed RGB (6×7×6): `((R*7)+G)*6+B` where R∈[0,5], G∈[0,6], B∈[0,5]
+    /// - `rp{2}` = 16-bit packed RGB (5-6-5): `RRRRR GGGGGG BBBBB` (bit-aligned)
+    ///
+    /// Standard RGB/RGBA:
+    /// - `ru{3}` = 24-bit RGB (8 bits per channel)
+    /// - `rs{6}` = 48-bit RGB (16 bits per channel)
+    /// - `rf{12}` = 96-bit RGB (32-bit float × 3)
+    /// - `ra{4}` = 32-bit RGBA (8 bits per channel)
+    /// - `rt{8}` = 64-bit RGBA (16 bits per channel)
+    /// - `rh{16}` = 128-bit RGBA (32-bit float × 4)
+    ///
+    /// ## 3. Magic Matrix: `rm[f5][N][3]{matrix_data}{gamma}`
+    /// Colour transform matrix: N input channels → 3 LMS outputs
+    /// - Format follows tensor notation: 'f' '5' [N] [3] [N×3×4 bytes matrix] [4 bytes gamma]
+    /// - Matrix: N×3 f32 values (4 bytes each)
+    /// - Gamma: Single f32 value (4 bytes), no type prefix
+    /// - Total: 2 + 2 + size(N) + size(3) + (N×3×4) + 4 bytes
+    ///
+    /// # Examples
+    /// ```ignore
+    /// // Purple using 6×7×6 packing: ri{0x83}
+    /// // RGB = (130, 0, 255) → (3, 0, 5) → ((3*7)+0)*6+5 = 131 = 0x83
+    ///
+    /// // Standard RGB red: ru{255, 0, 0}
+    /// // RGBA semi-transparent blue: ra{0, 0, 255, 128}
+    /// // 16-channel spectral: rG3[16 bytes]
+    /// ```
+    // General format colour
+    r(u8, u8, Vec<u8>), // r(channels_base36, depth_exp, data)
+
+    // Named shortcuts (zero-data)
+    rb, // Blue
+    rc, // Cyan
+    rg, // Grey
+    rj, // Magenta
+    rk, // Black
+    rl, // Lime
+    rn, // Green
+    ro, // Orange
+    rq, // Aqua
+    rr, // Red
+    rv, // Purple
+    rw, // White
+    ry, // Yellow
+
+    // Format shortcuts (with data)
+    re(u8),       // 8-bit greyscale
+    rx(u16),      // 16-bit greyscale
+    rz(f32),      // 32-bit float greyscale
+    ri(u8),       // 8-bit packed RGB (6×7×6)
+    rp(u16),      // 16-bit packed RGB (5-6-5)
+    ru([u8; 3]),  // 24-bit RGB (8bpc)
+    rs([u16; 3]), // 48-bit RGB (16bpc)
+    rf([f32; 3]), // 96-bit RGB (32f×3)
+    ra([u8; 4]),  // 32-bit RGBA (8bpc)
+    rt([u16; 4]), // 64-bit RGBA (16bpc)
+    rh([f32; 4]), // 128-bit RGBA (32f×4)
+
+    // Magic matrix colour transform
+    rm(usize, usize, Vec<f32>, f32), // rm(input_channels, output_channels, matrix_NxM, gamma)
+    // Where:
+    // input_channels - Number of input colour channels (N)
+    // output_channels - Number of output colour channels (M, usually 3 for LMS)
+    // matrix_NxM - Flattened N×M matrix as Vec<f32>
+    // gamma - Gamma correction value as f32
 
     // ==================== SPIRIX SCALARS ====================
     #[cfg(feature = "spirix")]
@@ -518,212 +732,4 @@ pub enum VsfType {
 
     // ==================== BITPACKED TENSORS ====================
     p(BitPackedTensor), // Bitpacked tensor (1-256 bits per sample)
-
-    // ==================== METADATA & SPECIAL TYPES ====================
-    x(String),     // UTF-8 text (Unicode, user-facing, Huffman compressed)
-    e(EtType),     // Eagle Time
-    w(WorldCoord), // World coordinate (Dymaxion icosahedral)
-
-    // ==================== COLOUR TYPES ====================
-    /// VSF Colour Encoding
-    ///
-    /// # Format Overview
-    ///
-    /// ## 0. General Format: `r[channels][depth][data]`
-    /// - **channels**: Single byte base-36 digit (0-9, A-Z) = 0-35 channels
-    /// - **depth**: Single byte digit (0-9) where bits_per_channel = 2^depth
-    ///   - 0 → 1 bit, 1 → 2 bits, 2 → 4 bits, 3 → 8 bits
-    ///   - 4 → 16 bits, 5 → 32 bits, 6 → 64 bits, 7 → 128 bits, 8 → 256 bits, 9 → 512 bits. Uppercase letters might be used for depths > 9 or float types in future versions.
-    /// - **data**: channel_count × (2^depth / 8) bytes
-    ///
-    /// Examples:
-    /// - `r33[3 bytes]` = 3 channels × 8 bits = RGB
-    /// - `r45[8 bytes]` = 4 channels × 32 bits = RGBA (integer)
-    /// - `rG3[16 bytes]` = 16 channels × 8 bits = multispectral
-    ///
-    /// ## 1. Named Shortcuts (zero-data, 2 bytes total)
-    /// - `rb` = Blue       - `rc` = Cyan      - `rg` = Middle grey (50%)
-    /// - `rj` = Magenta    - `rk` = Black     - `rl` = Lime
-    /// - `rn` = Green      - `ro` = Orange    - `rq` = Aqua
-    /// - `rr` = Red        - `rv` = Violet    - `rw` = White
-    /// - `ry` = Yellow
-    ///
-    /// ## 2. Format Shortcuts (with data, where {#} indicates size in Bytes)
-    /// Greyscale:
-    /// - `re{1}` = 8-bit greyscale
-    /// - `rx{2}` = 16-bit greyscale
-    /// - `rz{4}` = 32-bit float greyscale
-    ///
-    /// Packed RGB:
-    /// - `ri{1}` = 8-bit packed RGB (6×7×6): `((R*7)+G)*6+B` where R∈[0,5], G∈[0,6], B∈[0,5]
-    /// - `rp{2}` = 16-bit packed RGB (5-6-5): `RRRRR GGGGGG BBBBB` (bit-aligned)
-    ///
-    /// Standard RGB/RGBA:
-    /// - `ru{3}` = 24-bit RGB (8 bits per channel)
-    /// - `rs{6}` = 48-bit RGB (16 bits per channel)
-    /// - `rf{12}` = 96-bit RGB (32-bit float × 3)
-    /// - `ra{4}` = 32-bit RGBA (8 bits per channel)
-    /// - `rt{8}` = 64-bit RGBA (16 bits per channel)
-    /// - `rh{16}` = 128-bit RGBA (32-bit float × 4)
-    ///
-    /// ## 3. Magic Matrix: `rm[f5][N][3]{matrix_data}{gamma}`
-    /// Colour transform matrix: N input channels → 3 LMS outputs
-    /// - Format follows tensor notation: 'f' '5' [N] [3] [N×3×4 bytes matrix] [4 bytes gamma]
-    /// - Matrix: N×3 f32 values (4 bytes each)
-    /// - Gamma: Single f32 value (4 bytes), no type prefix
-    /// - Total: 2 + 2 + size(N) + size(3) + (N×3×4) + 4 bytes
-    ///
-    /// # Examples
-    /// ```ignore
-    /// // Purple using 6×7×6 packing: ri{0x83}
-    /// // RGB = (130, 0, 255) → (3, 0, 5) → ((3*7)+0)*6+5 = 131 = 0x83
-    ///
-    /// // Standard RGB red: ru{255, 0, 0}
-    /// // RGBA semi-transparent blue: ra{0, 0, 255, 128}
-    /// // 16-channel spectral: rG3[16 bytes]
-    /// ```
-    // General format colour
-    r(u8, u8, Vec<u8>), // r(channels_base36, depth_exp, data)
-
-    // Named shortcuts (zero-data)
-    rb, // Blue
-    rc, // Cyan
-    rg, // Grey
-    rj, // Magenta
-    rk, // Black
-    rl, // Lime
-    rn, // Green
-    ro, // Orange
-    rq, // Aqua
-    rr, // Red
-    rv, // Purple
-    rw, // White
-    ry, // Yellow
-
-    // Format shortcuts (with data)
-    re(u8),       // 8-bit greyscale
-    rx(u16),      // 16-bit greyscale
-    rz(f32),      // 32-bit float greyscale
-    ri(u8),       // 8-bit packed RGB (6×7×6)
-    rp(u16),      // 16-bit packed RGB (5-6-5)
-    ru([u8; 3]),  // 24-bit RGB (8bpc)
-    rs([u16; 3]), // 48-bit RGB (16bpc)
-    rf([f32; 3]), // 96-bit RGB (32f×3)
-    ra([u8; 4]),  // 32-bit RGBA (8bpc)
-    rt([u16; 4]), // 64-bit RGBA (16bpc)
-    rh([f32; 4]), // 128-bit RGBA (32f×4)
-
-    // Magic matrix colour transform
-    rm(usize, usize, Vec<f32>, f32), // rm(input_channels, output_channels, matrix_NxM, gamma)
-    // Where:
-    // input_channels - Number of input colour channels (N)
-    // output_channels - Number of output colour channels (M, usually 3 for LMS)
-    // matrix_NxM - Flattened N×M matrix as Vec<f32>
-    // gamma - Gamma correction value as f32
-
-    // VSF Structure
-    d(String),      // Dictionary key (internal naming: section names, field names, keys)
-    l(String),      // ASCII text (user-facing, ASCII-only alternative to x)
-    o(usize),       // Offset in Bytes
-    b(usize, bool), // Length in Bytes (value, inclusive_mode)
-    n(usize),       // Number/count
-    z(usize),       // Version
-    y(usize),       // Backward version
-    m(usize),       // Marker
-
-    // ==================== CRYPTOGRAPHIC TYPES ====================
-    // Hash algorithms
-    hp(Vec<u8>), // BLAKE3 provenance hash (immutable content identity)
-    hb(Vec<u8>), // BLAKE3 rolling hash (current file state)
-    hs(Vec<u8>), // SHA hash (SHA-256, SHA-512, etc.)
-
-    // Signature algorithms
-    ge(Vec<u8>), // Ed25519 signature
-    gp(Vec<u8>), // ECDSA-P256 signature
-    #[deprecated(
-        since = "0.1.7",
-        note = "RSA is legacy - prefer Ed25519 for new applications"
-    )]
-    gr(Vec<u8>), // RSA signature (deprecated)
-
-    // Cryptographic keys
-    ke(Vec<u8>), // Ed25519 public key (32B)
-    kx(Vec<u8>), // X25519 public key (32B)
-    kp(Vec<u8>), // ECDSA/ECDH P-curve keys (33/65B P-256, 49/97B P-384 - size disambiguates)
-    kk(Vec<u8>), // secp256k1 public key (33B compressed)
-    kc(Vec<u8>), // ChaCha20-Poly1305 symmetric key (32B)
-    ka(Vec<u8>), // AES-256-GCM symmetric key (32B)
-    km(Vec<u8>), // ML-KEM public key (800/1184/1568B for 512/768/1024 - size disambiguates)
-    kf(Vec<u8>), // FrodoKEM public key (9616/15632/21520B for 640/976/1344 - size disambiguates)
-    kl(Vec<u8>), // Classic McEliece public key (up to ~1MB - size disambiguates variant)
-    kn(Vec<u8>), // NTRU public key (699/930/1230B for HPS-509/677/821, 1138B for HRSS-701)
-    kh(Vec<u8>), // HQC public key (2249/4522/7245B for 128/192/256 - size disambiguates)
-
-    // Shared secret (output of key agreement/decapsulation)
-    ks(Vec<u8>), // Shared secret / derived key material (typically 32B)
-
-    // MAC (Message Authentication Code)
-    ah(Vec<u8>), // HMAC-SHA256 (32B)
-    at(Vec<u8>), // HMAC-SHA512 (64B) - 't' for "twelve-eight" (512 bits)
-    ap(Vec<u8>), // Poly1305 (16B)
-    ab(Vec<u8>), // BLAKE3-keyed (variable, default 32B)
-    ac(Vec<u8>), // CMAC-AES (16B)
-
-    // ==================== VECTORS (1D CONTIGUOUS) ====================
-    /// 1D contiguous vectors - compact encoding with count marker
-    /// Binary format: [t][n][count][type][data...]
-    /// Where n indicates 1D (count) vs multi-dimensional (shape)
-    /// Primitive element types
-    v_u0(Vector<bool>), // Bit-packed bools (8 per byte)
-    v_u3(Vector<u8>),
-    v_u4(Vector<u16>),
-    v_u5(Vector<u32>),
-    v_u6(Vector<u64>),
-    v_u7(Vector<u128>),
-    v_i3(Vector<i8>),
-    v_i4(Vector<i16>),
-    v_i5(Vector<i32>),
-    v_i6(Vector<i64>),
-    v_i7(Vector<i128>),
-    v_f5(Vector<f32>),
-    v_f6(Vector<f64>),
-    v_j5(Vector<Complex<f32>>),
-    v_j6(Vector<Complex<f64>>),
-
-    // ==================== WRAPPED/ENCODED DATA ====================
-    /// Wrapped/encoded VSF data with compression, error correction, encryption, units or other encoding
-    ///
-    /// Format: v[encoding][encoded_data]
-    ///
-    /// Encoding identifiers (single ASCII character):
-    /// - 'a' = AV1 video codec (image/video compression)
-    /// - 'z' = zstd compression
-    /// - 'r' = Reed-Solomon error correction
-    /// - 'x' = XZ/LZMA compression
-    /// - 'e' = Encryption (algorithm-specific)
-    /// - 'u' = Measurement in specified units
-    ///
-    /// KEM ciphertext identifiers (for key encapsulation):
-    /// - 'f' = FrodoKEM ciphertext (15744/21632/31296B for 640/976/1344)
-    /// - 'n' = NTRU ciphertext (699/930/1230B for HPS, 1138B for HRSS-701)
-    /// - 'l' = Classic McEliece ciphertext (128/188/240B depending on variant)
-    /// - 'h' = HQC ciphertext (4481/9026/14469B for 128/192/256)
-    ///
-    /// Example usage:
-    /// ```ignore
-    /// // Compress VSF Bytes with zstd
-    /// let original = VsfType::t_u3(tensor);
-    /// let compressed = compress_zstd(&original.flatten());
-    /// let wrapped = VsfType::v(b'z', compressed);
-    ///
-    /// // Can nest wrappers (compress then error-correct)
-    /// let inner = VsfType::v(b'z', compressed_bytes);
-    /// let outer = VsfType::v(b'r', reed_solomon_encode(&inner.flatten()));
-    ///
-    /// // KEM ciphertext (FrodoKEM-976 encapsulation output)
-    /// let ciphertext = VsfType::v(b'f', frodo_ciphertext_bytes);
-    /// ```
-    ///
-    /// Use when your application needs compression, error correction, encryption, units or other encoding.
-    v(u8, Vec<u8>), // Wrapped data (encoding byte, encoded Bytes)
 }

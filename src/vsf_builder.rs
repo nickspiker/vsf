@@ -14,40 +14,18 @@ use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
 
 /// Per-section cryptographic metadata for header fields
 ///
-/// This allows setting key (k) and wrap (v) fields on individual sections.
-/// Used for encrypted sections where the header field needs to indicate
-/// the encryption key and wrapper type.
+/// This allows setting a key (k) field on individual sections.
+/// Used for sections where the header needs to indicate the cryptographic key.
 #[derive(Clone, Default)]
 pub struct SectionMeta {
     /// Cryptographic key associated with this section (ke for Ed25519, kx for X25519)
     pub key: Option<VsfType>,
-    /// Wrapper/encryption marker (e.g., v'e' for encrypted)
-    pub wrap: Option<VsfType>,
 }
 
 impl SectionMeta {
     /// Create new section metadata with a key
-    pub fn with_key(key: VsfType) -> Self {
-        Self {
-            key: Some(key),
-            wrap: None,
-        }
-    }
-
-    /// Create new section metadata with a wrap marker
-    pub fn with_wrap(wrap: VsfType) -> Self {
-        Self {
-            key: None,
-            wrap: Some(wrap),
-        }
-    }
-
-    /// Create new section metadata with both key and wrap
-    pub fn new(key: VsfType, wrap: VsfType) -> Self {
-        Self {
-            key: Some(key),
-            wrap: Some(wrap),
-        }
+    pub fn new(key: VsfType) -> Self {
+        Self { key: Some(key) }
     }
 }
 
@@ -168,11 +146,10 @@ impl VsfBuilder {
         self
     }
 
-    /// Add a structured section with cryptographic metadata (key/wrap)
+    /// Add a structured section with cryptographic metadata (key)
     ///
-    /// Use this for encrypted sections where the header field needs to indicate:
+    /// Use this for sections where the header field needs to indicate:
     /// - `key`: The cryptographic key (ke for Ed25519, kx for X25519)
-    /// - `wrap`: The encryption wrapper (e.g., `VsfType::v(b'e', vec![])` for encrypted)
     ///
     /// # Example
     /// ```ignore
@@ -180,10 +157,7 @@ impl VsfBuilder {
     ///     .add_section_with_meta(
     ///         "encrypted_data",
     ///         vec![("payload".to_string(), VsfType::v(b'e', encrypted_bytes))],
-    ///         SectionMeta::new(
-    ///             VsfType::ke(pubkey.to_vec()),  // Ed25519 key
-    ///             VsfType::v(b'e', vec![]),      // Encrypted marker
-    ///         ),
+    ///         SectionMeta::new(VsfType::ke(pubkey.to_vec())),
     ///     );
     /// ```
     pub fn add_section_with_meta(
@@ -301,12 +275,9 @@ impl VsfBuilder {
             // Empty sections have no body - just the name in header
             if section.fields.is_empty() {
                 let mut field = crate::file_format::VsfField::new(&section.name);
-                // Add key/wrap metadata if present
+                // Add key metadata if present
                 if let Some(ref key) = meta.key {
                     field = field.with_value(key.clone());
-                }
-                if let Some(ref wrap) = meta.wrap {
-                    field = field.with_value(wrap.clone());
                 }
                 vsf.push(field.flatten());
                 continue;
@@ -314,12 +285,9 @@ impl VsfBuilder {
 
             // Create field with placeholder values
             let mut field = crate::file_format::VsfField::new(&section.name);
-            // Add key/wrap metadata if present (before offset/size/n)
+            // Add key metadata if present (before offset/size/n)
             if let Some(ref key) = meta.key {
                 field = field.with_value(key.clone());
-            }
-            if let Some(ref wrap) = meta.wrap {
-                field = field.with_value(wrap.clone());
             }
             field = field
                 .with_value(VsfType::o(0)) // offset placeholder
@@ -341,12 +309,9 @@ impl VsfBuilder {
             let unboxed_index = self.sections.len() + i;
 
             let mut field = crate::file_format::VsfField::new(name);
-            // Add key/wrap metadata if present (before offset/size/n)
+            // Add key metadata if present (before offset/size/n)
             if let Some(ref key) = meta.key {
                 field = field.with_value(key.clone());
-            }
-            if let Some(ref wrap) = meta.wrap {
-                field = field.with_value(wrap.clone());
             }
             field = field
                 .with_value(VsfType::o(0)) // offset placeholder
@@ -432,13 +397,10 @@ impl VsfBuilder {
 
                     // Rebuild field with updated values using VsfField API
                     let mut field = crate::file_format::VsfField::new(name);
-                    // Add key/wrap metadata if present (before offset/size/n)
+                    // Add key metadata if present (before offset/size/n)
                     if let Some(meta) = meta {
                         if let Some(ref key) = meta.key {
                             field = field.with_value(key.clone());
-                        }
-                        if let Some(ref wrap) = meta.wrap {
-                            field = field.with_value(wrap.clone());
                         }
                     }
                     field = field

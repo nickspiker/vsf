@@ -282,6 +282,15 @@ pub fn inspect_vsf_plain(data: &[u8]) -> Result<String, String> {
     Ok(strip_ansi(&terminal_output))
 }
 
+/// Inspect a standalone VSF section and return HTML
+pub fn inspect_section_html(data: &[u8]) -> Result<String, String> {
+    colored::control::set_override(true);
+    #[cfg(not(target_arch = "wasm32"))]
+    std::env::set_var("COLORTERM", "truecolor");
+    let terminal_output = inspect_section(data)?;
+    Ok(ansi_to_html(&terminal_output))
+}
+
 /// Strip ANSI escape codes from string
 pub fn strip_ansi(input: &str) -> String {
     let mut output = String::with_capacity(input.len());
@@ -549,10 +558,10 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             }
         }
 
-        // Eagle Time - show human-readable date/time
+        // Eagle Time - show human-readable date/time (e cyan, time amber)
         VsfType::e(et) => {
             let formatted = format_eagle_time(et);
-            format!("{}{{{}}}", "e".cyan(), formatted.white())
+            format!("{}{}{}{}", "e".cyan(), "{".truecolor(255, 200, 120), formatted.truecolor(255, 200, 120), "}".truecolor(255, 200, 120))
         }
 
         // Fall back to debug for unhandled types
@@ -566,7 +575,6 @@ pub struct LabelInfo {
     pub hash: Option<VsfType>,
     pub signature: Option<VsfType>,
     pub key: Option<VsfType>,
-    pub wrap: Option<VsfType>,
     pub offset: usize,
     pub size: usize,
     pub child_count: usize,
@@ -797,7 +805,6 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::kc(key) => format_crypto_literal("kc", key),
         VsfType::ka(key) => format_crypto_literal("ka", key),
         VsfType::ah(mac) => format_crypto_literal("ah", mac),
-        VsfType::at(mac) => format_crypto_literal("at", mac),
         VsfType::ap(mac) => format_crypto_literal("ap", mac),
         VsfType::ab(mac) => format_crypto_literal("ab", mac),
         VsfType::ac(mac) => format_crypto_literal("ac", mac),
@@ -938,7 +945,6 @@ pub fn labels_from_header(header: &VsfHeader) -> Vec<LabelInfo> {
             hash: field.hash.clone(),
             signature: field.signature.clone(),
             key: field.key.clone(),
-            wrap: field.wrap.clone(),
             offset: field.offset_bytes,
             size: field.size_bytes,
             child_count: field.child_count,
@@ -972,14 +978,14 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
 
     let mut out = String::new();
 
-    // Title
-    out.push_str(&format!("{}\n", "Versatile Storage Format".white().bold()));
+    // Title (not literal VSF data, so darker)
+    out.push_str(&format!("{}\n", tc("Versatile Storage Format", 128, 128, 128)));
     out.push_str(&format!(
         "{} {}{} {}{}\n",
-        format_bytes(data.len()).white(),
+        tc(&format_bytes(data.len()), 128, 128, 128),
         tc("(", 100, 100, 100),
-        format_number(data.len()).truecolor(200, 200, 100),
-        tc("Bytes", 128, 128, 128),
+        tc(&format_number(data.len()), 128, 128, 128),
+        tc("Bytes", 100, 100, 100),
         tc(")", 100, 100, 100)
     ));
     out.push('\n');
@@ -1106,21 +1112,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         tc("labels", 128, 128, 128)
     ));
 
-    // Calculate max widths for alignment
-    let max_size_len = labels
-        .iter()
-        .map(|l| format_bytes(l.size).len())
-        .max()
-        .unwrap_or(0);
-    let max_name_len = labels.iter().map(|l| l.name.len()).max().unwrap_or(0);
-    let max_offset_len = labels
-        .iter()
-        .map(|l| format_number(l.offset).len())
-        .max()
-        .unwrap_or(0);
-
     for label in &labels {
-        let size_str = format_bytes(label.size);
         let offset_str = format_number(label.offset);
 
         // Build crypto suffix with algorithm annotations (matching header style)
@@ -1165,21 +1157,6 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                 crypto_parts.push(format_value_short(sig));
             }
         }
-        if let Some(ref wrap) = label.wrap {
-            // wrap is VsfType::v(algo, data) - show ve{size} with explanation
-            if let VsfType::v(algo, data) = wrap {
-                crypto_parts.push(format!(
-                    "{}{}{}{}{} {}",
-                    "v".cyan(),
-                    (*algo as char).to_string().cyan(),
-                    tc("{", 100, 100, 100),
-                    data.len().to_string().truecolor(200, 200, 100),
-                    tc("}", 100, 100, 100),
-                    tc("(encrypted body)", 128, 128, 128)
-                ));
-            }
-        }
-
         // Field count string - try to determine actual count for signed sections
         let actual_count = if label.child_count == 0 && label.size > 0 {
             // Try to parse and count fields for signed sections
@@ -1190,31 +1167,32 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             None
         };
 
+        // Field count: number is white (literal), "field(s)" is gray (annotation)
         let field_str = if label.size == 0 {
             String::new()
         } else if let Some(count) = actual_count {
             if count == 1 {
-                format!("{} {}", tc("1", 200, 200, 100), tc("field", 128, 128, 128))
+                format!("{} {}", "1".white(), tc("field", 128, 128, 128))
             } else {
-                format!("{} {}", count.to_string().truecolor(200, 200, 100), tc("fields", 128, 128, 128))
+                format!("{} {}", count.to_string().white(), tc("fields", 128, 128, 128))
             }
         } else if label.child_count == 0 {
-            format!("{} {}", tc("?", 200, 200, 100), tc("fields", 128, 128, 128))
+            format!("{} {}", tc("?", 128, 128, 128), tc("fields", 128, 128, 128))
         } else if label.child_count == 1 {
-            format!("{} {}", tc("1", 200, 200, 100), tc("field", 128, 128, 128))
+            format!("{} {}", "1".white(), tc("field", 128, 128, 128))
         } else {
-            format!("{} {}", label.child_count.to_string().truecolor(200, 200, 100), tc("fields", 128, 128, 128))
+            format!("{} {}", label.child_count.to_string().white(), tc("fields", 128, 128, 128))
         };
 
-        // Print label line - compact format
+        // Print label line - matches encoding order: d(name), o(offset), b(size), n(count)
+        // Literal values (name, offset, size, count) are white; annotations (Bytes, field) are gray
         out.push_str(&format!(" {}", tc("(", 100, 100, 100)));
         if label.size == 0 {
             out.push_str(&format!("{}", label.name.white().bold()));
         } else {
-            out.push_str(&format!("{:>width$}", size_str.white(), width = max_size_len));
-            out.push_str(" ");
-            out.push_str(&format!("{:<width$}", label.name.white().bold(), width = max_name_len));
-            out.push_str(&format!(" {}{}", tc("@", 100, 100, 100), tc(&offset_str, 200, 200, 100)));
+            out.push_str(&format!("{}", label.name.white().bold()));
+            out.push_str(&format!(" {}{}", tc("@", 100, 100, 100), offset_str.white()));
+            out.push_str(&format!(" {} {}", label.size.to_string().white(), tc("Bytes", 128, 128, 128)));
             out.push_str(&format!(" {}", field_str));
         }
         out.push_str(&format!("{}\n", tc(")", 100, 100, 100)));
@@ -1475,67 +1453,109 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
         }
     }
 
-    // Build header line with validation if hints present
+    // Build header line: [name SIZE Bytes COUNT fields
     let mut header = format!("{}{}", tc("[", 128, 128, 128), section_name.white().bold());
-    if let Some(count) = count_hint {
-        header.push_str(&format!(" n{{{}}}", count).truecolor(128, 128, 128).to_string());
-    }
     if let Some(len) = length_hint {
-        header.push_str(&format!(" b{{{}}}", len).truecolor(128, 128, 128).to_string());
+        header.push_str(&format!(
+            " {} {}",
+            len.to_string().white(),
+            tc("Bytes", 128, 128, 128)
+        ));
+    }
+    if let Some(count) = count_hint {
+        header.push_str(&format!(
+            " {} {}",
+            count.to_string().white(),
+            tc(if count == 1 { "field" } else { "fields" }, 128, 128, 128)
+        ));
     }
     header.push('\n');
     out.push_str(&header);
 
-    // Collect all items to determine which is last
-    let mut items: Vec<String> = Vec::new();
-
-    // Parse remaining values until ']' or end
+    // Collect parsed fields first to know which is last
+    let mut fields: Vec<VsfField> = Vec::new();
     while pointer < data.len() && data[pointer] != b']' {
-        // Check if this is a field tuple: (name : val1, val2, ...)
         if data[pointer] == b'(' {
-            // Use VsfField::parse() which handles multi-value fields
             match VsfField::parse(data, &mut pointer) {
-                Ok(field) => {
-                    // Format as literal: (name : val1, val2, val3)
-                    let name_literal = format_value_literal(&VsfType::d(field.name));
-                    let values_literal: Vec<String> = field
-                        .values
-                        .iter()
-                        .map(|v| format_value_literal(v))
-                        .collect();
-                    items.push(format!(
-                        "{}{} {} {}{}",
-                        tc("(", 128, 128, 128),
-                        name_literal,
-                        tc(":", 128, 128, 128),
-                        values_literal.join(&tc(", ", 128, 128, 128).to_string()),
-                        tc(")", 128, 128, 128)
-                    ));
-                }
+                Ok(field) => fields.push(field),
                 Err(e) => {
-                    items.push(format!("<parse error in field: {}>", e));
+                    out.push_str(&format!("  {} <parse error: {}>\n", tree_corner(), e));
                     break;
                 }
             }
         } else {
-            // Raw value (crypto fields like ke, ge, ve)
-            match parse(data, &mut pointer) {
-                Ok(value) => {
-                    items.push(format_value_literal(&value));
-                }
-                Err(e) => {
-                    items.push(format!("<parse error: {}>", e));
-                    break;
-                }
-            }
+            // Skip unexpected bytes
+            pointer += 1;
         }
     }
 
-    // Output items with tree formatting
-    for (i, item) in items.iter().enumerate() {
-        let is_last = i == items.len() - 1;
-        let connector = if is_last { tree_corner() } else { tree_tee() };
-        out.push_str(&format!("  {} {}\n", connector, item));
+    // Output fields with multi-line formatting
+    let comma = tc(",", 128, 128, 128).to_string();
+    let pipe = tc("┃", 64, 64, 64).to_string();
+
+    for (i, field) in fields.iter().enumerate() {
+        let is_last_field = i == fields.len() - 1;
+        let connector = if is_last_field { tree_corner() } else { tree_tee() };
+        let continuation = if is_last_field { "  ".to_string() } else { pipe.clone() };
+
+        // First line: connector + (name : first_value
+        let name_literal = format_value_literal(&VsfType::d(field.name.clone()));
+        out.push_str(&format!("  {} {}{} {} ", connector, tc("(", 128, 128, 128), name_literal, tc(":", 128, 128, 128)));
+
+        // Format each value, one per line after the first
+        for (vi, val) in field.values.iter().enumerate() {
+            let is_last_val = vi == field.values.len() - 1;
+            let val_str = format_value_literal(val);
+
+            if vi == 0 {
+                // First value on same line as field name
+                // Check if it has hex lines that need continuation
+                if val_str.contains(CRYPTO_LINE_SEP) {
+                    let parts: Vec<&str> = val_str.split(CRYPTO_LINE_SEP).collect();
+                    out.push_str(parts[0]);
+                    out.push('\n');
+                    for (hi, hex_line) in parts[1..].iter().enumerate() {
+                        out.push_str(&format!("  {}     {}", continuation, hex_line));
+                        if hi == parts.len() - 2 {
+                            // Last hex line - add comma if not last value
+                            if !is_last_val {
+                                out.push_str(&comma);
+                            }
+                        }
+                        out.push('\n');
+                    }
+                } else {
+                    out.push_str(&val_str);
+                    if !is_last_val {
+                        out.push_str(&comma);
+                    }
+                    out.push('\n');
+                }
+            } else {
+                // Subsequent values on new lines with continuation
+                if val_str.contains(CRYPTO_LINE_SEP) {
+                    let parts: Vec<&str> = val_str.split(CRYPTO_LINE_SEP).collect();
+                    out.push_str(&format!("  {}   {}", continuation, parts[0]));
+                    out.push('\n');
+                    for (hi, hex_line) in parts[1..].iter().enumerate() {
+                        out.push_str(&format!("  {}     {}", continuation, hex_line));
+                        if hi == parts.len() - 2 && !is_last_val {
+                            out.push_str(&comma);
+                        }
+                        out.push('\n');
+                    }
+                } else {
+                    out.push_str(&format!("  {}   {}", continuation, val_str));
+                    if !is_last_val {
+                        out.push_str(&comma);
+                    }
+                    out.push('\n');
+                }
+            }
+        }
+
+        // Close the field with )
+        out.push_str(&format!("  {}  {}\n", continuation, tc(")", 128, 128, 128)));
     }
 
     // Closing bracket
