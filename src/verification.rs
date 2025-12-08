@@ -154,7 +154,6 @@ fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, Strin
     let mut hash = None;
     let mut signature = None;
     let mut key = None;
-    let mut wrap = None;
     let mut offset_bytes = None;
     let mut size_bytes = None;
     let mut child_count = None;
@@ -167,12 +166,11 @@ fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, Strin
             VsfType::ke(_) | VsfType::kx(_) | VsfType::kp(_) | VsfType::kc(_) | VsfType::ka(_) => {
                 key = Some(value)
             }
-            VsfType::v(_, _) => wrap = Some(value),
             // Positional fields
             VsfType::o(bytes) => offset_bytes = Some(bytes),
             VsfType::b(bytes, _) => size_bytes = Some(bytes),
             VsfType::n(count) => child_count = Some(count),
-            // Forward compatibility: ignore unknown types
+            // Forward compatibility: ignore unknown types (including legacy wrap markers)
             _ => {}
         }
     }
@@ -188,7 +186,6 @@ fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, Strin
             hash,
             signature,
             key,
-            wrap,
             offset_bytes: 0,
             size_bytes: 0,
             child_count: 0,
@@ -197,20 +194,13 @@ fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, Strin
         // Section field - require all positional data
         let offset_bytes = offset_bytes.ok_or("Missing required offset (o) field")?;
         let size_bytes = size_bytes.ok_or("Missing required size (b) field")?;
-
-        // Child count is optional if encrypted (wrap present)
-        let child_count = if wrap.is_some() {
-            0 // Encrypted sections have implied n[0]
-        } else {
-            child_count.ok_or("Missing required child count (n) field for unencrypted section")?
-        };
+        let child_count = child_count.ok_or("Missing required child count (n) field")?;
 
         Ok(HeaderField {
             name: field.name,
             hash,
             signature,
             key,
-            wrap,
             offset_bytes,
             size_bytes,
             child_count,
@@ -1136,9 +1126,6 @@ pub fn add_encryption_metadata(
     for field in &mut new_fields {
         if field.name == section_name {
             use crate::crypto_algorithms::{WRAP_AES256_GCM, WRAP_CHACHA20POLY1305};
-
-            // Add wrapped/encrypted marker (v)
-            field.wrap = Some(VsfType::v(algorithm, vec![])); // Empty vec, just marks as encrypted
 
             // Add encryption key based on algorithm
             let key_vsf = match algorithm {

@@ -273,8 +273,7 @@ pub fn parse_mac(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
 
     // Return appropriate MAC type based on algorithm
     match algo {
-        b'h' => Ok(VsfType::ah(mac_tag)),
-        b't' => Ok(VsfType::at(mac_tag)), // HMAC-SHA512 ('t' for 512-bit)
+        b'h' => Ok(VsfType::ah(mac_tag)), // HMAC-SHA (size disambiguates 256/512)
         b'p' => Ok(VsfType::ap(mac_tag)),
         b'b' => Ok(VsfType::ab(mac_tag)),
         b'c' => Ok(VsfType::ac(mac_tag)),
