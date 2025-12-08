@@ -14,6 +14,27 @@ use crate::types::{EagleTime, EtType, VsfType};
 use chrono::{Datelike, Local, Timelike};
 use colored::*;
 
+/// Wrapper that forces truecolor ANSI output regardless of COLORTERM detection
+/// This is needed because the colored crate falls back to 8-color in WASM
+struct Tc(String);
+
+impl Tc {
+    fn new<S: AsRef<str>>(s: S, r: u8, g: u8, b: u8) -> Self {
+        Tc(format!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, s.as_ref()))
+    }
+}
+
+impl std::fmt::Display for Tc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Shorthand for forced truecolor - replaces .truecolor(r,g,b)
+fn tc<S: AsRef<str>>(s: S, r: u8, g: u8, b: u8) -> Tc {
+    Tc::new(s, r, g, b)
+}
+
 /// Output format for VSF inspection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputFormat {
@@ -247,6 +268,10 @@ fn parse_sgr_to_css(params: &str) -> String {
 pub fn inspect_vsf_html(data: &[u8]) -> Result<String, String> {
     // Force colour output even when not connected to a TTY (e.g., WASM)
     colored::control::set_override(true);
+    // Force truecolor mode - colored crate checks COLORTERM env var
+    // std::env::set_var panics in WASM, so use a fallback check
+    #[cfg(not(target_arch = "wasm32"))]
+    std::env::set_var("COLORTERM", "truecolor");
     let terminal_output = inspect_vsf(data)?;
     Ok(ansi_to_html(&terminal_output))
 }
@@ -328,8 +353,8 @@ fn format_crypto_hex(type_name: &str, data: &[u8]) -> String {
         format!(
             "{}{}{}{}",
             type_name.cyan(),
-            size_str.truecolor(200, 200, 100),
-            "0x".truecolor(100, 100, 100),
+            tc(&size_str, 200, 200, 100),
+            tc("0x", 100, 100, 100),
             hex_lines[0].white()
         )
     } else {
@@ -337,8 +362,8 @@ fn format_crypto_hex(type_name: &str, data: &[u8]) -> String {
         format!(
             "{}{}{}{}{}",
             type_name.cyan(),
-            size_str.truecolor(200, 200, 100),
-            "0x".truecolor(100, 100, 100),
+            tc(&size_str, 200, 200, 100),
+            tc("0x", 100, 100, 100),
             CRYPTO_LINE_SEP,
             hex_lines.iter().map(|l| l.white().to_string()).collect::<Vec<_>>().join(CRYPTO_LINE_SEP)
         )
@@ -357,16 +382,16 @@ fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
             format!(
                 "{}{}{}{}",
                 format!("v{}", algo as char).cyan(),
-                size_str.truecolor(200, 200, 100),
-                "0x".truecolor(100, 100, 100),
+                tc(&size_str, 200, 200, 100),
+                tc("0x", 100, 100, 100),
                 hex_lines[0].white()
             )
         } else {
             format!(
                 "{}{}{}{}{}",
                 format!("v{}", algo as char).cyan(),
-                size_str.truecolor(200, 200, 100),
-                "0x".truecolor(100, 100, 100),
+                tc(&size_str, 200, 200, 100),
+                tc("0x", 100, 100, 100),
                 CRYPTO_LINE_SEP,
                 hex_lines.iter().map(|l| l.white().to_string()).collect::<Vec<_>>().join(CRYPTO_LINE_SEP)
             )
@@ -377,10 +402,10 @@ fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
         format!(
             "{}{}{}{}{}",
             format!("v{}", algo as char).cyan(),
-            size_str.truecolor(200, 200, 100),
-            "0x".truecolor(100, 100, 100),
+            tc(&size_str, 200, 200, 100),
+            tc("0x", 100, 100, 100),
             hex_preview.white(),
-            "...".truecolor(100, 100, 100)
+            tc("...", 100, 100, 100)
         )
     }
 }
@@ -499,10 +524,10 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
                     .join("×");
                 format!("{}{}{}{}{}{}",
                     "t_u3".cyan(),
-                    "[".truecolor(100, 100, 100),
+                    tc("[", 100, 100, 100),
                     shape_str.truecolor(200, 200, 100),
-                    "]".truecolor(100, 100, 100),
-                    "(".truecolor(100, 100, 100),
+                    tc("]", 100, 100, 100),
+                    tc("(", 100, 100, 100),
                     format!("{} bytes)", tensor.data.len()).truecolor(200, 200, 100)
                 )
             }
@@ -944,25 +969,25 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     out.push_str(&format!(
         "{} {}{} {}{}\n",
         format_bytes(data.len()).white(),
-        "(".truecolor(100, 100, 100),
+        tc("(", 100, 100, 100),
         format_number(data.len()).truecolor(200, 200, 100),
-        "Bytes".truecolor(128, 128, 128),
-        ")".truecolor(100, 100, 100)
+        tc("Bytes", 128, 128, 128),
+        tc(")", 100, 100, 100)
     ));
     out.push('\n');
 
     // Header section marker
-    out.push_str(&format!("{}\n", "<".truecolor(128, 128, 128)));
+    out.push_str(&format!("{}\n", tc("<", 128, 128, 128)));
 
     // Version info
     out.push_str(&format!(
         " {} {}\n",
-        "Version".truecolor(128, 128, 128),
+        tc("Version", 128, 128, 128),
         header.version.to_string().white()
     ));
     out.push_str(&format!(
         " {} {}\n",
-        "Backward compat".truecolor(128, 128, 128),
+        tc("Backward compat", 128, 128, 128),
         header.backward_compat.to_string().white()
     ));
 
@@ -970,7 +995,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     if let VsfType::e(ref et) = header.creation_time {
         out.push_str(&format!(
             " {} {}\n",
-            "Created".truecolor(128, 128, 128),
+            tc("Created", 128, 128, 128),
             format_eagle_time(et).white()
         ));
     }
@@ -978,7 +1003,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     // Header size
     out.push_str(&format!(
         " {} {} Bytes\n",
-        "Header size:".truecolor(128, 128, 128),
+        tc("Header size:", 128, 128, 128),
         header_length_bytes.to_string().white()
     ));
 
@@ -987,11 +1012,11 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         out.push_str(&format!(
             " {}{}{} {} {} {}\n",
             hash.len().to_string().truecolor(200, 200, 100),
-            "-".truecolor(100, 100, 100),
-            "Byte".truecolor(128, 128, 128),
+            tc("-", 100, 100, 100),
+            tc("Byte", 128, 128, 128),
             "BLAKE3".cyan(),
-            "provenance hash".truecolor(128, 128, 128),
-            "hex".truecolor(100, 100, 100)
+            tc("provenance hash", 128, 128, 128),
+            tc("hex", 100, 100, 100)
         ));
         let hash_lines = format_hex_lines(hash);
         for line in &hash_lines {
@@ -1004,11 +1029,11 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         out.push_str(&format!(
             " {}{}{} {} {} {}\n",
             key.len().to_string().truecolor(200, 200, 100),
-            "-".truecolor(100, 100, 100),
-            "Byte".truecolor(128, 128, 128),
+            tc("-", 100, 100, 100),
+            tc("Byte", 128, 128, 128),
             "Ed25519".cyan(),
-            "signer pubkey".truecolor(128, 128, 128),
-            "hex".truecolor(100, 100, 100)
+            tc("signer pubkey", 128, 128, 128),
+            tc("hex", 100, 100, 100)
         ));
         let key_lines = format_hex_lines(key);
         for line in &key_lines {
@@ -1021,11 +1046,11 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         out.push_str(&format!(
             " {}{}{} {} {} {}\n",
             sig.len().to_string().truecolor(200, 200, 100),
-            "-".truecolor(100, 100, 100),
-            "Byte".truecolor(128, 128, 128),
+            tc("-", 100, 100, 100),
+            tc("Byte", 128, 128, 128),
             "Ed25519".cyan(),
-            "signature".truecolor(128, 128, 128),
-            "hex".truecolor(100, 100, 100)
+            tc("signature", 128, 128, 128),
+            tc("hex", 100, 100, 100)
         ));
         let sig_lines = format_hex_lines(sig);
         for line in &sig_lines {
@@ -1038,11 +1063,11 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         out.push_str(&format!(
             " {}{}{} {} {} {}\n",
             hash.len().to_string().truecolor(200, 200, 100),
-            "-".truecolor(100, 100, 100),
-            "Byte".truecolor(128, 128, 128),
+            tc("-", 100, 100, 100),
+            tc("Byte", 128, 128, 128),
             "BLAKE3".cyan(),
-            "rolling hash".truecolor(128, 128, 128),
-            "hex".truecolor(100, 100, 100)
+            tc("rolling hash", 128, 128, 128),
+            tc("hex", 100, 100, 100)
         ));
         let hash_lines = format_hex_lines(hash);
         for line in &hash_lines {
@@ -1053,14 +1078,14 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             if computed.as_slice() == hash.as_slice() {
                 out.push_str(&format!(
                     " {} {}\n",
-                    "Verification:".truecolor(128, 128, 128),
-                    "PASS".truecolor(100, 220, 100)
+                    tc("Verification:", 128, 128, 128),
+                    tc("PASS", 100, 220, 100)
                 ));
             } else {
                 out.push_str(&format!(
                     " {} {}\n",
-                    "Verification:".truecolor(128, 128, 128),
-                    "FAIL".truecolor(220, 100, 100)
+                    tc("Verification:", 128, 128, 128),
+                    tc("FAIL", 220, 100, 100)
                 ));
             }
         }
@@ -1070,7 +1095,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     out.push_str(&format!(
         " {} {}\n",
         labels.len().to_string().truecolor(200, 200, 100),
-        "labels".truecolor(128, 128, 128)
+        tc("labels", 128, 128, 128)
     ));
 
     // Calculate max widths for alignment
@@ -1098,11 +1123,11 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                 crypto_parts.push(format!(
                     "{}{}{} {} {} {}",
                     k.len().to_string().truecolor(200, 200, 100),
-                    "-".truecolor(100, 100, 100),
-                    "Byte".truecolor(128, 128, 128),
+                    tc("-", 100, 100, 100),
+                    tc("Byte", 128, 128, 128),
                     "Ed25519".cyan(),
-                    "pubkey".truecolor(128, 128, 128),
-                    "hex".truecolor(100, 100, 100)
+                    tc("pubkey", 128, 128, 128),
+                    tc("hex", 100, 100, 100)
                 ));
                 let hex_lines = format_hex_lines(k);
                 for line in &hex_lines {
@@ -1118,11 +1143,11 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                 crypto_parts.push(format!(
                     "{}{}{} {} {} {}",
                     s.len().to_string().truecolor(200, 200, 100),
-                    "-".truecolor(100, 100, 100),
-                    "Byte".truecolor(128, 128, 128),
+                    tc("-", 100, 100, 100),
+                    tc("Byte", 128, 128, 128),
                     "Ed25519".cyan(),
-                    "signature".truecolor(128, 128, 128),
-                    "hex".truecolor(100, 100, 100)
+                    tc("signature", 128, 128, 128),
+                    tc("hex", 100, 100, 100)
                 ));
                 let hex_lines = format_hex_lines(s);
                 for line in &hex_lines {
@@ -1139,7 +1164,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                     "{}{} {}",
                     "v".cyan(),
                     (*algo as char).to_string().cyan(),
-                    "(encrypted body)".truecolor(128, 128, 128)
+                    tc("(encrypted body)", 128, 128, 128)
                 ));
             }
         }
@@ -1158,30 +1183,30 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             String::new()
         } else if let Some(count) = actual_count {
             if count == 1 {
-                format!("{} {}", "1".truecolor(200, 200, 100), "field".truecolor(128, 128, 128))
+                format!("{} {}", tc("1", 200, 200, 100), tc("field", 128, 128, 128))
             } else {
-                format!("{} {}", count.to_string().truecolor(200, 200, 100), "fields".truecolor(128, 128, 128))
+                format!("{} {}", count.to_string().truecolor(200, 200, 100), tc("fields", 128, 128, 128))
             }
         } else if label.child_count == 0 {
-            format!("{} {}", "?".truecolor(200, 200, 100), "fields".truecolor(128, 128, 128))
+            format!("{} {}", tc("?", 200, 200, 100), tc("fields", 128, 128, 128))
         } else if label.child_count == 1 {
-            format!("{} {}", "1".truecolor(200, 200, 100), "field".truecolor(128, 128, 128))
+            format!("{} {}", tc("1", 200, 200, 100), tc("field", 128, 128, 128))
         } else {
-            format!("{} {}", label.child_count.to_string().truecolor(200, 200, 100), "fields".truecolor(128, 128, 128))
+            format!("{} {}", label.child_count.to_string().truecolor(200, 200, 100), tc("fields", 128, 128, 128))
         };
 
         // Print label line - compact format
-        out.push_str(&format!(" {}", "(".truecolor(100, 100, 100)));
+        out.push_str(&format!(" {}", tc("(", 100, 100, 100)));
         if label.size == 0 {
             out.push_str(&format!("{}", label.name.white().bold()));
         } else {
             out.push_str(&format!("{:>width$}", size_str.white(), width = max_size_len));
             out.push_str(" ");
             out.push_str(&format!("{:<width$}", label.name.white().bold(), width = max_name_len));
-            out.push_str(&format!(" {}{}", "@".truecolor(100, 100, 100), offset_str.truecolor(200, 200, 100)));
+            out.push_str(&format!(" {}{}", tc("@", 100, 100, 100), tc(&offset_str, 200, 200, 100)));
             out.push_str(&format!(" {}", field_str));
         }
-        out.push_str(&format!("{}\n", ")".truecolor(100, 100, 100)));
+        out.push_str(&format!("{}\n", tc(")", 100, 100, 100)));
 
         // Print crypto fields on separate indented lines
         for part in &crypto_parts {
@@ -1193,9 +1218,9 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     let has_nonempty_sections = labels.iter().any(|l| l.size > 0);
 
     if has_nonempty_sections {
-        out.push_str(&format!("{}{}\n", ">".truecolor(64, 64, 64), "┓".truecolor(64, 64, 64))); // Heavy down and left
+        out.push_str(&format!("{}{}\n", tc(">", 64, 64, 64), tc("┓", 64, 64, 64))); // Heavy down and left
     } else {
-        out.push_str(&format!("{}\n", ">".truecolor(64, 64, 64)));
+        out.push_str(&format!("{}\n", tc(">", 64, 64, 64)));
     }
 
     // Show sections with tree structure (skip empty sections)
@@ -1210,23 +1235,23 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             out.push_str(&format!(
                 "{}{}\n",
                 connector,
-                "[".truecolor(64, 64, 64)
+                tc("[", 64, 64, 64)
             ));
         } else {
             out.push_str(&format!(
                 "{}{}{} {}{}{}{}{}{}{}b{}{}\n",
                 connector,
-                "[".truecolor(64, 64, 64),
+                tc("[", 64, 64, 64),
                 label.name.white().bold(),
-                "n".truecolor(128, 128, 128),
-                "{".truecolor(100, 100, 100),
+                tc("n", 128, 128, 128),
+                tc("{", 100, 100, 100),
                 label.child_count.to_string().truecolor(200, 200, 100),
-                "}".truecolor(100, 100, 100),
+                tc("}", 100, 100, 100),
                 " ".normal(),
-                "b".truecolor(128, 128, 128),
-                "{".truecolor(100, 100, 100),
+                tc("b", 128, 128, 128),
+                tc("{", 100, 100, 100),
                 label.size.to_string().truecolor(200, 200, 100),
-                "}".truecolor(100, 100, 100)
+                tc("}", 100, 100, 100)
             ));
         }
 
@@ -1302,22 +1327,22 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                                 "{}{} {}{} {} {}{}\n",
                                 field_prefix,
                                 field_connector,
-                                "(".truecolor(64, 64, 64),
+                                tc("(", 64, 64, 64),
                                 name_literal,
-                                ":".truecolor(64, 64, 64),
+                                tc(":", 64, 64, 64),
                                 formatted,
-                                ")".truecolor(64, 64, 64),
+                                tc(")", 64, 64, 64),
                             ));
                         } else {
                             out.push_str(&format!(
                                 "{}{} {}{} {} {}{}\n",
                                 field_prefix,
                                 field_connector,
-                                "(".truecolor(64, 64, 64),
+                                tc("(", 64, 64, 64),
                                 name_literal,
-                                ":".truecolor(64, 64, 64),
+                                tc(":", 64, 64, 64),
                                 val,
-                                ")".truecolor(64, 64, 64),
+                                tc(")", 64, 64, 64),
                             ));
                         }
                     } else {
@@ -1326,7 +1351,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                             "{}{} {}{}:\n",
                             field_prefix,
                             field_connector,
-                            "(".truecolor(64, 64, 64),
+                            tc("(", 64, 64, 64),
                             name_literal,
                         ));
                         for (k, val) in values_literal.iter().enumerate() {
@@ -1383,7 +1408,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         out.push_str(&format!(
             "{}{}\n",
             if is_last { "   " } else { &format!(" {} ", tree_vert()) },
-            "]".truecolor(64, 64, 64)
+            tc("]", 64, 64, 64)
         ));
 
         if !is_last {
@@ -1393,7 +1418,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
 
     // Valid indicator at end
     out.push('\n');
-    out.push_str(&format!("{}\n", "Valid".truecolor(100, 220, 100)));
+    out.push_str(&format!("{}\n", tc("Valid", 100, 220, 100)));
 
     Ok(out)
 }
@@ -1440,7 +1465,7 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
     }
 
     // Build header line with validation if hints present
-    let mut header = format!("{}{}", "[".truecolor(128, 128, 128), section_name.white().bold());
+    let mut header = format!("{}{}", tc("[", 128, 128, 128), section_name.white().bold());
     if let Some(count) = count_hint {
         header.push_str(&format!(" n{{{}}}", count).truecolor(128, 128, 128).to_string());
     }
@@ -1469,11 +1494,11 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
                         .collect();
                     items.push(format!(
                         "{}{} {} {}{}",
-                        "(".truecolor(128, 128, 128),
+                        tc("(", 128, 128, 128),
                         name_literal,
-                        ":".truecolor(128, 128, 128),
-                        values_literal.join(&", ".truecolor(128, 128, 128).to_string()),
-                        ")".truecolor(128, 128, 128)
+                        tc(":", 128, 128, 128),
+                        values_literal.join(&tc(", ", 128, 128, 128).to_string()),
+                        tc(")", 128, 128, 128)
                     ));
                 }
                 Err(e) => {
@@ -1503,7 +1528,7 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
     }
 
     // Closing bracket
-    out.push_str(&format!("{}\n", "]".truecolor(64, 64, 64)));
+    out.push_str(&format!("{}\n", tc("]", 64, 64, 64)));
 
     // Add validation line if hints were present
     if length_hint.is_some() || count_hint.is_some() {
@@ -1534,9 +1559,9 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
         }
 
         if valid {
-            out.push_str(&format!("  {}\n", "✓".truecolor(100, 220, 100)));
+            out.push_str(&format!("  {}\n", tc("✓", 100, 220, 100)));
         } else {
-            out.push_str(&format!("  {} MISMATCH{}\n", "✗".truecolor(220, 100, 100), validation));
+            out.push_str(&format!("  {} MISMATCH{}\n", tc("✗", 220, 100, 100), validation));
         }
     }
 
