@@ -339,6 +339,29 @@ fn format_hex_wrapped(data: &[u8]) -> String {
     format_hex_lines(data).join("\n")
 }
 
+/// Format crypto literal (no colours) showing first 1KB with line wrapping
+/// Returns format like "hp{32}0x\nHEXLINE..." with CRYPTO_LINE_SEP markers
+fn format_crypto_literal(type_name: &str, data: &[u8]) -> String {
+    let max_bytes = 1024; // Show first 1KB
+    let truncated = data.len() > max_bytes;
+    let display_data = if truncated { &data[..max_bytes] } else { data };
+    let hex_lines = format_hex_lines(display_data);
+    let suffix = if truncated { "..." } else { "" };
+
+    if hex_lines.len() == 1 && !truncated {
+        format!("{}{{{}}}0x{}", type_name, data.len(), hex_lines[0])
+    } else {
+        format!(
+            "{}{{{}}}0x{}{}{}",
+            type_name,
+            data.len(),
+            CRYPTO_LINE_SEP,
+            hex_lines.join(CRYPTO_LINE_SEP),
+            suffix
+        )
+    }
+}
+
 /// Format crypto field with colour coding: type{size}0xHEX
 /// type=cyan, size=yellow, 0x=gray, hex=white
 /// For multi-line hex, lines are joined with CRYPTO_LINE_SEP marker for later replacement
@@ -371,41 +394,34 @@ fn format_crypto_hex(type_name: &str, data: &[u8]) -> String {
 }
 
 /// Format v wrapper type with colour coding: ve{size}0xHEX
-/// For large data, shows preview with ...
+/// Shows first 1KB of data with line wrapping, truncates larger data with ...
 fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
     let size_str = format!("{{{}}}", data.len());
+    let max_bytes = 1024; // Show first 1KB
+    let truncated = data.len() > max_bytes;
+    let display_data = if truncated { &data[..max_bytes] } else { data };
+    let hex_lines = format_hex_lines(display_data);
 
-    if data.len() <= 32 {
-        // Show full hex with line separator
-        let hex_lines = format_hex_lines(data);
-        if hex_lines.len() == 1 {
-            format!(
-                "{}{}{}{}",
-                format!("v{}", algo as char).cyan(),
-                tc(&size_str, 200, 200, 100),
-                tc("0x", 100, 100, 100),
-                hex_lines[0].white()
-            )
-        } else {
-            format!(
-                "{}{}{}{}{}",
-                format!("v{}", algo as char).cyan(),
-                tc(&size_str, 200, 200, 100),
-                tc("0x", 100, 100, 100),
-                CRYPTO_LINE_SEP,
-                hex_lines.iter().map(|l| l.white().to_string()).collect::<Vec<_>>().join(CRYPTO_LINE_SEP)
-            )
-        }
-    } else {
-        // Show first 16 bytes with ...
-        let hex_preview = hex::encode(&data[..16]).to_uppercase();
+    if hex_lines.len() == 1 && !truncated {
+        // Single line - inline
         format!(
-            "{}{}{}{}{}",
+            "{}{}{}{}",
             format!("v{}", algo as char).cyan(),
             tc(&size_str, 200, 200, 100),
             tc("0x", 100, 100, 100),
-            hex_preview.white(),
-            tc("...", 100, 100, 100)
+            hex_lines[0].white()
+        )
+    } else {
+        // Multi-line with optional truncation indicator
+        let suffix = if truncated { tc("...", 100, 100, 100).to_string() } else { String::new() };
+        format!(
+            "{}{}{}{}{}{}",
+            format!("v{}", algo as char).cyan(),
+            tc(&size_str, 200, 200, 100),
+            tc("0x", 100, 100, 100),
+            CRYPTO_LINE_SEP,
+            hex_lines.iter().map(|l| l.white().to_string()).collect::<Vec<_>>().join(CRYPTO_LINE_SEP),
+            suffix
         )
     }
 }
@@ -768,33 +784,25 @@ pub fn format_value(vsf: &VsfType) -> String {
                 _ => format!("e{{{:?}}}", et),
             }
         }
-        VsfType::hp(hash) => format!("hp{{{}}}0x{}...", hash.len(), hex_preview(hash)),
-        // Literal VSF notation for all crypto types
-        VsfType::hb(hash) => format!("hb{{{}}}0x{}...", hash.len(), hex_preview(hash)),
-        VsfType::hs(hash) => format!("hs{{{}}}0x{}...", hash.len(), hex_preview(hash)),
-        VsfType::ge(sig) => format!("ge{{{}}}0x{}...", sig.len(), hex_preview(sig)),
-        VsfType::gp(sig) => format!("gp{{{}}}0x{}...", sig.len(), hex_preview(sig)),
-        VsfType::gr(sig) => format!("gr{{{}}}0x{}...", sig.len(), hex_preview(sig)),
-        VsfType::ke(key) => format!("ke{{{}}}0x{}...", key.len(), hex_preview(key)),
-        VsfType::kx(key) => format!("kx{{{}}}0x{}...", key.len(), hex_preview(key)),
-        VsfType::kp(key) => format!("kp{{{}}}0x{}...", key.len(), hex_preview(key)),
-        VsfType::kc(key) => format!("kc{{{}}}0x{}...", key.len(), hex_preview(key)),
-        VsfType::ka(key) => format!("ka{{{}}}0x{}...", key.len(), hex_preview(key)),
-        VsfType::ah(mac) => format!("ah{{{}}}0x{}...", mac.len(), hex_preview(mac)),
-        VsfType::at(mac) => format!("at{{{}}}0x{}...", mac.len(), hex_preview(mac)),
-        VsfType::ap(mac) => format!("ap{{{}}}0x{}...", mac.len(), hex_preview(mac)),
-        VsfType::ab(mac) => format!("ab{{{}}}0x{}...", mac.len(), hex_preview(mac)),
-        VsfType::ac(mac) => format!("ac{{{}}}0x{}...", mac.len(), hex_preview(mac)),
+        // Crypto types - show first 1KB with line wrapping
+        VsfType::hp(hash) => format_crypto_literal("hp", hash),
+        VsfType::hb(hash) => format_crypto_literal("hb", hash),
+        VsfType::hs(hash) => format_crypto_literal("hs", hash),
+        VsfType::ge(sig) => format_crypto_literal("ge", sig),
+        VsfType::gp(sig) => format_crypto_literal("gp", sig),
+        VsfType::gr(sig) => format_crypto_literal("gr", sig),
+        VsfType::ke(key) => format_crypto_literal("ke", key),
+        VsfType::kx(key) => format_crypto_literal("kx", key),
+        VsfType::kp(key) => format_crypto_literal("kp", key),
+        VsfType::kc(key) => format_crypto_literal("kc", key),
+        VsfType::ka(key) => format_crypto_literal("ka", key),
+        VsfType::ah(mac) => format_crypto_literal("ah", mac),
+        VsfType::at(mac) => format_crypto_literal("at", mac),
+        VsfType::ap(mac) => format_crypto_literal("ap", mac),
+        VsfType::ab(mac) => format_crypto_literal("ab", mac),
+        VsfType::ac(mac) => format_crypto_literal("ac", mac),
 
-        VsfType::v(algo, data) => {
-            // Show literal VSF notation: ve{size}0xHEX...
-            let hex_preview = if data.len() <= 64 {
-                hex::encode(data).to_uppercase()
-            } else {
-                format!("{}...", hex::encode(&data[..32]).to_uppercase())
-            };
-            format!("v{}{{{}}}0x{}", *algo as char, data.len(), hex_preview)
-        }
+        VsfType::v(algo, data) => format_crypto_literal(&format!("v{}", *algo as char), data),
         VsfType::d(name) => format!("d\"{}\"", name),
         VsfType::l(s) => s.clone(),
         VsfType::o(offset) => format!("o[{}]", offset),
