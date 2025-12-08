@@ -392,10 +392,9 @@ fn size_marker(len: usize) -> char {
         '4'
     } else if len <= 0xFFFFFFFF {
         '5'
-    } else if len <= 0xFFFFFFFFFFFFFFFF {
-        '6'
     } else {
-        '7'
+        // 64-bit length (size code '6') - any usize > 32-bit
+        '6'
     }
 }
 
