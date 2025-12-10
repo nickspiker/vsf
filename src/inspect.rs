@@ -348,10 +348,11 @@ fn format_hex_wrapped(data: &[u8]) -> String {
     format_hex_lines(data).join("\n")
 }
 
-/// Format crypto literal (no colours) showing first 1KB with line wrapping
+/// Format crypto literal (no colours) showing first 64 bytes with line wrapping
 /// Returns format like "hp{32}0x\nHEXLINE..." with CRYPTO_LINE_SEP markers
+/// Large PQC keys (McEliece 512KB, Frodo 15KB) are truncated to keep logs readable
 fn format_crypto_literal(type_name: &str, data: &[u8]) -> String {
-    let max_bytes = 1024; // Show first 1KB
+    let max_bytes = 64; // Show first 64 bytes - enough for 32-byte hashes/keys
     let truncated = data.len() > max_bytes;
     let display_data = if truncated { &data[..max_bytes] } else { data };
     let hex_lines = format_hex_lines(display_data);
@@ -374,13 +375,17 @@ fn format_crypto_literal(type_name: &str, data: &[u8]) -> String {
 /// Format crypto field with colour coding: type{size}0xHEX
 /// type=cyan, size=yellow, 0x=gray, hex=white
 /// For multi-line hex, lines are joined with CRYPTO_LINE_SEP marker for later replacement
+/// Large PQC keys (McEliece 512KB, Frodo 15KB) are truncated to 64 bytes for readable logs
 const CRYPTO_LINE_SEP: &str = "\x00HEXLINE\x00";
 
 fn format_crypto_hex(type_name: &str, data: &[u8]) -> String {
-    let hex_lines = format_hex_lines(data);
+    let max_bytes = 64; // Show first 64 bytes - enough for 32-byte hashes/keys
+    let truncated = data.len() > max_bytes;
+    let display_data = if truncated { &data[..max_bytes] } else { data };
+    let hex_lines = format_hex_lines(display_data);
     let size_str = format!("{{{}}}", data.len());
 
-    if hex_lines.len() == 1 {
+    if hex_lines.len() == 1 && !truncated {
         // Single line - inline
         format!(
             "{}{}{}{}",
@@ -391,22 +396,25 @@ fn format_crypto_hex(type_name: &str, data: &[u8]) -> String {
         )
     } else {
         // Multi-line - use separator for later replacement with proper indent
+        let suffix = if truncated { tc("...", 100, 100, 100).to_string() } else { String::new() };
         format!(
-            "{}{}{}{}{}",
+            "{}{}{}{}{}{}",
             type_name.cyan(),
             tc(&size_str, 200, 200, 100),
             tc("0x", 100, 100, 100),
             CRYPTO_LINE_SEP,
-            hex_lines.iter().map(|l| l.white().to_string()).collect::<Vec<_>>().join(CRYPTO_LINE_SEP)
+            hex_lines.iter().map(|l| l.white().to_string()).collect::<Vec<_>>().join(CRYPTO_LINE_SEP),
+            suffix
         )
     }
 }
 
 /// Format v wrapper type with colour coding: ve{size}0xHEX
-/// Shows first 1KB of data with line wrapping, truncates larger data with ...
+/// Shows first 64 bytes of data with line wrapping, truncates larger data with ...
+/// Large PQC ciphertexts are truncated to keep logs readable
 fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
     let size_str = format!("{{{}}}", data.len());
-    let max_bytes = 1024; // Show first 1KB
+    let max_bytes = 64; // Show first 64 bytes
     let truncated = data.len() > max_bytes;
     let display_data = if truncated { &data[..max_bytes] } else { data };
     let hex_lines = format_hex_lines(display_data);
@@ -522,6 +530,12 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         VsfType::kp(k) => format_crypto_hex("kp", k),
         VsfType::kc(k) => format_crypto_hex("kc", k),
         VsfType::ka(k) => format_crypto_hex("ka", k),
+        // Extended key types (post-quantum, additional curves)
+        VsfType::kk(k) => format_crypto_hex("kk", k),  // secp256k1
+        VsfType::kf(k) => format_crypto_hex("kf", k),  // Frodo
+        VsfType::kn(k) => format_crypto_hex("kn", k),  // NTRU
+        VsfType::kl(k) => format_crypto_hex("kl", k),  // McEliece
+        VsfType::kh(k) => format_crypto_hex("kh", k),  // HQC
         VsfType::ge(s) => format_crypto_hex("ge", s),
         VsfType::gp(s) => format_crypto_hex("gp", s),
         VsfType::gr(s) => format_crypto_hex("gr", s),
@@ -575,9 +589,11 @@ pub struct LabelInfo {
     pub hash: Option<VsfType>,
     pub signature: Option<VsfType>,
     pub key: Option<VsfType>,
+    pub wrap: Option<VsfType>, // Wrap marker (not used but kept for compatibility)
     pub offset: usize,
     pub size: usize,
     pub child_count: usize,
+    pub inline_values: Vec<VsfType>, // Inline values for header-only fields
 }
 
 /// Format bytes with proper units and 4 significant figures
@@ -804,6 +820,12 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::kp(key) => format_crypto_literal("kp", key),
         VsfType::kc(key) => format_crypto_literal("kc", key),
         VsfType::ka(key) => format_crypto_literal("ka", key),
+        // Extended key types (post-quantum, additional curves)
+        VsfType::kk(key) => format_crypto_literal("kk", key),  // secp256k1
+        VsfType::kf(key) => format_crypto_literal("kf", key),  // Frodo
+        VsfType::kn(key) => format_crypto_literal("kn", key),  // NTRU
+        VsfType::kl(key) => format_crypto_literal("kl", key),  // McEliece
+        VsfType::kh(key) => format_crypto_literal("kh", key),  // HQC
         VsfType::ah(mac) => format_crypto_literal("ah", mac),
         VsfType::ap(mac) => format_crypto_literal("ap", mac),
         VsfType::ab(mac) => format_crypto_literal("ab", mac),
@@ -848,6 +870,12 @@ pub fn format_value_short(vsf: &VsfType) -> String {
         VsfType::kp(key) => format_crypto_hex("kp", key),
         VsfType::kc(key) => format_crypto_hex("kc", key),
         VsfType::ka(key) => format_crypto_hex("ka", key),
+        // Extended key types (post-quantum, additional curves)
+        VsfType::kk(key) => format_crypto_hex("kk", key),  // secp256k1
+        VsfType::kf(key) => format_crypto_hex("kf", key),  // Frodo
+        VsfType::kn(key) => format_crypto_hex("kn", key),  // NTRU
+        VsfType::kl(key) => format_crypto_hex("kl", key),  // McEliece
+        VsfType::kh(key) => format_crypto_hex("kh", key),  // HQC
         VsfType::ge(sig) => format_crypto_hex("ge", sig),
         VsfType::gp(sig) => format_crypto_hex("gp", sig),
         VsfType::gr(sig) => format_crypto_hex("gr", sig),
@@ -945,9 +973,11 @@ pub fn labels_from_header(header: &VsfHeader) -> Vec<LabelInfo> {
             hash: field.hash.clone(),
             signature: field.signature.clone(),
             key: field.key.clone(),
+            wrap: None,
             offset: field.offset_bytes,
             size: field.size_bytes,
             child_count: field.child_count,
+            inline_values: field.inline_values.clone(),
         })
         .collect()
 }
@@ -1185,10 +1215,21 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         };
 
         // Print label line - matches encoding order: d(name), o(offset), b(size), n(count)
+        // For inline fields: (name:value,value,...) - no offset/size/count
         // Literal values (name, offset, size, count) are white; annotations (Bytes, field) are gray
         out.push_str(&format!(" {}", tc("(", 100, 100, 100)));
         if label.size == 0 {
             out.push_str(&format!("{}", label.name.white().bold()));
+            // Show inline values if present: (name:val1,val2,...)
+            if !label.inline_values.is_empty() {
+                out.push_str(&format!("{}", tc(":", 100, 100, 100)));
+                for (i, val) in label.inline_values.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(&format!("{}", tc(",", 100, 100, 100)));
+                    }
+                    out.push_str(&format!("{}", format_value_literal(val)));
+                }
+            }
         } else {
             out.push_str(&format!("{}", label.name.white().bold()));
             out.push_str(&format!(" {}{}", tc("@", 100, 100, 100), offset_str.white()));

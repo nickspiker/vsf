@@ -127,6 +127,7 @@ pub struct VsfHeader {
 /// Header field definition (section pointer with positional values)
 /// Format: (d[section_name] o[offset] b[size] n[count])
 /// Note: Header fields use POSITIONAL values (no colons or commas)
+/// For inline fields (no section body): (d[name]:value,value,...)
 #[derive(Debug, Clone)]
 pub struct HeaderField {
     pub name: String,
@@ -136,6 +137,7 @@ pub struct HeaderField {
     pub offset_bytes: usize,   // Offset in bytes (byte-aligned)
     pub size_bytes: usize,     // Size in bytes (byte-aligned)
     pub child_count: usize,    // 0 = unboxed blob, N = N structured children
+    pub inline_values: Vec<VsfType>, // For header-only fields (no section body)
 }
 
 impl VsfHeader {
@@ -406,6 +408,7 @@ impl VsfHeader {
             let mut size_bytes = 0;
             let mut child_count = 0;
             let mut has_offset = false;
+            let mut inline_values = Vec::new();
 
             for value in &field.values {
                 match value {
@@ -434,7 +437,10 @@ impl VsfHeader {
                     VsfType::n(n) => {
                         child_count = *n;
                     }
-                    _ => {} // Ignore other types (including legacy wrap markers)
+                    // Capture inline values (u, i, d, l, x, f, etc.) for header-only fields
+                    _ => {
+                        inline_values.push(value.clone());
+                    }
                 }
             }
 
@@ -454,6 +460,7 @@ impl VsfHeader {
                 offset_bytes,
                 size_bytes,
                 child_count,
+                inline_values,
             });
         }
 
@@ -1091,6 +1098,7 @@ mod tests {
             offset_bytes: 512,
             size_bytes: 256,
             child_count: 3,
+            inline_values: Vec::new(),
         });
 
         let encoded = header.encode().unwrap();
@@ -1232,6 +1240,7 @@ mod tests {
             offset_bytes: 256,
             size_bytes: 128,
             child_count: 2,
+            inline_values: Vec::new(),
         });
 
         // Encode it
@@ -1263,6 +1272,7 @@ mod tests {
             offset_bytes: 512,
             size_bytes: 1024,
             child_count: 0,
+            inline_values: Vec::new(),
         });
 
         // Encode it

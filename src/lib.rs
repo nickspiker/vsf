@@ -51,22 +51,22 @@
 //!
 //! ```text
 //! RÅ<                                  Magic number + header start
-//!   z?{version}                        Format version (FIRST - determines encoding)
-//!   y?{backward_version}               Backward compatibility version
-//!   b?{header_length}                  Header size (now we know how to encode it!)
-//!   ef5{current_time}                  Eagle Time current timestamp when last edited (f32, ~2min precision)
-//!   hp{31}{provenance_hash}            Provenance: BLAKE3 hash of content (required, always 32 bytes)
-//!   ge{64}{signature}                  Ed25519 signature over hp (optional)
+//!   z3{5}                        Format version (FIRST - determines encoding)
+//!   y3{5}               Backward compatibility version
+//!   b#{header length}                  Header size (now we know how to encode it!)
+//!   ef5{current time as f32}                  Eagle Time current timestamp when last edited (f32, ~2min precision)
+//!   hp3{31}{provenance hash}            Provenance: BLAKE3 hash of content (required, always 32 bytes)
+//!   ge{64}{signature}                  Ed25519 signature over entire file AFTER provinence hash is patched in (optional, rolling or provinence, must have one or the other)
 //!   hb{31}{rolling_hash}               Rolling: BLAKE3 of current state with History (optional)
-//!   k?{key}                            File-level encryption key (optional)
-//!   n?{label_count}                    Number of label records
-//!   (draw_image:h?{hash},g?{sig},k?{key},o?{offset},b?{size},n?{count})     Label record
-//!   (dthumbnail:h?{hash},g?{sig},k?{key},o?{offset},b?{size},n?{count})
+//!   k#{key}                            File-level encryption key (optional)
+//!   n#{field count}                    Number of fields
+//!   (d3{9}raw_image:h#{hash},o#{offset},b#{size},n#{count})     Field with values
+//!   (d3{9}thumbnail:h#{hash},o#{offset},b#{size},n#{count})
 //!   ...
 //! >                                    Header end
 //!
-//! [d{raw_image} (section_fields...)]           Section data at offset
-//! [d{thumbnail} (section_fields...)]
+//! [(section_fields...)...]           Section data at offset for RAW image, note that if section is not encrypted and closer than 1MB from the header, section name, count and length are not required. otherwise all three.
+//! [d3{9}thumbnailn#{number of fields}b#{length of section}(section_fields...)...]
 //! ```
 //!
 //! **Hash Strategy (Always BLAKE3):**
@@ -74,10 +74,10 @@
 //!   Computed with hp field as zeros, then filled in. Creates stable identifier for original content.
 //! - **ge** (signature): Optional Ed25519 signature. When signing, compute hp, sign it, then **replace** hp bytes with ge signature.
 //! - **hb** (hash rolling): Current file state - Optional BLAKE3 hash including History section.
-//!   Updates when History updates. Useful for tracking mutable file evolution.
+//!   Updates when History updates. Useful for tracking mutable file evolution. ge or hb, must have one.
 //!
 //! **Provenance Verification:**
-//! To verify a file's provenance, zero the hp field and compute BLAKE3 - it should match the stored hp.
+//! To verify a file's provenance, zero the hp and signature/rolling hash fields and compute BLAKE3 - it will match the stored hp if original.
 //! If present, verify the ge signature against hp to authenticate the creator.
 //!
 //! **Terminology:**
@@ -85,7 +85,7 @@
 //! - **Provenance primitives**: Version, timestamp, hash, signature (NOT wrapped in `()`)
 //! - **Header field**: Section pointer `(d"name" o b n)` with POSITIONAL values (no `:` or `,`)
 //! - **Section**: Actual data blocks after the header, located at specified offsets
-//! - **Section field**: Individual `(field:value)` or `(field:v1,v2)` entries within a section
+//! - **Section field**: Individual `(field:value)` or `(field:v0,v1)` entries within a section
 //! - **`?` and `{}`**: `?` indicates length (ASCII 0-Z), `{}` indicates binary data
 //!
 //! The `:` and `,` separators in label records make the format human-readable in hex editors

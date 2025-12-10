@@ -44,11 +44,14 @@ impl EagleTime {
     /// Creates a new EagleTime instance from a VsfType.
     ///
     /// # Panics
-    /// Panics if the VsfType is not a valid numeric variant.
+    /// Panics if the VsfType is not a valid numeric variant or EagleTime type.
     pub fn new_from_vsf(value: crate::types::VsfType) -> Self {
         use crate::types::VsfType;
 
         let et_seconds = match value {
+            // Handle VsfType::e (already an EagleTime wrapper)
+            VsfType::e(et) => et,
+            // Handle raw numeric types
             VsfType::f5(v) => EtType::f5(v),
             VsfType::f6(v) => EtType::f6(v),
             VsfType::u(v, false) => EtType::u(v),
