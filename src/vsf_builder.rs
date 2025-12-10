@@ -38,6 +38,7 @@ pub struct VsfBuilder {
     creation_time: VsfType, // Creation timestamp (ef5 for ~2min precision, ef6 for nanos)
     sections: Vec<(VsfSection, SectionMeta)>, // Section with optional crypto metadata
     unboxed: Vec<(String, Vec<u8>, SectionMeta)>, // Name, data, and optional crypto metadata
+    inline_fields: Vec<(String, Vec<VsfType>)>, // Metadata-only fields: (name, inline values)
     include_file_hash: bool, // True for rolling hash, false if signed
     custom_provenance: Option<[u8; 32]>, // Custom provenance hash (immutable identity)
     signer_pubkey: Option<VsfType>, // Signer's Ed25519 pubkey (ke) - for signature verification
@@ -71,6 +72,7 @@ impl VsfBuilder {
             creation_time: VsfType::e(EtType::f5(et_f32)),
             sections: Vec::new(),
             unboxed: Vec::new(),
+            inline_fields: Vec::new(),
             include_file_hash: true, // True for rolling hash, false if signed
             custom_provenance: None,
             signer_pubkey: None,
@@ -126,6 +128,27 @@ impl VsfBuilder {
     /// The provenance hash (hp) will still be computed for content identity.
     pub fn provenance_only(mut self) -> Self {
         self.include_file_hash = false;
+        self
+    }
+
+    /// Add an inline metadata field (header-only, no section body)
+    ///
+    /// Creates a field like `(d#{name}:value1,value2,...)` in the header.
+    /// Unlike sections, inline fields have no offset/size/count - just name + values.
+    ///
+    /// Use for lightweight control packets (e.g., PT acks) where provenance hash
+    /// provides integrity and inline values carry the metadata.
+    ///
+    /// # Example
+    /// ```ignore
+    /// VsfBuilder::new()
+    ///     .provenance_hash(chunk_hash)
+    ///     .provenance_only()
+    ///     .add_inline_field("pt_ack", vec![VsfType::u3(seq), VsfType::u3(buf)])
+    ///     .build()
+    /// ```
+    pub fn add_inline_field(mut self, name: impl Into<String>, values: Vec<VsfType>) -> Self {
+        self.inline_fields.push((name.into(), values));
         self
     }
 
@@ -261,9 +284,10 @@ impl VsfBuilder {
             vsf[header_index].extend_from_slice(&hash_placeholder(b'b', 32));
         }
 
-        // Header field count (sections + unboxed + optional avatar_id)
+        // Header field count (sections + unboxed + inline_fields + optional avatar_id)
         let avatar_field_count = if self.avatar_hash.is_some() { 1 } else { 0 };
-        let total_fields = self.sections.len() + self.unboxed.len() + avatar_field_count;
+        let total_fields =
+            self.sections.len() + self.unboxed.len() + self.inline_fields.len() + avatar_field_count;
         vsf[header_index].extend_from_slice(&VsfType::n(total_fields).flatten());
 
         // Create header field definitions (section pointers)
@@ -324,6 +348,16 @@ impl VsfBuilder {
             field_size_indices.push((unboxed_index, vsf.len()));
 
             vsf.push(field_bytes);
+        }
+
+        // Inline metadata fields (no section body, just name + values in header)
+        // Format: (d#{name}:value1,value2,...) - no offset/size/count
+        for (name, values) in &self.inline_fields {
+            let mut field = crate::file_format::VsfField::new(name);
+            for value in values {
+                field = field.with_value(value.clone());
+            }
+            vsf.push(field.flatten());
         }
 
         // Avatar ID metadata-only field (if set)

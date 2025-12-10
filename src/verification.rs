@@ -189,6 +189,7 @@ fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, Strin
             offset_bytes: 0,
             size_bytes: 0,
             child_count: 0,
+            inline_values: Vec::new(),
         })
     } else {
         // Section field - require all positional data
@@ -204,6 +205,7 @@ fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, Strin
             offset_bytes,
             size_bytes,
             child_count,
+            inline_values: Vec::new(),
         })
     }
 }
@@ -1236,6 +1238,280 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
     }
 }
 
+/// Sign entire VSF file with Ed25519 (header-level signature)
+///
+/// This function signs the FILE HASH (not the provenance hash directly).
+/// The file must already be built with:
+/// - `ke` (Ed25519 pubkey) in header
+/// - `ge` placeholder (64 zeros) in header
+/// - `hp` either as placeholder (auto-computed) or explicit value
+///
+/// # Flow:
+/// 1. If hp is zeros, compute provenance hash and patch it
+/// 2. Compute file hash = BLAKE3(file with hp filled, ge still zeros)
+/// 3. Sign the file hash with Ed25519
+/// 4. Patch ge with signature
+///
+/// # Arguments
+/// * `vsf_bytes` - Complete VSF file with ke and ge placeholder
+/// * `signing_key` - Ed25519 signing key (32 bytes)
+///
+/// # Returns
+/// VSF file bytes with hp and ge filled in
+///
+/// # Security
+/// Signs the FILE HASH, not the provenance hash directly. This prevents
+/// extension attacks where content could be added after the signed portion.
+#[cfg(feature = "crypto")]
+pub fn sign_file(mut vsf_bytes: Vec<u8>, signing_key: &[u8; 32]) -> Result<Vec<u8>, String> {
+    use ed25519_dalek::{Signer, SigningKey};
+
+    // Parse signing key
+    let signing_key = SigningKey::from_bytes(signing_key);
+
+    // Check if hp needs to be computed (all zeros = placeholder)
+    let hp_info = find_header_hp(&vsf_bytes)?;
+    if hp_info.is_placeholder {
+        // Compute and write provenance hash
+        let hp_hash = compute_provenance_hash(&vsf_bytes)?;
+        vsf_bytes[hp_info.value_start..hp_info.value_start + 32].copy_from_slice(&hp_hash);
+    }
+
+    // Find ge signature placeholder
+    let ge_info = find_header_ge(&vsf_bytes)?;
+    if !ge_info.is_placeholder {
+        return Err("ge is already filled - file may already be signed".to_string());
+    }
+
+    // Compute file hash with hp filled, ge still zeros
+    // This is what we sign
+    let file_hash = blake3::hash(&vsf_bytes);
+
+    // Sign the file hash
+    let signature = signing_key.sign(file_hash.as_bytes());
+    let sig_bytes = signature.to_bytes();
+
+    // Patch ge with signature
+    vsf_bytes[ge_info.value_start..ge_info.value_start + 64].copy_from_slice(&sig_bytes);
+
+    Ok(vsf_bytes)
+}
+
+/// Verify header-level Ed25519 signature
+///
+/// # Flow:
+/// 1. Extract ke (pubkey) and ge (signature) from header
+/// 2. Zero out ge bytes to get signing input
+/// 3. Compute file hash of that
+/// 4. Verify signature against file hash using ke
+///
+/// # Arguments
+/// * `vsf_bytes` - Complete VSF file with ke and ge in header
+///
+/// # Returns
+/// `Ok(true)` if signature is valid
+/// `Ok(false)` if signature is invalid
+/// `Err` if file format is wrong or missing ke/ge
+#[cfg(feature = "crypto")]
+pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    // Find ke (public key)
+    let ke_info = find_header_ke(vsf_bytes)?;
+    if ke_info.value_len != 32 {
+        return Err(format!("Expected 32-byte Ed25519 pubkey, got {}", ke_info.value_len));
+    }
+    let pubkey_bytes: [u8; 32] = vsf_bytes[ke_info.value_start..ke_info.value_start + 32]
+        .try_into()
+        .map_err(|_| "Failed to extract pubkey bytes")?;
+
+    // Find ge (signature)
+    let ge_info = find_header_ge(vsf_bytes)?;
+    if ge_info.value_len != 64 {
+        return Err(format!("Expected 64-byte Ed25519 signature, got {}", ge_info.value_len));
+    }
+    let sig_bytes: [u8; 64] = vsf_bytes[ge_info.value_start..ge_info.value_start + 64]
+        .try_into()
+        .map_err(|_| "Failed to extract signature bytes")?;
+
+    // Check if signature is all zeros (not signed)
+    if sig_bytes.iter().all(|&b| b == 0) {
+        return Err("Signature is all zeros - file not signed".to_string());
+    }
+
+    // Zero out ge to compute what was signed
+    let mut temp_bytes = vsf_bytes.to_vec();
+    for i in 0..64 {
+        temp_bytes[ge_info.value_start + i] = 0;
+    }
+
+    // Compute file hash
+    let file_hash = blake3::hash(&temp_bytes);
+
+    // Verify signature
+    let verifying_key = VerifyingKey::from_bytes(&pubkey_bytes)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let signature = Signature::from_bytes(&sig_bytes);
+
+    match verifying_key.verify(file_hash.as_bytes(), &signature) {
+        Ok(()) => Ok(true),
+        Err(_) => Ok(false),
+    }
+}
+
+/// Extract the signer's public key (ke) from a signed VSF file
+///
+/// # Arguments
+/// * `vsf_bytes` - Complete VSF file with ke in header
+///
+/// # Returns
+/// 32-byte Ed25519 public key
+#[cfg(feature = "crypto")]
+pub fn extract_signer_pubkey(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
+    let ke_info = find_header_ke(vsf_bytes)?;
+    if ke_info.value_len != 32 {
+        return Err(format!("Expected 32-byte Ed25519 pubkey, got {}", ke_info.value_len));
+    }
+    vsf_bytes[ke_info.value_start..ke_info.value_start + 32]
+        .try_into()
+        .map_err(|_| "Failed to extract pubkey bytes".to_string())
+}
+
+/// Info about a header field location
+struct HeaderFieldInfo {
+    #[allow(dead_code)]
+    marker_pos: usize,    // Position of type marker (e.g., 'h' for hp)
+    value_start: usize,   // Position where value bytes start
+    value_len: usize,     // Length of value bytes
+    is_placeholder: bool, // True if all value bytes are zero
+}
+
+/// Find hp (provenance hash) in header
+fn find_header_hp(data: &[u8]) -> Result<HeaderFieldInfo, String> {
+    if data.len() < 4 || &data[0..3] != "RÅ".as_bytes() || data[3] != b'<' {
+        return Err("Invalid VSF magic".to_string());
+    }
+
+    let mut ptr = 4;
+
+    // Skip version, backward compat, header length
+    let _ = parse(data, &mut ptr).map_err(|e| format!("version: {}", e))?;
+    let _ = parse(data, &mut ptr).map_err(|e| format!("backward: {}", e))?;
+    let _ = parse(data, &mut ptr).map_err(|e| format!("header_len: {}", e))?;
+
+    // Skip creation time
+    let _ = parse(data, &mut ptr).map_err(|e| format!("creation_time: {}", e))?;
+
+    // Now should be at hp
+    let marker_pos = ptr;
+    if ptr >= data.len() || data[ptr] != b'h' {
+        return Err(format!("Expected hp at position {}", ptr));
+    }
+
+    let hp_type = parse(data, &mut ptr).map_err(|e| format!("hp: {}", e))?;
+    match hp_type {
+        VsfType::hp(bytes) => {
+            let value_start = ptr - bytes.len();
+            let is_placeholder = bytes.iter().all(|&b| b == 0);
+            Ok(HeaderFieldInfo {
+                marker_pos,
+                value_start,
+                value_len: bytes.len(),
+                is_placeholder,
+            })
+        }
+        _ => Err("Expected hp type".to_string()),
+    }
+}
+
+/// Find ke (Ed25519 pubkey) in header
+fn find_header_ke(data: &[u8]) -> Result<HeaderFieldInfo, String> {
+    if data.len() < 4 || &data[0..3] != "RÅ".as_bytes() || data[3] != b'<' {
+        return Err("Invalid VSF magic".to_string());
+    }
+
+    let mut ptr = 4;
+
+    // Skip version, backward compat, header length
+    let _ = parse(data, &mut ptr).map_err(|e| format!("version: {}", e))?;
+    let _ = parse(data, &mut ptr).map_err(|e| format!("backward: {}", e))?;
+    let _ = parse(data, &mut ptr).map_err(|e| format!("header_len: {}", e))?;
+
+    // Skip creation time
+    let _ = parse(data, &mut ptr).map_err(|e| format!("creation_time: {}", e))?;
+
+    // Skip hp
+    let _ = parse(data, &mut ptr).map_err(|e| format!("hp: {}", e))?;
+
+    // Now should be at ke (if present)
+    let marker_pos = ptr;
+    if ptr >= data.len() || data[ptr] != b'k' {
+        return Err("No ke found in header".to_string());
+    }
+
+    let ke_type = parse(data, &mut ptr).map_err(|e| format!("ke: {}", e))?;
+    match ke_type {
+        VsfType::ke(bytes) => {
+            let value_start = ptr - bytes.len();
+            let is_placeholder = bytes.iter().all(|&b| b == 0);
+            Ok(HeaderFieldInfo {
+                marker_pos,
+                value_start,
+                value_len: bytes.len(),
+                is_placeholder,
+            })
+        }
+        _ => Err(format!("Expected ke type, got {:?}", ke_type)),
+    }
+}
+
+/// Find ge (Ed25519 signature) in header
+fn find_header_ge(data: &[u8]) -> Result<HeaderFieldInfo, String> {
+    if data.len() < 4 || &data[0..3] != "RÅ".as_bytes() || data[3] != b'<' {
+        return Err("Invalid VSF magic".to_string());
+    }
+
+    let mut ptr = 4;
+
+    // Skip version, backward compat, header length
+    let _ = parse(data, &mut ptr).map_err(|e| format!("version: {}", e))?;
+    let _ = parse(data, &mut ptr).map_err(|e| format!("backward: {}", e))?;
+    let _ = parse(data, &mut ptr).map_err(|e| format!("header_len: {}", e))?;
+
+    // Skip creation time
+    let _ = parse(data, &mut ptr).map_err(|e| format!("creation_time: {}", e))?;
+
+    // Skip hp
+    let _ = parse(data, &mut ptr).map_err(|e| format!("hp: {}", e))?;
+
+    // Skip ke (must be present before ge)
+    if ptr >= data.len() || data[ptr] != b'k' {
+        return Err("No ke found before ge".to_string());
+    }
+    let _ = parse(data, &mut ptr).map_err(|e| format!("ke: {}", e))?;
+
+    // Now should be at ge
+    let marker_pos = ptr;
+    if ptr >= data.len() || data[ptr] != b'g' {
+        return Err("No ge found in header".to_string());
+    }
+
+    let ge_type = parse(data, &mut ptr).map_err(|e| format!("ge: {}", e))?;
+    match ge_type {
+        VsfType::ge(bytes) => {
+            let value_start = ptr - bytes.len();
+            let is_placeholder = bytes.iter().all(|&b| b == 0);
+            Ok(HeaderFieldInfo {
+                marker_pos,
+                value_start,
+                value_len: bytes.len(),
+                is_placeholder,
+            })
+        }
+        _ => Err(format!("Expected ge type, got {:?}", ge_type)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1250,7 +1526,6 @@ mod tests {
         // Build a simple VSF file similar to what Photon does
         let meta = SectionMeta::new(
             VsfType::ke(vec![0u8; 32]),    // Ed25519 device public key
-            VsfType::v(b'e', vec![]),       // Empty vec = metadata only
         );
 
         let encrypted = vec![0u8; 100]; // Fake encrypted data
@@ -1346,5 +1621,86 @@ mod tests {
             result.is_err(),
             "Corrupted file should fail hash verification"
         );
+    }
+
+    #[cfg(feature = "crypto")]
+    #[test]
+    fn test_sign_and_verify_file() {
+        use crate::vsf_builder::VsfBuilder;
+        use ed25519_dalek::SigningKey;
+        use rand::rngs::OsRng;
+
+        // Generate a keypair
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let pubkey = signing_key.verifying_key().to_bytes();
+
+        // Build VSF with ke + ge placeholder
+        let unsigned = VsfBuilder::new()
+            .signature_ed25519(pubkey, [0u8; 64]) // ke + ge placeholder
+            .add_section("test", vec![
+                ("value".to_string(), VsfType::u(42, false)),
+            ])
+            .build()
+            .expect("Failed to build unsigned VSF");
+
+        println!("Unsigned VSF: {} bytes", unsigned.len());
+
+        // Sign the file
+        let signed = sign_file(unsigned.clone(), signing_key.as_bytes())
+            .expect("Failed to sign file");
+
+        println!("Signed VSF: {} bytes", signed.len());
+
+        // Verify the signature
+        let valid = verify_file_signature(&signed)
+            .expect("Failed to verify signature");
+        assert!(valid, "Signature should be valid");
+
+        // Corrupt a byte and verify it fails
+        let mut corrupted = signed.clone();
+        corrupted[signed.len() - 10] ^= 0xFF;
+        let valid = verify_file_signature(&corrupted)
+            .expect("Should parse corrupted file");
+        assert!(!valid, "Corrupted file should fail verification");
+
+        // Extract signer pubkey
+        let extracted = extract_signer_pubkey(&signed)
+            .expect("Failed to extract pubkey");
+        assert_eq!(extracted, pubkey, "Extracted pubkey should match");
+    }
+
+    #[cfg(feature = "crypto")]
+    #[test]
+    fn test_sign_file_with_custom_provenance() {
+        use crate::vsf_builder::VsfBuilder;
+        use ed25519_dalek::SigningKey;
+        use rand::rngs::OsRng;
+
+        // Generate a keypair
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let pubkey = signing_key.verifying_key().to_bytes();
+
+        // Custom provenance (e.g., ceremony session ID)
+        let ceremony_hp = *blake3::hash(b"test_ceremony").as_bytes();
+
+        // Build VSF with custom provenance + ke + ge placeholder
+        let unsigned = VsfBuilder::new()
+            .provenance_hash(ceremony_hp)
+            .signature_ed25519(pubkey, [0u8; 64])
+            .add_section("clutch_full_offer", vec![
+                ("lower".to_string(), VsfType::hb(vec![1u8; 32])),
+                ("higher".to_string(), VsfType::hb(vec![2u8; 32])),
+            ])
+            .build()
+            .expect("Failed to build unsigned VSF");
+
+        // Sign the file (should NOT recompute hp since it's not all zeros)
+        let signed = sign_file(unsigned, signing_key.as_bytes())
+            .expect("Failed to sign file");
+
+        // Verify
+        let valid = verify_file_signature(&signed)
+            .expect("Failed to verify signature");
+        assert!(valid, "Signature should be valid with custom provenance");
     }
 }

@@ -518,8 +518,18 @@ fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(),
         // Print with alignment
         print!(" {}", "(".truecolor(128, 128, 128));
         if label.size == 0 {
-            // Empty section - just show name
+            // Empty section or inline field - show name
             print!("{}", label.name.white().bold());
+            // Show inline values if present: (name:val1,val2,...)
+            if !label.inline_values.is_empty() {
+                print!("{}", ":".truecolor(128, 128, 128));
+                for (i, val) in label.inline_values.iter().enumerate() {
+                    if i > 0 {
+                        print!("{}", ",".truecolor(128, 128, 128));
+                    }
+                    print!("{}", format_value_short(val));
+                }
+            }
         } else {
             // Regular section with size/offset info
             print!("{:>width$}", size_str.bright_yellow(), width = max_size_len);

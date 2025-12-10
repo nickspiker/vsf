@@ -17,8 +17,8 @@ download the required files when users build the crate.
 
 ## Pre-publish Checklist
 
-1. Run tests: `cargo test --lib --features text`
-2. Check it builds: `cargo build --release --features text`
-3. Bump version in `Cargo.toml`
-4. Dry run (optional): `cargo publish --dry-run --allow-dirty --no-verify`
-5. Publish: `cargo publish --no-verify`
+0. Run tests: `cargo test --lib --features text`
+1. Check it builds: `cargo build --release --features text`
+2. Bump version in `Cargo.toml`
+3. Dry run (optional): `cargo publish --dry-run --allow-dirty --no-verify`
+4. Publish: `cargo publish --no-verify`
