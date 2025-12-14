@@ -354,6 +354,14 @@ impl VsfType {
                 flat
             }
 
+            VsfType::L(value, _inclusive) => {
+                // File length - same encoding as b (inclusive mode handled by stabilization loop)
+                let mut flat = Vec::new();
+                flat.push(b'L');
+                flat.extend_from_slice(&value.encode_number());
+                flat
+            }
+
             VsfType::n(value) => {
                 let mut flat = Vec::new();
                 flat.push(b'n');
@@ -399,6 +407,20 @@ impl VsfType {
 
             VsfType::hs(value) => {
                 let mut flat = vec![b'h', b's'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
+                flat.extend_from_slice(&value); // Write actual hash bytes
+                flat
+            }
+
+            VsfType::hm(value) => {
+                let mut flat = vec![b'h', b'm'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
+                flat.extend_from_slice(&value); // Write actual hash bytes
+                flat
+            }
+
+            VsfType::hg(value) => {
+                let mut flat = vec![b'h', b'g'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(&value); // Write actual hash bytes
                 flat
@@ -4086,6 +4108,12 @@ impl VsfType {
                 1 + encoded_usize_len(*size)
             }
 
+            VsfType::L(size, _inclusive) => {
+                // 'L' + encoded file length (as usize)
+                // Note: inclusive mode is handled by stabilization, encoding is same
+                1 + encoded_usize_len(*size)
+            }
+
             VsfType::n(count) => {
                 // 'n' + encoded count (as usize)
                 1 + encoded_usize_len(*count)
@@ -4096,7 +4124,7 @@ impl VsfType {
             VsfType::y(compat) => 1 + encoded_usize_len(*compat), // 'y' + encoded compat
 
             // ==================== CRYPTO PRIMITIVES ====================
-            VsfType::hb(bytes) | VsfType::hs(bytes) => {
+            VsfType::hb(bytes) | VsfType::hs(bytes) | VsfType::hm(bytes) | VsfType::hg(bytes) => {
                 // prefix + encoded_length + data
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
             }

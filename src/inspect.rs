@@ -486,10 +486,10 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         }
         VsfType::x(s) => {
             format!(
-                "{}{}{}",
+                "{}{}\"{}\"",
                 format!("x{}", size_marker(s.len())).cyan(),
                 format!("{{{}}}", s.len()).truecolor(200, 200, 100),
-                s.white()
+                s.escape_default().to_string().white()
             )
         }
 
@@ -525,6 +525,8 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         VsfType::hp(h) => format_crypto_hex("hp", h),
         VsfType::hb(h) => format_crypto_hex("hb", h),
         VsfType::hs(h) => format_crypto_hex("hs", h),
+        VsfType::hm(h) => format_crypto_hex("hm", h),
+        VsfType::hg(h) => format_crypto_hex("hg", h),
         VsfType::ke(k) => format_crypto_hex("ke", k),
         VsfType::kx(k) => format_crypto_hex("kx", k),
         VsfType::kp(k) => format_crypto_hex("kp", k),
@@ -561,13 +563,22 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
                     .map(|d| d.to_string())
                     .collect::<Vec<_>>()
                     .join("×");
-                format!("{}{}{}{}{}{}",
+                // Show first 64 bytes as hex
+                let preview_len = tensor.data.len().min(64);
+                let hex_preview = tensor.data[..preview_len]
+                    .iter()
+                    .map(|b| format!("{:02X}", b))
+                    .collect::<String>();
+                let ellipsis = if tensor.data.len() > 64 { "..." } else { "" };
+                format!("{}{}{}{}{}{}{}{}",
                     "t_u3".cyan(),
                     tc("[", 100, 100, 100),
                     shape_str.truecolor(200, 200, 100),
                     tc("]", 100, 100, 100),
                     tc("(", 100, 100, 100),
-                    format!("{} bytes)", tensor.data.len()).truecolor(200, 200, 100)
+                    format!("{} bytes)", tensor.data.len()).truecolor(200, 200, 100),
+                    format!("0x{}", hex_preview).truecolor(180, 180, 255),
+                    ellipsis.truecolor(100, 100, 100)
                 )
             }
         }
@@ -755,7 +766,7 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::i7(v) => format!("{}", v),
         VsfType::f5(v) => format!("{:.4}", v),
         VsfType::f6(v) => format!("{:.8}", v),
-        VsfType::x(s) => s.clone(),
+        VsfType::x(s) => format!("\"{}\"", s.escape_default()),
         VsfType::p(tensor) => {
             let shape_str = tensor
                 .shape
@@ -775,16 +786,23 @@ pub fn format_value(vsf: &VsfType) -> String {
             if tensor.shape == vec![16] && tensor.data.len() == 16 {
                 let bytes: [u8; 16] = tensor.data.as_slice().try_into().unwrap_or([0u8; 16]);
                 let ipv6 = std::net::Ipv6Addr::from(bytes);
-                format!("t u3{{{}}}", ipv6)
+                format!("t_u3{{{}}}", ipv6)
             } else {
-                // Generic tensor: t_u3{shape}(data preview)
+                // Generic tensor: t_u3{shape}(data preview with first 64 bytes as hex)
                 let shape_str = tensor
                     .shape
                     .iter()
                     .map(|d| d.to_string())
                     .collect::<Vec<_>>()
                     .join("×");
-                format!("t_u3[{}]({} bytes)", shape_str, tensor.data.len())
+                let preview_len = tensor.data.len().min(64);
+                let hex_preview = tensor.data[..preview_len]
+                    .iter()
+                    .map(|b| format!("{:02X}", b))
+                    .collect::<Vec<_>>()
+                    .join("");
+                let ellipsis = if tensor.data.len() > 64 { "..." } else { "" };
+                format!("t_u3[{}]({} bytes)0x{}{}", shape_str, tensor.data.len(), hex_preview, ellipsis)
             }
         }
         VsfType::t_f5(tensor) => {
@@ -812,6 +830,8 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::hp(hash) => format_crypto_literal("hp", hash),
         VsfType::hb(hash) => format_crypto_literal("hb", hash),
         VsfType::hs(hash) => format_crypto_literal("hs", hash),
+        VsfType::hm(hash) => format_crypto_literal("hm", hash),
+        VsfType::hg(hash) => format_crypto_literal("hg", hash),
         VsfType::ge(sig) => format_crypto_literal("ge", sig),
         VsfType::gp(sig) => format_crypto_literal("gp", sig),
         VsfType::gr(sig) => format_crypto_literal("gr", sig),
@@ -859,12 +879,14 @@ pub fn format_value_short(vsf: &VsfType) -> String {
                 format_number(tensor.data.len())
             )
         }
-        VsfType::x(s) if s.len() > 30 => format!("{}...", &s[..27]),
+        VsfType::x(s) if s.len() > 30 => format!("\"{}\"...", s[..27].escape_default()),
         // Show literal VSF notation for crypto fields with colour coding
         // type{size}0xHEX - type=cyan, size=yellow, 0x=gray, hex=white
         VsfType::hp(hash) => format_crypto_hex("hp", hash),
         VsfType::hb(hash) => format_crypto_hex("hb", hash),
         VsfType::hs(hash) => format_crypto_hex("hs", hash),
+        VsfType::hm(hash) => format_crypto_hex("hm", hash),
+        VsfType::hg(hash) => format_crypto_hex("hg", hash),
         VsfType::ke(key) => format_crypto_hex("ke", key),
         VsfType::kx(key) => format_crypto_hex("kx", key),
         VsfType::kp(key) => format_crypto_hex("kp", key),
@@ -984,6 +1006,7 @@ pub fn labels_from_header(header: &VsfHeader) -> Vec<LabelInfo> {
 
 /// Format complete VSF stream for inspection (coloured output with tree structure)
 /// Returns multi-line string with header info, labels, and section tree
+/// Shows literal VSF encoding first (white), then descriptive hints (dark grey)
 pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     // Check magic number
     if data.len() < 4 {
@@ -996,7 +1019,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     let (header, _consumed) = VsfHeader::decode(data)?;
     let labels = labels_from_header(&header);
 
-    // Parse header length
+    // Parse header length and file length
     let mut pointer = 4; // After "RÅ<"
     let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
     let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse backward compat: {}", e))?;
@@ -1004,6 +1027,16 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     let header_length_bytes = match header_length_type {
         VsfType::b(bytes, _) => bytes,
         _ => 0,
+    };
+    // Parse optional file length (L field) - only present in newer files
+    let file_length_bytes = if pointer < data.len() && data[pointer] == b'L' {
+        let file_length_type = parse(data, &mut pointer).map_err(|e| format!("Failed to parse file length: {}", e))?;
+        match file_length_type {
+            VsfType::L(bytes, _) => Some(bytes),
+            _ => None,
+        }
+    } else {
+        None // No L field present
     };
 
     let mut out = String::new();
@@ -1023,44 +1056,101 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     // Header section marker
     out.push_str(&format!("{}\n", tc("<", 128, 128, 128)));
 
-    // Version info
+    // Version: z3{N} literal first, then hint
     out.push_str(&format!(
-        " {} {}\n",
-        tc("Version", 128, 128, 128),
-        header.version.to_string().white()
-    ));
-    out.push_str(&format!(
-        " {} {}\n",
-        tc("Backward compat", 128, 128, 128),
-        header.backward_compat.to_string().white()
+        " {}{}{}{}{} {}\n",
+        "z".white(),
+        "3".truecolor(100, 100, 100),
+        "{".truecolor(100, 100, 100),
+        header.version.to_string().white(),
+        "}".truecolor(100, 100, 100),
+        tc("Version", 100, 100, 100)
     ));
 
-    // Creation time
+    // Backward compat: y3{N}
+    out.push_str(&format!(
+        " {}{}{}{}{} {}\n",
+        "y".white(),
+        "3".truecolor(100, 100, 100),
+        "{".truecolor(100, 100, 100),
+        header.backward_compat.to_string().white(),
+        "}".truecolor(100, 100, 100),
+        tc("Backward compat", 100, 100, 100)
+    ));
+
+    // Creation time: ef6{timestamp}
     if let VsfType::e(ref et) = header.creation_time {
+        let tier = match et {
+            crate::types::EtType::f5(_) => "5",
+            crate::types::EtType::f6(_) => "6",
+            _ => "?",
+        };
         out.push_str(&format!(
-            " {} {}\n",
-            tc("Created", 128, 128, 128),
-            format_eagle_time(et).white()
+            " {}{}{}{}{}\n",
+            "e".white(),
+            format!("f{}", tier).truecolor(100, 100, 100),
+            "{".truecolor(100, 100, 100),
+            format_eagle_time(et).white(),
+            "}".truecolor(100, 100, 100)
         ));
     }
 
-    // Header size
+    // Header size: b3{N} Bytes
     out.push_str(&format!(
-        " {} {} Bytes\n",
-        tc("Header size:", 128, 128, 128),
-        header_length_bytes.to_string().white()
+        " {}{}{}{}{} {} {}\n",
+        "b".white(),
+        "3".truecolor(100, 100, 100),
+        "{".truecolor(100, 100, 100),
+        header_length_bytes.to_string().white(),
+        "}".truecolor(100, 100, 100),
+        tc("Header size", 100, 100, 100),
+        tc("Bytes", 100, 100, 100)
     ));
 
-    // Provenance hash (full)
+    // File length: L3{N} Bytes (only if present)
+    if let Some(file_len) = file_length_bytes {
+        let actual_len = data.len();
+        let length_valid = file_len == actual_len;
+        if length_valid {
+            out.push_str(&format!(
+                " {}{}{}{}{} {} {} {}\n",
+                "L".white(),
+                "3".truecolor(100, 100, 100),
+                "{".truecolor(100, 100, 100),
+                file_len.to_string().white(),
+                "}".truecolor(100, 100, 100),
+                tc("File length", 100, 100, 100),
+                tc("Bytes", 100, 100, 100),
+                tc("✓", 0, 200, 0)
+            ));
+        } else {
+            out.push_str(&format!(
+                " {}{}{}{}{} {} {} {} {}\n",
+                "L".white(),
+                "3".truecolor(100, 100, 100),
+                "{".truecolor(100, 100, 100),
+                file_len.to_string().red(),
+                "}".truecolor(100, 100, 100),
+                tc("File length", 100, 100, 100),
+                tc("Bytes", 100, 100, 100),
+                tc("✗ MISMATCH", 255, 0, 0),
+                format!("(actual: {})", actual_len).truecolor(100, 100, 100)
+            ));
+        }
+    }
+
+    // Provenance hash: hp3{32} then hex on next lines
     if let VsfType::hp(ref hash) = header.provenance_hash {
         out.push_str(&format!(
-            " {}{}{} {} {} {}\n",
-            hash.len().to_string().truecolor(200, 200, 100),
-            tc("-", 100, 100, 100),
-            tc("Byte", 128, 128, 128),
-            "BLAKE3".cyan(),
-            tc("provenance hash", 128, 128, 128),
-            tc("hex", 100, 100, 100)
+            " {}{}{}{}{} {} {} {}\n",
+            "hp".white(),
+            "3".truecolor(100, 100, 100),
+            "{".truecolor(100, 100, 100),
+            hash.len().to_string().white(),
+            "}".truecolor(100, 100, 100),
+            tc("BLAKE3 provenance hash", 100, 100, 100),
+            tc("hex", 100, 100, 100),
+            "".white() // placeholder
         ));
         let hash_lines = format_hex_lines(hash);
         for line in &hash_lines {
@@ -1068,15 +1158,16 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         }
     }
 
-    // Signer pubkey (full, wrapped at 16 bytes)
+    // Signer pubkey: ke3{32} hex
     if let Some(VsfType::ke(ref key)) = header.signer_pubkey {
         out.push_str(&format!(
-            " {}{}{} {} {} {}\n",
-            key.len().to_string().truecolor(200, 200, 100),
-            tc("-", 100, 100, 100),
-            tc("Byte", 128, 128, 128),
-            "Ed25519".cyan(),
-            tc("signer pubkey", 128, 128, 128),
+            " {}{}{}{}{} {} {}\n",
+            "ke".white(),
+            "3".truecolor(100, 100, 100),
+            "{".truecolor(100, 100, 100),
+            key.len().to_string().white(),
+            "}".truecolor(100, 100, 100),
+            tc("Ed25519 signer pubkey", 100, 100, 100),
             tc("hex", 100, 100, 100)
         ));
         let key_lines = format_hex_lines(key);
@@ -1085,15 +1176,16 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         }
     }
 
-    // Signature (full, wrapped at 16 bytes)
+    // Signature: ge3{64} hex
     if let Some(VsfType::ge(ref sig)) = header.signature {
         out.push_str(&format!(
-            " {}{}{} {} {} {}\n",
-            sig.len().to_string().truecolor(200, 200, 100),
-            tc("-", 100, 100, 100),
-            tc("Byte", 128, 128, 128),
-            "Ed25519".cyan(),
-            tc("signature", 128, 128, 128),
+            " {}{}{}{}{} {} {}\n",
+            "ge".white(),
+            "3".truecolor(100, 100, 100),
+            "{".truecolor(100, 100, 100),
+            sig.len().to_string().white(),
+            "}".truecolor(100, 100, 100),
+            tc("Ed25519 signature", 100, 100, 100),
             tc("hex", 100, 100, 100)
         ));
         let sig_lines = format_hex_lines(sig);
@@ -1102,15 +1194,16 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         }
     }
 
-    // Rolling hash if present (wrapped at 16 bytes)
+    // Rolling hash: hb3{32} hex
     if let Some(VsfType::hb(ref hash)) = header.rolling_hash {
         out.push_str(&format!(
-            " {}{}{} {} {} {}\n",
-            hash.len().to_string().truecolor(200, 200, 100),
-            tc("-", 100, 100, 100),
-            tc("Byte", 128, 128, 128),
-            "BLAKE3".cyan(),
-            tc("rolling hash", 128, 128, 128),
+            " {}{}{}{}{} {} {}\n",
+            "hb".white(),
+            "3".truecolor(100, 100, 100),
+            "{".truecolor(100, 100, 100),
+            hash.len().to_string().white(),
+            "}".truecolor(100, 100, 100),
+            tc("BLAKE3 rolling hash", 100, 100, 100),
             tc("hex", 100, 100, 100)
         ));
         let hash_lines = format_hex_lines(hash);
@@ -1122,24 +1215,28 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             if computed.as_slice() == hash.as_slice() {
                 out.push_str(&format!(
                     " {} {}\n",
-                    tc("Verification:", 128, 128, 128),
+                    tc("Verification:", 100, 100, 100),
                     tc("PASS", 100, 220, 100)
                 ));
             } else {
                 out.push_str(&format!(
                     " {} {}\n",
-                    tc("Verification:", 128, 128, 128),
+                    tc("Verification:", 100, 100, 100),
                     tc("FAIL", 220, 100, 100)
                 ));
             }
         }
     }
 
-    // Labels section
+    // Label count: n3{N}
     out.push_str(&format!(
-        " {} {}\n",
-        labels.len().to_string().truecolor(200, 200, 100),
-        tc("labels", 128, 128, 128)
+        " {}{}{}{}{} {}\n",
+        "n".white(),
+        "3".truecolor(100, 100, 100),
+        "{".truecolor(100, 100, 100),
+        labels.len().to_string().white(),
+        "}".truecolor(100, 100, 100),
+        tc("labels", 100, 100, 100)
     ));
 
     for label in &labels {

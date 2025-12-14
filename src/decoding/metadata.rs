@@ -222,6 +222,11 @@ pub fn parse_length(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
     Ok(VsfType::b(length, false)) // Inclusive flag not relevant when parsing
 }
 
+pub fn parse_file_length(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+    let length = decode_usize(data, pointer)?;
+    Ok(VsfType::L(length, false)) // Inclusive flag not relevant when parsing
+}
+
 pub fn parse_count(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
     let count = decode_usize(data, pointer)?;
     Ok(VsfType::n(count))
@@ -313,6 +318,8 @@ pub fn parse_hash(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
         b'p' => Ok(VsfType::hp(hash)),
         b'b' => Ok(VsfType::hb(hash)),
         b's' => Ok(VsfType::hs(hash)),
+        b'm' => Ok(VsfType::hm(hash)),
+        b'g' => Ok(VsfType::hg(hash)),
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Unknown hash algorithm: {}", algo as char),

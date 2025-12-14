@@ -473,6 +473,8 @@ impl FromVsfType for Vec<u8> {
             VsfType::hb(bytes) => Ok(bytes.clone()),
             VsfType::hp(bytes) => Ok(bytes.clone()),
             VsfType::hs(bytes) => Ok(bytes.clone()),
+            VsfType::hm(bytes) => Ok(bytes.clone()),
+            VsfType::hg(bytes) => Ok(bytes.clone()),
             VsfType::ke(bytes) => Ok(bytes.clone()),
             VsfType::kx(bytes) => Ok(bytes.clone()),
             VsfType::kp(bytes) => Ok(bytes.clone()),

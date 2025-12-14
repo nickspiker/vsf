@@ -118,6 +118,7 @@ pub enum VsfType {
     l(String),      // ASCII text (user-facing, ASCII-only alternative to x)
     o(usize),       // Offset in Bytes
     b(usize, bool), // Length in Bytes (value, inclusive_mode)
+    L(usize, bool), // File length in Bytes (value, inclusive_mode) - for TCP streaming
     n(usize),       // Number/count
     z(usize),       // Version
     y(usize),       // Backward version
@@ -128,6 +129,8 @@ pub enum VsfType {
     hp(Vec<u8>), // BLAKE3 provenance hash (immutable content identity)
     hb(Vec<u8>), // BLAKE3 rolling hash (current file state)
     hs(Vec<u8>), // SHA hash (SHA-256, SHA-512, etc.)
+    hm(Vec<u8>), // Smear hash (XOR of BLAKE3 + SHA3-256 + SHA-512)
+    hg(Vec<u8>), // Spaghetti hash (domain-separated, maximally weird mixing)
     hc(Vec<u8>), // SHA-3/Keccak
     hk(Vec<u8>), // BLAKE2
 

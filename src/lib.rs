@@ -54,6 +54,7 @@
 //!   z3{5}                        Format version (FIRST - determines encoding)
 //!   y3{5}               Backward compatibility version
 //!   b#{header length}                  Header size (now we know how to encode it!)
+//!   L#{file length}                    Total file size in bytes (optional, for TCP streaming without parse-as-you-go)
 //!   ef5{current time as f32}                  Eagle Time current timestamp when last edited (f32, ~2min precision)
 //!   hp3{31}{provenance hash}            Provenance: BLAKE3 hash of content (required, always 32 bytes)
 //!   ge{64}{signature}                  Ed25519 signature over entire file AFTER provinence hash is patched in (optional, rolling or provinence, must have one or the other)
@@ -290,9 +291,11 @@
 
 // VSF format version constants
 /// Current VSF format version
-pub const VSF_VERSION: usize = 5;
+/// v6: L (file length) field in header for TCP streaming (always present in v6+)
+pub const VSF_VERSION: usize = 6;
 
 /// Backward compatibility version (oldest version this implementation can read)
+/// v5 files (without L) are still readable
 pub const VSF_BACKWARD_COMPAT: usize = 5;
 
 // Core type system
