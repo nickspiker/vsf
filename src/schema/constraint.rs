@@ -48,14 +48,18 @@ pub enum TypeConstraint {
     AsciiText,
 
     // === HASH TYPES ===
-    /// Any hash type (hp, hb, hs)
+    /// Any hash type (hp, hb, hs, hm, hg)
     AnyHash,
     /// BLAKE3 provenance hash (hp)
     Blake3Provenance,
     /// BLAKE3 rolling hash (hb)
     Blake3Rolling,
-    /// SHA hash (hs)
-    Sha,
+    /// SHA hash (hs) - SHA-256, SHA-512, etc.
+    ShaHash,
+    /// Smear hash (hm) - XOR of BLAKE3 + SHA3-256 + SHA-512
+    Smear,
+    /// Spaghetti hash (hg) - domain-separated, maximally weird mixing
+    Spaghetti,
 
     // === KEY TYPES ===
     /// Any cryptographic key (ke, kx, kp, kc, ka)
@@ -196,12 +200,14 @@ impl TypeConstraint {
             TypeConstraint::AsciiText => matches!(value, VsfType::l(_)),
 
             TypeConstraint::AnyHash => {
-                matches!(value, VsfType::hp(_) | VsfType::hb(_) | VsfType::hs(_))
+                matches!(value, VsfType::hp(_) | VsfType::hb(_) | VsfType::hs(_) | VsfType::hm(_) | VsfType::hg(_))
             }
 
             TypeConstraint::Blake3Provenance => matches!(value, VsfType::hp(_)),
             TypeConstraint::Blake3Rolling => matches!(value, VsfType::hb(_)),
-            TypeConstraint::Sha => matches!(value, VsfType::hs(_)),
+            TypeConstraint::ShaHash => matches!(value, VsfType::hs(_)),
+            TypeConstraint::Smear => matches!(value, VsfType::hm(_)),
+            TypeConstraint::Spaghetti => matches!(value, VsfType::hg(_)),
 
             TypeConstraint::AnyKey => matches!(
                 value,
@@ -370,7 +376,9 @@ impl TypeConstraint {
             TypeConstraint::AnyHash => "any hash type".into(),
             TypeConstraint::Blake3Provenance => "BLAKE3 provenance hash (hp)".into(),
             TypeConstraint::Blake3Rolling => "BLAKE3 rolling hash (hb)".into(),
-            TypeConstraint::Sha => "SHA hash (hs)".into(),
+            TypeConstraint::ShaHash => "SHA hash (hs)".into(),
+            TypeConstraint::Smear => "smear hash (hm)".into(),
+            TypeConstraint::Spaghetti => "spaghetti hash (hg)".into(),
             TypeConstraint::AnyKey => "any cryptographic key".into(),
             TypeConstraint::Ed25519Key => "Ed25519 public key (ke)".into(),
             TypeConstraint::X25519Key => "X25519 key (kx)".into(),

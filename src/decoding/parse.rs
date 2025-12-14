@@ -5,9 +5,10 @@ use std::io::{Error, ErrorKind};
 
 // Import sub-parsers from sibling modules
 use super::metadata::{
-    parse_backward_version, parse_count, parse_dtype, parse_eagle_time, parse_hash, parse_key,
-    parse_label, parse_length, parse_mac, parse_marker_def, parse_marker_ref, parse_offset,
-    parse_signature, parse_string, parse_version, parse_world_coord, parse_wrapped,
+    parse_backward_version, parse_count, parse_dtype, parse_eagle_time, parse_file_length,
+    parse_hash, parse_key, parse_label, parse_length, parse_mac, parse_marker_def,
+    parse_marker_ref, parse_offset, parse_signature, parse_string, parse_version,
+    parse_world_coord, parse_wrapped,
 };
 use super::primitives::{parse_complex, parse_float, parse_signed, parse_unsigned};
 #[cfg(feature = "spirix")]
@@ -72,6 +73,7 @@ pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
         b'l' => parse_label(data, pointer),
         b'o' => parse_offset(data, pointer),
         b'b' => parse_length(data, pointer),
+        b'L' => parse_file_length(data, pointer),
         b'n' => parse_count(data, pointer),
         b'z' => parse_version(data, pointer),
         b'y' => parse_backward_version(data, pointer),

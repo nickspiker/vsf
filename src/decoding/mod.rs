@@ -11,5 +11,5 @@ pub mod spirix;
 pub mod tensors;
 
 // Re-export the main parse function and preamble parser
-pub use metadata::parse_preamble;
+pub use metadata::{parse_file_length, parse_preamble};
 pub use parse::parse;

@@ -116,6 +116,7 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 pub struct VsfHeader {
     pub version: usize,
     pub backward_compat: usize,
+    pub file_length: usize, // Total file length in bytes (for TCP streaming)
     pub creation_time: VsfType, // Creation timestamp (ef5 for ~2min precision)
     pub provenance_hash: VsfType, // Required: BLAKE3 hash of immutable content (hp)
     pub rolling_hash: Option<VsfType>, // Optional: BLAKE3 hash of current state (hb) - OR signature
@@ -156,6 +157,7 @@ impl VsfHeader {
         Self {
             version,
             backward_compat,
+            file_length: 0, // Placeholder, filled during build
             creation_time,
             provenance_hash: VsfType::hp(vec![0u8; 32]), // Placeholder, filled during build
             rolling_hash: None,
@@ -189,6 +191,10 @@ impl VsfHeader {
         // Header length placeholder (after version/backward_compat)
         let header_length_placeholder = VsfType::b(0, true).flatten();
         header.extend_from_slice(&header_length_placeholder);
+
+        // File length placeholder (for TCP streaming)
+        let file_length_placeholder = VsfType::L(0, true).flatten();
+        header.extend_from_slice(&file_length_placeholder);
 
         // Creation time (always present)
         header.extend_from_slice(&self.creation_time.flatten());
@@ -324,6 +330,19 @@ impl VsfHeader {
                     header_length_type
                 ))
             }
+        };
+
+        // Parse optional file length (L) - for TCP streaming (default on, but optional for compat)
+        let file_length = if ptr < data.len() && data[ptr] == b'L' {
+            match parse(data, &mut ptr) {
+                Ok(VsfType::L(len, _)) => len,
+                Ok(other) => {
+                    return Err(format!("Expected L value after 'L' marker, got {:?}", other))
+                }
+                Err(e) => return Err(format!("Failed to parse file_length: {}", e)),
+            }
+        } else {
+            0 // No L field present - use 0 to indicate unknown
         };
 
         // Parse creation time (e)
@@ -477,6 +496,7 @@ impl VsfHeader {
             VsfHeader {
                 version,
                 backward_compat,
+                file_length,
                 creation_time,
                 provenance_hash,
                 rolling_hash,
@@ -550,6 +570,78 @@ impl VsfHeader {
         header_bytes.drain(value_start..value_start + placeholder_len);
 
         // Insert new length encoding value (skip first 'b' since it's already there)
+        for (i, byte) in length_encoded.iter().skip(1).enumerate() {
+            header_bytes.insert(value_start + i, *byte);
+        }
+
+        // Also update L (file length) if present - for header-only files, L = header length
+        Self::update_file_length(header_bytes)?;
+
+        Ok(())
+    }
+
+    /// Update the file length (L) field in a header to match actual size
+    /// Called automatically by update_header_length() for header-only files
+    pub fn update_file_length(header_bytes: &mut Vec<u8>) -> Result<(), String> {
+        // Find L field (after b, before e or h)
+        let mut ptr = 4; // After "RÅ<"
+
+        // Skip z (version)
+        while ptr < header_bytes.len() && header_bytes[ptr] != b'y' {
+            ptr += 1;
+        }
+        // Skip y (backward compat)
+        while ptr < header_bytes.len() && header_bytes[ptr] != b'b' {
+            ptr += 1;
+        }
+        // Skip b (header length)
+        if ptr >= header_bytes.len() || header_bytes[ptr] != b'b' {
+            return Ok(()); // No b field, nothing to do
+        }
+        ptr += 1;
+        while ptr < header_bytes.len()
+            && header_bytes[ptr] != b'L'
+            && header_bytes[ptr] != b'e'
+            && header_bytes[ptr] != b'h'
+        {
+            ptr += 1;
+        }
+
+        // Check if L field exists
+        if ptr >= header_bytes.len() || header_bytes[ptr] != b'L' {
+            return Ok(()); // No L field, nothing to do
+        }
+
+        let l_start = ptr;
+        ptr += 1; // Skip 'L'
+
+        // Find end of L field value
+        let value_start = ptr;
+        while ptr < header_bytes.len()
+            && header_bytes[ptr] != b'e'
+            && header_bytes[ptr] != b'h'
+        {
+            ptr += 1;
+        }
+        let placeholder_len = ptr - value_start;
+
+        // Calculate file length with stabilization loop
+        let mut file_length = header_bytes.len();
+        let mut length_encoded = VsfType::L(file_length, true).flatten();
+
+        loop {
+            let new_total = header_bytes.len() - placeholder_len + (length_encoded.len() - 1);
+            if new_total == file_length {
+                break;
+            }
+            file_length = new_total;
+            length_encoded = VsfType::L(file_length, true).flatten();
+        }
+
+        // Remove old L field value (keep 'L' marker)
+        header_bytes.drain(value_start..value_start + placeholder_len);
+
+        // Insert new length encoding (skip 'L' marker)
         for (i, byte) in length_encoded.iter().skip(1).enumerate() {
             header_bytes.insert(value_start + i, *byte);
         }

@@ -30,6 +30,7 @@ use crate::types::VsfType;
 pub struct ParsedHeader {
     pub version: usize,
     pub backward_compat: usize,
+    pub file_length: usize, // Total file size from L field
     pub rolling_hash: Option<VsfType>,
     pub fields: Vec<HeaderField>,
     pub header_end: usize, // Byte position where header ends (after '>')
@@ -72,6 +73,17 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
 
     // Parse header length (now we know how to decode it!)
     let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse header length: {}", e))?;
+
+    // Parse optional file length (L field for TCP streaming)
+    let file_length = if ptr < data.len() && data[ptr] == b'L' {
+        match parse(data, &mut ptr) {
+            Ok(VsfType::L(len, _)) => len,
+            Ok(other) => return Err(format!("Expected L value, got: {:?}", other)),
+            Err(e) => return Err(format!("Failed to parse file length: {}", e)),
+        }
+    } else {
+        0 // No L field - use 0 to indicate unknown
+    };
 
     // Skip creation time (required in v4+)
     let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse creation time: {}", e))?;
@@ -132,6 +144,7 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     Ok(ParsedHeader {
         version,
         backward_compat,
+        file_length,
         rolling_hash,
         fields,
         header_end: ptr,
@@ -335,6 +348,12 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     let _header_length_type = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse header length: {}", e))?;
 
+    // Skip optional file length (L field) if present
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'L' {
+        let _ = parse(vsf_bytes, &mut pointer)
+            .map_err(|e| format!("Failed to parse file length: {}", e))?;
+    }
+
     // Skip creation time (ef5 - always present in version 3+)
     let _creation_time = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse creation time: {}", e))?;
@@ -478,15 +497,21 @@ pub fn write_provenance_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<
 
     let mut pointer = 4; // Skip "RÅ<"
 
-    // Parse header length
-    let _header_length_type = parse(&vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse header length: {}", e))?;
-
     // Parse version and backward compat
     let _version =
         parse(&vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
     let _backward = parse(&vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+
+    // Parse header length
+    let _header_length_type = parse(&vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse header length: {}", e))?;
+
+    // Skip optional file length (L field) if present
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'L' {
+        let _ = parse(&vsf_bytes, &mut pointer)
+            .map_err(|e| format!("Failed to parse file length: {}", e))?;
+    }
 
     // Skip creation time (ef5 - always present in version 3+)
     let _creation_time = parse(&vsf_bytes, &mut pointer)
@@ -541,6 +566,103 @@ fn find_hp_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize, 
     }
 }
 
+/// Fill the provenance hash (hp) placeholder with computed hash bytes
+///
+/// # Arguments
+/// * `vsf_bytes` - Mutable VSF file bytes with hp placeholder (32 zeros)
+/// * `hash` - The computed 32-byte BLAKE3 hash
+///
+/// # Returns
+/// Ok(()) on success
+///
+pub fn fill_provenance_hash(vsf_bytes: &mut [u8], hash: &[u8; 32]) -> Result<(), String> {
+    // Find hp position
+    let mut pointer = 4; // Skip "RÅ<"
+
+    // Skip version, backward compat, header length
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("version: {}", e))?;
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("backward: {}", e))?;
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("header_len: {}", e))?;
+
+    // Skip optional file length (L)
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'L' {
+        let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("file_len: {}", e))?;
+    }
+
+    // Skip creation time
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("creation_time: {}", e))?;
+
+    // Should be at hp now
+    if pointer >= vsf_bytes.len() || vsf_bytes[pointer] != b'h' {
+        return Err("No hp field found".to_string());
+    }
+
+    let hash_start = find_hp_value_position(vsf_bytes, pointer)?;
+    vsf_bytes[hash_start..hash_start + 32].copy_from_slice(hash);
+
+    Ok(())
+}
+
+/// Fill the signature (ge) placeholder with signature bytes
+///
+/// # Arguments
+/// * `vsf_bytes` - Mutable VSF file bytes with ge placeholder (64 zeros)
+/// * `signature` - The 64-byte Ed25519 signature
+///
+/// # Returns
+/// Ok(()) on success
+///
+pub fn fill_signature(vsf_bytes: &mut [u8], signature: &[u8]) -> Result<(), String> {
+    if signature.len() != 64 {
+        return Err(format!("Signature must be 64 bytes, got {}", signature.len()));
+    }
+
+    // Find ge position (after hp, optionally after ke)
+    let mut pointer = 4; // Skip "RÅ<"
+
+    // Skip version, backward compat, header length
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("version: {}", e))?;
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("backward: {}", e))?;
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("header_len: {}", e))?;
+
+    // Skip optional file length (L)
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'L' {
+        let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("file_len: {}", e))?;
+    }
+
+    // Skip creation time
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("creation_time: {}", e))?;
+
+    // Skip hp (provenance hash)
+    if pointer >= vsf_bytes.len() || vsf_bytes[pointer] != b'h' {
+        return Err("No hp field found".to_string());
+    }
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("hp: {}", e))?;
+
+    // Skip optional ke (signer pubkey) if present
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'k' {
+        let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("ke: {}", e))?;
+    }
+
+    // Should be at ge now
+    if pointer >= vsf_bytes.len() || vsf_bytes[pointer] != b'g' {
+        return Err("No ge field found".to_string());
+    }
+
+    // Parse ge to find value position
+    let ge_marker = pointer;
+    let ge_type = parse(vsf_bytes, &mut pointer).map_err(|e| format!("ge: {}", e))?;
+
+    match ge_type {
+        VsfType::ge(sig_bytes) => {
+            let sig_start = pointer - sig_bytes.len();
+            vsf_bytes[sig_start..sig_start + 64].copy_from_slice(signature);
+            Ok(())
+        }
+        _ => Err(format!("Expected ge at position {}", ge_marker)),
+    }
+}
+
 /// Compute BLAKE3 rolling hash (hb) of VSF file
 ///
 /// This function computes the rolling hash with hb field as zeros.
@@ -573,6 +695,12 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     // Parse header length
     let _header_length_type = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse header length: {}", e))?;
+
+    // Skip optional file length (L field) if present
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'L' {
+        let _ = parse(vsf_bytes, &mut pointer)
+            .map_err(|e| format!("Failed to parse file length: {}", e))?;
+    }
 
     // Skip creation time (ef5 - always present in version 3+)
     let _creation_time = parse(vsf_bytes, &mut pointer)
@@ -649,15 +777,21 @@ pub fn write_file_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<Vec<u8
 
     let mut pointer = 4; // Skip "RÅ<"
 
-    // Parse header length
-    let _header_length_type = parse(&vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse header length: {}", e))?;
-
     // Parse version and backward compat
     let _version =
         parse(&vsf_bytes, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
     let _backward = parse(&vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+
+    // Parse header length
+    let _header_length_type = parse(&vsf_bytes, &mut pointer)
+        .map_err(|e| format!("Failed to parse header length: {}", e))?;
+
+    // Skip optional file length (L field) if present
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'L' {
+        let _ = parse(&vsf_bytes, &mut pointer)
+            .map_err(|e| format!("Failed to parse file length: {}", e))?;
+    }
 
     // Skip creation time (ef5 - always present in version 3+)
     let _creation_time = parse(&vsf_bytes, &mut pointer)
@@ -976,10 +1110,11 @@ fn find_section_signature_position(vsf_bytes: &[u8], section_name: &str) -> Resu
     // Parse through header to find the section's signature field
     let mut pointer = 4; // Skip magic "RÅ<"
 
-    // Skip version, backward compat, header length
-    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
-    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
-    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+    // Skip version, backward compat, header length, file length
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?; // z
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?; // y
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?; // b
+    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?; // L
 
     // Skip creation time
     let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
@@ -1399,6 +1534,11 @@ fn find_header_hp(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     let _ = parse(data, &mut ptr).map_err(|e| format!("backward: {}", e))?;
     let _ = parse(data, &mut ptr).map_err(|e| format!("header_len: {}", e))?;
 
+    // Skip optional file length (L) if present
+    if ptr < data.len() && data[ptr] == b'L' {
+        let _ = parse(data, &mut ptr).map_err(|e| format!("file_len: {}", e))?;
+    }
+
     // Skip creation time
     let _ = parse(data, &mut ptr).map_err(|e| format!("creation_time: {}", e))?;
 
@@ -1436,6 +1576,11 @@ fn find_header_ke(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     let _ = parse(data, &mut ptr).map_err(|e| format!("version: {}", e))?;
     let _ = parse(data, &mut ptr).map_err(|e| format!("backward: {}", e))?;
     let _ = parse(data, &mut ptr).map_err(|e| format!("header_len: {}", e))?;
+
+    // Skip optional file length (L) if present
+    if ptr < data.len() && data[ptr] == b'L' {
+        let _ = parse(data, &mut ptr).map_err(|e| format!("file_len: {}", e))?;
+    }
 
     // Skip creation time
     let _ = parse(data, &mut ptr).map_err(|e| format!("creation_time: {}", e))?;
@@ -1477,6 +1622,11 @@ fn find_header_ge(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     let _ = parse(data, &mut ptr).map_err(|e| format!("version: {}", e))?;
     let _ = parse(data, &mut ptr).map_err(|e| format!("backward: {}", e))?;
     let _ = parse(data, &mut ptr).map_err(|e| format!("header_len: {}", e))?;
+
+    // Skip optional file length (L) if present
+    if ptr < data.len() && data[ptr] == b'L' {
+        let _ = parse(data, &mut ptr).map_err(|e| format!("file_len: {}", e))?;
+    }
 
     // Skip creation time
     let _ = parse(data, &mut ptr).map_err(|e| format!("creation_time: {}", e))?;

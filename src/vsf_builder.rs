@@ -131,6 +131,33 @@ impl VsfBuilder {
         self
     }
 
+    /// Set signer pubkey and include signature placeholder
+    ///
+    /// Creates a header with ke (signer pubkey) and ge (signature placeholder).
+    /// The signature must be filled in externally after computing provenance hash.
+    /// This mode is for protocols that need async signing (e.g., WebCrypto in Workers).
+    ///
+    /// # Arguments
+    /// * `pubkey` - VsfType::ke with the Ed25519 public key bytes
+    ///
+    /// # Example
+    /// ```ignore
+    /// let unsigned = VsfBuilder::new()
+    ///     .signed_only(VsfType::ke(pubkey.to_vec()))
+    ///     .build()?;
+    /// let hash = verification::compute_provenance_hash(&unsigned)?;
+    /// let signature = sign_async(&hash, &secret_key).await;
+    /// verification::fill_provenance_hash(&mut unsigned, &hash)?;
+    /// verification::fill_signature(&mut unsigned, &signature)?;
+    /// ```
+    pub fn signed_only(mut self, pubkey: VsfType) -> Self {
+        self.include_file_hash = false;
+        self.signer_pubkey = Some(pubkey);
+        // Signature will be a 64-byte placeholder (zeros) that must be filled externally
+        self.signature = Some((VsfType::ge(vec![0u8; 64]), [0u8; 64]));
+        self
+    }
+
     /// Add an inline metadata field (header-only, no section body)
     ///
     /// Creates a field like `(d#{name}:value1,value2,...)` in the header.
@@ -260,6 +287,10 @@ impl VsfBuilder {
         let header_length_index = vsf.len();
         vsf.push(VsfType::b(0, true).flatten()); // Will be updated in loop
 
+        // Placeholder for file length (for TCP streaming)
+        let file_length_index = vsf.len();
+        vsf.push(VsfType::L(0, true).flatten()); // Will be updated in loop
+
         // Creation time
         header_index = vsf.len();
         vsf.push(self.creation_time.flatten());
@@ -379,6 +410,7 @@ impl VsfBuilder {
 
         // Stabilization loop
         let mut prev_header_length = 0;
+        let mut prev_file_length = 0;
         let mut prev_offsets = vec![0; field_offset_indices.len()];
         let mut prev_sizes = vec![0; field_size_indices.len()];
 
@@ -397,6 +429,15 @@ impl VsfBuilder {
             if header_length != prev_header_length {
                 vsf[header_length_index] = VsfType::b(header_length, true).flatten();
                 prev_header_length = header_length;
+                changed = true;
+            }
+
+            // Calculate total file length
+            let file_length: usize = vsf.iter().map(|chunk| chunk.len()).sum();
+
+            if file_length != prev_file_length {
+                vsf[file_length_index] = VsfType::L(file_length, true).flatten();
+                prev_file_length = file_length;
                 changed = true;
             }
 
