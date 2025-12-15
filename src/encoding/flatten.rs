@@ -575,9 +575,58 @@ impl VsfType {
                 flat
             }
 
-            // ==================== SHARED SECRET ====================
-            VsfType::ks(value) => {
-                let mut flat = vec![b'k', b's'];
+            // ==================== SHARED SECRETS (typed by algorithm) ====================
+            VsfType::ksx(value) => {
+                let mut flat = vec![b'k', b's', b'x'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::ksp(value) => {
+                let mut flat = vec![b'k', b's', b'p'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::ksk(value) => {
+                let mut flat = vec![b'k', b's', b'k'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::ksf(value) => {
+                let mut flat = vec![b'k', b's', b'f'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::ksn(value) => {
+                let mut flat = vec![b'k', b's', b'n'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::ksl(value) => {
+                let mut flat = vec![b'k', b's', b'l'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::ksh(value) => {
+                let mut flat = vec![b'k', b's', b'h'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::ksm(value) => {
+                let mut flat = vec![b'k', b's', b'm'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number());
                 flat.extend_from_slice(value);
                 flat
@@ -4145,9 +4194,23 @@ impl VsfType {
             | VsfType::kl(bytes)
             | VsfType::kn(bytes)
             | VsfType::kh(bytes)
-            | VsfType::ks(bytes) => {
+            | VsfType::kd(bytes)
+            | VsfType::kb(bytes) => {
                 // prefix + encoded_length + data
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
+            }
+
+            // Shared secrets have 3-byte prefix (ksx, ksp, etc.)
+            VsfType::ksx(bytes)
+            | VsfType::ksp(bytes)
+            | VsfType::ksk(bytes)
+            | VsfType::ksf(bytes)
+            | VsfType::ksn(bytes)
+            | VsfType::ksl(bytes)
+            | VsfType::ksh(bytes)
+            | VsfType::ksm(bytes) => {
+                // 3-byte prefix + encoded_length + data
+                3 + encoded_usize_len(bytes.len()) + bytes.len()
             }
 
             VsfType::ah(bytes)

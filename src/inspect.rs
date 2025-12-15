@@ -323,10 +323,69 @@ const BOX_CORNER: &str = "┗";   // U+2517 Heavy up and right
 const BOX_TEE: &str = "┣";      // U+2523 Heavy vertical and right
 const BOX_HORIZ: &str = "━";    // U+2501 Heavy horizontal
 
-// Tree drawing helpers - dark grey (64,64,64) for subtlety
-fn tree_vert() -> ColoredString { BOX_VERT.truecolor(64, 64, 64) }
-fn tree_corner() -> ColoredString { format!("{}{}", BOX_CORNER, BOX_HORIZ).truecolor(64, 64, 64) }
-fn tree_tee() -> ColoredString { format!("{}{}", BOX_TEE, BOX_HORIZ).truecolor(64, 64, 64) }
+// ==================== SEMANTIC COLOUR PALETTE ====================
+// Type markers are coloured by semantic category for visual grouping
+//
+// Data values: white (actual hex, numbers, strings - brightest)
+// Hints/labels: (100, 100, 100) - descriptions, "Bytes", algorithm names
+// Punctuation: (80, 80, 80) - {}, (), :, size markers (3/4/5/6/7)
+// Tree/structure: (64, 64, 64) - [], >, <, box-drawing chars
+
+/// Semantic colour for unsigned integers (u0, u3-u7, n, b, o, z, y)
+const COL_UINT: (u8, u8, u8) = (100, 220, 100);  // Soft green
+
+/// Semantic colour for signed integers (i, i3-i7)
+const COL_SINT: (u8, u8, u8) = (255, 150, 200);  // Pink
+
+/// Semantic colour for floats (f5, f6)
+const COL_FLOAT: (u8, u8, u8) = (255, 220, 100);  // Amber
+
+/// Semantic colour for complex numbers (j5, j6)
+const COL_COMPLEX: (u8, u8, u8) = (255, 180, 80);  // Orange-amber
+
+/// Semantic colour for time (e, ef5, ef6)
+const COL_TIME: (u8, u8, u8) = (255, 150, 220);  // Pink-magenta
+
+/// Semantic colour for text types (d, l, x)
+const COL_TEXT: (u8, u8, u8) = (100, 200, 255);  // Light blue
+
+/// Semantic colour for hashes (hp, hb, hs, hm, hg, hc, hk) and MACs (ah, ap, ab, ac)
+const COL_HASH: (u8, u8, u8) = (100, 200, 180);  // Teal/cyan
+
+/// Semantic colour for signatures (ge, gp, gd, gs, gf, gr)
+const COL_SIG: (u8, u8, u8) = (180, 150, 255);  // Purple
+
+/// Semantic colour for keys (ke, kx, kp, kk, kc, ka, km, kf, kl, kn, kh, kd, kb, ks)
+const COL_KEY: (u8, u8, u8) = (100, 150, 255);  // Blue
+
+/// Semantic colour for wrapped/encoded data (v, ve, vz, vr...)
+const COL_WRAP: (u8, u8, u8) = (150, 130, 200);  // Muted purple
+
+/// Semantic colour for tensors (t_*, v_*, q_*, p)
+const COL_TENSOR: (u8, u8, u8) = (150, 200, 255);  // Light blue
+
+/// Semantic colour for world coordinates (w)
+const COL_WORLD: (u8, u8, u8) = (100, 180, 120);  // Earth green
+
+/// Hints, labels, descriptions
+const COL_HINT: (u8, u8, u8) = (100, 100, 100);  // Dark gray
+
+/// Punctuation: {}, (), :, size markers
+const COL_PUNCT: (u8, u8, u8) = (80, 80, 80);  // Darker gray
+
+/// Tree/structure: [], >, <, box-drawing
+const COL_TREE: (u8, u8, u8) = (64, 64, 64);  // Darkest gray
+
+/// Success/pass
+const COL_PASS: (u8, u8, u8) = (0, 200, 0);  // Green
+
+/// Error/fail
+const COL_FAIL: (u8, u8, u8) = (220, 100, 100);  // Soft red
+
+// Tree drawing helpers - darkest grey for subtlety
+fn tree_vert() -> ColoredString { BOX_VERT.truecolor(COL_TREE.0, COL_TREE.1, COL_TREE.2) }
+fn tree_corner() -> ColoredString { format!("{}{}", BOX_CORNER, BOX_HORIZ).truecolor(COL_TREE.0, COL_TREE.1, COL_TREE.2) }
+fn tree_tee() -> ColoredString { format!("{}{}", BOX_TEE, BOX_HORIZ).truecolor(COL_TREE.0, COL_TREE.1, COL_TREE.2) }
 
 /// Format hex data as lines of 16 bytes (32 hex chars each)
 /// Returns a Vec of hex line strings for caller to join with appropriate indent
@@ -373,35 +432,52 @@ fn format_crypto_literal(type_name: &str, data: &[u8]) -> String {
 }
 
 /// Format crypto field with colour coding: type{size}0xHEX
-/// type=cyan, size=yellow, 0x=gray, hex=white
+/// Type markers are colored by semantic category (hash=teal, sig=purple, key=blue, etc.)
+/// Size shown as len-1 (wire encoding) with punctuation in dark gray
 /// For multi-line hex, lines are joined with CRYPTO_LINE_SEP marker for later replacement
 /// Large PQC keys (McEliece 512KB, Frodo 15KB) are truncated to 64 bytes for readable logs
 const CRYPTO_LINE_SEP: &str = "\x00HEXLINE\x00";
+
+/// Get semantic color for a crypto type based on its prefix
+fn crypto_type_color(type_name: &str) -> (u8, u8, u8) {
+    match type_name.chars().next() {
+        Some('h') => COL_HASH,   // Hashes: hp, hb, hs, hm, hg, hc, hk
+        Some('g') => COL_SIG,    // Signatures: ge, gp, gd, gs, gf, gr
+        Some('k') => COL_KEY,    // Keys: ke, kx, kp, kk, kc, ka, km, kf, kl, kn, kh, kd, kb, ks
+        Some('a') => COL_HASH,   // MACs: ah, ap, ab, ac (same as hashes)
+        Some('v') => COL_WRAP,   // Wrapped: ve, vz, vr, etc.
+        _ => COL_HINT,           // Fallback
+    }
+}
 
 fn format_crypto_hex(type_name: &str, data: &[u8]) -> String {
     let max_bytes = 64; // Show first 64 bytes - enough for 32-byte hashes/keys
     let truncated = data.len() > max_bytes;
     let display_data = if truncated { &data[..max_bytes] } else { data };
     let hex_lines = format_hex_lines(display_data);
-    let size_str = format!("{{{}}}", data.len());
+    // Wire encoding uses len-1 for crypto types (no zero-length crypto primitives)
+    let wire_len = if data.len() > 0 { data.len() - 1 } else { 0 };
+    // Wire format: type + "3" (length field size) + {len-1}
+    let size_str = format!("3{{{}}}", wire_len);
+    let col = crypto_type_color(type_name);
 
     if hex_lines.len() == 1 && !truncated {
         // Single line - inline
         format!(
             "{}{}{}{}",
-            type_name.cyan(),
-            tc(&size_str, 200, 200, 100),
-            tc("0x", 100, 100, 100),
+            type_name.truecolor(col.0, col.1, col.2),
+            tc(&size_str, COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("0x", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             hex_lines[0].white()
         )
     } else {
         // Multi-line - use separator for later replacement with proper indent
-        let suffix = if truncated { tc("...", 100, 100, 100).to_string() } else { String::new() };
+        let suffix = if truncated { tc("...", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2).to_string() } else { String::new() };
         format!(
             "{}{}{}{}{}{}",
-            type_name.cyan(),
-            tc(&size_str, 200, 200, 100),
-            tc("0x", 100, 100, 100),
+            type_name.truecolor(col.0, col.1, col.2),
+            tc(&size_str, COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("0x", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             CRYPTO_LINE_SEP,
             hex_lines.iter().map(|l| l.white().to_string()).collect::<Vec<_>>().join(CRYPTO_LINE_SEP),
             suffix
@@ -413,7 +489,10 @@ fn format_crypto_hex(type_name: &str, data: &[u8]) -> String {
 /// Shows first 64 bytes of data with line wrapping, truncates larger data with ...
 /// Large PQC ciphertexts are truncated to keep logs readable
 fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
-    let size_str = format!("{{{}}}", data.len());
+    // Wire encoding uses len-1 for wrapped data (no zero-length wrappers)
+    let wire_len = if data.len() > 0 { data.len() - 1 } else { 0 };
+    // Wire format: v{algo} + "3" (length field size) + {len-1}
+    let size_str = format!("3{{{}}}", wire_len);
     let max_bytes = 64; // Show first 64 bytes
     let truncated = data.len() > max_bytes;
     let display_data = if truncated { &data[..max_bytes] } else { data };
@@ -423,19 +502,19 @@ fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
         // Single line - inline
         format!(
             "{}{}{}{}",
-            format!("v{}", algo as char).cyan(),
-            tc(&size_str, 200, 200, 100),
-            tc("0x", 100, 100, 100),
+            format!("v{}", algo as char).truecolor(COL_WRAP.0, COL_WRAP.1, COL_WRAP.2),
+            tc(&size_str, COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("0x", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             hex_lines[0].white()
         )
     } else {
         // Multi-line with optional truncation indicator
-        let suffix = if truncated { tc("...", 100, 100, 100).to_string() } else { String::new() };
+        let suffix = if truncated { tc("...", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2).to_string() } else { String::new() };
         format!(
             "{}{}{}{}{}{}",
-            format!("v{}", algo as char).cyan(),
-            tc(&size_str, 200, 200, 100),
-            tc("0x", 100, 100, 100),
+            format!("v{}", algo as char).truecolor(COL_WRAP.0, COL_WRAP.1, COL_WRAP.2),
+            tc(&size_str, COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("0x", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             CRYPTO_LINE_SEP,
             hex_lines.iter().map(|l| l.white().to_string()).collect::<Vec<_>>().join(CRYPTO_LINE_SEP),
             suffix
@@ -458,8 +537,19 @@ fn size_marker(len: usize) -> char {
     }
 }
 
-/// Format a VsfType as literal VSF wire notation with colour coding
+/// Format a VsfType as literal VSF wire notation with semantic colour coding
 /// Shows actual encoding: type code, size marker, length/value, content
+///
+/// Colour scheme by category:
+/// - Text (d, l, x): COL_TEXT (light blue)
+/// - Unsigned (u*): COL_UINT (soft green)
+/// - Signed (i*): COL_SINT (pink)
+/// - Float (f*): COL_FLOAT (amber)
+/// - Complex (j*): COL_COMPLEX (orange-amber)
+/// - Time (e*): COL_TIME (pink-magenta)
+/// - Metadata (n, b, o, z, y): COL_UINT (soft green - they're counts/sizes)
+/// - Size markers, braces, punctuation: COL_PUNCT (darker gray)
+/// - Values (numbers, strings, hex): white (brightest)
 ///
 /// Examples:
 /// - `l3{7}"message"` for an ASCII string
@@ -470,123 +560,317 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         // Text types: type + size_marker + {length} + "content"
         VsfType::d(s) => {
             format!(
-                "{}{}{}",
-                format!("d{}", size_marker(s.len())).cyan(),
-                format!("{{{}}}", s.len()).truecolor(200, 200, 100),
-                s.white()
+                "{}{}{}{}{}{}",
+                "d".truecolor(COL_TEXT.0, COL_TEXT.1, COL_TEXT.2),
+                tc(&size_marker(s.len()).to_string(), COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                s.len().to_string().white(),
+                tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                s.white().bold()
             )
         }
         VsfType::l(s) => {
             format!(
-                "{}{}{}",
-                format!("l{}", size_marker(s.len())).cyan(),
-                format!("{{{}}}", s.len()).truecolor(200, 200, 100),
+                "{}{}{}{}{}{}",
+                "l".truecolor(COL_TEXT.0, COL_TEXT.1, COL_TEXT.2),
+                tc(&size_marker(s.len()).to_string(), COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                s.len().to_string().white(),
+                tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
                 s.white()
             )
         }
         VsfType::x(s) => {
             format!(
-                "{}{}\"{}\"",
-                format!("x{}", size_marker(s.len())).cyan(),
-                format!("{{{}}}", s.len()).truecolor(200, 200, 100),
+                "{}{}{}{}{}\"{}\"",
+                "x".truecolor(COL_TEXT.0, COL_TEXT.1, COL_TEXT.2),
+                tc(&size_marker(s.len()).to_string(), COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                s.len().to_string().white(),
+                tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
                 s.escape_default().to_string().white()
             )
         }
 
-        // Unsigned integers: type{value}
-        VsfType::u0(b) => format!("{}{}", "u0".cyan(), if *b { "1" } else { "0" }.truecolor(200, 200, 100)),
-        VsfType::u3(v) => format!("{}{}", "u3".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::u4(v) => format!("{}{}", "u4".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::u5(v) => format!("{}{}", "u5".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::u6(v) => format!("{}{}", "u6".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::u7(v) => format!("{}{}", "u7".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::u(v, _) => format!("{}{}", format!("u{}", size_marker(*v)).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        // Unsigned integers: soft green
+        VsfType::u0(b) => format!(
+            "{}{}{}{}{}",
+            "u".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc("0", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            if *b { "1" } else { "0" }.white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::u3(v) => format!(
+            "{}{}{}{}{}",
+            "u".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::u4(v) => format!(
+            "{}{}{}{}{}",
+            "u".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc("4", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::u5(v) => format!(
+            "{}{}{}{}{}",
+            "u".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc("5", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::u6(v) => format!(
+            "{}{}{}{}{}",
+            "u".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc("6", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::u7(v) => format!(
+            "{}{}{}{}{}",
+            "u".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc("7", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::u(v, _) => format!(
+            "{}{}{}{}{}",
+            "u".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc(&size_marker(*v).to_string(), COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
 
-        // Signed integers: type{value}
-        VsfType::i(v) => format!("{}{}", format!("i{}", size_marker(v.unsigned_abs())).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::i3(v) => format!("{}{}", "i3".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::i4(v) => format!("{}{}", "i4".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::i5(v) => format!("{}{}", "i5".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::i6(v) => format!("{}{}", "i6".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::i7(v) => format!("{}{}", "i7".cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        // Signed integers: pink
+        VsfType::i(v) => format!(
+            "{}{}{}{}{}",
+            "i".truecolor(COL_SINT.0, COL_SINT.1, COL_SINT.2),
+            tc(&size_marker(v.unsigned_abs()).to_string(), COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::i3(v) => format!(
+            "{}{}{}{}{}",
+            "i".truecolor(COL_SINT.0, COL_SINT.1, COL_SINT.2),
+            tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::i4(v) => format!(
+            "{}{}{}{}{}",
+            "i".truecolor(COL_SINT.0, COL_SINT.1, COL_SINT.2),
+            tc("4", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::i5(v) => format!(
+            "{}{}{}{}{}",
+            "i".truecolor(COL_SINT.0, COL_SINT.1, COL_SINT.2),
+            tc("5", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::i6(v) => format!(
+            "{}{}{}{}{}",
+            "i".truecolor(COL_SINT.0, COL_SINT.1, COL_SINT.2),
+            tc("6", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::i7(v) => format!(
+            "{}{}{}{}{}",
+            "i".truecolor(COL_SINT.0, COL_SINT.1, COL_SINT.2),
+            tc("7", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
 
-        // Floats
-        VsfType::f5(v) => format!("{}{}", "f5".cyan(), format!("{{{:.6}}}", v).truecolor(200, 200, 100)),
-        VsfType::f6(v) => format!("{}{}", "f6".cyan(), format!("{{{:.10}}}", v).truecolor(200, 200, 100)),
+        // Floats: amber
+        VsfType::f5(v) => format!(
+            "{}{}{}{}{}",
+            "f".truecolor(COL_FLOAT.0, COL_FLOAT.1, COL_FLOAT.2),
+            tc("5", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            format!("{:.6}", v).white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::f6(v) => format!(
+            "{}{}{}{}{}",
+            "f".truecolor(COL_FLOAT.0, COL_FLOAT.1, COL_FLOAT.2),
+            tc("6", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            format!("{:.10}", v).white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
 
-        // Metadata types
-        VsfType::n(v) => format!("{}{}", format!("n{}", size_marker(*v)).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::b(v, _) => format!("{}{}", format!("b{}", size_marker(*v)).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::o(v) => format!("{}{}", format!("o{}", size_marker(*v)).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::z(v) => format!("{}{}", format!("z{}", size_marker(*v)).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
-        VsfType::y(v) => format!("{}{}", format!("y{}", size_marker(*v)).cyan(), format!("{{{}}}", v).truecolor(200, 200, 100)),
+        // Metadata types (n, b, o, z, y) - soft green like unsigned (they're counts/sizes)
+        VsfType::n(v) => format!(
+            "{}{}{}{}{}",
+            "n".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc(&size_marker(*v).to_string(), COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::b(v, _) => format!(
+            "{}{}{}{}{}",
+            "b".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc(&size_marker(*v).to_string(), COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::o(v) => format!(
+            "{}{}{}{}{}",
+            "o".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc(&size_marker(*v).to_string(), COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::z(v) => format!(
+            "{}{}{}{}{}",
+            "z".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc(&size_marker(*v).to_string(), COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
+        VsfType::y(v) => format!(
+            "{}{}{}{}{}",
+            "y".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc(&size_marker(*v).to_string(), COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            v.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+        ),
 
-        // Crypto types - use existing format
+        // Crypto types - use semantic colors via format_crypto_hex
+        // Hashes (teal)
         VsfType::hp(h) => format_crypto_hex("hp", h),
         VsfType::hb(h) => format_crypto_hex("hb", h),
         VsfType::hs(h) => format_crypto_hex("hs", h),
         VsfType::hm(h) => format_crypto_hex("hm", h),
         VsfType::hg(h) => format_crypto_hex("hg", h),
-        VsfType::ke(k) => format_crypto_hex("ke", k),
-        VsfType::kx(k) => format_crypto_hex("kx", k),
-        VsfType::kp(k) => format_crypto_hex("kp", k),
-        VsfType::kc(k) => format_crypto_hex("kc", k),
-        VsfType::ka(k) => format_crypto_hex("ka", k),
-        // Extended key types (post-quantum, additional curves)
+        VsfType::hc(h) => format_crypto_hex("hc", h),  // SHA-3/Keccak
+        VsfType::hk(h) => format_crypto_hex("hk", h),  // BLAKE2
+        // Keys (blue)
+        VsfType::ke(k) => format_crypto_hex("ke", k),  // Ed25519
+        VsfType::kx(k) => format_crypto_hex("kx", k),  // X25519
+        VsfType::kp(k) => format_crypto_hex("kp", k),  // P-curve
+        VsfType::kc(k) => format_crypto_hex("kc", k),  // ChaCha20-Poly1305
+        VsfType::ka(k) => format_crypto_hex("ka", k),  // AES-256-GCM
         VsfType::kk(k) => format_crypto_hex("kk", k),  // secp256k1
         VsfType::kf(k) => format_crypto_hex("kf", k),  // Frodo
         VsfType::kn(k) => format_crypto_hex("kn", k),  // NTRU
         VsfType::kl(k) => format_crypto_hex("kl", k),  // McEliece
         VsfType::kh(k) => format_crypto_hex("kh", k),  // HQC
-        VsfType::ge(s) => format_crypto_hex("ge", s),
-        VsfType::gp(s) => format_crypto_hex("gp", s),
-        VsfType::gr(s) => format_crypto_hex("gr", s),
+        VsfType::kd(k) => format_crypto_hex("kd", k),  // Dilithium/ML-DSA
+        VsfType::km(k) => format_crypto_hex("km", k),  // ML-KEM
+        VsfType::kb(k) => format_crypto_hex("kb", k),  // BIKE
+        // Shared secrets (typed by algorithm)
+        VsfType::ksx(k) => format_crypto_hex("ksx", k),  // X25519 shared secret
+        VsfType::ksp(k) => format_crypto_hex("ksp", k),  // P-curve shared secret
+        VsfType::ksk(k) => format_crypto_hex("ksk", k),  // secp256k1 shared secret
+        VsfType::ksf(k) => format_crypto_hex("ksf", k),  // Frodo shared secret
+        VsfType::ksn(k) => format_crypto_hex("ksn", k),  // NTRU shared secret
+        VsfType::ksl(k) => format_crypto_hex("ksl", k),  // McEliece shared secret
+        VsfType::ksh(k) => format_crypto_hex("ksh", k),  // HQC shared secret
+        VsfType::ksm(k) => format_crypto_hex("ksm", k),  // ML-KEM shared secret
+        // Signatures (purple)
+        VsfType::ge(s) => format_crypto_hex("ge", s),  // Ed25519
+        VsfType::gp(s) => format_crypto_hex("gp", s),  // ECDSA-P256
+        VsfType::gd(s) => format_crypto_hex("gd", s),  // Dilithium/ML-DSA
+        VsfType::gs(s) => format_crypto_hex("gs", s),  // Sphincs+
+        VsfType::gf(s) => format_crypto_hex("gf", s),  // Falcon
+        #[allow(deprecated)]
+        VsfType::gr(s) => format_crypto_hex("gr", s),  // RSA (deprecated)
+        // MACs (teal, like hashes)
+        VsfType::ah(m) => format_crypto_hex("ah", m),  // HMAC-SHA256
+        VsfType::ap(m) => format_crypto_hex("ap", m),  // Poly1305
+        VsfType::ab(m) => format_crypto_hex("ab", m),  // BLAKE3-keyed
+        VsfType::ac(m) => format_crypto_hex("ac", m),  // CMAC-AES
+        // Wrapped/encoded (muted purple)
         VsfType::v(algo, data) => format_crypto_wrap(*algo, data),
 
-        // Tensors
+        // Tensors: light blue
+        // Wire format: t3{dims}u3 + shape values + data
+        // e.g., t3{1}u3 3{16} [38,0,16,15,...] for a 16-element 1D u8 tensor
         VsfType::t_u3(tensor) => {
-            // Special case: 16-byte 1D tensor = IPv6 address
-            if tensor.shape == vec![16] && tensor.data.len() == 16 {
-                let bytes: [u8; 16] = tensor.data.as_slice().try_into().unwrap_or([0u8; 16]);
-                let ipv6 = std::net::Ipv6Addr::from(bytes);
-                // Format IPv6 with uppercase hex segments
-                let ipv6_upper = ipv6.segments()
-                    .iter()
-                    .map(|s| format!("{:X}", s))
-                    .collect::<Vec<_>>()
-                    .join(":");
-                format!("{}{{{}}}", "t_u3".cyan(), ipv6_upper.white())
-            } else {
-                let shape_str = tensor
-                    .shape
-                    .iter()
-                    .map(|d| d.to_string())
-                    .collect::<Vec<_>>()
-                    .join("×");
-                // Show first 64 bytes as hex
-                let preview_len = tensor.data.len().min(64);
-                let hex_preview = tensor.data[..preview_len]
-                    .iter()
-                    .map(|b| format!("{:02X}", b))
-                    .collect::<String>();
-                let ellipsis = if tensor.data.len() > 64 { "..." } else { "" };
-                format!("{}{}{}{}{}{}{}{}",
-                    "t_u3".cyan(),
-                    tc("[", 100, 100, 100),
-                    shape_str.truecolor(200, 200, 100),
-                    tc("]", 100, 100, 100),
-                    tc("(", 100, 100, 100),
-                    format!("{} bytes)", tensor.data.len()).truecolor(200, 200, 100),
-                    format!("0x{}", hex_preview).truecolor(180, 180, 255),
-                    ellipsis.truecolor(100, 100, 100)
-                )
-            }
+            let dims = tensor.shape.len();
+            // Build shape encoding: 3{dim0}3{dim1}...
+            let shape_encoded: String = tensor.shape.iter()
+                .map(|d| format!(
+                    "{}{}{}{}",
+                    tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                    tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                    d.to_string().white(),
+                    tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+                ))
+                .collect();
+
+            // Show u8 values as decimal (native representation)
+            let preview_len = tensor.data.len().min(32);
+            let values_preview: String = tensor.data[..preview_len]
+                .iter()
+                .map(|b| b.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            let ellipsis = if tensor.data.len() > 32 { ",..." } else { "" };
+
+            // Build shape hint like "16" or "24×71"
+            let shape_hint = tensor.shape.iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join("×");
+
+            format!(
+                "{}{}{}{}{}{} {} {}{}{}{}{}",
+                "t".truecolor(COL_TENSOR.0, COL_TENSOR.1, COL_TENSOR.2),
+                tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                dims.to_string().white(),
+                tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                "u3".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+                shape_encoded,
+                tc("[", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                values_preview.white(),
+                tc(ellipsis, COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                tc("]", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                format!(" {}", tc(&format!("{} u8 tensor", shape_hint), COL_HINT.0, COL_HINT.1, COL_HINT.2))
+            )
         }
 
-        // Eagle Time - show human-readable date/time (e cyan, time amber)
+        // Eagle Time: pink-magenta - show underlying float type (ef5 or ef6)
         VsfType::e(et) => {
             let formatted = format_eagle_time(et);
-            format!("{}{}{}{}", "e".cyan(), "{".truecolor(255, 200, 120), formatted.truecolor(255, 200, 120), "}".truecolor(255, 200, 120))
+            let type_marker = match et {
+                EtType::f5(_) => "ef5",
+                EtType::f6(_) => "ef6",
+                _ => "e",
+            };
+            format!(
+                "{}{}{}{}",
+                type_marker.truecolor(COL_TIME.0, COL_TIME.1, COL_TIME.2),
+                tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                formatted.white(),
+                tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+            )
         }
 
         // Fall back to debug for unhandled types
@@ -1016,7 +1300,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         return Err("Invalid VSF magic number".into());
     }
 
-    let (header, _consumed) = VsfHeader::decode(data)?;
+    let (header, actual_header_size) = VsfHeader::decode(data)?;
     let labels = labels_from_header(&header);
 
     // Parse header length and file length
@@ -1042,43 +1326,43 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     let mut out = String::new();
 
     // Title (not literal VSF data, so darker)
-    out.push_str(&format!("{}\n", tc("Versatile Storage Format", 128, 128, 128)));
+    out.push_str(&format!("{}\n", tc("Versatile Storage Format", COL_HINT.0, COL_HINT.1, COL_HINT.2)));
     out.push_str(&format!(
         "{} {}{} {}{}\n",
-        tc(&format_bytes(data.len()), 128, 128, 128),
-        tc("(", 100, 100, 100),
-        tc(&format_number(data.len()), 128, 128, 128),
-        tc("Bytes", 100, 100, 100),
-        tc(")", 100, 100, 100)
+        tc(&format_bytes(data.len()), COL_HINT.0, COL_HINT.1, COL_HINT.2),
+        tc("(", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+        tc(&format_number(data.len()), COL_HINT.0, COL_HINT.1, COL_HINT.2),
+        tc("Bytes", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+        tc(")", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
     ));
     out.push('\n');
 
     // Header section marker
-    out.push_str(&format!("{}\n", tc("<", 128, 128, 128)));
+    out.push_str(&format!("{}\n", tc("<", COL_HINT.0, COL_HINT.1, COL_HINT.2)));
 
-    // Version: z3{N} literal first, then hint
+    // Version: z3{N} - metadata/unsigned (soft green)
     out.push_str(&format!(
         " {}{}{}{}{} {}\n",
-        "z".white(),
-        "3".truecolor(100, 100, 100),
-        "{".truecolor(100, 100, 100),
+        "z".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+        tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+        tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
         header.version.to_string().white(),
-        "}".truecolor(100, 100, 100),
-        tc("Version", 100, 100, 100)
+        tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+        tc("Version", COL_HINT.0, COL_HINT.1, COL_HINT.2)
     ));
 
-    // Backward compat: y3{N}
+    // Backward compat: y3{N} - metadata/unsigned (soft green)
     out.push_str(&format!(
         " {}{}{}{}{} {}\n",
-        "y".white(),
-        "3".truecolor(100, 100, 100),
-        "{".truecolor(100, 100, 100),
+        "y".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+        tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+        tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
         header.backward_compat.to_string().white(),
-        "}".truecolor(100, 100, 100),
-        tc("Backward compat", 100, 100, 100)
+        tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+        tc("Backward compat", COL_HINT.0, COL_HINT.1, COL_HINT.2)
     ));
 
-    // Creation time: ef6{timestamp}
+    // Creation time: ef6{timestamp} - time (pink-magenta)
     if let VsfType::e(ref et) = header.creation_time {
         let tier = match et {
             crate::types::EtType::f5(_) => "5",
@@ -1087,70 +1371,86 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         };
         out.push_str(&format!(
             " {}{}{}{}{}\n",
-            "e".white(),
-            format!("f{}", tier).truecolor(100, 100, 100),
-            "{".truecolor(100, 100, 100),
+            "e".truecolor(COL_TIME.0, COL_TIME.1, COL_TIME.2),
+            format!("f{}", tier).truecolor(COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             format_eagle_time(et).white(),
-            "}".truecolor(100, 100, 100)
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
         ));
     }
 
-    // Header size: b3{N} Bytes
-    out.push_str(&format!(
-        " {}{}{}{}{} {} {}\n",
-        "b".white(),
-        "3".truecolor(100, 100, 100),
-        "{".truecolor(100, 100, 100),
-        header_length_bytes.to_string().white(),
-        "}".truecolor(100, 100, 100),
-        tc("Header size", 100, 100, 100),
-        tc("Bytes", 100, 100, 100)
-    ));
+    // Header size: b3{N} Bytes - metadata/unsigned (soft green)
+    let header_size_valid = header_length_bytes == actual_header_size;
+    if header_size_valid {
+        out.push_str(&format!(
+            " {}{}{}{}{} {} {} {}\n",
+            "b".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            header_length_bytes.to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("Header size", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+            tc("Bytes", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+            tc("✓", COL_PASS.0, COL_PASS.1, COL_PASS.2)
+        ));
+    } else {
+        out.push_str(&format!(
+            " {}{}{}{}{} {} {} {} {}\n",
+            "b".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+            tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            header_length_bytes.to_string().truecolor(COL_FAIL.0, COL_FAIL.1, COL_FAIL.2),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("Header size", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+            tc("Bytes", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+            tc("✗ MISMATCH", COL_FAIL.0, COL_FAIL.1, COL_FAIL.2),
+            format!("(actual: {})", actual_header_size).truecolor(COL_HINT.0, COL_HINT.1, COL_HINT.2)
+        ));
+    }
 
-    // File length: L3{N} Bytes (only if present)
+    // File length: L3{N} Bytes - metadata/unsigned (soft green)
     if let Some(file_len) = file_length_bytes {
         let actual_len = data.len();
         let length_valid = file_len == actual_len;
         if length_valid {
             out.push_str(&format!(
                 " {}{}{}{}{} {} {} {}\n",
-                "L".white(),
-                "3".truecolor(100, 100, 100),
-                "{".truecolor(100, 100, 100),
+                "L".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+                tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
                 file_len.to_string().white(),
-                "}".truecolor(100, 100, 100),
-                tc("File length", 100, 100, 100),
-                tc("Bytes", 100, 100, 100),
-                tc("✓", 0, 200, 0)
+                tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                tc("File length", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+                tc("Bytes", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+                tc("✓", COL_PASS.0, COL_PASS.1, COL_PASS.2)
             ));
         } else {
             out.push_str(&format!(
                 " {}{}{}{}{} {} {} {} {}\n",
-                "L".white(),
-                "3".truecolor(100, 100, 100),
-                "{".truecolor(100, 100, 100),
-                file_len.to_string().red(),
-                "}".truecolor(100, 100, 100),
-                tc("File length", 100, 100, 100),
-                tc("Bytes", 100, 100, 100),
-                tc("✗ MISMATCH", 255, 0, 0),
-                format!("(actual: {})", actual_len).truecolor(100, 100, 100)
+                "L".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+                tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                file_len.to_string().truecolor(COL_FAIL.0, COL_FAIL.1, COL_FAIL.2),
+                tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                tc("File length", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+                tc("Bytes", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+                tc("✗ MISMATCH", COL_FAIL.0, COL_FAIL.1, COL_FAIL.2),
+                format!("(actual: {})", actual_len).truecolor(COL_HINT.0, COL_HINT.1, COL_HINT.2)
             ));
         }
     }
 
-    // Provenance hash: hp3{32} then hex on next lines
+    // Provenance hash: hp3{31} (32 Bytes) - encoded as len-1
     if let VsfType::hp(ref hash) = header.provenance_hash {
         out.push_str(&format!(
-            " {}{}{}{}{} {} {} {}\n",
-            "hp".white(),
-            "3".truecolor(100, 100, 100),
-            "{".truecolor(100, 100, 100),
-            hash.len().to_string().white(),
-            "}".truecolor(100, 100, 100),
-            tc("BLAKE3 provenance hash", 100, 100, 100),
-            tc("hex", 100, 100, 100),
-            "".white() // placeholder
+            " {}{}{}{}{} {} {}\n",
+            "hp".truecolor(COL_HASH.0, COL_HASH.1, COL_HASH.2),
+            tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            format!("{}", hash.len() - 1).white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("BLAKE3 provenance hash", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+            format!("({} Bytes)", hash.len()).truecolor(COL_HINT.0, COL_HINT.1, COL_HINT.2),
         ));
         let hash_lines = format_hex_lines(hash);
         for line in &hash_lines {
@@ -1158,17 +1458,17 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         }
     }
 
-    // Signer pubkey: ke3{32} hex
+    // Signer pubkey: ke3{31} (32 Bytes) - encoded as len-1
     if let Some(VsfType::ke(ref key)) = header.signer_pubkey {
         out.push_str(&format!(
             " {}{}{}{}{} {} {}\n",
-            "ke".white(),
-            "3".truecolor(100, 100, 100),
-            "{".truecolor(100, 100, 100),
-            key.len().to_string().white(),
-            "}".truecolor(100, 100, 100),
-            tc("Ed25519 signer pubkey", 100, 100, 100),
-            tc("hex", 100, 100, 100)
+            "ke".truecolor(COL_KEY.0, COL_KEY.1, COL_KEY.2),
+            tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            format!("{}", key.len() - 1).white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("Ed25519 signer pubkey", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+            format!("({} Bytes)", key.len()).truecolor(COL_HINT.0, COL_HINT.1, COL_HINT.2),
         ));
         let key_lines = format_hex_lines(key);
         for line in &key_lines {
@@ -1176,17 +1476,17 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         }
     }
 
-    // Signature: ge3{64} hex
+    // Signature: ge3{63} (64 Bytes) - encoded as len-1
     if let Some(VsfType::ge(ref sig)) = header.signature {
         out.push_str(&format!(
             " {}{}{}{}{} {} {}\n",
-            "ge".white(),
-            "3".truecolor(100, 100, 100),
-            "{".truecolor(100, 100, 100),
-            sig.len().to_string().white(),
-            "}".truecolor(100, 100, 100),
-            tc("Ed25519 signature", 100, 100, 100),
-            tc("hex", 100, 100, 100)
+            "ge".truecolor(COL_SIG.0, COL_SIG.1, COL_SIG.2),
+            tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            format!("{}", sig.len() - 1).white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("Ed25519 signature", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+            format!("({} Bytes)", sig.len()).truecolor(COL_HINT.0, COL_HINT.1, COL_HINT.2),
         ));
         let sig_lines = format_hex_lines(sig);
         for line in &sig_lines {
@@ -1194,17 +1494,17 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         }
     }
 
-    // Rolling hash: hb3{32} hex
+    // Rolling hash: hb3{31} (32 Bytes) - encoded as len-1 like other crypto types
     if let Some(VsfType::hb(ref hash)) = header.rolling_hash {
         out.push_str(&format!(
             " {}{}{}{}{} {} {}\n",
-            "hb".white(),
-            "3".truecolor(100, 100, 100),
-            "{".truecolor(100, 100, 100),
-            hash.len().to_string().white(),
-            "}".truecolor(100, 100, 100),
-            tc("BLAKE3 rolling hash", 100, 100, 100),
-            tc("hex", 100, 100, 100)
+            "hb".truecolor(COL_HASH.0, COL_HASH.1, COL_HASH.2),
+            tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            format!("{}", hash.len() - 1).white(),  // len-1 encoding
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("BLAKE3 rolling hash", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+            format!("({} Bytes)", hash.len()).truecolor(COL_HINT.0, COL_HINT.1, COL_HINT.2),
         ));
         let hash_lines = format_hex_lines(hash);
         for line in &hash_lines {
@@ -1215,130 +1515,86 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             if computed.as_slice() == hash.as_slice() {
                 out.push_str(&format!(
                     " {} {}\n",
-                    tc("Verification:", 100, 100, 100),
-                    tc("PASS", 100, 220, 100)
+                    tc("Verification:", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+                    tc("PASS", COL_PASS.0, COL_PASS.1, COL_PASS.2)
                 ));
             } else {
                 out.push_str(&format!(
                     " {} {}\n",
-                    tc("Verification:", 100, 100, 100),
-                    tc("FAIL", 220, 100, 100)
+                    tc("Verification:", COL_HINT.0, COL_HINT.1, COL_HINT.2),
+                    tc("FAIL", COL_FAIL.0, COL_FAIL.1, COL_FAIL.2)
                 ));
             }
         }
     }
 
-    // Label count: n3{N}
+    // Label count: n3{N} - metadata/unsigned (soft green)
     out.push_str(&format!(
         " {}{}{}{}{} {}\n",
-        "n".white(),
-        "3".truecolor(100, 100, 100),
-        "{".truecolor(100, 100, 100),
+        "n".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+        tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+        tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
         labels.len().to_string().white(),
-        "}".truecolor(100, 100, 100),
-        tc("labels", 100, 100, 100)
+        tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+        tc("labels", COL_HINT.0, COL_HINT.1, COL_HINT.2)
     ));
 
     for label in &labels {
-        let offset_str = format_number(label.offset);
+        // Show literal VSF encoding: (d3{N}name o3{offset} b3{size} n3{count} ke3{31}... ge3{63}...)
+        out.push_str(&format!(" {}", tc("(", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)));
 
-        // Build crypto suffix with algorithm annotations (matching header style)
-        let mut crypto_parts = Vec::new();
-        if let Some(ref key) = label.key {
-            // Annotate ke with algorithm name
-            if let VsfType::ke(k) = key {
-                crypto_parts.push(format!(
-                    "{}{}{} {} {} {}",
-                    k.len().to_string().truecolor(200, 200, 100),
-                    tc("-", 100, 100, 100),
-                    tc("Byte", 128, 128, 128),
-                    "Ed25519".cyan(),
-                    tc("pubkey", 128, 128, 128),
-                    tc("hex", 100, 100, 100)
-                ));
-                let hex_lines = format_hex_lines(k);
-                for line in &hex_lines {
-                    crypto_parts.push(format!("    {}", line.white()));
-                }
-            } else {
-                crypto_parts.push(format_value_short(key));
-            }
-        }
-        if let Some(ref sig) = label.signature {
-            // Annotate ge with algorithm name
-            if let VsfType::ge(s) = sig {
-                crypto_parts.push(format!(
-                    "{}{}{} {} {} {}",
-                    s.len().to_string().truecolor(200, 200, 100),
-                    tc("-", 100, 100, 100),
-                    tc("Byte", 128, 128, 128),
-                    "Ed25519".cyan(),
-                    tc("signature", 128, 128, 128),
-                    tc("hex", 100, 100, 100)
-                ));
-                let hex_lines = format_hex_lines(s);
-                for line in &hex_lines {
-                    crypto_parts.push(format!("    {}", line.white()));
-                }
-            } else {
-                crypto_parts.push(format_value_short(sig));
-            }
-        }
-        // Field count string - try to determine actual count for signed sections
-        let actual_count = if label.child_count == 0 && label.size > 0 {
-            // Try to parse and count fields for signed sections
-            try_parse_section_fields(data, label.offset)
-                .map(|fields| fields.len())
-                .ok()
-        } else {
-            None
-        };
+        // d3{len}name - field name with length prefix - text (light blue)
+        out.push_str(&format!(
+            "{}{}{}{}{}{}",
+            "d".truecolor(COL_TEXT.0, COL_TEXT.1, COL_TEXT.2),
+            tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            label.name.len().to_string().white(),
+            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+            label.name.white().bold()
+        ));
 
-        // Field count: number is white (literal), "field(s)" is gray (annotation)
-        let field_str = if label.size == 0 {
-            String::new()
-        } else if let Some(count) = actual_count {
-            if count == 1 {
-                format!("{} {}", "1".white(), tc("field", 128, 128, 128))
-            } else {
-                format!("{} {}", count.to_string().white(), tc("fields", 128, 128, 128))
-            }
-        } else if label.child_count == 0 {
-            format!("{} {}", tc("?", 128, 128, 128), tc("fields", 128, 128, 128))
-        } else if label.child_count == 1 {
-            format!("{} {}", "1".white(), tc("field", 128, 128, 128))
-        } else {
-            format!("{} {}", label.child_count.to_string().white(), tc("fields", 128, 128, 128))
-        };
-
-        // Print label line - matches encoding order: d(name), o(offset), b(size), n(count)
-        // For inline fields: (name:value,value,...) - no offset/size/count
-        // Literal values (name, offset, size, count) are white; annotations (Bytes, field) are gray
-        out.push_str(&format!(" {}", tc("(", 100, 100, 100)));
         if label.size == 0 {
-            out.push_str(&format!("{}", label.name.white().bold()));
-            // Show inline values if present: (name:val1,val2,...)
+            // Inline field: (d3{N}name:val1,val2,...)
             if !label.inline_values.is_empty() {
-                out.push_str(&format!("{}", tc(":", 100, 100, 100)));
+                out.push_str(&format!(" {}", tc(":", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)));
                 for (i, val) in label.inline_values.iter().enumerate() {
                     if i > 0 {
-                        out.push_str(&format!("{}", tc(",", 100, 100, 100)));
+                        out.push_str(&format!("{}", tc(",", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)));
                     }
                     out.push_str(&format!("{}", format_value_literal(val)));
                 }
             }
         } else {
-            out.push_str(&format!("{}", label.name.white().bold()));
-            out.push_str(&format!(" {}{}", tc("@", 100, 100, 100), offset_str.white()));
-            out.push_str(&format!(" {} {}", label.size.to_string().white(), tc("Bytes", 128, 128, 128)));
-            out.push_str(&format!(" {}", field_str));
+            // Section pointer: o3{offset} b3{size} n3{count} - metadata/unsigned (soft green)
+            out.push_str(&format!(
+                " {}{}{}{}{}",
+                "o".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+                tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                label.offset.to_string().white(),
+                tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+            ));
+            out.push_str(&format!(
+                " {}{}{}{}{}",
+                "b".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+                tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                label.size.to_string().white(),
+                tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+            ));
+            out.push_str(&format!(
+                " {}{}{}{}{}",
+                "n".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+                tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                label.child_count.to_string().white(),
+                tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+            ));
         }
-        out.push_str(&format!("{}\n", tc(")", 100, 100, 100)));
 
-        // Print crypto fields on separate indented lines
-        for part in &crypto_parts {
-            out.push_str(&format!("   {}\n", part));
-        }
+        // NOTE: ke/ge are NOT part of the label pointer - they appear in section content
+        out.push_str(&format!("{}\n", tc(")", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)));
     }
 
     // Check if there are any non-empty sections
@@ -1542,10 +1798,6 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             out.push_str(&format!(" {}\n", tree_vert()));
         }
     }
-
-    // Valid indicator at end
-    out.push('\n');
-    out.push_str(&format!("{}\n", tc("Valid", 100, 220, 100)));
 
     Ok(out)
 }

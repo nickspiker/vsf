@@ -364,7 +364,7 @@ pub fn parse_signature(data: &[u8], pointer: &mut usize) -> Result<VsfType, Erro
 }
 
 pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
-    // Read algorithm byte (e for Ed25519, x for X25519, c for ChaCha20, etc.)
+    // Read algorithm byte (e for Ed25519, x for X25519, s for shared secrets, etc.)
     if *pointer >= data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
@@ -373,6 +373,13 @@ pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
     }
     let algo = data[*pointer];
     *pointer += 1;
+
+    // Handle shared secrets (ks*) - these have a 3-byte prefix
+    if algo == b's' {
+        // This is a shared secret - dispatch to parse_shared_secret
+        // Note: pointer is now at the third byte (algorithm variant)
+        return parse_shared_secret(data, pointer);
+    }
 
     // Read length (stored as len-1) using standard VSF variable-length encoding
     let length = decode_usize(data, pointer)? + 1; // Add 1 back
@@ -400,10 +407,53 @@ pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
         b'l' => Ok(VsfType::kl(key)),
         b'n' => Ok(VsfType::kn(key)), // NTRU public key
         b'h' => Ok(VsfType::kh(key)), // HQC public key
-        b's' => Ok(VsfType::ks(key)), // Shared secret
+        b'd' => Ok(VsfType::kd(key)), // Dilithium/ML-DSA public key
+        b'b' => Ok(VsfType::kb(key)), // BIKE public key
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Unknown key algorithm: {}", algo as char),
+        )),
+    }
+}
+
+/// Parse shared secret (ks* types - 3-byte prefix)
+pub fn parse_shared_secret(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+    // Read algorithm byte (x for X25519, p for P-curve, k for secp256k1, etc.)
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for shared secret algorithm",
+        ));
+    }
+    let algo = data[*pointer];
+    *pointer += 1;
+
+    // Read length (stored as len-1) using standard VSF variable-length encoding
+    let length = decode_usize(data, pointer)? + 1; // Add 1 back
+
+    // Read secret data
+    if *pointer + length > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for shared secret",
+        ));
+    }
+    let secret = data[*pointer..*pointer + length].to_vec();
+    *pointer += length;
+
+    // Return appropriate shared secret type
+    match algo {
+        b'x' => Ok(VsfType::ksx(secret)), // X25519
+        b'p' => Ok(VsfType::ksp(secret)), // P-curve (P-256/P-384)
+        b'k' => Ok(VsfType::ksk(secret)), // secp256k1
+        b'f' => Ok(VsfType::ksf(secret)), // Frodo
+        b'n' => Ok(VsfType::ksn(secret)), // NTRU
+        b'l' => Ok(VsfType::ksl(secret)), // McEliece
+        b'h' => Ok(VsfType::ksh(secret)), // HQC
+        b'm' => Ok(VsfType::ksm(secret)), // ML-KEM
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Unknown shared secret algorithm: {}", algo as char),
         )),
     }
 }
