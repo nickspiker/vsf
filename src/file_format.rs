@@ -365,132 +365,120 @@ impl VsfHeader {
             ));
         }
 
-        // Check for optional signer_pubkey (ke), signature (ge), or rolling hash (hb)
-        // These are mutually exclusive: either (ke + ge) OR (hb), but not both
+        // Parse remaining header until '>' using VSF dispatch pattern
+        // See byte → dispatch to parser → repeat
         let mut rolling_hash = None;
         let mut signer_pubkey = None;
         let mut signature = None;
+        let mut fields = Vec::new();
 
-        // Parse optional crypto fields until we hit 'n' (field count)
-        while ptr < data.len() && data[ptr] != b'n' {
+        while ptr < data.len() && data[ptr] != b'>' {
             match data[ptr] {
                 b'k' => {
-                    // Signer pubkey (ke)
+                    // Key type (ke, kx, etc.)
                     signer_pubkey = Some(
                         parse(data, &mut ptr)
                             .map_err(|e| format!("Failed to parse signer_pubkey: {}", e))?,
                     );
                 }
                 b'g' => {
-                    // Signature (ge)
+                    // Signature type (ge, gp, etc.)
                     signature = Some(
                         parse(data, &mut ptr)
                             .map_err(|e| format!("Failed to parse signature: {}", e))?,
                     );
                 }
                 b'h' => {
-                    // Rolling hash (hb) - only if no signature
+                    // Hash type (hb, hp, etc.)
                     rolling_hash = Some(
                         parse(data, &mut ptr)
                             .map_err(|e| format!("Failed to parse rolling_hash: {}", e))?,
                     );
                 }
-                _ => break, // Unknown field, stop parsing crypto
-            }
-        }
+                b'n' => {
+                    // Field count - just parse and discard (we count fields from '(' markers)
+                    let _ = parse(data, &mut ptr)
+                        .map_err(|e| format!("Failed to parse field_count: {}", e))?;
+                }
+                b'(' => {
+                    // Header field
+                    let field = VsfField::parse(data, &mut ptr)
+                        .map_err(|e| format!("Failed to parse header field: {}", e))?;
 
-        let field_count_type = parse(data, &mut ptr)
-            .map_err(|e| format!("Failed to parse field_count: {}", e))?;
+                    // Extract typed values from the parsed field
+                    let mut hash = None;
+                    let mut field_signature = None;
+                    let mut key = None;
+                    let mut offset_bytes = 0;
+                    let mut size_bytes = 0;
+                    let mut child_count = 0;
+                    let mut has_offset = false;
+                    let mut inline_values = Vec::new();
 
-        let field_count = match field_count_type {
-            VsfType::n(count) => count,
-            _ => {
-                return Err(format!(
-                    "Expected field_count (n), got {:?}",
-                    field_count_type
-                ))
-            }
-        };
+                    for value in &field.values {
+                        match value {
+                            // Hash types
+                            VsfType::hp(_) | VsfType::hb(_) | VsfType::hs(_) => {
+                                hash = Some(value.clone());
+                            }
+                            // Signature types
+                            VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => {
+                                field_signature = Some(value.clone());
+                            }
+                            // Key types
+                            VsfType::ke(_) | VsfType::kx(_) | VsfType::kc(_) | VsfType::ka(_) => {
+                                key = Some(value.clone());
+                            }
+                            // Offset - indicates this field points to a section body
+                            VsfType::o(o) => {
+                                offset_bytes = *o;
+                                has_offset = true;
+                            }
+                            // Size in bytes
+                            VsfType::b(b, _) => {
+                                size_bytes = *b;
+                            }
+                            // Child count
+                            VsfType::n(n) => {
+                                child_count = *n;
+                            }
+                            // Capture inline values (u, i, d, l, x, f, etc.) for header-only fields
+                            _ => {
+                                inline_values.push(value.clone());
+                            }
+                        }
+                    }
 
-        // Parse header fields using VsfField::parse() - same format as section fields
-        // Format: (dname:value,value,value) or (dname) for empty
-        let mut fields = Vec::with_capacity(field_count);
-        for i in 0..field_count {
-            let field = VsfField::parse(data, &mut ptr)
-                .map_err(|e| format!("Failed to parse header field {}: {}", i, e))?;
+                    // If no offset, this is a metadata-only field (no section body)
+                    if !has_offset {
+                        offset_bytes = 0;
+                        size_bytes = 0;
+                        child_count = 0;
+                    }
 
-            // Extract typed values from the parsed field
-            let mut hash = None;
-            let mut signature = None;
-            let mut key = None;
-            let mut offset_bytes = 0;
-            let mut size_bytes = 0;
-            let mut child_count = 0;
-            let mut has_offset = false;
-            let mut inline_values = Vec::new();
-
-            for value in &field.values {
-                match value {
-                    // Hash types
-                    VsfType::hp(_) | VsfType::hb(_) | VsfType::hs(_) => {
-                        hash = Some(value.clone());
-                    }
-                    // Signature types
-                    VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) => {
-                        signature = Some(value.clone());
-                    }
-                    // Key types
-                    VsfType::ke(_) | VsfType::kx(_) | VsfType::kc(_) | VsfType::ka(_) => {
-                        key = Some(value.clone());
-                    }
-                    // Offset - indicates this field points to a section body
-                    VsfType::o(o) => {
-                        offset_bytes = *o;
-                        has_offset = true;
-                    }
-                    // Size in bytes
-                    VsfType::b(b, _) => {
-                        size_bytes = *b;
-                    }
-                    // Child count
-                    VsfType::n(n) => {
-                        child_count = *n;
-                    }
-                    // Capture inline values (u, i, d, l, x, f, etc.) for header-only fields
-                    _ => {
-                        inline_values.push(value.clone());
-                    }
+                    fields.push(HeaderField {
+                        name: field.name,
+                        hash,
+                        signature: field_signature,
+                        key,
+                        offset_bytes,
+                        size_bytes,
+                        child_count,
+                        inline_values,
+                    });
+                }
+                _ => {
+                    // Unknown type - just parse and continue (VSF is extensible)
+                    let _ = parse(data, &mut ptr)
+                        .map_err(|e| format!("Failed to parse unknown type at byte {}: {}", ptr, e))?;
                 }
             }
-
-            // If no offset, this is a metadata-only field (no section body)
-            // offset_bytes stays 0, size_bytes stays 0, child_count stays 0
-            if !has_offset {
-                offset_bytes = 0;
-                size_bytes = 0;
-                child_count = 0;
-            }
-
-            fields.push(HeaderField {
-                name: field.name,
-                hash,
-                signature,
-                key,
-                offset_bytes,
-                size_bytes,
-                child_count,
-                inline_values,
-            });
         }
 
-        // Expect closing '>'
-        if ptr >= data.len() || data[ptr] != b'>' {
-            return Err(format!(
-                "Expected '>' to close header, found {:?}",
-                data.get(ptr)
-            ));
+        // Skip past '>'
+        if ptr < data.len() && data[ptr] == b'>' {
+            ptr += 1;
         }
-        ptr += 1;
 
         Ok((
             VsfHeader {
@@ -744,9 +732,9 @@ impl VsfField {
         *ptr += 1;
 
         // Parse field name
-        let name = match crate::parse(data, ptr).map_err(|e| e.to_string())? {
+        let name = match crate::parse(data, ptr).map_err(|e| format!("VsfField: Failed to parse name: {}", e))? {
             VsfType::d(s) => s,
-            other => return Err(format!("Expected field name (d type), found {:?}", other)),
+            other => return Err(format!("VsfField: Expected field name (d type), found {:?}", other)),
         };
 
         let mut values = Vec::new();
@@ -774,7 +762,7 @@ impl VsfField {
                 }
 
                 // Parse value
-                let value = crate::parse(data, ptr).map_err(|e| e.to_string())?;
+                let value = crate::parse(data, ptr).map_err(|e| format!("VsfField: Failed to parse value: {}", e))?;
                 values.push(value);
             }
         }
@@ -924,11 +912,8 @@ impl VsfSection {
     /// a VSF header. The `n` and `b` fields allow validation after decryption.
     ///
     /// Format: [d{name}n{count}b{length}(field:value)...]
+    /// Empty sections produce: [d{name}n{0}b{X}]
     pub fn encode_encrypted(&self) -> Vec<u8> {
-        if self.fields.is_empty() {
-            return Vec::new();
-        }
-
         let mut bytes = Vec::new();
         bytes.push(b'[');
 
@@ -1089,9 +1074,9 @@ impl VsfSection {
         *ptr += 1;
 
         // Parse section name first
-        let name = match crate::parse(data, ptr).map_err(|e| e.to_string())? {
+        let name = match crate::parse(data, ptr).map_err(|e| format!("VsfSection: Failed to parse name: {}", e))? {
             VsfType::d(s) => s,
-            other => return Err(format!("Expected section name (d type), found {:?}", other)),
+            other => return Err(format!("VsfSection: Expected section name (d type), found {:?}", other)),
         };
 
         // Check for optional n{count}b{length} suffix AFTER name (sections >1MB)

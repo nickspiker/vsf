@@ -161,8 +161,15 @@ pub enum VsfType {
     kd(Vec<u8>), // Dilithium/ML-DSA public key
     kb(Vec<u8>), // BIKE public key
 
-    // Shared secret (output of key agreement/decapsulation)
-    ks(Vec<u8>), // Shared secret / derived key material (typically 32B)
+    // Shared secrets (output of key agreement/decapsulation) - typed by algorithm
+    ksx(Vec<u8>), // X25519 shared secret (32B)
+    ksp(Vec<u8>), // P-curve ECDH shared secret (32B P-256, 48B P-384 - size disambiguates)
+    ksk(Vec<u8>), // secp256k1 shared secret (32B)
+    ksf(Vec<u8>), // FrodoKEM shared secret (24B)
+    ksn(Vec<u8>), // NTRU shared secret (32B)
+    ksl(Vec<u8>), // Classic McEliece shared secret (32B)
+    ksh(Vec<u8>), // HQC shared secret (64B)
+    ksm(Vec<u8>), // ML-KEM shared secret (32B)
 
     // MAC (Message Authentication Code)
     ah(Vec<u8>), // HMAC-SHA256 (32B or 64B)

@@ -1110,88 +1110,58 @@ fn find_section_signature_position(vsf_bytes: &[u8], section_name: &str) -> Resu
     // Parse through header to find the section's signature field
     let mut pointer = 4; // Skip magic "RÅ<"
 
-    // Skip version, backward compat, header length, file length
-    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?; // z
-    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?; // y
-    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?; // b
-    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?; // L
+    // VSF design: dispatch on byte until we hit '>'
+    // See byte → parse it → repeat
+    while pointer < vsf_bytes.len() && vsf_bytes[pointer] != b'>' {
+        let byte = vsf_bytes[pointer];
 
-    // Skip creation time
-    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+        if byte == b'(' {
+            // Header field - parse it and look for our section's signature
+            pointer += 1; // skip '('
 
-    // Skip provenance hash (hp)
-    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+            // Parse field name
+            let field_name = match parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())? {
+                VsfType::d(name) => name,
+                _ => return Err("Expected field name".to_string()),
+            };
 
-    // Skip header-level signature if present (ge/gp/gr at header level)
-    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'g' {
-        let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
-    }
-
-    // Skip header-level signer key if present (ke/kx/kp at header level)
-    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'k' {
-        let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
-    }
-
-    // Skip optional rolling hash (hb) - but we shouldn't have one when signing
-    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'h' {
-        let _ = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
-    }
-
-    // Now parse field count and fields
-    let field_count = match parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())? {
-        VsfType::n(count) => count,
-        _ => return Err("Expected field count".to_string()),
-    };
-
-    // Parse each field looking for our section
-    for _ in 0..field_count {
-        if pointer >= vsf_bytes.len() || vsf_bytes[pointer] != b'(' {
-            return Err("Expected field start '('".to_string());
-        }
-        pointer += 1; // skip '('
-
-        // Parse field name
-        let field_name = match parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())? {
-            VsfType::d(name) => name,
-            _ => return Err("Expected field name".to_string()),
-        };
-
-        // Skip colon separator between name and values (if present)
-        if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b':' {
-            pointer += 1;
-        }
-
-        // Parse field values until we hit ')'
-        let mut found_sig_position = None;
-        while pointer < vsf_bytes.len() && vsf_bytes[pointer] != b')' {
-            // Skip comma separators between values
-            if vsf_bytes[pointer] == b',' {
+            // Skip colon separator if present
+            if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b':' {
                 pointer += 1;
-                continue;
             }
 
-            let value = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+            // Parse field values until ')'
+            let mut found_sig_position = None;
+            while pointer < vsf_bytes.len() && vsf_bytes[pointer] != b')' {
+                // Skip comma separators
+                if vsf_bytes[pointer] == b',' {
+                    pointer += 1;
+                    continue;
+                }
 
-            // If this is a signature and we're in the right section
-            if field_name == section_name {
-                if let VsfType::ge(sig_bytes) = value {
-                    // Position is after the 'ge' prefix, at the actual bytes
-                    // ge encoding: 'g' + subtype + length + bytes
-                    // We need to find where the 64 bytes start
-                    found_sig_position = Some(pointer - sig_bytes.len());
+                let value = parse(vsf_bytes, &mut pointer).map_err(|e| e.to_string())?;
+
+                // If this is a signature and we're in the right section
+                if field_name == section_name {
+                    if let VsfType::ge(sig_bytes) = value {
+                        found_sig_position = Some(pointer - sig_bytes.len());
+                    }
                 }
             }
-        }
 
-        if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b')' {
-            pointer += 1; // skip ')'
-        }
-
-        if field_name == section_name {
-            if let Some(pos) = found_sig_position {
-                return Ok(pos);
+            if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b')' {
+                pointer += 1; // skip ')'
             }
-            return Err(format!("Section '{}' has no signature field", section_name));
+
+            // Check if this was our target section
+            if field_name == section_name {
+                return found_sig_position
+                    .ok_or_else(|| format!("Section '{}' has no signature field", section_name));
+            }
+        } else {
+            // Any other type marker - just parse and continue
+            let _ = parse(vsf_bytes, &mut pointer)
+                .map_err(|e| format!("Header parse error at byte {}: {}", pointer, e))?;
         }
     }
 
