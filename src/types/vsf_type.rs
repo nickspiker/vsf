@@ -118,7 +118,7 @@ pub enum VsfType {
     l(String),      // ASCII text (user-facing, ASCII-only alternative to x)
     o(usize),       // Offset in Bytes
     b(usize, bool), // Length in Bytes (value, inclusive_mode)
-    L(usize, bool), // File length in Bytes (value, inclusive_mode) - for TCP streaming
+    L(usize, bool), // File length in Bytes (value, inclusive_mode)
     n(usize),       // Number/count
     z(usize),       // Version
     y(usize),       // Backward version
@@ -133,6 +133,9 @@ pub enum VsfType {
     hg(Vec<u8>), // Spaghetti hash (domain-separated, maximally weird mixing)
     hc(Vec<u8>), // SHA-3/Keccak
     hk(Vec<u8>), // BLAKE2
+
+    // Application-specific hashes (capital letter = app-specific)
+    hP(Vec<u8>), // Photon handle proof (memory-hard PoW result, 32 bytes)
 
     // Signature algorithms
     ge(Vec<u8>), // Ed25519 signature

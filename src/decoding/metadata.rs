@@ -320,6 +320,7 @@ pub fn parse_hash(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
         b's' => Ok(VsfType::hs(hash)),
         b'm' => Ok(VsfType::hm(hash)),
         b'g' => Ok(VsfType::hg(hash)),
+        b'P' => Ok(VsfType::hP(hash)), // Photon handle proof
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Unknown hash algorithm: {}", algo as char),

@@ -769,6 +769,7 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         VsfType::hg(h) => format_crypto_hex("hg", h),
         VsfType::hc(h) => format_crypto_hex("hc", h),  // SHA-3/Keccak
         VsfType::hk(h) => format_crypto_hex("hk", h),  // BLAKE2
+        VsfType::hP(h) => format_crypto_hex("hP", h),  // Photon handle proof
         // Keys (blue)
         VsfType::ke(k) => format_crypto_hex("ke", k),  // Ed25519
         VsfType::kx(k) => format_crypto_hex("kx", k),  // X25519
@@ -1116,6 +1117,7 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::hs(hash) => format_crypto_literal("hs", hash),
         VsfType::hm(hash) => format_crypto_literal("hm", hash),
         VsfType::hg(hash) => format_crypto_literal("hg", hash),
+        VsfType::hP(hash) => format_crypto_literal("hP", hash),
         VsfType::ge(sig) => format_crypto_literal("ge", sig),
         VsfType::gp(sig) => format_crypto_literal("gp", sig),
         VsfType::gr(sig) => format_crypto_literal("gr", sig),
@@ -1171,6 +1173,7 @@ pub fn format_value_short(vsf: &VsfType) -> String {
         VsfType::hs(hash) => format_crypto_hex("hs", hash),
         VsfType::hm(hash) => format_crypto_hex("hm", hash),
         VsfType::hg(hash) => format_crypto_hex("hg", hash),
+        VsfType::hP(hash) => format_crypto_hex("hP", hash),
         VsfType::ke(key) => format_crypto_hex("ke", key),
         VsfType::kx(key) => format_crypto_hex("kx", key),
         VsfType::kp(key) => format_crypto_hex("kp", key),
