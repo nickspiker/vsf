@@ -440,6 +440,14 @@ impl VsfType {
                 flat
             }
 
+            // Application-specific hashes
+            VsfType::hP(value) => {
+                let mut flat = vec![b'h', b'P'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(&value);
+                flat
+            }
+
             // ==================== SIGNATURES ====================
             VsfType::ge(value) => {
                 let mut flat = vec![b'g', b'e'];
