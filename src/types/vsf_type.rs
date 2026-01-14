@@ -237,7 +237,12 @@ pub enum VsfType {
     ///
     /// Format: v[encoding][encoded_data]
     ///
-    /// Encoding identifiers (single ASCII character):
+    /// **Encoding identifier convention:**
+    /// - **Lowercase** = VSF-standardized encodings (formally recognized by spec)
+    /// - **Uppercase** = Application-specific custom encodings (per-application basis)
+    ///
+    /// **Standard encoding identifiers** (lowercase, VSF spec):
+    /// - 'b' = Binary blob (raw bytes, no encoding)
     /// - 'a' = AV1 video codec (image/video compression)
     /// - 'z' = zstd compression
     /// - 'r' = Reed-Solomon error correction
@@ -245,14 +250,22 @@ pub enum VsfType {
     /// - 'e' = Encryption (algorithm-specific)
     /// - 'u' = Measurement in specified units
     ///
-    /// KEM ciphertext identifiers (for key encapsulation):
+    /// **KEM ciphertext identifiers** (for key encapsulation):
     /// - 'f' = FrodoKEM ciphertext (15744/21632/31296B for 640/976/1344)
     /// - 'n' = NTRU ciphertext (699/930/1230B for HPS, 1138B for HRSS-701)
     /// - 'l' = Classic McEliece ciphertext (128/188/240B depending on variant)
     /// - 'h' = HQC ciphertext (4481/9026/14469B for 128/192/256)
     ///
+    /// **Application-specific encodings** (uppercase):
+    /// Applications can define custom encodings using uppercase letters (A-Z).
+    /// These are not standardized by VSF and are application-specific.
+    ///
     /// Example usage:
     /// ```ignore
+    /// // Binary blob (raw bytes, no encoding)
+    /// let file_bytes = std::fs::read("image.png")?;
+    /// let binary = VsfType::v(b'b', file_bytes);
+    ///
     /// // Compress VSF Bytes with zstd
     /// let original = VsfType::t_u3(tensor);
     /// let compressed = compress_zstd(&original.flatten());
@@ -264,6 +277,9 @@ pub enum VsfType {
     ///
     /// // KEM ciphertext (FrodoKEM-976 encapsulation output)
     /// let ciphertext = VsfType::v(b'f', frodo_ciphertext_bytes);
+    ///
+    /// // Application-specific encoding (uppercase)
+    /// let custom = VsfType::v(b'B', my_custom_format_bytes);
     /// ```
     ///
     /// Use when your application needs compression, error correction, encryption, units or other encoding.
