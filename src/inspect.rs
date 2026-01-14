@@ -343,7 +343,7 @@ const COL_FLOAT: (u8, u8, u8) = (255, 220, 100);  // Amber
 /// Semantic colour for complex numbers (j5, j6)
 const COL_COMPLEX: (u8, u8, u8) = (255, 180, 80);  // Orange-amber
 
-/// Semantic colour for time (e, ef5, ef6)
+/// Semantic colour for time (e, eu6, ef5, ef6)
 const COL_TIME: (u8, u8, u8) = (255, 150, 220);  // Pink-magenta
 
 /// Semantic colour for text types (d, l, x)
@@ -857,10 +857,11 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             )
         }
 
-        // Eagle Time: pink-magenta - show underlying float type (ef5 or ef6)
+        // Eagle Time: pink-magenta - show underlying type (eu6, ef5, ef6)
         VsfType::e(et) => {
             let formatted = format_eagle_time(et);
             let type_marker = match et {
+                EtType::u(_) => "eu6",
                 EtType::f5(_) => "ef5",
                 EtType::f6(_) => "ef6",
                 _ => "e",
@@ -973,7 +974,20 @@ pub fn format_number(n: usize) -> String {
 pub fn format_eagle_time(et: &EtType) -> String {
     // Convert EtType to EagleTime and then to DateTime (UTC), then to local
     let eagle_time = EagleTime::new(et.clone());
-    let dt_utc = eagle_time.to_datetime();
+
+    // Handle timestamps that are outside chrono's representable range
+    let dt_utc = match eagle_time.to_datetime_opt() {
+        Some(dt) => dt,
+        None => {
+            // Fallback: show the raw wire encoding
+            return match et {
+                EtType::u(v) => format!("eu6{{{}}}", v),
+                EtType::i(v) => format!("ei6{{{}}}", v),
+                EtType::f5(v) => format!("ef5{{{}}}", v),
+                EtType::f6(v) => format!("ef6{{{}}}", v),
+            };
+        }
+    };
     let dt = dt_utc.with_timezone(&Local);
 
     // Extract milliseconds from fractional seconds if available
@@ -1104,8 +1118,9 @@ pub fn format_value(vsf: &VsfType) -> String {
             format!("({:.4}°N, {:.4}°W)", lat, lon)
         }
         VsfType::e(et) => {
-            // Wire literal format: ef5{value} or ef6{value}
+            // Wire literal format: eu6{value}, ef5{value}, or ef6{value}
             match et {
+                EtType::u(v) => format!("eu6{{{}}}", v),
                 EtType::f5(v) => format!("ef5{{{:.2}}}", v),
                 EtType::f6(v) => format!("ef6{{{:.2}}}", v),
                 _ => format!("e{{{:?}}}", et),

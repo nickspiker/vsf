@@ -39,23 +39,23 @@ use std::f64::consts::PI;
 const BASE: u64 = 960_383_883; // floor(sqrt(2^64 / 20))
 
 /// Icosahedral geometry constants
-const A: f64 = 0.618033988749895; // 1.0 / PHI
-const B: f64 = 1.0;
+const A: f64 = 0.618033988749895; // 1 / PHI
+const B: f64 = 1.;
 
 /// 12 vertices of the icosahedron (normalized)
 const VERTICES: [[f64; 3]; 12] = [
-    [0.0, B, A],
-    [0.0, B, -A],
-    [0.0, -B, A],
-    [0.0, -B, -A],
-    [B, A, 0.0],
-    [B, -A, 0.0],
-    [-B, A, 0.0],
-    [-B, -A, 0.0],
-    [A, 0.0, B],
-    [-A, 0.0, B],
-    [A, 0.0, -B],
-    [-A, 0.0, -B],
+    [0., B, A],
+    [0., B, -A],
+    [0., -B, A],
+    [0., -B, -A],
+    [B, A, 0.],
+    [B, -A, 0.],
+    [-B, A, 0.],
+    [-B, -A, 0.],
+    [A, 0., B],
+    [-A, 0., B],
+    [A, 0., -B],
+    [-A, 0., -B],
 ];
 
 /// 20 triangular faces of the icosahedron (vertex indices)
@@ -527,7 +527,7 @@ fn levenshtein(a: &str, b: &str) -> i32 {
 }
 
 /// 3,177-word mnemonic list
-const WORD_LIST: [&str; 3177] = [
+pub const WORD_LIST: [&str; 3177] = [
     "work",
     "kid",
     "long",

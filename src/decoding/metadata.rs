@@ -63,11 +63,14 @@ pub fn parse_eagle_time(data: &[u8], pointer: &mut usize) -> Result<VsfType, Err
     }
 
     let time_type = data[*pointer];
+    eprintln!("DEBUG parse_eagle_time: time_type={} ('{}')", time_type, time_type as char);
     *pointer += 1;
 
     match time_type {
         b'u' => {
+            eprintln!("DEBUG: Parsing unsigned Eagle Time");
             let value = decode_usize(data, pointer)?;
+            eprintln!("DEBUG: Decoded value = {}", value);
             Ok(VsfType::e(EtType::u(value)))
         }
         b'i' => {
@@ -321,6 +324,7 @@ pub fn parse_hash(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
         b'm' => Ok(VsfType::hm(hash)),
         b'g' => Ok(VsfType::hg(hash)),
         b'P' => Ok(VsfType::hP(hash)), // Photon handle proof
+        b'R' => Ok(VsfType::hR(hash)), // Random padding material
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Unknown hash algorithm: {}", algo as char),

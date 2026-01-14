@@ -35,7 +35,7 @@ impl SectionMeta {
 pub struct VsfBuilder {
     version: usize,
     backward_compat: usize,
-    creation_time: VsfType, // Creation timestamp (ef5 for ~2min precision, ef6 for nanos)
+    creation_time: VsfType, // Creation timestamp (eu6 for 704ps precision, default)
     sections: Vec<(VsfSection, SectionMeta)>, // Section with optional crypto metadata
     unboxed: Vec<(String, Vec<u8>, SectionMeta)>, // Name, data, and optional crypto metadata
     inline_fields: Vec<(String, Vec<VsfType>)>, // Metadata-only fields: (name, inline values)
@@ -50,26 +50,16 @@ impl VsfBuilder {
     /// Create a new VSF file builder
     ///
     /// **Note:** Every VSF file automatically includes:
-    /// - Creation timestamp (current time as ef5, ~2min precision)
+    /// - Creation timestamp (current time as eu6, 704ps precision)
     /// - BLAKE3 hash for integrity verification (computed during `build()`)
     pub fn new() -> Self {
-        use crate::types::EtType;
-        use chrono::Utc;
-
-        // Get current time and convert to Eagle Time f32
-        let now = Utc::now();
-        let et = crate::datetime_to_eagle_time(now);
-        let et_f32 = match et.et_type() {
-            EtType::f6(v) => *v as f32,
-            EtType::f5(v) => *v,
-            EtType::u(v) => *v as f32,
-            EtType::i(v) => *v as f32,
-        };
+        // Get current time as Eagle Time (oscillations)
+        let et = crate::types::eagle_time::eagle_time_now();
 
         Self {
             version: VSF_VERSION,
             backward_compat: VSF_BACKWARD_COMPAT,
-            creation_time: VsfType::e(EtType::f5(et_f32)),
+            creation_time: VsfType::e(et.et_type().clone()),
             sections: Vec::new(),
             unboxed: Vec::new(),
             inline_fields: Vec::new(),
@@ -81,8 +71,18 @@ impl VsfBuilder {
         }
     }
 
-    /// Set creation time with nanosecond precision (ef6)
-    /// Use this for protocols that need unique timestamps for replay protection
+    /// Set creation time with integer oscillations (eu)
+    /// Use this for protocols that need unique timestamps with integer precision.
+    /// 1,420,407,826 oscillations per second (21cm hydrogen line) = 704ps precision
+    pub fn creation_time_oscillations(mut self, oscillations: usize) -> Self {
+        use crate::types::EtType;
+        self.creation_time = VsfType::e(EtType::u(oscillations));
+        self
+    }
+
+    /// Set creation time with nanosecond precision (ef6) - DEPRECATED
+    /// Use creation_time_oscillations() for integer timestamps instead
+    #[deprecated(note = "Use creation_time_oscillations() for integer timestamps")]
     pub fn creation_time_nanos(mut self, eagle_time: f64) -> Self {
         use crate::types::EtType;
         self.creation_time = VsfType::e(EtType::f6(eagle_time));

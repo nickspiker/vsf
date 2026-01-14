@@ -55,7 +55,7 @@
 //!   y3{5}               Backward compatibility version
 //!   b#{header length}                  Header size (now we know how to encode it!)
 //!   L#{file length}                    Total file size in bytes (optional, for TCP streaming without parse-as-you-go)
-//!   ef5{current time as f32}                  Eagle Time current timestamp when last edited (f32, ~2min precision)
+//!   eu6{current time as u64}                  Eagle Time current timestamp when last edited (u64 oscillations, 704ps precision)
 //!   hp3{31}{provenance hash}            Provenance: BLAKE3 hash of content (required, always 32 bytes)
 //!   ge{64}{signature}                  Ed25519 signature over entire file AFTER provinence hash is patched in (optional, rolling or provinence, must have one or the other)
 //!   hb{31}{rolling_hash}               Rolling: BLAKE3 of current state with History (optional)
@@ -192,14 +192,14 @@
 //!
 //! ## Eagle Time Formats
 //!
-//! Eagle Time counts seconds since 1969-07-20 20:17:40 UTC (Apollo 11 lunar landing).
+//! Eagle Time counts oscillations since 1969-07-20 20:17:40 UTC (Apollo 11 lunar landing).
 //! Always coordinated, no timezones, no daylight saving. One universal time standard.
 //!
-//! - **ef5**: 32-bit float (`f32`) - ~2 minute precision, compact for most uses
-//! - **ef6**: 64-bit float (`f64`) - microsecond precision, for high-accuracy timestamps
+//! - **eu6**: 64-bit oscillation count (`u64`) - 704ps precision, deterministic integer timestamps (default)
+//! - **ef5**: 32-bit float (`f32`) - ~2 minute precision, legacy compact format
+//! - **ef6**: 64-bit float (`f64`) - ~200ns precision, legacy high-accuracy format
 //!
-//! The format version doesn't change the epoch or duration of seconds - both use SI seconds
-//! counted from the same lunar landing moment. Only the precision differs.
+//! The format version doesn't change the epoch or oscillation frequency - 1,420,407,826 Hz (21cm hydrogen line).
 //!
 //! ## Parsing and Encoding
 //!
@@ -342,7 +342,7 @@ pub mod inspect;
 
 // Re-export main types
 pub use types::{
-    datetime_to_eagle_time, eagle_time_nanos, EagleTime, EtType, LayoutOrder, StridedTensor,
+    datetime_to_eagle_time, eagle_time_nanos, eagle_time_oscillations, EagleTime, EtType, LayoutOrder, StridedTensor,
     Tensor, VsfType, WorldCoord,
 };
 
