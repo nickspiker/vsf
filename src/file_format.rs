@@ -117,7 +117,7 @@ pub struct VsfHeader {
     pub version: usize,
     pub backward_compat: usize,
     pub file_length: usize, // Total file length in bytes (for TCP streaming)
-    pub creation_time: VsfType, // Creation timestamp (ef5 for ~2min precision)
+    pub creation_time: VsfType, // Creation timestamp (eu6 for 704ps precision, default)
     pub provenance_hash: VsfType, // Required: BLAKE3 hash of immutable content (hp)
     pub rolling_hash: Option<VsfType>, // Optional: BLAKE3 hash of current state (hb) - OR signature
     pub signer_pubkey: Option<VsfType>, // Optional: Ed25519 public key (ke) - for signed files
@@ -275,7 +275,7 @@ impl VsfHeader {
     ///   z[version]                 Version number
     ///   y[backward_compat]         Backward compatibility version
     ///   b[header_length_bytes]     Header length in BYTES
-    ///   e[creation_time]           Creation timestamp (ef5/ef6)
+    ///   e[creation_time]           Creation timestamp (eu6 default, ef5/ef6 legacy)
     ///   hp[hash]                   Provenance hash (BLAKE3)
     ///   hb[hash]?                  Optional rolling hash (BLAKE3)
     ///   n[field_count]             Number of header fields

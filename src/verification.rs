@@ -354,7 +354,7 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
             .map_err(|e| format!("Failed to parse file length: {}", e))?;
     }
 
-    // Skip creation time (ef5 - always present in version 3+)
+    // Skip creation time (eu6 default, ef5/ef6 legacy - always present in version 3+)
     let _creation_time = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse creation time: {}", e))?;
 
@@ -702,7 +702,7 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
             .map_err(|e| format!("Failed to parse file length: {}", e))?;
     }
 
-    // Skip creation time (ef5 - always present in version 3+)
+    // Skip creation time (eu6 default, ef5/ef6 legacy - always present in version 3+)
     let _creation_time = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse creation time: {}", e))?;
 
