@@ -12,7 +12,7 @@ use spirix::{CircleF4E4, ScalarF4E4};
 pub struct TokaBox {
     pub pos: CircleF4E4,
     pub size: CircleF4E4,
-    pub color: CircleF4E4,
+    pub color: [ScalarF4E4; 4], // RGBA
 }
 
 #[cfg(feature = "spirix")]
@@ -25,9 +25,11 @@ impl TokaBox {
         bytes.extend_from_slice(&self.size.real.to_be_bytes());
         bytes.extend_from_slice(&self.size.imaginary.to_be_bytes());
         bytes.extend_from_slice(&self.size.exponent.to_be_bytes());
-        bytes.extend_from_slice(&self.color.real.to_be_bytes());
-        bytes.extend_from_slice(&self.color.imaginary.to_be_bytes());
-        bytes.extend_from_slice(&self.color.exponent.to_be_bytes());
+        // RGBA: 4 ScalarF4E4 values (16 bytes total)
+        for channel in &self.color {
+            bytes.extend_from_slice(&channel.fraction.to_be_bytes());
+            bytes.extend_from_slice(&channel.exponent.to_be_bytes());
+        }
         bytes
     }
 
@@ -73,7 +75,7 @@ impl TokaGroup {
 pub struct TokaCircle {
     pub pos: CircleF4E4,
     pub span: ScalarF4E4,
-    pub color: CircleF4E4,
+    pub color: [ScalarF4E4; 4], // RGBA
 }
 
 #[cfg(feature = "spirix")]
@@ -85,9 +87,11 @@ impl TokaCircle {
         bytes.extend_from_slice(&self.pos.exponent.to_be_bytes());
         bytes.extend_from_slice(&self.span.fraction.to_be_bytes());
         bytes.extend_from_slice(&self.span.exponent.to_be_bytes());
-        bytes.extend_from_slice(&self.color.real.to_be_bytes());
-        bytes.extend_from_slice(&self.color.imaginary.to_be_bytes());
-        bytes.extend_from_slice(&self.color.exponent.to_be_bytes());
+        // RGBA: 4 ScalarF4E4 values (16 bytes total)
+        for channel in &self.color {
+            bytes.extend_from_slice(&channel.fraction.to_be_bytes());
+            bytes.extend_from_slice(&channel.exponent.to_be_bytes());
+        }
         bytes
     }
 
@@ -103,7 +107,7 @@ pub struct TokaLine {
     pub start: CircleF4E4,
     pub end: CircleF4E4,
     pub width: ScalarF4E4,
-    pub color: CircleF4E4,
+    pub color: [ScalarF4E4; 4], // RGBA
 }
 
 #[cfg(feature = "spirix")]
@@ -118,9 +122,11 @@ impl TokaLine {
         bytes.extend_from_slice(&self.end.exponent.to_be_bytes());
         bytes.extend_from_slice(&self.width.fraction.to_be_bytes());
         bytes.extend_from_slice(&self.width.exponent.to_be_bytes());
-        bytes.extend_from_slice(&self.color.real.to_be_bytes());
-        bytes.extend_from_slice(&self.color.imaginary.to_be_bytes());
-        bytes.extend_from_slice(&self.color.exponent.to_be_bytes());
+        // RGBA: 4 ScalarF4E4 values (16 bytes total)
+        for channel in &self.color {
+            bytes.extend_from_slice(&channel.fraction.to_be_bytes());
+            bytes.extend_from_slice(&channel.exponent.to_be_bytes());
+        }
         bytes
     }
 
@@ -136,7 +142,7 @@ pub struct TokaText {
     pub pos: CircleF4E4,
     pub size: CircleF4E4,
     pub content: String,
-    pub color: CircleF4E4,
+    pub color: [ScalarF4E4; 4], // RGBA
 }
 
 #[cfg(feature = "spirix")]
@@ -152,9 +158,11 @@ impl TokaText {
         // Encode content as VSF string type
         let content_vsf = super::VsfType::x(self.content.clone());
         bytes.extend_from_slice(&content_vsf.flatten());
-        bytes.extend_from_slice(&self.color.real.to_be_bytes());
-        bytes.extend_from_slice(&self.color.imaginary.to_be_bytes());
-        bytes.extend_from_slice(&self.color.exponent.to_be_bytes());
+        // RGBA: 4 ScalarF4E4 values (16 bytes total)
+        for channel in &self.color {
+            bytes.extend_from_slice(&channel.fraction.to_be_bytes());
+            bytes.extend_from_slice(&channel.exponent.to_be_bytes());
+        }
         bytes
     }
 
@@ -171,7 +179,7 @@ pub struct TokaButton {
     pub size: CircleF4E4,
     pub label: String,
     pub variant: ButtonVariant,
-    pub color: CircleF4E4,
+    pub color: [ScalarF4E4; 4], // RGBA
 }
 
 #[cfg(feature = "spirix")]
@@ -188,9 +196,11 @@ impl TokaButton {
         let label_vsf = super::VsfType::x(self.label.clone());
         bytes.extend_from_slice(&label_vsf.flatten());
         bytes.push(self.variant as u8);
-        bytes.extend_from_slice(&self.color.real.to_be_bytes());
-        bytes.extend_from_slice(&self.color.imaginary.to_be_bytes());
-        bytes.extend_from_slice(&self.color.exponent.to_be_bytes());
+        // RGBA: 4 ScalarF4E4 values (16 bytes total)
+        for channel in &self.color {
+            bytes.extend_from_slice(&channel.fraction.to_be_bytes());
+            bytes.extend_from_slice(&channel.exponent.to_be_bytes());
+        }
         bytes
     }
 
@@ -212,7 +222,7 @@ pub enum ButtonVariant {
 /// Vector path primitive
 #[derive(Debug, Clone, PartialEq)]
 pub struct TokaPath {
-    pub color: CircleF4E4,
+    pub color: [ScalarF4E4; 4], // RGBA
     pub width: ScalarF4E4,
     pub commands: Vec<PathCommand>,
 }
@@ -221,9 +231,11 @@ pub struct TokaPath {
 impl TokaPath {
     pub fn encode_inner(&self) -> Vec<u8> {
         let mut bytes = vec![b'p'];
-        bytes.extend_from_slice(&self.color.real.to_be_bytes());
-        bytes.extend_from_slice(&self.color.imaginary.to_be_bytes());
-        bytes.extend_from_slice(&self.color.exponent.to_be_bytes());
+        // RGBA: 4 ScalarF4E4 values (16 bytes total)
+        for channel in &self.color {
+            bytes.extend_from_slice(&channel.fraction.to_be_bytes());
+            bytes.extend_from_slice(&channel.exponent.to_be_bytes());
+        }
         bytes.extend_from_slice(&self.width.fraction.to_be_bytes());
         bytes.extend_from_slice(&self.width.exponent.to_be_bytes());
         bytes.push(self.commands.len() as u8);
@@ -305,7 +317,7 @@ pub struct TokaImage {
     pub pos: CircleF4E4,
     pub size: CircleF4E4,
     pub handle: u64,
-    pub tint: CircleF4E4,
+    pub tint: [ScalarF4E4; 4], // RGBA tint
 }
 
 #[cfg(feature = "spirix")]
@@ -319,9 +331,11 @@ impl TokaImage {
         bytes.extend_from_slice(&self.size.imaginary.to_be_bytes());
         bytes.extend_from_slice(&self.size.exponent.to_be_bytes());
         bytes.extend_from_slice(&self.handle.to_be_bytes());
-        bytes.extend_from_slice(&self.tint.real.to_be_bytes());
-        bytes.extend_from_slice(&self.tint.imaginary.to_be_bytes());
-        bytes.extend_from_slice(&self.tint.exponent.to_be_bytes());
+        // RGBA tint: 4 ScalarF4E4 values (16 bytes total)
+        for channel in &self.tint {
+            bytes.extend_from_slice(&channel.fraction.to_be_bytes());
+            bytes.extend_from_slice(&channel.exponent.to_be_bytes());
+        }
         bytes
     }
 
