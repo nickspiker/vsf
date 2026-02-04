@@ -11,9 +11,7 @@
 //!
 //! Named shortcuts (rr, rn, rb, rc, rj, ry, etc.) are convenient colours for human use.
 //!
-//! # Why No CIE 1931 XYZ Support?
-//!
-//! **VSF does NOT provide conversions to/from CIE 1931 XYZ or xy chromaticity coordinates.**
+//! # Why is CIE 1931 XYZ Legacy?
 //!
 //! This is intentional. Here's why:
 //!
@@ -31,9 +29,7 @@
 //!
 //! ## VSF Uses Modern Colourimetry
 //!
-//! VSF RGB is based on the **Stockman & Sharpe 2000 cone fundamentals** (10° observer),
-//! which represent current understanding of human colour vision. All transformations go thru
-//! **LMS cone response space**, not XYZ.
+//! VSF RGB is based on the **Stockman & Sharpe 2000 cone fundamentals** (10° observer), which represent current understanding of human colour vision. All transformations go thru **LMS cone response space**, not XYZ.
 //!
 //! Conversion path: `Other colourspace → LMS (2000 10°) → VSF RGB`
 //!
@@ -48,7 +44,7 @@
 //! We support specific legacy standards only where necessary for compatibility:
 //!
 //! - **sRGB / Rec.709**: Same primaries, different transfer functions (piecewise sRGB vs. Rec.709 OETF)
-//!   - These use 1931-derived xy coordinates (we're stuck with them for compatibility)
+//!   - These use 1931-derived xy coordinates
 //!
 //! - **Rec.2020 / BT.2020**: Uses their WAVELENGTH specification (630nm, 532nm, 467nm)
 //!   - We IGNORE their xy coordinates (which contradict their wavelength spec!)
@@ -69,96 +65,146 @@ use crate::colour::{
     // REC7092VSF_RGB, VSF_RGB2REC709,
 };
 use crate::types::VsfType;
+#[cfg(feature = "spirix")]
+use spirix::ScalarF4E4;
+#[cfg(feature = "spirix")]
+pub type S44 = ScalarF4E4;
 
 /// Trait for colour value types that can be converted to/from linear
 ///
 /// **Convention**:
-/// - Floats (f32) are ALWAYS linear (no gamma encoding)
+/// - Floats (f32, ScalarF4E4) are ALWAYS linear (no gamma encoding)
 /// - Integers (u8, u16) are ALWAYS gamma-encoded (various EOTF applied)
-pub trait ColourValue: Copy {
+///
+/// The `Linear` type parameter determines the target float type (f32 or ScalarF4E4).
+/// Integers convert directly to either float type without roundtripping.
+pub trait ColourValue<Linear: Copy>: Copy {
     /// Convert from gamma-encoded value to linear (0-1 range)
     /// For integers: apply EOTF and normalize to 0-1
-    fn to_linear_srgb(self) -> f32;
+    fn to_linear_srgb(self) -> Linear;
 
     /// Convert from linear (0-1 range) to gamma-encoded value
-    /// For f32: pass thru (stay linear)
+    /// For floats: pass thru (stay linear)
     /// For integers: apply OETF and quantize
-    fn from_linear_srgb(linear: f32) -> Self;
+    fn from_linear_srgb(linear: Linear) -> Self;
 
     /// Convert from gamma-encoded value to linear using Rec.709 EOTF
-    fn to_linear_rec709(self) -> f32;
+    fn to_linear_rec709(self) -> Linear;
 
     /// Convert from linear to gamma-encoded using Rec.709 OETF
-    fn from_linear_rec709(linear: f32) -> Self;
+    fn from_linear_rec709(linear: Linear) -> Self;
 
     /// Convert from gamma-encoded value to linear using Rec.2020 EOTF
     /// (Rec.2020 uses Rec.709 transfer function)
-    fn to_linear_rec2020(self) -> f32 {
+    fn to_linear_rec2020(self) -> Linear {
         self.to_linear_rec709()
     }
 
     /// Convert from linear to gamma-encoded using Rec.2020 OETF
     /// (Rec.2020 uses Rec.709 transfer function)
-    fn from_linear_rec2020(linear: f32) -> Self {
+    fn from_linear_rec2020(linear: Linear) -> Self {
         Self::from_linear_rec709(linear)
     }
 
     /// Convert from gamma 2.2 encoded (Adobe RGB) to linear
-    fn to_linear_adobe_rgb(self) -> f32;
+    fn to_linear_adobe_rgb(self) -> Linear;
 
     /// Convert from linear to gamma 2.2 encoded (Adobe RGB)
-    fn from_linear_adobe_rgb(linear: f32) -> Self;
+    fn from_linear_adobe_rgb(linear: Linear) -> Self;
 
-    /// Convert from gamma 2.0 encoded (VSF RGB native) to linear
-    fn to_linear_gamma2(self) -> f32;
+    /// Convert from gamma 2 encoded (VSF RGB native) to linear
+    fn to_linear_gamma2(self) -> Linear;
 
-    /// Convert from linear to gamma 2.0 encoded (VSF RGB native)
-    fn from_linear_gamma2(linear: f32) -> Self;
+    /// Convert from linear to gamma 2 encoded (VSF RGB native)
+    fn from_linear_gamma2(linear: Linear) -> Self;
 }
 
-impl ColourValue for f32 {
+impl ColourValue<f32> for f32 {
     #[inline]
     fn to_linear_srgb(self) -> f32 {
-        self // Floats are always linear
+        self
     }
 
     #[inline]
     fn from_linear_srgb(linear: f32) -> Self {
-        linear // Stay linear
+        linear
     }
 
     #[inline]
     fn to_linear_rec709(self) -> f32 {
-        self // Floats are always linear
+        self
     }
 
     #[inline]
     fn from_linear_rec709(linear: f32) -> Self {
-        linear // Stay linear
+        linear
     }
 
     #[inline]
     fn to_linear_adobe_rgb(self) -> f32 {
-        self // Floats are always linear
+        self
     }
 
     #[inline]
     fn from_linear_adobe_rgb(linear: f32) -> Self {
-        linear // Stay linear
+        linear
     }
 
     #[inline]
     fn to_linear_gamma2(self) -> f32 {
-        self // Floats are always linear
+        self
     }
 
     #[inline]
     fn from_linear_gamma2(linear: f32) -> Self {
-        linear // Stay linear
+        linear
     }
 }
 
-impl ColourValue for u8 {
+#[cfg(feature = "spirix")]
+impl ColourValue<ScalarF4E4> for ScalarF4E4 {
+    #[inline]
+    fn to_linear_srgb(self) -> ScalarF4E4 {
+        self
+    }
+
+    #[inline]
+    fn from_linear_srgb(linear: ScalarF4E4) -> Self {
+        linear
+    }
+
+    #[inline]
+    fn to_linear_rec709(self) -> ScalarF4E4 {
+        self
+    }
+
+    #[inline]
+    fn from_linear_rec709(linear: ScalarF4E4) -> Self {
+        linear
+    }
+
+    #[inline]
+    fn to_linear_adobe_rgb(self) -> ScalarF4E4 {
+        self
+    }
+
+    #[inline]
+    fn from_linear_adobe_rgb(linear: ScalarF4E4) -> Self {
+        linear
+    }
+
+    #[inline]
+    fn to_linear_gamma2(self) -> ScalarF4E4 {
+        self
+    }
+
+    #[inline]
+    fn from_linear_gamma2(linear: ScalarF4E4) -> Self {
+        linear
+    }
+}
+
+impl ColourValue<f32> for u8 {
     #[inline]
     fn to_linear_srgb(self) -> f32 {
         linearize_srgb_u8(self)
@@ -174,15 +220,13 @@ impl ColourValue for u8 {
         // Rec.709 integers use studio range: [16, 235]
         // Denormalize to [0, 1] then apply EOTF
         let normalized = (self.saturating_sub(16) as f32) / 219.0; // 235-16=219
-        linearize_bt709(normalized.clamp(0.0, 1.0))
+        linearize_bt709(normalized.clamp(0., 1.))
     }
 
     #[inline]
     fn from_linear_rec709(linear: f32) -> Self {
         // Apply OETF then map to studio range [16, 235]
-        ((encode_bt709(linear) * 219.0).round() as u8)
-            .saturating_add(16)
-            .min(235)
+        ((encode_bt709(linear) * 219.).round() as u8).min(219) + 16
     }
 
     #[inline]
@@ -195,21 +239,100 @@ impl ColourValue for u8 {
     #[inline]
     fn from_linear_adobe_rgb(linear: f32) -> Self {
         use crate::colour::legacy::transfer::adobe_rgb_oetf;
-        (adobe_rgb_oetf(linear) * 255.0).round() as u8
+        (adobe_rgb_oetf(linear) * 255.).round() as u8
     }
 
     #[inline]
     fn to_linear_gamma2(self) -> f32 {
-        linearize_gamma2_u8(self)
+        linearize_gamma2_u8_f32(self)
     }
 
     #[inline]
     fn from_linear_gamma2(linear: f32) -> Self {
-        delinearize_gamma2_u8(linear)
+        delinearize_gamma2_u8_f32(linear)
     }
 }
 
-impl ColourValue for u16 {
+#[cfg(feature = "spirix")]
+impl ColourValue<ScalarF4E4> for u8 {
+    #[inline]
+    fn to_linear_srgb(self) -> ScalarF4E4 {
+        let normalized = S44::from(self) / 255;
+        // sRGB EOTF
+        let threshold = ScalarF4E4::from(0.04045);
+        if normalized <= threshold {
+            normalized / ScalarF4E4::from(12.92)
+        } else {
+            let num: ScalarF4E4 = normalized + ScalarF4E4::from(0.055);
+            let result: ScalarF4E4 = num / ScalarF4E4::from(1.055);
+            result.pow(ScalarF4E4::from(2.4))
+        }
+    }
+
+    #[inline]
+    fn from_linear_srgb(linear: ScalarF4E4) -> Self {
+        // sRGB OETF
+        let encoded = if linear <= ScalarF4E4::from(0.0031308) {
+            linear * ScalarF4E4::from(12.92)
+        } else {
+            ScalarF4E4::from(1.055) * linear.pow(ScalarF4E4::from(1.0 / 2.4))
+                - ScalarF4E4::from(0.055)
+        };
+        ((encoded * ScalarF4E4::from(255.0)).round().to_i32() as u8)
+    }
+
+    #[inline]
+    fn to_linear_rec709(self) -> ScalarF4E4 {
+        // Rec.709 integers use studio range: [16, 235]
+        let normalized = ScalarF4E4::from(self.saturating_sub(16)) / ScalarF4E4::from(219); // 235-16=219
+        let normalized = normalized.clamp(ScalarF4E4::from(0.0), ScalarF4E4::from(1.0));
+        // Rec.709 EOTF
+        if normalized < ScalarF4E4::from(0.081) {
+            normalized / ScalarF4E4::from(4.5)
+        } else {
+            ((normalized + ScalarF4E4::from(0.099)) / ScalarF4E4::from(1.099))
+                .pow(ScalarF4E4::from(1.0 / 0.45))
+        }
+    }
+
+    #[inline]
+    fn from_linear_rec709(linear: ScalarF4E4) -> Self {
+        // Rec.709 OETF
+        let encoded = if linear < ScalarF4E4::from(0.018) {
+            linear * ScalarF4E4::from(4.5)
+        } else {
+            ScalarF4E4::from(1.099) * linear.pow(ScalarF4E4::from(0.45)) - ScalarF4E4::from(0.099)
+        };
+        ((encoded * ScalarF4E4::from(219.0)).round().to_i32() as u8).min(219) + 16
+    }
+
+    #[inline]
+    fn to_linear_adobe_rgb(self) -> ScalarF4E4 {
+        let normalized = ScalarF4E4::from(self) / ScalarF4E4::from(255);
+        // Adobe RGB gamma 2.2
+        normalized.pow(ScalarF4E4::from(2.2))
+    }
+
+    #[inline]
+    fn from_linear_adobe_rgb(linear: ScalarF4E4) -> Self {
+        let encoded = linear.pow(ScalarF4E4::from(1.0 / 2.2));
+        (encoded * ScalarF4E4::from(255.0)).round().to_i32() as u8
+    }
+
+    #[inline]
+    fn to_linear_gamma2(self) -> ScalarF4E4 {
+        let normalized = ScalarF4E4::from(self) / ScalarF4E4::from(256);
+        normalized * normalized
+    }
+
+    #[inline]
+    fn from_linear_gamma2(linear: ScalarF4E4) -> Self {
+        let encoded = linear.sqrt();
+        (encoded * ScalarF4E4::from(256.0)).to_i32() as u8
+    }
+}
+
+impl ColourValue<f32> for u16 {
     #[inline]
     fn to_linear_srgb(self) -> f32 {
         linearize_srgb_u16(self)
@@ -231,9 +354,7 @@ impl ColourValue for u16 {
     #[inline]
     fn from_linear_rec709(linear: f32) -> Self {
         // Apply OETF then map to studio range [4096, 60160]
-        ((encode_bt709(linear) * 56064.0).round() as u16)
-            .saturating_add(4096)
-            .min(60160)
+        ((encode_bt709(linear) * 56064.0).round() as u16).min(56064) + 4096
     }
 
     #[inline]
@@ -251,19 +372,98 @@ impl ColourValue for u16 {
 
     #[inline]
     fn to_linear_gamma2(self) -> f32 {
-        linearize_gamma2_u16(self)
+        linearize_gamma2_u16_f32(self)
     }
 
     #[inline]
     fn from_linear_gamma2(linear: f32) -> Self {
-        delinearize_gamma2_u16(linear)
+        delinearize_gamma2_u16_f32(linear)
     }
 }
 
-/// Invert a 3x3 matrix stored in column-major format
+#[cfg(feature = "spirix")]
+impl ColourValue<ScalarF4E4> for u16 {
+    #[inline]
+    fn to_linear_srgb(self) -> ScalarF4E4 {
+        let normalized = ScalarF4E4::from(self) / ScalarF4E4::from(65535);
+        // sRGB EOTF
+        if normalized <= ScalarF4E4::from(0.04045) {
+            normalized / ScalarF4E4::from(12.92)
+        } else {
+            ((normalized + ScalarF4E4::from(0.055)) / ScalarF4E4::from(1.055))
+                .pow(ScalarF4E4::from(2.4))
+        }
+    }
+
+    #[inline]
+    fn from_linear_srgb(linear: ScalarF4E4) -> Self {
+        // sRGB OETF
+        let encoded = if linear <= ScalarF4E4::from(0.0031308) {
+            linear * ScalarF4E4::from(12.92)
+        } else {
+            ScalarF4E4::from(1.055) * linear.pow(ScalarF4E4::from(1.0 / 2.4))
+                - ScalarF4E4::from(0.055)
+        };
+        (encoded * ScalarF4E4::from(65535.0)).round().to_i32() as u16
+    }
+
+    #[inline]
+    fn to_linear_rec709(self) -> ScalarF4E4 {
+        // Rec.709 integers use studio range: [4096, 60160]
+        let normalized = ScalarF4E4::from(self.saturating_sub(4096)) / ScalarF4E4::from(56064); // 60160-4096=56064
+        let normalized = normalized.clamp(ScalarF4E4::from(0.0), ScalarF4E4::from(1.0));
+        // Rec.709 EOTF
+        if normalized < ScalarF4E4::from(0.081) {
+            normalized / ScalarF4E4::from(4.5)
+        } else {
+            ((normalized + ScalarF4E4::from(0.099)) / ScalarF4E4::from(1.099))
+                .pow(ScalarF4E4::from(1.0 / 0.45))
+        }
+    }
+
+    #[inline]
+    fn from_linear_rec709(linear: ScalarF4E4) -> Self {
+        // Rec.709 OETF
+        let encoded = if linear < ScalarF4E4::from(0.018) {
+            linear * ScalarF4E4::from(4.5)
+        } else {
+            ScalarF4E4::from(1.099) * linear.pow(ScalarF4E4::from(0.45)) - ScalarF4E4::from(0.099)
+        };
+        ((encoded * ScalarF4E4::from(56064.0)).round().to_i32() as u16)
+            .saturating_add(4096)
+            .min(60160)
+    }
+
+    #[inline]
+    fn to_linear_adobe_rgb(self) -> ScalarF4E4 {
+        let normalized = ScalarF4E4::from(self) / ScalarF4E4::from(65535);
+        // Adobe RGB gamma 2.2
+        normalized.pow(ScalarF4E4::from(2.2))
+    }
+
+    #[inline]
+    fn from_linear_adobe_rgb(linear: ScalarF4E4) -> Self {
+        let encoded = linear.pow(ScalarF4E4::from(1.0 / 2.2));
+        (encoded * ScalarF4E4::from(65535.0)).round().to_i32() as u16
+    }
+
+    #[inline]
+    fn to_linear_gamma2(self) -> ScalarF4E4 {
+        let normalized = ScalarF4E4::from(self) / ScalarF4E4::from(65536);
+        normalized * normalized
+    }
+
+    #[inline]
+    fn from_linear_gamma2(linear: ScalarF4E4) -> Self {
+        let encoded = linear.sqrt();
+        (encoded * ScalarF4E4::from(65536.0)).to_i32() as u16
+    }
+}
+
+/// Invert a 3x3 matrix stored in column-major format (f32 version)
 ///
 /// Matrix format: [col0_r, col0_g, col0_b, col1_r, col1_g, col1_b, col2_r, col2_g, col2_b]
-pub fn invert_matrix_3x3(m: &[f32; 9]) -> [f32; 9] {
+pub fn invert_matrix_3x3_f32(m: &[f32; 9]) -> [f32; 9] {
     let d = 1.
         / (m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6])
             + m[2] * (m[3] * m[7] - m[4] * m[6]));
@@ -280,18 +480,47 @@ pub fn invert_matrix_3x3(m: &[f32; 9]) -> [f32; 9] {
     ]
 }
 
-/// Apply a 3x3 transformation matrix to a colour
+/// Invert a 3x3 matrix stored in column-major format (ScalarF4E4 version)
+///
+/// Matrix format: [col0_r, col0_g, col0_b, col1_r, col1_g, col1_b, col2_r, col2_g, col2_b]
+#[cfg(feature = "spirix")]
+pub fn invert_matrix_3x3_s44(m: &[ScalarF4E4; 9]) -> [ScalarF4E4; 9] {
+    let d = ScalarF4E4::from(1.0)
+        / (m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6])
+            + m[2] * (m[3] * m[7] - m[4] * m[6]));
+    [
+        (m[4] * m[8] - m[5] * m[7]) * d,
+        (m[2] * m[7] - m[1] * m[8]) * d,
+        (m[1] * m[5] - m[2] * m[4]) * d,
+        (m[5] * m[6] - m[3] * m[8]) * d,
+        (m[0] * m[8] - m[2] * m[6]) * d,
+        (m[2] * m[3] - m[0] * m[5]) * d,
+        (m[3] * m[7] - m[4] * m[6]) * d,
+        (m[1] * m[6] - m[0] * m[7]) * d,
+        (m[0] * m[4] - m[1] * m[3]) * d,
+    ]
+}
+
+/// Apply a 3x3 transformation matrix to a colour (f32 version)
 ///
 /// Matrix is in column-major format: [col0_r, col0_g, col0_b, col1_r, col1_g, col1_b, col2_r, col2_g, col2_b]
 ///
-/// This means:
-/// - out[0] = colour[0] * cmx[0] + colour[1] * cmx[1] + colour[2] * cmx[2]
-/// - out[1] = colour[0] * cmx[3] + colour[1] * cmx[4] + colour[2] * cmx[5]
-/// - out[2] = colour[0] * cmx[6] + colour[1] * cmx[7] + colour[2] * cmx[8]
-/// Apply 3×3 transformation matrix to colour vector (column-major)
+/// Computes: result = matrix * colour
+pub fn apply_matrix_3x3_f32(cmx: &[f32], colour: &[f32; 3]) -> [f32; 3] {
+    [
+        cmx[0] * colour[0] + cmx[3] * colour[1] + cmx[6] * colour[2], // Row 0
+        cmx[1] * colour[0] + cmx[4] * colour[1] + cmx[7] * colour[2], // Row 1
+        cmx[2] * colour[0] + cmx[5] * colour[1] + cmx[8] * colour[2], // Row 2
+    ]
+}
+
+/// Apply a 3x3 transformation matrix to a colour (ScalarF4E4 version)
+///
+/// Matrix is in column-major format: [col0_r, col0_g, col0_b, col1_r, col1_g, col1_b, col2_r, col2_g, col2_b]
 ///
 /// Computes: result = matrix * colour
-pub fn apply_matrix_3x3(cmx: &[f32], colour: &[f32; 3]) -> [f32; 3] {
+#[cfg(feature = "spirix")]
+pub fn apply_matrix_3x3_s44(cmx: &[ScalarF4E4], colour: &[ScalarF4E4; 3]) -> [ScalarF4E4; 3] {
     [
         cmx[0] * colour[0] + cmx[3] * colour[1] + cmx[6] * colour[2], // Row 0
         cmx[1] * colour[0] + cmx[4] * colour[1] + cmx[7] * colour[2], // Row 1
@@ -302,7 +531,28 @@ pub fn apply_matrix_3x3(cmx: &[f32], colour: &[f32; 3]) -> [f32; 3] {
 /// Multiply two 3×3 matrices: C = A * B (column-major)
 ///
 /// Column j of C = A * column j of B
-pub fn convert_matrix_3x3(a: &[f32], b: &[f32]) -> [f32; 9] {
+pub fn convert_matrix_3x3_f32(a: &[f32], b: &[f32]) -> [f32; 9] {
+    [
+        // Column 0 of result = A * column 0 of B
+        a[0] * b[0] + a[3] * b[1] + a[6] * b[2], // C[0]
+        a[1] * b[0] + a[4] * b[1] + a[7] * b[2], // C[1]
+        a[2] * b[0] + a[5] * b[1] + a[8] * b[2], // C[2]
+        // Column 1 of result = A * column 1 of B
+        a[0] * b[3] + a[3] * b[4] + a[6] * b[5], // C[3]
+        a[1] * b[3] + a[4] * b[4] + a[7] * b[5], // C[4]
+        a[2] * b[3] + a[5] * b[4] + a[8] * b[5], // C[5]
+        // Column 2 of result = A * column 2 of B
+        a[0] * b[6] + a[3] * b[7] + a[6] * b[8], // C[6]
+        a[1] * b[6] + a[4] * b[7] + a[7] * b[8], // C[7]
+        a[2] * b[6] + a[5] * b[7] + a[8] * b[8], // C[8]
+    ]
+}
+
+/// Multiply two 3×3 matrices: C = A * B (column-major, ScalarF4E4 version)
+///
+/// Column j of C = A * column j of B
+#[cfg(feature = "spirix")]
+pub fn convert_matrix_3x3_s44(a: &[ScalarF4E4], b: &[ScalarF4E4]) -> [ScalarF4E4; 9] {
     [
         // Column 0 of result = A * column 0 of B
         a[0] * b[0] + a[3] * b[1] + a[6] * b[2], // C[0]
@@ -326,7 +576,7 @@ pub fn convert_matrix_3x3(a: &[f32], b: &[f32]) -> [f32; 9] {
 /// - If max > 1: Scales all values down proportionally
 ///
 /// This preserves the bright hues, whites especially while ensuring displayable colors.
-pub fn scale_to_gamut(mut r: f32, mut g: f32, mut b: f32) -> (f32, f32, f32) {
+pub fn scale_to_gamut_f32(mut r: f32, mut g: f32, mut b: f32) -> (f32, f32, f32) {
     // let min = r.min(g).min(b);
     // if min < 0. {
     //     r = 1. - r;
@@ -355,6 +605,30 @@ pub fn scale_to_gamut(mut r: f32, mut g: f32, mut b: f32) -> (f32, f32, f32) {
     (r, g, b)
 }
 
+/// Scale RGB values to fit within [?,1] gamut while preserving hue (ScalarF4E4 version)
+///
+/// - If min < 0: Assumes you will handle the -'s with the cast (Rust does this when casting to unsigned int)
+/// - If max > 1: Scales all values down proportionally
+///
+/// This preserves the bright hues, whites especially while ensuring displayable colors.
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn scale_to_gamut_s44(
+    mut r: ScalarF4E4,
+    mut g: ScalarF4E4,
+    mut b: ScalarF4E4,
+) -> (ScalarF4E4, ScalarF4E4, ScalarF4E4) {
+    let max = r.max(g).max(b);
+    let one = ScalarF4E4::from(1);
+    if max > one {
+        let scale = one / max;
+        r *= scale;
+        g *= scale;
+        b *= scale;
+    }
+    (r, g, b)
+}
+
 /// Linear VSF RGB colour (f32 per channel, 0-1 range)
 /// Primaries are VSF RGB (703nm, 523nm, 462nm)
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -373,73 +647,93 @@ pub struct RgbaLinear {
     pub a: f32,
 }
 
+/// Linear VSF RGB colour (ScalarF4E4 per channel, 0-1 range)
+/// Primaries are VSF RGB (703nm, 523nm, 462nm)
+#[cfg(feature = "spirix")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RgbLinearS44 {
+    pub r: ScalarF4E4,
+    pub g: ScalarF4E4,
+    pub b: ScalarF4E4,
+}
+
+/// Linear RGBA colour (ScalarF4E4 per channel, 0-1 range)
+#[cfg(feature = "spirix")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RgbaLinearS44 {
+    pub r: ScalarF4E4,
+    pub g: ScalarF4E4,
+    pub b: ScalarF4E4,
+    pub a: ScalarF4E4,
+}
+
 impl VsfType {
     /// Convert any colour type to linear RGB (f32, 0-1 range)
     /// All VSF integers are gamma 2 encoded wheras floats are linear
     pub fn to_rgb_linear(&self) -> Option<RgbLinear> {
         match self {
             // Named shortcuts (gamma 2 encoded)
-            VsfType::rk => Some(RgbLinear {
+            VsfType::rck => Some(RgbLinear {
                 r: 0.,
                 g: 0.,
                 b: 0.,
             }), // Black
-            VsfType::rw => Some(RgbLinear {
+            VsfType::rcw => Some(RgbLinear {
                 r: 1.,
                 g: 1.,
                 b: 1.,
             }), // White
-            VsfType::rg => Some(RgbLinear {
+            VsfType::rcg => Some(RgbLinear {
                 r: 0.25,
                 g: 0.25,
                 b: 0.25,
             }), // Middle grey
-            VsfType::rr => Some(RgbLinear {
+            VsfType::rcr => Some(RgbLinear {
                 r: 1.,
                 g: 0.,
                 b: 0.,
             }), // Red
-            VsfType::rn => Some(RgbLinear {
+            VsfType::rcn => Some(RgbLinear {
                 r: 0.,
                 g: 1.,
                 b: 0.,
             }), // Green
-            VsfType::rb => Some(RgbLinear {
+            VsfType::rcb => Some(RgbLinear {
                 r: 0.,
                 g: 0.,
                 b: 1.,
             }), // Blue
-            VsfType::rc => Some(RgbLinear {
+            VsfType::rcc => Some(RgbLinear {
                 r: 0.,
                 g: 1.,
                 b: 1.,
             }), // Cyan
-            VsfType::rj => Some(RgbLinear {
+            VsfType::rcj => Some(RgbLinear {
                 r: 1.,
                 g: 0.,
                 b: 1.,
             }), // Magenta
-            VsfType::ry => Some(RgbLinear {
+            VsfType::rcy => Some(RgbLinear {
                 r: 1.,
                 g: 1.,
                 b: 0.,
             }), // Yellow
-            VsfType::ro => Some(RgbLinear {
+            VsfType::rco => Some(RgbLinear {
                 r: 1.,
                 g: 0.5,
                 b: 0.,
             }), // Orange
-            VsfType::rl => Some(RgbLinear {
+            VsfType::rcl => Some(RgbLinear {
                 r: 0.5,
                 g: 1.,
                 b: 0.,
             }), // Lime
-            VsfType::rq => Some(RgbLinear {
+            VsfType::rcq => Some(RgbLinear {
                 r: 0.,
                 g: 1.,
                 b: 0.5,
             }), // Aqua
-            VsfType::rv => Some(RgbLinear {
+            VsfType::rcv => Some(RgbLinear {
                 r: 0.25,
                 g: 0.,
                 b: 1.,
@@ -447,7 +741,7 @@ impl VsfType {
 
             // Greyscale → RGB (replicate value, linearize)
             VsfType::re(grey) => {
-                let lin = linearize_gamma2_u8(*grey);
+                let lin = linearize_gamma2_u8_f32(*grey);
                 Some(RgbLinear {
                     r: lin,
                     g: lin,
@@ -455,7 +749,7 @@ impl VsfType {
                 })
             }
             VsfType::rx(grey) => {
-                let lin = linearize_gamma2_u16(*grey);
+                let lin = linearize_gamma2_u16_f32(*grey);
                 Some(RgbLinear {
                     r: lin,
                     g: lin,
@@ -483,14 +777,14 @@ impl VsfType {
 
             // Standard RGB (gamma-encoded - linearize)
             VsfType::ru([r, g, b]) => Some(RgbLinear {
-                r: linearize_gamma2_u8(*r),
-                g: linearize_gamma2_u8(*g),
-                b: linearize_gamma2_u8(*b),
+                r: linearize_gamma2_u8_f32(*r),
+                g: linearize_gamma2_u8_f32(*g),
+                b: linearize_gamma2_u8_f32(*b),
             }),
             VsfType::rs([r, g, b]) => Some(RgbLinear {
-                r: linearize_gamma2_u16(*r),
-                g: linearize_gamma2_u16(*g),
-                b: linearize_gamma2_u16(*b),
+                r: linearize_gamma2_u16_f32(*r),
+                g: linearize_gamma2_u16_f32(*g),
+                b: linearize_gamma2_u16_f32(*b),
             }),
             VsfType::rf([r, g, b]) => Some(RgbLinear {
                 r: *r,
@@ -500,14 +794,14 @@ impl VsfType {
 
             // RGBA → RGB (drop alpha, linearize)
             VsfType::ra([r, g, b, _]) => Some(RgbLinear {
-                r: linearize_gamma2_u8(*r),
-                g: linearize_gamma2_u8(*g),
-                b: linearize_gamma2_u8(*b),
+                r: linearize_gamma2_u8_f32(*r),
+                g: linearize_gamma2_u8_f32(*g),
+                b: linearize_gamma2_u8_f32(*b),
             }),
             VsfType::rt([r, g, b, _]) => Some(RgbLinear {
-                r: linearize_gamma2_u16(*r),
-                g: linearize_gamma2_u16(*g),
-                b: linearize_gamma2_u16(*b),
+                r: linearize_gamma2_u16_f32(*r),
+                g: linearize_gamma2_u16_f32(*g),
+                b: linearize_gamma2_u16_f32(*b),
             }),
             VsfType::rh([r, g, b, _]) => Some(RgbLinear {
                 r: *r,
@@ -525,16 +819,16 @@ impl VsfType {
         match self {
             // RGBA formats (gamma-encoded - linearize)
             VsfType::ra([r, g, b, a]) => Some(RgbaLinear {
-                r: linearize_gamma2_u8(*r),
-                g: linearize_gamma2_u8(*g),
-                b: linearize_gamma2_u8(*b),
-                a: linearize_gamma2_u8(*a),
+                r: linearize_gamma2_u8_f32(*r),
+                g: linearize_gamma2_u8_f32(*g),
+                b: linearize_gamma2_u8_f32(*b),
+                a: linearize_gamma2_u8_f32(*a),
             }),
             VsfType::rt([r, g, b, a]) => Some(RgbaLinear {
-                r: linearize_gamma2_u16(*r),
-                g: linearize_gamma2_u16(*g),
-                b: linearize_gamma2_u16(*b),
-                a: linearize_gamma2_u16(*a),
+                r: linearize_gamma2_u16_f32(*r),
+                g: linearize_gamma2_u16_f32(*g),
+                b: linearize_gamma2_u16_f32(*b),
+                a: linearize_gamma2_u16_f32(*a),
             }),
             VsfType::rh([r, g, b, a]) => Some(RgbaLinear {
                 r: *r,
@@ -553,6 +847,183 @@ impl VsfType {
         }
     }
 
+    /// Convert any colour type to linear RGB (ScalarF4E4, 0-1 range)
+    /// All VSF integers are gamma 2 encoded whereas floats are linear
+    #[cfg(feature = "spirix")]
+    pub fn to_rgb_linear_s44(&self) -> Option<RgbLinearS44> {
+        match self {
+            // Named shortcuts (gamma 2 encoded)
+            VsfType::rck => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(0.0),
+                g: ScalarF4E4::from(0.0),
+                b: ScalarF4E4::from(0.0),
+            }),
+            VsfType::rcw => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(1.0),
+                g: ScalarF4E4::from(1.0),
+                b: ScalarF4E4::from(1.0),
+            }),
+            VsfType::rcg => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(0.25),
+                g: ScalarF4E4::from(0.25),
+                b: ScalarF4E4::from(0.25),
+            }),
+            VsfType::rcr => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(1.0),
+                g: ScalarF4E4::from(0.0),
+                b: ScalarF4E4::from(0.0),
+            }),
+            VsfType::rcn => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(0.0),
+                g: ScalarF4E4::from(1.0),
+                b: ScalarF4E4::from(0.0),
+            }),
+            VsfType::rcb => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(0.0),
+                g: ScalarF4E4::from(0.0),
+                b: ScalarF4E4::from(1.0),
+            }),
+            VsfType::rcc => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(0.0),
+                g: ScalarF4E4::from(1.0),
+                b: ScalarF4E4::from(1.0),
+            }),
+            VsfType::rcj => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(1.0),
+                g: ScalarF4E4::from(0.0),
+                b: ScalarF4E4::from(1.0),
+            }),
+            VsfType::rcy => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(1.0),
+                g: ScalarF4E4::from(1.0),
+                b: ScalarF4E4::from(0.0),
+            }),
+            VsfType::rco => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(1.0),
+                g: ScalarF4E4::from(0.5),
+                b: ScalarF4E4::from(0.0),
+            }),
+            VsfType::rcl => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(0.5),
+                g: ScalarF4E4::from(1.0),
+                b: ScalarF4E4::from(0.0),
+            }),
+            VsfType::rcq => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(0.0),
+                g: ScalarF4E4::from(1.0),
+                b: ScalarF4E4::from(0.5),
+            }),
+            VsfType::rcv => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(0.25),
+                g: ScalarF4E4::from(0.0),
+                b: ScalarF4E4::from(1.0),
+            }),
+
+            // Greyscale → RGB (replicate value, linearize)
+            VsfType::re(grey) => {
+                let lin = linearize_gamma2_u8_s44(*grey);
+                Some(RgbLinearS44 {
+                    r: lin,
+                    g: lin,
+                    b: lin,
+                })
+            }
+            VsfType::rx(grey) => {
+                let lin = linearize_gamma2_u16_s44(*grey);
+                Some(RgbLinearS44 {
+                    r: lin,
+                    g: lin,
+                    b: lin,
+                })
+            }
+            VsfType::rz(grey) => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(*grey),
+                g: ScalarF4E4::from(*grey),
+                b: ScalarF4E4::from(*grey),
+            }),
+
+            // Packed RGB (gamma-encoded, lossy - linearize)
+            VsfType::ri(packed) => {
+                let (r, g, b) = unpack_rgb_676_linear_s44(*packed);
+                Some(RgbLinearS44 { r, g, b })
+            }
+            VsfType::rp(packed) => {
+                let (r, g, b) = unpack_rgb_565_linear_s44(*packed);
+                Some(RgbLinearS44 { r, g, b })
+            }
+
+            // Standard RGB (gamma-encoded - linearize)
+            VsfType::ru([r, g, b]) => Some(RgbLinearS44 {
+                r: linearize_gamma2_u8_s44(*r),
+                g: linearize_gamma2_u8_s44(*g),
+                b: linearize_gamma2_u8_s44(*b),
+            }),
+            VsfType::rs([r, g, b]) => Some(RgbLinearS44 {
+                r: linearize_gamma2_u16_s44(*r),
+                g: linearize_gamma2_u16_s44(*g),
+                b: linearize_gamma2_u16_s44(*b),
+            }),
+            VsfType::rf([r, g, b]) => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(*r),
+                g: ScalarF4E4::from(*g),
+                b: ScalarF4E4::from(*b),
+            }),
+
+            // RGBA → RGB (drop alpha, linearize)
+            VsfType::ra([r, g, b, _]) => Some(RgbLinearS44 {
+                r: linearize_gamma2_u8_s44(*r),
+                g: linearize_gamma2_u8_s44(*g),
+                b: linearize_gamma2_u8_s44(*b),
+            }),
+            VsfType::rt([r, g, b, _]) => Some(RgbLinearS44 {
+                r: linearize_gamma2_u16_s44(*r),
+                g: linearize_gamma2_u16_s44(*g),
+                b: linearize_gamma2_u16_s44(*b),
+            }),
+            VsfType::rh([r, g, b, _]) => Some(RgbLinearS44 {
+                r: ScalarF4E4::from(*r),
+                g: ScalarF4E4::from(*g),
+                b: ScalarF4E4::from(*b),
+            }),
+
+            _ => None,
+        }
+    }
+
+    /// Convert any colour type to linear RGBA (ScalarF4E4, 0-1 range)
+    #[cfg(feature = "spirix")]
+    pub fn to_rgba_linear_s44(&self) -> Option<RgbaLinearS44> {
+        match self {
+            // RGBA formats (gamma-encoded - linearize)
+            VsfType::ra([r, g, b, a]) => Some(RgbaLinearS44 {
+                r: linearize_gamma2_u8_s44(*r),
+                g: linearize_gamma2_u8_s44(*g),
+                b: linearize_gamma2_u8_s44(*b),
+                a: linearize_gamma2_u8_s44(*a),
+            }),
+            VsfType::rt([r, g, b, a]) => Some(RgbaLinearS44 {
+                r: linearize_gamma2_u16_s44(*r),
+                g: linearize_gamma2_u16_s44(*g),
+                b: linearize_gamma2_u16_s44(*b),
+                a: linearize_gamma2_u16_s44(*a),
+            }),
+            VsfType::rh([r, g, b, a]) => Some(RgbaLinearS44 {
+                r: ScalarF4E4::from(*r),
+                g: ScalarF4E4::from(*g),
+                b: ScalarF4E4::from(*b),
+                a: ScalarF4E4::from(*a),
+            }),
+
+            // RGB formats → add opaque alpha
+            _ => self.to_rgb_linear_s44().map(|rgb| RgbaLinearS44 {
+                r: rgb.r,
+                g: rgb.g,
+                b: rgb.b,
+                a: ScalarF4E4::ONE,
+            }),
+        }
+    }
+
     /// Convert any colour type to 8-bit greyscale
     ///
     /// Uses VSF RGB photopic luminance matrix for RGB → Grey conversions
@@ -561,12 +1032,12 @@ impl VsfType {
             // Greyscale formats (direct)
             VsfType::re(grey) => Some(*grey),
             VsfType::rx(grey) => Some((*grey >> 8) as u8),
-            VsfType::rz(grey) => Some(delinearize_gamma2_u8(*grey)),
+            VsfType::rz(grey) => Some(delinearize_gamma2_u8_f32(*grey)),
 
             // RGB → Grey: Use VSF RGB photopic luminance (in linear space)
             _ => self.to_rgb_linear().map(|rgb| {
-                let lum = vsf_rgb_to_photopic(rgb.r, rgb.g, rgb.b);
-                delinearize_gamma2_u8(lum)
+                let lum = vsf_rgb_to_photopic_f32(rgb.r, rgb.g, rgb.b);
+                delinearize_gamma2_u8_f32(lum)
             }),
         }
     }
@@ -577,11 +1048,11 @@ impl VsfType {
     /// Automatically scales out-of-gamut colors to fit [0,1] range.
     pub fn to_rgb_u8(&self) -> Option<(u8, u8, u8)> {
         let rgb = self.to_rgb_linear()?;
-        let (r, g, b) = scale_to_gamut(rgb.r, rgb.g, rgb.b);
+        let (r, g, b) = scale_to_gamut_f32(rgb.r, rgb.g, rgb.b);
         Some((
-            delinearize_gamma2_u8(r),
-            delinearize_gamma2_u8(g),
-            delinearize_gamma2_u8(b),
+            delinearize_gamma2_u8_f32(r),
+            delinearize_gamma2_u8_f32(g),
+            delinearize_gamma2_u8_f32(b),
         ))
     }
 
@@ -594,7 +1065,7 @@ impl VsfType {
     pub fn to_lms_linear(&self) -> Option<(f32, f32, f32)> {
         let rgb = self.to_rgb_linear()?;
         use crate::colour::VSF_RGB2LMS;
-        let result = apply_matrix_3x3(&VSF_RGB2LMS, &[rgb.r, rgb.g, rgb.b]);
+        let result = apply_matrix_3x3_f32(&VSF_RGB2LMS, &[rgb.r, rgb.g, rgb.b]);
         Some((result[0], result[1], result[2]))
     }
 
@@ -608,7 +1079,51 @@ impl VsfType {
     pub fn to_xyz_linear(&self) -> Option<(f32, f32, f32)> {
         let rgb = self.to_rgb_linear()?;
         use crate::colour::VSF_RGB2XYZ;
-        let result = apply_matrix_3x3(&VSF_RGB2XYZ, &[rgb.r, rgb.g, rgb.b]);
+        let result = apply_matrix_3x3_f32(&VSF_RGB2XYZ, &[rgb.r, rgb.g, rgb.b]);
+        Some((result[0], result[1], result[2]))
+    }
+
+    /// Convert VSF RGB to LMS cone space (linear, ScalarF4E4)
+    #[cfg(feature = "spirix")]
+    pub fn to_lms_linear_s44(&self) -> Option<(ScalarF4E4, ScalarF4E4, ScalarF4E4)> {
+        let rgb = self.to_rgb_linear_s44()?;
+        use crate::colour::VSF_RGB2LMS;
+        let result = apply_matrix_3x3_s44(
+            &[
+                ScalarF4E4::from(VSF_RGB2LMS[0]),
+                ScalarF4E4::from(VSF_RGB2LMS[1]),
+                ScalarF4E4::from(VSF_RGB2LMS[2]),
+                ScalarF4E4::from(VSF_RGB2LMS[3]),
+                ScalarF4E4::from(VSF_RGB2LMS[4]),
+                ScalarF4E4::from(VSF_RGB2LMS[5]),
+                ScalarF4E4::from(VSF_RGB2LMS[6]),
+                ScalarF4E4::from(VSF_RGB2LMS[7]),
+                ScalarF4E4::from(VSF_RGB2LMS[8]),
+            ],
+            &[rgb.r, rgb.g, rgb.b],
+        );
+        Some((result[0], result[1], result[2]))
+    }
+
+    /// Convert VSF RGB to CIE 1931 XYZ tristimulus values (linear, ScalarF4E4)
+    #[cfg(feature = "spirix")]
+    pub fn to_xyz_linear_s44(&self) -> Option<(ScalarF4E4, ScalarF4E4, ScalarF4E4)> {
+        let rgb = self.to_rgb_linear_s44()?;
+        use crate::colour::VSF_RGB2XYZ;
+        let result = apply_matrix_3x3_s44(
+            &[
+                ScalarF4E4::from(VSF_RGB2XYZ[0]),
+                ScalarF4E4::from(VSF_RGB2XYZ[1]),
+                ScalarF4E4::from(VSF_RGB2XYZ[2]),
+                ScalarF4E4::from(VSF_RGB2XYZ[3]),
+                ScalarF4E4::from(VSF_RGB2XYZ[4]),
+                ScalarF4E4::from(VSF_RGB2XYZ[5]),
+                ScalarF4E4::from(VSF_RGB2XYZ[6]),
+                ScalarF4E4::from(VSF_RGB2XYZ[7]),
+                ScalarF4E4::from(VSF_RGB2XYZ[8]),
+            ],
+            &[rgb.r, rgb.g, rgb.b],
+        );
         Some((result[0], result[1], result[2]))
     }
 
@@ -631,11 +1146,11 @@ impl VsfType {
     /// Convert VSF RGB to sRGB linear (f32, 0-1 nominal range)
     ///
     /// Returns linear light values. May be out of gamut (negative or >1).
-    /// Use `scale_to_gamut()` to bring into displayable range, prioritizing hue
-    pub fn to_srgb_linear(&self) -> Option<(f32, f32, f32)> {
+    /// Use `scale_to_gamut_f32()` to bring into displayable range, prioritizing hue
+    pub fn to_srgb_linear_f32(&self) -> Option<(f32, f32, f32)> {
         let rgb = self.to_rgb_linear()?;
         use crate::colour::VSF_RGB2SRGB;
-        let result = apply_matrix_3x3(&VSF_RGB2SRGB, &[rgb.r, rgb.g, rgb.b]);
+        let result = apply_matrix_3x3_f32(&VSF_RGB2SRGB, &[rgb.r, rgb.g, rgb.b]);
         Some((result[0], result[1], result[2]))
     }
 
@@ -643,10 +1158,76 @@ impl VsfType {
     ///
     /// Returns linear light values. May be out of gamut (negative or >1).
     /// Use this for HDR or when you need the raw linear values.
-    pub fn to_rec2020_linear(&self) -> Option<(f32, f32, f32)> {
+    pub fn to_rec2020_linear_f32(&self) -> Option<(f32, f32, f32)> {
         let rgb = self.to_rgb_linear()?;
         use crate::colour::VSF_RGB2REC2020;
-        let result = apply_matrix_3x3(&VSF_RGB2REC2020, &[rgb.r, rgb.g, rgb.b]);
+        let result = apply_matrix_3x3_f32(&VSF_RGB2REC2020, &[rgb.r, rgb.g, rgb.b]);
+        Some((result[0], result[1], result[2]))
+    }
+
+    /// Convert VSF RGB to sRGB linear (ScalarF4E4, 0-1 nominal range)
+    #[cfg(feature = "spirix")]
+    pub fn to_srgb_linear_s44(&self) -> Option<(ScalarF4E4, ScalarF4E4, ScalarF4E4)> {
+        let rgb = self.to_rgb_linear_s44()?;
+        use crate::colour::VSF_RGB2SRGB;
+        let result = apply_matrix_3x3_s44(
+            &[
+                ScalarF4E4::from(VSF_RGB2SRGB[0]),
+                ScalarF4E4::from(VSF_RGB2SRGB[1]),
+                ScalarF4E4::from(VSF_RGB2SRGB[2]),
+                ScalarF4E4::from(VSF_RGB2SRGB[3]),
+                ScalarF4E4::from(VSF_RGB2SRGB[4]),
+                ScalarF4E4::from(VSF_RGB2SRGB[5]),
+                ScalarF4E4::from(VSF_RGB2SRGB[6]),
+                ScalarF4E4::from(VSF_RGB2SRGB[7]),
+                ScalarF4E4::from(VSF_RGB2SRGB[8]),
+            ],
+            &[rgb.r, rgb.g, rgb.b],
+        );
+        Some((result[0], result[1], result[2]))
+    }
+
+    /// Convert VSF RGB to BT.2020/Rec.2020 linear (ScalarF4E4, 0-1 nominal range)
+    #[cfg(feature = "spirix")]
+    pub fn to_rec2020_linear_s44(&self) -> Option<(ScalarF4E4, ScalarF4E4, ScalarF4E4)> {
+        let rgb = self.to_rgb_linear_s44()?;
+        use crate::colour::VSF_RGB2REC2020;
+        let result = apply_matrix_3x3_s44(
+            &[
+                ScalarF4E4::from(VSF_RGB2REC2020[0]),
+                ScalarF4E4::from(VSF_RGB2REC2020[1]),
+                ScalarF4E4::from(VSF_RGB2REC2020[2]),
+                ScalarF4E4::from(VSF_RGB2REC2020[3]),
+                ScalarF4E4::from(VSF_RGB2REC2020[4]),
+                ScalarF4E4::from(VSF_RGB2REC2020[5]),
+                ScalarF4E4::from(VSF_RGB2REC2020[6]),
+                ScalarF4E4::from(VSF_RGB2REC2020[7]),
+                ScalarF4E4::from(VSF_RGB2REC2020[8]),
+            ],
+            &[rgb.r, rgb.g, rgb.b],
+        );
+        Some((result[0], result[1], result[2]))
+    }
+
+    /// Convert VSF RGB to Adobe RGB linear (ScalarF4E4, 0-1 nominal range)
+    #[cfg(feature = "spirix")]
+    pub fn to_adobe_rgb_linear_s44(&self) -> Option<(ScalarF4E4, ScalarF4E4, ScalarF4E4)> {
+        let rgb = self.to_rgb_linear_s44()?;
+        use crate::colour::VSF_RGB2ADOBE_RGB;
+        let result = apply_matrix_3x3_s44(
+            &[
+                ScalarF4E4::from(VSF_RGB2ADOBE_RGB[0]),
+                ScalarF4E4::from(VSF_RGB2ADOBE_RGB[1]),
+                ScalarF4E4::from(VSF_RGB2ADOBE_RGB[2]),
+                ScalarF4E4::from(VSF_RGB2ADOBE_RGB[3]),
+                ScalarF4E4::from(VSF_RGB2ADOBE_RGB[4]),
+                ScalarF4E4::from(VSF_RGB2ADOBE_RGB[5]),
+                ScalarF4E4::from(VSF_RGB2ADOBE_RGB[6]),
+                ScalarF4E4::from(VSF_RGB2ADOBE_RGB[7]),
+                ScalarF4E4::from(VSF_RGB2ADOBE_RGB[8]),
+            ],
+            &[rgb.r, rgb.g, rgb.b],
+        );
         Some((result[0], result[1], result[2]))
     }
 
@@ -654,10 +1235,10 @@ impl VsfType {
     ///
     /// Uses sRGB OETF and ×255 + round quantization.
     /// Automatically scales out-of-gamut colors to fit [0,1] range.
-    pub fn to_srgb_u8(&self) -> Option<(u8, u8, u8)> {
+    pub fn f32_to_srgb_u8(&self) -> Option<(u8, u8, u8)> {
         use crate::colour::legacy::transfer::srgb_oetf;
-        let (r, g, b) = self.to_srgb_linear()?;
-        let (r, g, b) = scale_to_gamut(r, g, b);
+        let (r, g, b) = self.to_srgb_linear_f32()?;
+        let (r, g, b) = scale_to_gamut_f32(r, g, b);
         Some((
             (srgb_oetf(r) * 255.).round() as u8,
             (srgb_oetf(g) * 255.).round() as u8,
@@ -669,9 +1250,9 @@ impl VsfType {
     ///
     /// Uses sRGB OETF and ×65535 + round quantization (sRGB spec).
     /// Automatically scales out-of-gamut colors to fit [0,1] range.
-    pub fn to_srgb_u16(&self) -> Option<(u16, u16, u16)> {
-        let (r, g, b) = self.to_srgb_linear()?;
-        let (r, g, b) = scale_to_gamut(r, g, b);
+    pub fn f32_to_srgb_u16(&self) -> Option<(u16, u16, u16)> {
+        let (r, g, b) = self.to_srgb_linear_f32()?;
+        let (r, g, b) = scale_to_gamut_f32(r, g, b);
         Some((
             (delinearize_srgb(r) * 65535.).round() as u16,
             (delinearize_srgb(g) * 65535.).round() as u16,
@@ -680,9 +1261,9 @@ impl VsfType {
     }
 
     /// Convert VSF RGB to Rec.709 (u8, gamma-encoded, studio range 16-235)
-    pub fn to_rec709_u8(&self) -> Option<(u8, u8, u8)> {
-        let (r, g, b) = self.to_srgb_linear()?;
-        let (r, g, b) = scale_to_gamut(r, g, b);
+    pub fn f32_to_rec709_u8(&self) -> Option<(u8, u8, u8)> {
+        let (r, g, b) = self.to_srgb_linear_f32()?;
+        let (r, g, b) = scale_to_gamut_f32(r, g, b);
         Some((
             (encode_bt709(r) * 219.) as u8 + 16,
             (encode_bt709(g) * 219.) as u8 + 16,
@@ -691,9 +1272,9 @@ impl VsfType {
     }
 
     /// Convert VSF RGB to Rec.709 (u16, gamma-encoded, studio range 4096-60160)
-    pub fn to_rec709_u16(&self) -> Option<(u16, u16, u16)> {
-        let (r, g, b) = self.to_srgb_linear()?;
-        let (r, g, b) = scale_to_gamut(r, g, b);
+    pub fn f32_to_rec709_u16(&self) -> Option<(u16, u16, u16)> {
+        let (r, g, b) = self.to_srgb_linear_f32()?;
+        let (r, g, b) = scale_to_gamut_f32(r, g, b);
         Some((
             (encode_bt709(r) * 56064.) as u16 + 4096,
             (encode_bt709(g) * 56064.) as u16 + 4096,
@@ -702,9 +1283,9 @@ impl VsfType {
     }
 
     /// Convert VSF RGB to Rec.2020 (u8, gamma-encoded, studio range 16-235)
-    pub fn to_rec2020_u8(&self) -> Option<(u8, u8, u8)> {
-        let (r, g, b) = self.to_rec2020_linear()?;
-        let (r, g, b) = scale_to_gamut(r, g, b);
+    pub fn f32_to_rec2020_u8(&self) -> Option<(u8, u8, u8)> {
+        let (r, g, b) = self.to_rec2020_linear_f32()?;
+        let (r, g, b) = scale_to_gamut_f32(r, g, b);
         Some((
             (encode_bt709(r) * 219.) as u8 + 16,
             (encode_bt709(g) * 219.) as u8 + 16,
@@ -713,9 +1294,9 @@ impl VsfType {
     }
 
     /// Convert VSF RGB to Rec.2020 (u16, gamma-encoded, studio range 4096-60160)
-    pub fn to_rec2020_u16(&self) -> Option<(u16, u16, u16)> {
-        let (r, g, b) = self.to_rec2020_linear()?;
-        let (r, g, b) = scale_to_gamut(r, g, b);
+    pub fn f32_to_rec2020_u16(&self) -> Option<(u16, u16, u16)> {
+        let (r, g, b) = self.to_rec2020_linear_f32()?;
+        let (r, g, b) = scale_to_gamut_f32(r, g, b);
         Some((
             (encode_bt709(r) * 56064.) as u16 + 4096,
             (encode_bt709(g) * 56064.) as u16 + 4096,
@@ -728,10 +1309,10 @@ impl VsfType {
     /// **DEPRECATED**: Adobe RGB primaries are based on CIE 1931 xy chromaticity (legacy).
     ///
     /// Returns linear light values. May be out of gamut (negative or >1).
-    pub fn to_adobe_rgb_linear(&self) -> Option<(f32, f32, f32)> {
+    pub fn f32_to_adobe_rgb_linear(&self) -> Option<(f32, f32, f32)> {
         let rgb = self.to_rgb_linear()?;
         use crate::colour::VSF_RGB2ADOBE_RGB;
-        let result = apply_matrix_3x3(&VSF_RGB2ADOBE_RGB, &[rgb.r, rgb.g, rgb.b]);
+        let result = apply_matrix_3x3_f32(&VSF_RGB2ADOBE_RGB, &[rgb.r, rgb.g, rgb.b]);
         Some((result[0], result[1], result[2]))
     }
 
@@ -741,10 +1322,10 @@ impl VsfType {
     ///
     /// Uses Adobe RGB gamma 2.2 and ×255 + round quantization.
     /// Automatically scales out-of-gamut colors to fit [0,1] range.
-    pub fn to_adobe_rgb_u8(&self) -> Option<(u8, u8, u8)> {
+    pub fn f32_to_adobe_rgb_u8(&self) -> Option<(u8, u8, u8)> {
         use crate::colour::legacy::transfer::adobe_rgb_oetf;
-        let (r, g, b) = self.to_adobe_rgb_linear()?;
-        let (r, g, b) = scale_to_gamut(r, g, b);
+        let (r, g, b) = self.f32_to_adobe_rgb_linear()?;
+        let (r, g, b) = scale_to_gamut_f32(r, g, b);
         Some((
             (adobe_rgb_oetf(r) * 255.).round() as u8,
             (adobe_rgb_oetf(g) * 255.).round() as u8,
@@ -758,10 +1339,10 @@ impl VsfType {
     ///
     /// Uses Adobe RGB gamma 2.2 and ×65535 + round quantization.
     /// Automatically scales out-of-gamut colors to fit [0,1] range.
-    pub fn to_adobe_rgb_u16(&self) -> Option<(u16, u16, u16)> {
+    pub fn f32_to_adobe_rgb_u16(&self) -> Option<(u16, u16, u16)> {
         use crate::colour::legacy::transfer::adobe_rgb_oetf;
-        let (r, g, b) = self.to_adobe_rgb_linear()?;
-        let (r, g, b) = scale_to_gamut(r, g, b);
+        let (r, g, b) = self.f32_to_adobe_rgb_linear()?;
+        let (r, g, b) = scale_to_gamut_f32(r, g, b);
         Some((
             (adobe_rgb_oetf(r) * 65535.).round() as u16,
             (adobe_rgb_oetf(g) * 65535.).round() as u16,
@@ -774,7 +1355,7 @@ impl VsfType {
     /// Accepts f32 (linear), u8 (gamma-encoded full range [0,255]), or u16 (gamma-encoded full range [0,65535]).
     /// **Convention**: Floats are always linear, integers are always gamma-encoded.
     ///
-    /// Uses sRGB piecewise transfer function (EOTF) for integers, direct pass-through for floats.
+    /// Uses sRGB piecewise transfer function (EOTF) for integers, direct pass-thru for floats.
     ///
     /// # Examples
     /// ```ignore
@@ -784,18 +1365,50 @@ impl VsfType {
     /// // From linear float sRGB
     /// let colour = VsfType::from_srgb(1.0f32, 0.5f32, 0.25f32, ColourFormat::Rf);
     /// ```
-    pub fn from_srgb<T: ColourValue>(r: T, g: T, b: T, format: ColourFormat) -> Self {
-        // Apply sRGB EOTF (for integers) or pass-through (floats already linear)
+    pub fn from_srgb_f32<T: ColourValue<f32>>(r: T, g: T, b: T, format: ColourFormat) -> Self {
+        // Apply sRGB EOTF (for integers) or pass-thru (floats already linear)
         let r_lin = r.to_linear_srgb();
         let g_lin = g.to_linear_srgb();
         let b_lin = b.to_linear_srgb();
 
         // sRGB → VSF RGB matrix (sRGB and Rec.709 share the same primaries)
         use crate::colour::SRGB2VSF_RGB;
-        let result = apply_matrix_3x3(&SRGB2VSF_RGB, &[r_lin, g_lin, b_lin]);
+        let result = apply_matrix_3x3_f32(&SRGB2VSF_RGB, &[r_lin, g_lin, b_lin]);
         let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
 
-        Self::from_rgb_linear(vsf_r, vsf_g, vsf_b, format)
+        Self::from_rgb_linear_f32(vsf_r, vsf_g, vsf_b, format)
+    }
+
+    /// Convert from sRGB to VSF RGB (ScalarF4E4 version)
+    #[cfg(feature = "spirix")]
+    pub fn from_srgb_s44<T: ColourValue<ScalarF4E4>>(
+        r: T,
+        g: T,
+        b: T,
+        format: ColourFormat,
+    ) -> Self {
+        let r_lin = r.to_linear_srgb();
+        let g_lin = g.to_linear_srgb();
+        let b_lin = b.to_linear_srgb();
+
+        use crate::colour::SRGB2VSF_RGB;
+        let result = apply_matrix_3x3_s44(
+            &[
+                ScalarF4E4::from(SRGB2VSF_RGB[0]),
+                ScalarF4E4::from(SRGB2VSF_RGB[1]),
+                ScalarF4E4::from(SRGB2VSF_RGB[2]),
+                ScalarF4E4::from(SRGB2VSF_RGB[3]),
+                ScalarF4E4::from(SRGB2VSF_RGB[4]),
+                ScalarF4E4::from(SRGB2VSF_RGB[5]),
+                ScalarF4E4::from(SRGB2VSF_RGB[6]),
+                ScalarF4E4::from(SRGB2VSF_RGB[7]),
+                ScalarF4E4::from(SRGB2VSF_RGB[8]),
+            ],
+            &[r_lin, g_lin, b_lin],
+        );
+        let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
+
+        Self::from_rgb_linear_s44(vsf_r, vsf_g, vsf_b, format)
     }
 
     /// Convert from Rec.709 to VSF RGB
@@ -812,20 +1425,52 @@ impl VsfType {
     /// let colour = VsfType::from_rec709(235u8, 128u8, 64u8, ColourFormat::Rf);
     ///
     /// // From linear float Rec.709
-    /// let colour = VsfType::from_rec709(1.0f32, 0.5f32, 0.25f32, ColourFormat::Rf);
+    /// let colour = VsfType::from_rec709(1f32, 0.5f32, 0.25f32, ColourFormat::Rf);
     /// ```
-    pub fn from_rec709<T: ColourValue>(r: T, g: T, b: T, format: ColourFormat) -> Self {
-        // Apply Rec.709 EOTF (for integers in studio range) or pass-through (floats already linear)
+    pub fn from_rec709_f32<T: ColourValue<f32>>(r: T, g: T, b: T, format: ColourFormat) -> Self {
+        // Apply Rec.709 EOTF (for integers in studio range) or pass-thru (floats are linear)
         let r_lin = r.to_linear_rec709();
         let g_lin = g.to_linear_rec709();
         let b_lin = b.to_linear_rec709();
 
         // Rec.709 → VSF RGB matrix (same as sRGB - same primaries, different transfer)
         use crate::colour::SRGB2VSF_RGB;
-        let result = apply_matrix_3x3(&SRGB2VSF_RGB, &[r_lin, g_lin, b_lin]);
+        let result = apply_matrix_3x3_f32(&SRGB2VSF_RGB, &[r_lin, g_lin, b_lin]);
         let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
 
-        Self::from_rgb_linear(vsf_r, vsf_g, vsf_b, format)
+        Self::from_rgb_linear_f32(vsf_r, vsf_g, vsf_b, format)
+    }
+
+    /// Convert from Rec.709 to VSF RGB (ScalarF4E4 version)
+    #[cfg(feature = "spirix")]
+    pub fn from_rec709_s44<T: ColourValue<ScalarF4E4>>(
+        r: T,
+        g: T,
+        b: T,
+        format: ColourFormat,
+    ) -> Self {
+        let r_lin = r.to_linear_rec709();
+        let g_lin = g.to_linear_rec709();
+        let b_lin = b.to_linear_rec709();
+
+        use crate::colour::SRGB2VSF_RGB;
+        let result = apply_matrix_3x3_s44(
+            &[
+                ScalarF4E4::from(SRGB2VSF_RGB[0]),
+                ScalarF4E4::from(SRGB2VSF_RGB[1]),
+                ScalarF4E4::from(SRGB2VSF_RGB[2]),
+                ScalarF4E4::from(SRGB2VSF_RGB[3]),
+                ScalarF4E4::from(SRGB2VSF_RGB[4]),
+                ScalarF4E4::from(SRGB2VSF_RGB[5]),
+                ScalarF4E4::from(SRGB2VSF_RGB[6]),
+                ScalarF4E4::from(SRGB2VSF_RGB[7]),
+                ScalarF4E4::from(SRGB2VSF_RGB[8]),
+            ],
+            &[r_lin, g_lin, b_lin],
+        );
+        let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
+
+        Self::from_rgb_linear_s44(vsf_r, vsf_g, vsf_b, format)
     }
 
     /// Convert from BT.2020/Rec.2020 to VSF RGB
@@ -841,18 +1486,49 @@ impl VsfType {
     /// let colour = VsfType::from_rec2020(235u8, 128u8, 64u8, ColourFormat::Rf);
     ///
     /// // From linear float Rec.2020
-    /// let colour = VsfType::from_rec2020(1.0f32, 0.5f32, 0.25f32, ColourFormat::Rf);
+    /// let colour = VsfType::from_rec2020(1f32, 0.5f32, 0.25f32, ColourFormat::Rf);
     /// ```
-    pub fn from_rec2020<T: ColourValue>(r: T, g: T, b: T, format: ColourFormat) -> Self {
+    pub fn from_rec2020_f32<T: ColourValue<f32>>(r: T, g: T, b: T, format: ColourFormat) -> Self {
         let r_lin = r.to_linear_rec709(); // BT.2020 uses Rec.709 OETF
         let g_lin = g.to_linear_rec709();
         let b_lin = b.to_linear_rec709();
 
         // BT.2020 → VSF RGB matrix
-        let result = apply_matrix_3x3(&REC2020_2VSF_RGB, &[r_lin, g_lin, b_lin]);
+        let result = apply_matrix_3x3_f32(&REC2020_2VSF_RGB, &[r_lin, g_lin, b_lin]);
         let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
 
-        Self::from_rgb_linear(vsf_r, vsf_g, vsf_b, format)
+        Self::from_rgb_linear_f32(vsf_r, vsf_g, vsf_b, format)
+    }
+
+    /// Convert from BT.2020/Rec.2020 to VSF RGB (ScalarF4E4 version)
+    #[cfg(feature = "spirix")]
+    pub fn from_rec2020_s44<T: ColourValue<ScalarF4E4>>(
+        r: T,
+        g: T,
+        b: T,
+        format: ColourFormat,
+    ) -> Self {
+        let r_lin = r.to_linear_rec709();
+        let g_lin = g.to_linear_rec709();
+        let b_lin = b.to_linear_rec709();
+
+        let result = apply_matrix_3x3_s44(
+            &[
+                ScalarF4E4::from(REC2020_2VSF_RGB[0]),
+                ScalarF4E4::from(REC2020_2VSF_RGB[1]),
+                ScalarF4E4::from(REC2020_2VSF_RGB[2]),
+                ScalarF4E4::from(REC2020_2VSF_RGB[3]),
+                ScalarF4E4::from(REC2020_2VSF_RGB[4]),
+                ScalarF4E4::from(REC2020_2VSF_RGB[5]),
+                ScalarF4E4::from(REC2020_2VSF_RGB[6]),
+                ScalarF4E4::from(REC2020_2VSF_RGB[7]),
+                ScalarF4E4::from(REC2020_2VSF_RGB[8]),
+            ],
+            &[r_lin, g_lin, b_lin],
+        );
+        let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
+
+        Self::from_rgb_linear_s44(vsf_r, vsf_g, vsf_b, format)
     }
 
     /// Convert from LMS cone space to VSF RGB
@@ -870,11 +1546,11 @@ impl VsfType {
     /// ```ignore
     /// let colour = VsfType::from_lms(0.5, 0.4, 0.3, ColourFormat::Rf);
     /// ```
-    pub fn from_lms(l: f32, m: f32, s: f32, format: ColourFormat) -> Self {
+    pub fn from_lms_f32(l: f32, m: f32, s: f32, format: ColourFormat) -> Self {
         use crate::colour::LMS2VSF_RGB;
-        let result = apply_matrix_3x3(&LMS2VSF_RGB, &[l, m, s]);
+        let result = apply_matrix_3x3_f32(&LMS2VSF_RGB, &[l, m, s]);
         let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
-        Self::from_rgb_linear(vsf_r, vsf_g, vsf_b, format)
+        Self::from_rgb_linear_f32(vsf_r, vsf_g, vsf_b, format)
     }
 
     /// Convert from CIE 1931 XYZ tristimulus values to VSF RGB
@@ -894,89 +1570,235 @@ impl VsfType {
     /// ```ignore
     /// let colour = VsfType::from_xyz(0.4, 0.5, 0.3, ColourFormat::Rf);
     /// ```
-    pub fn from_xyz(x: f32, y: f32, z: f32, format: ColourFormat) -> Self {
+    pub fn from_xyz_f32(x: f32, y: f32, z: f32, format: ColourFormat) -> Self {
         use crate::colour::XYZ2VSF_RGB;
-        let result = apply_matrix_3x3(&XYZ2VSF_RGB, &[x, y, z]);
+        let result = apply_matrix_3x3_f32(&XYZ2VSF_RGB, &[x, y, z]);
         let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
-        Self::from_rgb_linear(vsf_r, vsf_g, vsf_b, format)
+        Self::from_rgb_linear_f32(vsf_r, vsf_g, vsf_b, format)
+    }
+
+    /// Convert from LMS cone space to VSF RGB (ScalarF4E4 version)
+    #[cfg(feature = "spirix")]
+    pub fn from_lms_s44(l: ScalarF4E4, m: ScalarF4E4, s: ScalarF4E4, format: ColourFormat) -> Self {
+        use crate::colour::LMS2VSF_RGB;
+        let result = apply_matrix_3x3_s44(
+            &[
+                ScalarF4E4::from(LMS2VSF_RGB[0]),
+                ScalarF4E4::from(LMS2VSF_RGB[1]),
+                ScalarF4E4::from(LMS2VSF_RGB[2]),
+                ScalarF4E4::from(LMS2VSF_RGB[3]),
+                ScalarF4E4::from(LMS2VSF_RGB[4]),
+                ScalarF4E4::from(LMS2VSF_RGB[5]),
+                ScalarF4E4::from(LMS2VSF_RGB[6]),
+                ScalarF4E4::from(LMS2VSF_RGB[7]),
+                ScalarF4E4::from(LMS2VSF_RGB[8]),
+            ],
+            &[l, m, s],
+        );
+        let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
+        Self::from_rgb_linear_s44(vsf_r, vsf_g, vsf_b, format)
+    }
+
+    /// Convert from CIE 1931 XYZ tristimulus values to VSF RGB (ScalarF4E4 version)
+    #[cfg(feature = "spirix")]
+    pub fn from_xyz_s44(x: ScalarF4E4, y: ScalarF4E4, z: ScalarF4E4, format: ColourFormat) -> Self {
+        use crate::colour::XYZ2VSF_RGB;
+        let result = apply_matrix_3x3_s44(
+            &[
+                ScalarF4E4::from(XYZ2VSF_RGB[0]),
+                ScalarF4E4::from(XYZ2VSF_RGB[1]),
+                ScalarF4E4::from(XYZ2VSF_RGB[2]),
+                ScalarF4E4::from(XYZ2VSF_RGB[3]),
+                ScalarF4E4::from(XYZ2VSF_RGB[4]),
+                ScalarF4E4::from(XYZ2VSF_RGB[5]),
+                ScalarF4E4::from(XYZ2VSF_RGB[6]),
+                ScalarF4E4::from(XYZ2VSF_RGB[7]),
+                ScalarF4E4::from(XYZ2VSF_RGB[8]),
+            ],
+            &[x, y, z],
+        );
+        let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
+        Self::from_rgb_linear_s44(vsf_r, vsf_g, vsf_b, format)
     }
 
     /// Helper: Create VsfType from linear RGB floats
     /// For integer formats: scale to gamut (preserves hue/saturation, prevents white clipping)
     /// For float formats: preserve full range (no clamping)
-    fn from_rgb_linear(r: f32, g: f32, b: f32, format: ColourFormat) -> Self {
+    fn from_rgb_linear_f32(r: f32, g: f32, b: f32, format: ColourFormat) -> Self {
         match format {
             ColourFormat::Rf => VsfType::rf([r, g, b]),
             ColourFormat::Ru => {
-                let (r, g, b) = scale_to_gamut(r, g, b);
+                let (r, g, b) = scale_to_gamut_f32(r, g, b);
                 VsfType::ru([
-                    delinearize_gamma2_u8(r),
-                    delinearize_gamma2_u8(g),
-                    delinearize_gamma2_u8(b),
+                    delinearize_gamma2_u8_f32(r),
+                    delinearize_gamma2_u8_f32(g),
+                    delinearize_gamma2_u8_f32(b),
                 ])
             }
             ColourFormat::Rs => {
-                let (r, g, b) = scale_to_gamut(r, g, b);
+                let (r, g, b) = scale_to_gamut_f32(r, g, b);
                 VsfType::rs([
-                    delinearize_gamma2_u16(r),
-                    delinearize_gamma2_u16(g),
-                    delinearize_gamma2_u16(b),
+                    delinearize_gamma2_u16_f32(r),
+                    delinearize_gamma2_u16_f32(g),
+                    delinearize_gamma2_u16_f32(b),
                 ])
             }
             ColourFormat::Ri => {
-                let (r, g, b) = scale_to_gamut(r, g, b);
+                let (r, g, b) = scale_to_gamut_f32(r, g, b);
                 VsfType::ri(pack_rgb_676_linear(r, g, b))
             }
             ColourFormat::Rp => {
-                let (r, g, b) = scale_to_gamut(r, g, b);
+                let (r, g, b) = scale_to_gamut_f32(r, g, b);
                 VsfType::rp(pack_rgb_565_linear(r, g, b))
             }
             // Greyscale formats
             ColourFormat::Re => {
-                let (r, g, b) = scale_to_gamut(r, g, b);
-                let lum = vsf_rgb_to_photopic(r, g, b);
-                VsfType::re(delinearize_gamma2_u8(lum))
+                let (r, g, b) = scale_to_gamut_f32(r, g, b);
+                let lum = vsf_rgb_to_photopic_f32(r, g, b);
+                VsfType::re(delinearize_gamma2_u8_f32(lum))
             }
             ColourFormat::Rx => {
-                let (r, g, b) = scale_to_gamut(r, g, b);
-                let lum = vsf_rgb_to_photopic(r, g, b);
-                VsfType::rx(delinearize_gamma2_u16(lum))
+                let (r, g, b) = scale_to_gamut_f32(r, g, b);
+                let lum = vsf_rgb_to_photopic_f32(r, g, b);
+                VsfType::rx(delinearize_gamma2_u16_f32(lum))
             }
             ColourFormat::Rz => {
-                let lum = vsf_rgb_to_photopic(r, g, b);
+                let lum = vsf_rgb_to_photopic_f32(r, g, b);
                 VsfType::rz(lum)
             }
             // RGBA formats → add opaque alpha
             ColourFormat::Ra => {
-                let (r, g, b) = scale_to_gamut(r, g, b);
+                let (r, g, b) = scale_to_gamut_f32(r, g, b);
                 VsfType::ra([
-                    delinearize_gamma2_u8(r),
-                    delinearize_gamma2_u8(g),
-                    delinearize_gamma2_u8(b),
+                    delinearize_gamma2_u8_f32(r),
+                    delinearize_gamma2_u8_f32(g),
+                    delinearize_gamma2_u8_f32(b),
                     255,
                 ])
             }
             ColourFormat::Rt => {
-                let (r, g, b) = scale_to_gamut(r, g, b);
+                let (r, g, b) = scale_to_gamut_f32(r, g, b);
                 VsfType::rt([
-                    delinearize_gamma2_u16(r),
-                    delinearize_gamma2_u16(g),
-                    delinearize_gamma2_u16(b),
+                    delinearize_gamma2_u16_f32(r),
+                    delinearize_gamma2_u16_f32(g),
+                    delinearize_gamma2_u16_f32(b),
                     0xFFFF,
                 ])
             }
             ColourFormat::Rh => VsfType::rh([r, g, b, 1.0]),
+            #[cfg(feature = "spirix")]
+            ColourFormat::Rd => {
+                let lum = vsf_rgb_to_photopic_f32(r, g, b);
+                VsfType::rd(ScalarF4E4::from(lum))
+            }
+            #[cfg(feature = "spirix")]
+            ColourFormat::Rb => VsfType::rb([
+                ScalarF4E4::from(r),
+                ScalarF4E4::from(g),
+                ScalarF4E4::from(b),
+            ]),
+            #[cfg(feature = "spirix")]
+            ColourFormat::Rw => VsfType::rw([
+                ScalarF4E4::from(r),
+                ScalarF4E4::from(g),
+                ScalarF4E4::from(b),
+                ScalarF4E4::from(1.0),
+            ]),
         }
     }
 
-    /// Create colour from gamma-encoded RGB (8-bit per channel)
+    /// Helper: Create VsfType from linear RGB ScalarF4E4
+    /// For integer formats: scale to gamut (preserves hue/saturation, prevents white clipping)
+    /// For float formats: preserve full range (no clamping)
+    #[cfg(feature = "spirix")]
+    fn from_rgb_linear_s44(
+        r: ScalarF4E4,
+        g: ScalarF4E4,
+        b: ScalarF4E4,
+        format: ColourFormat,
+    ) -> Self {
+        match format {
+            ColourFormat::Rf => VsfType::rf([r.into(), g.into(), b.into()]),
+            ColourFormat::Ru => {
+                let (r, g, b) = scale_to_gamut_s44(r, g, b);
+                VsfType::ru([
+                    delinearize_gamma2_u8_s44(r),
+                    delinearize_gamma2_u8_s44(g),
+                    delinearize_gamma2_u8_s44(b),
+                ])
+            }
+            ColourFormat::Rs => {
+                let (r, g, b) = scale_to_gamut_s44(r, g, b);
+                VsfType::rs([
+                    delinearize_gamma2_u16_s44(r),
+                    delinearize_gamma2_u16_s44(g),
+                    delinearize_gamma2_u16_s44(b),
+                ])
+            }
+            ColourFormat::Ri => {
+                let (r, g, b) = scale_to_gamut_s44(r, g, b);
+                VsfType::ri(pack_rgb_676_linear_s44(r, g, b))
+            }
+            ColourFormat::Rp => {
+                let (r, g, b) = scale_to_gamut_s44(r, g, b);
+                VsfType::rp(pack_rgb_565_linear_s44(r, g, b))
+            }
+            // Greyscale formats
+            ColourFormat::Re => {
+                let (r, g, b) = scale_to_gamut_s44(r, g, b);
+                let lum = vsf_rgb_to_photopic_s44(r, g, b);
+                VsfType::re(delinearize_gamma2_u8_s44(lum))
+            }
+            ColourFormat::Rx => {
+                let (r, g, b) = scale_to_gamut_s44(r, g, b);
+                let lum = vsf_rgb_to_photopic_s44(r, g, b);
+                VsfType::rx(delinearize_gamma2_u16_s44(lum))
+            }
+            ColourFormat::Rz => {
+                let lum = vsf_rgb_to_photopic_s44(r, g, b);
+                VsfType::rz(lum.into())
+            }
+            #[cfg(feature = "spirix")]
+            ColourFormat::Rd => {
+                let lum = vsf_rgb_to_photopic_s44(r, g, b);
+                VsfType::rd(lum)
+            }
+            // RGB ScalarF4E4 format
+            #[cfg(feature = "spirix")]
+            ColourFormat::Rb => VsfType::rb([r, g, b]),
+            // RGBA formats → add opaque alpha
+            ColourFormat::Ra => {
+                let (r, g, b) = scale_to_gamut_s44(r, g, b);
+                VsfType::ra([
+                    delinearize_gamma2_u8_s44(r),
+                    delinearize_gamma2_u8_s44(g),
+                    delinearize_gamma2_u8_s44(b),
+                    255,
+                ])
+            }
+            ColourFormat::Rt => {
+                let (r, g, b) = scale_to_gamut_s44(r, g, b);
+                VsfType::rt([
+                    delinearize_gamma2_u16_s44(r),
+                    delinearize_gamma2_u16_s44(g),
+                    delinearize_gamma2_u16_s44(b),
+                    0xFFFF,
+                ])
+            }
+            ColourFormat::Rh => VsfType::rh([r.into(), g.into(), b.into(), 1.0]),
+            #[cfg(feature = "spirix")]
+            ColourFormat::Rw => VsfType::rw([r, g, b, ScalarF4E4::from(1.0)]),
+        }
+    }
+
+    /// Create colour from gamma-encoded RGB (8-bit per channel, f32 version)
     ///
     /// Input RGB is assumed to be gamma-encoded VSF RGB colourspace
-    pub fn from_rgb8(r: u8, g: u8, b: u8, format: ColourFormat) -> Self {
+    pub fn from_rgb8_f32(r: u8, g: u8, b: u8, format: ColourFormat) -> Self {
         // Linearize input
-        let r_lin = linearize_gamma2_u8(r);
-        let g_lin = linearize_gamma2_u8(g);
-        let b_lin = linearize_gamma2_u8(b);
+        let r_lin = linearize_gamma2_u8_f32(r);
+        let g_lin = linearize_gamma2_u8_f32(g);
+        let b_lin = linearize_gamma2_u8_f32(b);
 
         match format {
             ColourFormat::Ru => VsfType::ru([r, g, b]),
@@ -991,15 +1813,15 @@ impl VsfType {
 
             // RGB → Greyscale: Use VSF RGB photopic luminance
             ColourFormat::Re => {
-                let lum = vsf_rgb_to_photopic(r_lin, g_lin, b_lin);
-                VsfType::re(delinearize_gamma2_u8(lum))
+                let lum = vsf_rgb_to_photopic_f32(r_lin, g_lin, b_lin);
+                VsfType::re(delinearize_gamma2_u8_f32(lum))
             }
             ColourFormat::Rx => {
-                let lum = vsf_rgb_to_photopic(r_lin, g_lin, b_lin);
-                VsfType::rx(delinearize_gamma2_u16(lum))
+                let lum = vsf_rgb_to_photopic_f32(r_lin, g_lin, b_lin);
+                VsfType::rx(delinearize_gamma2_u16_f32(lum))
             }
             ColourFormat::Rz => {
-                let lum = vsf_rgb_to_photopic(r_lin, g_lin, b_lin);
+                let lum = vsf_rgb_to_photopic_f32(r_lin, g_lin, b_lin);
                 VsfType::rz(lum)
             }
 
@@ -1012,18 +1834,89 @@ impl VsfType {
                 0xFFFF,
             ]),
             ColourFormat::Rh => VsfType::rh([r_lin, g_lin, b_lin, 1.0]),
+            #[cfg(feature = "spirix")]
+            ColourFormat::Rd => {
+                let lum = vsf_rgb_to_photopic_f32(r_lin, g_lin, b_lin);
+                VsfType::rd(ScalarF4E4::from(lum))
+            }
+            #[cfg(feature = "spirix")]
+            ColourFormat::Rb => VsfType::rb([
+                ScalarF4E4::from(r_lin),
+                ScalarF4E4::from(g_lin),
+                ScalarF4E4::from(b_lin),
+            ]),
+            #[cfg(feature = "spirix")]
+            ColourFormat::Rw => VsfType::rw([
+                ScalarF4E4::from(r_lin),
+                ScalarF4E4::from(g_lin),
+                ScalarF4E4::from(b_lin),
+                ScalarF4E4::from(1.0),
+            ]),
         }
     }
 
-    /// Create colour from gamma-encoded RGBA (8-bit per channel)
+    /// Create colour from gamma-encoded RGB (8-bit per channel, ScalarF4E4 version)
+    ///
+    /// Input RGB is assumed to be gamma-encoded VSF RGB colourspace
+    #[cfg(feature = "spirix")]
+    pub fn from_rgb8_s44(r: u8, g: u8, b: u8, format: ColourFormat) -> Self {
+        // Linearize input
+        let r_lin = linearize_gamma2_u8_s44(r);
+        let g_lin = linearize_gamma2_u8_s44(g);
+        let b_lin = linearize_gamma2_u8_s44(b);
+
+        match format {
+            ColourFormat::Ru => VsfType::ru([r, g, b]),
+            ColourFormat::Rs => VsfType::rs([
+                (r as u16) << 8 | r as u16,
+                (g as u16) << 8 | g as u16,
+                (b as u16) << 8 | b as u16,
+            ]),
+            ColourFormat::Rf => VsfType::rf([r_lin.into(), g_lin.into(), b_lin.into()]),
+            ColourFormat::Ri => VsfType::ri(pack_rgb_676_linear_s44(r_lin, g_lin, b_lin)),
+            ColourFormat::Rp => VsfType::rp(pack_rgb_565_linear_s44(r_lin, g_lin, b_lin)),
+
+            // RGB → Greyscale: Use VSF RGB photopic luminance
+            ColourFormat::Re => {
+                let lum = vsf_rgb_to_photopic_s44(r_lin, g_lin, b_lin);
+                VsfType::re(delinearize_gamma2_u8_s44(lum))
+            }
+            ColourFormat::Rx => {
+                let lum = vsf_rgb_to_photopic_s44(r_lin, g_lin, b_lin);
+                VsfType::rx(delinearize_gamma2_u16_s44(lum))
+            }
+            ColourFormat::Rz => {
+                let lum = vsf_rgb_to_photopic_s44(r_lin, g_lin, b_lin);
+                VsfType::rz(lum.into())
+            }
+            ColourFormat::Rd => {
+                let lum = vsf_rgb_to_photopic_s44(r_lin, g_lin, b_lin);
+                VsfType::rd(lum)
+            }
+            ColourFormat::Rb => VsfType::rb([r_lin, g_lin, b_lin]),
+
+            // RGBA formats → add opaque alpha
+            ColourFormat::Ra => VsfType::ra([r, g, b, 255]),
+            ColourFormat::Rt => VsfType::rt([
+                (r as u16) << 8 | r as u16,
+                (g as u16) << 8 | g as u16,
+                (b as u16) << 8 | b as u16,
+                0xFFFF,
+            ]),
+            ColourFormat::Rh => VsfType::rh([r_lin.into(), g_lin.into(), b_lin.into(), 1.0]),
+            ColourFormat::Rw => VsfType::rw([r_lin, g_lin, b_lin, ScalarF4E4::from(1.0)]),
+        }
+    }
+
+    /// Create colour from gamma-encoded RGBA (8-bit per channel, f32 version)
     ///
     /// Input RGBA is assumed to be gamma-encoded VSF RGB colourspace
-    pub fn from_rgba8(r: u8, g: u8, b: u8, a: u8, format: ColourFormat) -> Self {
+    pub fn from_rgba8_f32(r: u8, g: u8, b: u8, a: u8, format: ColourFormat) -> Self {
         // Linearize input
-        let r_lin = linearize_gamma2_u8(r);
-        let g_lin = linearize_gamma2_u8(g);
-        let b_lin = linearize_gamma2_u8(b);
-        let a_lin = linearize_gamma2_u8(a);
+        let r_lin = linearize_gamma2_u8_f32(r);
+        let g_lin = linearize_gamma2_u8_f32(g);
+        let b_lin = linearize_gamma2_u8_f32(b);
+        let a_lin = linearize_gamma2_u8_f32(a);
 
         match format {
             ColourFormat::Ra => VsfType::ra([r, g, b, a]),
@@ -1035,7 +1928,33 @@ impl VsfType {
             ]),
             ColourFormat::Rh => VsfType::rh([r_lin, g_lin, b_lin, a_lin]),
             // For RGB-only formats, ignore alpha
-            _ => Self::from_rgb8(r, g, b, format),
+            _ => Self::from_rgb8_f32(r, g, b, format),
+        }
+    }
+
+    /// Create colour from gamma-encoded RGBA (8-bit per channel, ScalarF4E4 version)
+    ///
+    /// Input RGBA is assumed to be gamma-encoded VSF RGB colourspace
+    #[cfg(feature = "spirix")]
+    pub fn from_rgba8_s44(r: u8, g: u8, b: u8, a: u8, format: ColourFormat) -> Self {
+        // Linearize input
+        let r_lin = linearize_gamma2_u8_s44(r);
+        let g_lin = linearize_gamma2_u8_s44(g);
+        let b_lin = linearize_gamma2_u8_s44(b);
+        let a_lin = linearize_gamma2_u8_s44(a);
+
+        match format {
+            ColourFormat::Ra => VsfType::ra([r, g, b, a]),
+            ColourFormat::Rt => VsfType::rt([
+                (r as u16) << 8 | r as u16,
+                (g as u16) << 8 | g as u16,
+                (b as u16) << 8 | b as u16,
+                (a as u16) << 8 | a as u16,
+            ]),
+            ColourFormat::Rh => VsfType::rh([r_lin.into(), g_lin.into(), b_lin.into(), a_lin.into()]),
+            ColourFormat::Rw => VsfType::rw([r_lin, g_lin, b_lin, a_lin]),
+            // For RGB-only formats, ignore alpha
+            _ => Self::from_rgb8_s44(r, g, b, format),
         }
     }
 
@@ -1044,14 +1963,14 @@ impl VsfType {
         // Get as linear RGBA (most general representation)
         let rgba = self.to_rgba_linear()?;
 
-        // Convert linear back to gamma u8 for from_rgba8 (which expects gamma input)
-        let r_gamma = delinearize_gamma2_u8(rgba.r);
-        let g_gamma = delinearize_gamma2_u8(rgba.g);
-        let b_gamma = delinearize_gamma2_u8(rgba.b);
-        let a_gamma = delinearize_gamma2_u8(rgba.a);
+        // Convert linear back to gamma u8 for from_rgba8_f32 (which expects gamma input)
+        let r_gamma = delinearize_gamma2_u8_f32(rgba.r);
+        let g_gamma = delinearize_gamma2_u8_f32(rgba.g);
+        let b_gamma = delinearize_gamma2_u8_f32(rgba.b);
+        let a_gamma = delinearize_gamma2_u8_f32(rgba.a);
 
         // Convert to target format
-        Some(Self::from_rgba8(r_gamma, g_gamma, b_gamma, a_gamma, target))
+        Some(Self::from_rgba8_f32(r_gamma, g_gamma, b_gamma, a_gamma, target))
     }
 }
 
@@ -1061,7 +1980,9 @@ pub enum ColourFormat {
     // Greyscale
     Re, // 8-bit
     Rx, // 16-bit
-    Rz, // float
+    Rz, // f32
+    #[cfg(feature = "spirix")]
+    Rd, // ScalarF4E4
 
     // Packed RGB
     Ri, // 6×7×6
@@ -1070,12 +1991,16 @@ pub enum ColourFormat {
     // Standard RGB
     Ru, // 8-bit
     Rs, // 16-bit
-    Rf, // float
+    Rf, // f32
+    #[cfg(feature = "spirix")]
+    Rb, // ScalarF4E4
 
     // Standard RGBA
     Ra, // 8-bit
     Rt, // 16-bit
-    Rh, // float
+    Rh, // f32
+    #[cfg(feature = "spirix")]
+    Rw, // ScalarF4E4
 }
 
 /// Unpack 6×7×6 RGB from single byte to linear f32
@@ -1091,18 +2016,18 @@ fn unpack_rgb_676_linear(packed: u8) -> (f32, f32, f32) {
     let b_gamma = b as f32 / 5.;
 
     (
-        linearize_gamma2(r_gamma),
-        linearize_gamma2(g_gamma),
-        linearize_gamma2(b_gamma),
+        linearize_gamma2_f32(r_gamma),
+        linearize_gamma2_f32(g_gamma),
+        linearize_gamma2_f32(b_gamma),
     )
 }
 
 /// Pack linear RGB into 6×7×6 format (single byte)
 fn pack_rgb_676_linear(r: f32, g: f32, b: f32) -> u8 {
     // Delinearize to gamma, then quantize
-    let r_gamma = delinearize_gamma2(r);
-    let g_gamma = delinearize_gamma2(g);
-    let b_gamma = delinearize_gamma2(b);
+    let r_gamma = delinearize_gamma2_f32(r);
+    let g_gamma = delinearize_gamma2_f32(g);
+    let b_gamma = delinearize_gamma2_f32(b);
 
     let r6 = (r_gamma * 5.).min(5.) as u8;
     let g7 = (g_gamma * 6.).min(6.) as u8;
@@ -1123,22 +2048,104 @@ fn unpack_rgb_565_linear(packed: u16) -> (f32, f32, f32) {
     let b_gamma = b5 as f32 / 32.;
 
     (
-        linearize_gamma2(r_gamma),
-        linearize_gamma2(g_gamma),
-        linearize_gamma2(b_gamma),
+        linearize_gamma2_f32(r_gamma),
+        linearize_gamma2_f32(g_gamma),
+        linearize_gamma2_f32(b_gamma),
     )
 }
 
 /// Pack linear RGB into 5-6-5 format (u16)
 fn pack_rgb_565_linear(r: f32, g: f32, b: f32) -> u16 {
     // Delinearize to gamma, then quantize
-    let r_gamma = delinearize_gamma2(r);
-    let g_gamma = delinearize_gamma2(g);
-    let b_gamma = delinearize_gamma2(b);
+    let r_gamma = delinearize_gamma2_f32(r);
+    let g_gamma = delinearize_gamma2_f32(g);
+    let b_gamma = delinearize_gamma2_f32(b);
 
     let r5 = (r_gamma.min(1.) * 32.) as u16;
     let g6 = (g_gamma.min(1.) * 64.) as u16;
     let b5 = (b_gamma.min(1.) * 32.) as u16;
+
+    (r5 << 11) | (g6 << 5) | b5
+}
+
+// ==================== PACKED RGB FUNCTIONS (ScalarF4E4) ====================
+
+/// Unpack 6×7×6 RGB from single byte to linear ScalarF4E4
+#[cfg(feature = "spirix")]
+fn unpack_rgb_676_linear_s44(packed: u8) -> (ScalarF4E4, ScalarF4E4, ScalarF4E4) {
+    let b = packed % 6;
+    let temp = packed / 6;
+    let g = temp % 7;
+    let r = temp / 7;
+
+    // Normalize to 0-1 gamma-encoded, then linearize
+    let r_gamma = ScalarF4E4::from(r) / 5;
+    let g_gamma = ScalarF4E4::from(g) / 6;
+    let b_gamma = ScalarF4E4::from(b) / 5;
+
+    (r_gamma * r_gamma, g_gamma * g_gamma, b_gamma * b_gamma)
+}
+
+/// Pack linear RGB into 6×7×6 format (single byte, ScalarF4E4 version)
+#[cfg(feature = "spirix")]
+fn pack_rgb_676_linear_s44(r: ScalarF4E4, g: ScalarF4E4, b: ScalarF4E4) -> u8 {
+    // Delinearize to gamma, then quantize
+    let r_gamma = r.sqrt();
+    let g_gamma = g.sqrt();
+    let b_gamma = b.sqrt();
+
+    let r_scaled: ScalarF4E4 = r_gamma * 5;
+    let g_scaled: ScalarF4E4 = g_gamma * 6;
+    let b_scaled: ScalarF4E4 = b_gamma * 5;
+
+    let r6: u8 = r_scaled
+        .clamp(ScalarF4E4::from(0.0), ScalarF4E4::from(5.0))
+        .to_i32() as u8;
+    let g7: u8 = g_scaled
+        .clamp(ScalarF4E4::from(0.0), ScalarF4E4::from(6.0))
+        .to_i32() as u8;
+    let b6: u8 = b_scaled
+        .clamp(ScalarF4E4::from(0.0), ScalarF4E4::from(5.0))
+        .to_i32() as u8;
+
+    ((r6 * 7) + g7) * 6 + b6
+}
+
+/// Unpack 5-6-5 RGB from u16 to linear ScalarF4E4
+#[cfg(feature = "spirix")]
+fn unpack_rgb_565_linear_s44(packed: u16) -> (ScalarF4E4, ScalarF4E4, ScalarF4E4) {
+    let r5 = (packed >> 11) & 0x1F;
+    let g6 = (packed >> 5) & 0x3F;
+    let b5 = packed & 0x1F;
+
+    // Normalize to 0-1 gamma-encoded, then linearize
+    let r_gamma = ScalarF4E4::from(r5) / 32;
+    let g_gamma = ScalarF4E4::from(g6) / 64;
+    let b_gamma = ScalarF4E4::from(b5) / 32;
+
+    (r_gamma * r_gamma, g_gamma * g_gamma, b_gamma * b_gamma)
+}
+
+/// Pack linear RGB into 5-6-5 format (u16, ScalarF4E4 version)
+#[cfg(feature = "spirix")]
+fn pack_rgb_565_linear_s44(r: ScalarF4E4, g: ScalarF4E4, b: ScalarF4E4) -> u16 {
+    // Delinearize to gamma, then quantize
+    let r_gamma = r.sqrt();
+    let g_gamma = g.sqrt();
+    let b_gamma = b.sqrt();
+
+    let one = ScalarF4E4::from(1.0);
+    let r_clamped: ScalarF4E4 = r_gamma.min(one);
+    let g_clamped: ScalarF4E4 = g_gamma.min(one);
+    let b_clamped: ScalarF4E4 = b_gamma.min(one);
+
+    let r_scaled: ScalarF4E4 = r_clamped * 32;
+    let g_scaled: ScalarF4E4 = g_clamped * 64;
+    let b_scaled: ScalarF4E4 = b_clamped * 32;
+
+    let r5: u16 = r_scaled.to_i32() as u16;
+    let g6: u16 = g_scaled.to_i32() as u16;
+    let b5: u16 = b_scaled.to_i32() as u16;
 
     (r5 << 11) | (g6 << 5) | b5
 }
@@ -1168,7 +2175,7 @@ const PHOTOPIC_WHITE_NORM: f32 = {
 /// 1. VSF RGB → LMS (cone responses using column-major matrix)
 /// 2. LMS → Photopic luminance (weighted sum: 1.05L + 0.62M)
 /// 3. Normalize so Illuminant E white [1,1,1] → 1.0
-pub fn vsf_rgb_to_photopic(r: f32, g: f32, b: f32) -> f32 {
+pub fn vsf_rgb_to_photopic_f32(r: f32, g: f32, b: f32) -> f32 {
     // VSF RGB → LMS (matrix in column-major order)
     let l = VSF_RGB2LMS[0] * r + VSF_RGB2LMS[1] * g + VSF_RGB2LMS[2] * b;
     let m = VSF_RGB2LMS[3] * r + VSF_RGB2LMS[4] * g + VSF_RGB2LMS[5] * b;
@@ -1181,6 +2188,34 @@ pub fn vsf_rgb_to_photopic(r: f32, g: f32, b: f32) -> f32 {
     photopic_raw / PHOTOPIC_WHITE_NORM
 }
 
+/// Convert linear VSF RGB to photopic luminance (0-1 range, ScalarF4E4 version)
+///
+/// This performs colourimetric conversion:
+/// 1. VSF RGB → LMS (cone responses using column-major matrix)
+/// 2. LMS → Photopic luminance (weighted sum: 1.05L + 0.62M)
+/// 3. Normalize so Illuminant E white [1,1,1] → 1.0
+#[cfg(feature = "spirix")]
+pub fn vsf_rgb_to_photopic_s44(r: ScalarF4E4, g: ScalarF4E4, b: ScalarF4E4) -> ScalarF4E4 {
+    // Convert matrix constants to S44
+    let l = ScalarF4E4::from(VSF_RGB2LMS[0]) * r
+        + ScalarF4E4::from(VSF_RGB2LMS[1]) * g
+        + ScalarF4E4::from(VSF_RGB2LMS[2]) * b;
+    let m = ScalarF4E4::from(VSF_RGB2LMS[3]) * r
+        + ScalarF4E4::from(VSF_RGB2LMS[4]) * g
+        + ScalarF4E4::from(VSF_RGB2LMS[5]) * b;
+    let s = ScalarF4E4::from(VSF_RGB2LMS[6]) * r
+        + ScalarF4E4::from(VSF_RGB2LMS[7]) * g
+        + ScalarF4E4::from(VSF_RGB2LMS[8]) * b;
+
+    // LMS → Photopic luminance (raw)
+    let photopic_raw = ScalarF4E4::from(LMS2PHOTOPIC[0]) * l
+        + ScalarF4E4::from(LMS2PHOTOPIC[1]) * m
+        + ScalarF4E4::from(LMS2PHOTOPIC[2]) * s;
+
+    // Normalize by precomputed white point so [1,1,1] → 1.0
+    photopic_raw / ScalarF4E4::from(PHOTOPIC_WHITE_NORM)
+}
+
 // ==================== GAMMA 2 FUNCTIONS ====================
 // VSF RGB uses gamma 2 by default (simple sqrt/square operations)
 
@@ -1188,7 +2223,7 @@ pub fn vsf_rgb_to_photopic(r: f32, g: f32, b: f32) -> f32 {
 ///
 /// Converts from gamma-encoded to linear light. For VSF RGB gamma 2,
 /// this is simply squaring the value.
-pub fn linearize_gamma2(encoded: f32) -> f32 {
+pub fn linearize_gamma2_f32(encoded: f32) -> f32 {
     encoded * encoded
 }
 
@@ -1196,7 +2231,7 @@ pub fn linearize_gamma2(encoded: f32) -> f32 {
 ///
 /// Converts from linear light to gamma-encoded. For VSF RGB gamma 2,
 /// this is simply the square root operation.
-pub fn delinearize_gamma2(linear: f32) -> f32 {
+pub fn delinearize_gamma2_f32(linear: f32) -> f32 {
     linear.sqrt()
 }
 
@@ -1211,9 +2246,9 @@ pub fn delinearize_gamma2(linear: f32) -> f32 {
 /// **Performance: 10-50× faster than sRGB's ×255 + rounding approach**
 ///
 /// Converts 0-255 range to linear 0-1
-pub fn linearize_gamma2_u8(encoded: u8) -> f32 {
+pub fn linearize_gamma2_u8_f32(encoded: u8) -> f32 {
     let normalized = encoded as f32 / 256.;
-    linearize_gamma2(normalized)
+    linearize_gamma2_f32(normalized)
 }
 
 /// Delinearize a linear value to 8-bit gamma 2
@@ -1227,8 +2262,8 @@ pub fn linearize_gamma2_u8(encoded: u8) -> f32 {
 /// **Performance: 10-50× faster than sRGB's ×255 + rounding approach**
 ///
 /// Converts linear 0-1 to 0-255 range
-pub fn delinearize_gamma2_u8(linear: f32) -> u8 {
-    let encoded = delinearize_gamma2(linear);
+pub fn delinearize_gamma2_u8_f32(linear: f32) -> u8 {
+    let encoded = delinearize_gamma2_f32(linear);
     (encoded * 256.) as u8
 }
 
@@ -1241,9 +2276,9 @@ pub fn delinearize_gamma2_u8(linear: f32) -> u8 {
 /// - Symmetric: encode and decode both use bucket bottoms
 ///
 /// Converts 0-65535 range to linear 0-1
-pub fn linearize_gamma2_u16(encoded: u16) -> f32 {
+pub fn linearize_gamma2_u16_f32(encoded: u16) -> f32 {
     let normalized = encoded as f32 / 65536.;
-    linearize_gamma2(normalized)
+    linearize_gamma2_f32(normalized)
 }
 
 /// Delinearize a linear value to 16-bit gamma 2
@@ -1255,33 +2290,98 @@ pub fn linearize_gamma2_u16(encoded: u16) -> f32 {
 /// - Symmetric: encode and decode both use bucket bottoms
 ///
 /// Converts linear 0.0-1.0 to 0-65535 range
-pub fn delinearize_gamma2_u16(linear: f32) -> u16 {
-    let encoded = delinearize_gamma2(linear);
+pub fn delinearize_gamma2_u16_f32(linear: f32) -> u16 {
+    let encoded = delinearize_gamma2_f32(linear);
     (encoded * 65536.) as u16
 }
 
 /// Linearize an RGB triple (8-bit per channel)
-pub fn linearize_gamma2_rgb(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+pub fn linearize_gamma2_rgb_f32(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     (
-        linearize_gamma2_u8(r),
-        linearize_gamma2_u8(g),
-        linearize_gamma2_u8(b),
+        linearize_gamma2_u8_f32(r),
+        linearize_gamma2_u8_f32(g),
+        linearize_gamma2_u8_f32(b),
     )
 }
 
 /// Delinearize a linear RGB triple to 8-bit
-pub fn delinearize_gamma2_rgb(r: f32, g: f32, b: f32) -> (u8, u8, u8) {
+pub fn delinearize_gamma2_rgb_f32(r: f32, g: f32, b: f32) -> (u8, u8, u8) {
     (
-        delinearize_gamma2_u8(r),
-        delinearize_gamma2_u8(g),
-        delinearize_gamma2_u8(b),
+        delinearize_gamma2_u8_f32(r),
+        delinearize_gamma2_u8_f32(g),
+        delinearize_gamma2_u8_f32(b),
     )
 }
 
-// ==================== LEGACY TRANSFER FUNCTIONS ====================
-// Legacy sRGB and Rec.709 functions have been moved to src/colour/legacy/
-// Import them from there if needed:
-// use crate::colour::legacy::{linearize_srgb, delinearize_srgb, encode_bt709, etc.};
+// ==================== GAMMA 2 FUNCTIONS (ScalarF4E4) ====================
+
+/// Linearize a gamma 2 encoded value (0-1 range, ScalarF4E4 version)
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn linearize_gamma2_s44(encoded: ScalarF4E4) -> ScalarF4E4 {
+    encoded * encoded
+}
+
+/// Delinearize a linear value to gamma 2 (0-1 range, ScalarF4E4 version)
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn delinearize_gamma2_s44(linear: ScalarF4E4) -> ScalarF4E4 {
+    linear.sqrt()
+}
+
+/// Linearize an 8-bit gamma 2 encoded value (ScalarF4E4 version)
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn linearize_gamma2_u8_s44(encoded: u8) -> ScalarF4E4 {
+    let normalized = ScalarF4E4::from(encoded) / 256;
+    normalized * normalized
+}
+
+/// Delinearize a linear value to 8-bit gamma 2 (ScalarF4E4 version)
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn delinearize_gamma2_u8_s44(linear: ScalarF4E4) -> u8 {
+    let encoded = linear.sqrt();
+    let scaled: ScalarF4E4 = encoded * 256;
+    scaled.to_i32() as u8
+}
+
+/// Linearize a 16-bit gamma 2 encoded value (ScalarF4E4 version)
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn linearize_gamma2_u16_s44(encoded: u16) -> ScalarF4E4 {
+    let normalized = ScalarF4E4::from(encoded) / 65536;
+    normalized * normalized
+}
+
+/// Delinearize a linear value to 16-bit gamma 2 (ScalarF4E4 version)
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn delinearize_gamma2_u16_s44(linear: ScalarF4E4) -> u16 {
+    let encoded = linear.sqrt();
+    let scaled: ScalarF4E4 = encoded * 65536;
+    scaled.to_i32() as u16
+}
+
+/// Linearize an RGB triple (8-bit per channel, ScalarF4E4 version)
+#[cfg(feature = "spirix")]
+pub fn linearize_gamma2_rgb_s44(r: u8, g: u8, b: u8) -> (ScalarF4E4, ScalarF4E4, ScalarF4E4) {
+    (
+        linearize_gamma2_u8_s44(r),
+        linearize_gamma2_u8_s44(g),
+        linearize_gamma2_u8_s44(b),
+    )
+}
+
+/// Delinearize a linear RGB triple to 8-bit (ScalarF4E4 version)
+#[cfg(feature = "spirix")]
+pub fn delinearize_gamma2_rgb_s44(r: ScalarF4E4, g: ScalarF4E4, b: ScalarF4E4) -> (u8, u8, u8) {
+    (
+        delinearize_gamma2_u8_s44(r),
+        delinearize_gamma2_u8_s44(g),
+        delinearize_gamma2_u8_s44(b),
+    )
+}
 
 #[cfg(test)]
 mod tests {
@@ -1292,7 +2392,7 @@ mod tests {
     #[test]
     fn test_named_shortcuts_to_rgb() {
         assert_eq!(
-            VsfType::rk.to_rgb_linear(),
+            VsfType::rck.to_rgb_linear(),
             Some(RgbLinear {
                 r: 0.,
                 g: 0.,
@@ -1300,7 +2400,7 @@ mod tests {
             })
         );
         assert_eq!(
-            VsfType::rw.to_rgb_linear(),
+            VsfType::rcw.to_rgb_linear(),
             Some(RgbLinear {
                 r: 1.,
                 g: 1.,
@@ -1308,7 +2408,7 @@ mod tests {
             })
         );
         assert_eq!(
-            VsfType::rr.to_rgb_linear(),
+            VsfType::rcr.to_rgb_linear(),
             Some(RgbLinear {
                 r: 1.,
                 g: 0.,
@@ -1368,10 +2468,10 @@ mod tests {
 
         for &(r_in, g_in, b_in) in &test_colours {
             // sRGB → VSF RGB (linear storage)
-            let vsf = VsfType::from_srgb(r_in, g_in, b_in, ColourFormat::Rf);
+            let vsf = VsfType::from_srgb_f32(r_in, g_in, b_in, ColourFormat::Rf);
 
             // VSF RGB → sRGB
-            if let Some((r_out, g_out, b_out)) = vsf.to_srgb_u8() {
+            if let Some((r_out, g_out, b_out)) = vsf.f32_to_srgb_u8() {
                 // Roundtrip should be very close (within ±2 due to rounding and f32 precision)
                 let r_diff = (r_out as i16 - r_in as i16).abs();
                 let g_diff = (g_out as i16 - g_in as i16).abs();
@@ -1391,7 +2491,7 @@ mod tests {
     #[test]
     fn test_packed_rgb_roundtrip() {
         let original_u8 = (130u8, 60u8, 200u8);
-        let packed = VsfType::from_rgb8(
+        let packed = VsfType::from_rgb8_f32(
             original_u8.0,
             original_u8.1,
             original_u8.2,
@@ -1401,9 +2501,9 @@ mod tests {
 
         // Convert back to u8 for comparison
         let unpacked_u8 = (
-            delinearize_gamma2_u8(unpacked.r),
-            delinearize_gamma2_u8(unpacked.g),
-            delinearize_gamma2_u8(unpacked.b),
+            delinearize_gamma2_u8_f32(unpacked.r),
+            delinearize_gamma2_u8_f32(unpacked.g),
+            delinearize_gamma2_u8_f32(unpacked.b),
         );
 
         // Should be close (lossy compression)
@@ -1430,8 +2530,8 @@ mod tests {
     fn test_gamma2_roundtrip() {
         let values = [0., 0.25, 0.5, 0.75, 1.];
         for &v in &values {
-            let delinearized = delinearize_gamma2(v);
-            let linearized = linearize_gamma2(delinearized);
+            let delinearized = delinearize_gamma2_f32(v);
+            let linearized = linearize_gamma2_f32(delinearized);
             // Use epsilon comparison for floating point
             assert!(
                 (linearized - v).abs() < 1e-7,
@@ -1448,8 +2548,8 @@ mod tests {
     fn test_gamma2_u8_roundtrip() {
         let values = [0u8, 64, 128, 192, 255];
         for &v in &values {
-            let linearized = linearize_gamma2_u8(v);
-            let delinearized = delinearize_gamma2_u8(linearized);
+            let linearized = linearize_gamma2_u8_f32(v);
+            let delinearized = delinearize_gamma2_u8_f32(linearized);
             // ×256 truncation has roundtrip asymmetry - allow ±1 error
             assert!(
                 (delinearized as i16 - v as i16).abs() <= 1,
@@ -1465,7 +2565,7 @@ mod tests {
     #[test]
     fn test_bt2020_conversion() {
         // Test BT.2020 white (studio range [16,235]) → VSF RGB
-        let bt2020_white = VsfType::from_rec2020(235u8, 235u8, 235u8, ColourFormat::Ru);
+        let bt2020_white = VsfType::from_rec2020_f32(235u8, 235u8, 235u8, ColourFormat::Ru);
         let vsf_white = bt2020_white.to_rgb_linear().unwrap();
 
         // D65 white → E white adaptation results in slightly shifted values
@@ -1476,7 +2576,7 @@ mod tests {
         assert!(vsf_white.b > 0.9 && vsf_white.b <= 1.0, "b={}", vsf_white.b);
 
         // Test BT.2020 black (studio range [16,235]) → VSF RGB black
-        let bt2020_black = VsfType::from_rec2020(16u8, 16u8, 16u8, ColourFormat::Ru);
+        let bt2020_black = VsfType::from_rec2020_f32(16u8, 16u8, 16u8, ColourFormat::Ru);
         let vsf_black = bt2020_black.to_rgb_linear().unwrap();
 
         assert!(vsf_black.r < 0.01);
@@ -1484,9 +2584,51 @@ mod tests {
         assert!(vsf_black.b < 0.01);
 
         // Test BT.2020 primary red (studio range)
-        let bt2020_red = VsfType::from_rec2020(235u8, 16u8, 16u8, ColourFormat::Ru);
+        let bt2020_red = VsfType::from_rec2020_f32(235u8, 16u8, 16u8, ColourFormat::Ru);
         let vsf_red = bt2020_red.to_rgb_linear().unwrap();
         // Red should stay mostly red
         assert!(vsf_red.r > vsf_red.g && vsf_red.r > vsf_red.b);
+    }
+
+    #[test]
+    #[cfg(feature = "spirix")]
+    fn test_scalar_f4e4_conversions() {
+        use super::*;
+        use spirix::ScalarF4E4;
+
+        // Test u8 → ScalarF4E4 conversion (direct, no f32 roundtrip)
+        let u8_val = 128u8;
+        let s44_linear: ScalarF4E4 = <u8 as ColourValue<ScalarF4E4>>::to_linear_srgb(u8_val);
+
+        // Verify it's approximately in the right range (128/255 with sRGB curve ≈ 0.2)
+        let s44_f32 = s44_linear.to_f32();
+        assert!(s44_f32 > 0.15 && s44_f32 < 0.25, "s44_linear = {}", s44_f32);
+
+        // Test roundtrip: u8 → ScalarF4E4 → u8
+        let roundtrip = <u8 as ColourValue<ScalarF4E4>>::from_linear_srgb(s44_linear);
+        assert!(
+            (roundtrip as i16 - u8_val as i16).abs() <= 2,
+            "Roundtrip failed: {} → {} → {}",
+            u8_val,
+            s44_f32,
+            roundtrip
+        );
+
+        // Test that ScalarF4E4 passthru works
+        let s44_val = ScalarF4E4::from(0.5);
+        let s44_out: ScalarF4E4 = <ScalarF4E4 as ColourValue<ScalarF4E4>>::to_linear_srgb(s44_val);
+        assert!((s44_out.to_f32() - 0.5).abs() < 0.001, "Passthru failed");
+
+        // Test gamma2 conversions with ScalarF4E4
+        let u8_gamma = 180u8;
+        let s44_gamma2: ScalarF4E4 = <u8 as ColourValue<ScalarF4E4>>::to_linear_gamma2(u8_gamma);
+        let u8_back = <u8 as ColourValue<ScalarF4E4>>::from_linear_gamma2(s44_gamma2);
+        assert!(
+            (u8_back as i16 - u8_gamma as i16).abs() <= 1,
+            "Gamma2 roundtrip failed: {} → {} → {}",
+            u8_gamma,
+            s44_gamma2.to_f32(),
+            u8_back
+        );
     }
 }

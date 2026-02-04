@@ -84,9 +84,53 @@ pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
         b'g' => parse_signature(data, pointer),
         b'k' => parse_key(data, pointer),
         b'v' => parse_wrapped(data, pointer),
+        b'{' => parse_opcode(data, pointer),
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Invalid type marker: {}", type_byte as char),
         )),
     }
+}
+
+/// Parse a Toka opcode: `{` a b `}`
+///
+/// Format: 4 bytes total - opening brace, two lowercase letters, closing brace
+fn parse_opcode(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+    // Need 3 more bytes: a, b, }
+    if *pointer + 3 > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Incomplete opcode (need 3 more bytes after '{')",
+        ));
+    }
+
+    let a = data[*pointer];
+    let b = data[*pointer + 1];
+    let close = data[*pointer + 2];
+    *pointer += 3;
+
+    // Validate closing brace
+    if close != b'}' {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!(
+                "Invalid opcode: expected '}}' at position {}, got '{}'",
+                *pointer - 1,
+                close as char
+            ),
+        ));
+    }
+
+    // Validate opcode letters (must be lowercase a-z)
+    if !a.is_ascii_lowercase() || !b.is_ascii_lowercase() {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!(
+                "Invalid opcode letters: '{}{}' (must be lowercase a-z)",
+                a as char, b as char
+            ),
+        ));
+    }
+
+    Ok(VsfType::op(a, b))
 }

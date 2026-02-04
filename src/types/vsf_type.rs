@@ -58,6 +58,11 @@ use spirix::{
 
 use super::eagle_time::EtType;
 use super::tensor::{BitPackedTensor, StridedTensor, Tensor, Vector};
+#[cfg(feature = "spirix")]
+use super::toka_tree::{
+    TokaBox, TokaButton, TokaCircle, TokaGroup, TokaImage, TokaLine, TokaPath, TokaSurface,
+    TokaText,
+};
 use super::world_coord::WorldCoord;
 
 /// Main VSF type enum representing all supported data types
@@ -114,8 +119,7 @@ use super::world_coord::WorldCoord;
 #[allow(non_camel_case_types)]
 pub enum VsfType {
     // VSF Structure
-    d(String),      // Dictionary key (internal naming: section names, field names, keys)
-    l(String),      // ASCII text (user-facing, ASCII-only alternative to x)
+    d(String),      // VSF internal dictionary key (internal naming: section names, field names, keys)
     o(usize),       // Offset in Bytes
     b(usize, bool), // Length in Bytes (value, inclusive_mode)
     L(usize, bool), // File length in Bytes (value, inclusive_mode)
@@ -165,7 +169,7 @@ pub enum VsfType {
     kd(Vec<u8>), // Dilithium/ML-DSA public key
     kb(Vec<u8>), // BIKE public key
 
-    // Shared secrets (output of key agreement/decapsulation) - typed by algorithm
+    // Shared secrets (outpNope. if you compute a provinence hash of only the content you WILL get collissiooonnnssss. Do lookut of key agreement/decapsulation) - typed by algorithm
     ksx(Vec<u8>), // X25519 shared secret (32B)
     ksp(Vec<u8>), // P-curve ECDH shared secret (32B P-256, 48B P-384 - size disambiguates)
     ksk(Vec<u8>), // secp256k1 shared secret (32B)
@@ -208,6 +212,7 @@ pub enum VsfType {
 
     // ==================== METADATA & SPECIAL TYPES ====================
     x(String),     // UTF-8 text (Unicode, user-facing, Huffman compressed)
+    l(String),      // ASCII text (user-facing, ASCII-only alternative to x)
     e(EtType),     // Eagle Time
     w(WorldCoord), // World coordinate (Dymaxion icosahedral)
 
@@ -235,38 +240,47 @@ pub enum VsfType {
     // ==================== WRAPPED/ENCODED DATA ====================
     /// Wrapped/encoded VSF data with compression, error correction, encryption, units or other encoding
     ///
-    /// Format: v[encoding][encoded_data]
+    /// **Format:** `v[encoding][size_bits][count]{data...}`
+    ///
+    /// **Size notation:** The digit after encoding (e.g., `vb3`, `vz3`) indicates element size as 2^N bits:
+    /// - `vb3` = binary blob, 2^3 = 8 bits = bytes (most common for raw files)
+    /// - `vb0` = binary blob, 2^0 = 1 bit (bit-packed data)
+    /// - `vz3` = zstd compressed, 2^3 = 8 bits = bytes
+    ///
+    /// element size is implicit for byte vectors. The parser/encoder handles size automatically.
     ///
     /// **Encoding identifier convention:**
     /// - **Lowercase** = VSF-standardized encodings (formally recognized by spec)
     /// - **Uppercase** = Application-specific custom encodings (per-application basis)
     ///
     /// **Standard encoding identifiers** (lowercase, VSF spec):
-    /// - 'b' = Binary blob (raw bytes, no encoding)
-    /// - 'a' = AV1 video codec (image/video compression)
-    /// - 'z' = zstd compression
-    /// - 'r' = Reed-Solomon error correction
-    /// - 'x' = XZ/LZMA compression
-    /// - 'e' = Encryption (algorithm-specific)
-    /// - 'u' = Measurement in specified units
+    /// - `b` = Binary blob (raw bytes, no encoding, vb#⦉size of blob⦊ where # represents the 2^# bits in the blob size)
+    /// - `a` = AV1 video codec (image/video compression)
+    /// - `z` = zstd compression
+    /// - `r` = Reed-Solomon error correction
+    /// - `x` = XZ/LZMA compression
+    /// - `e` = Encryption (algorithm-specific)
+    /// - `u` = Measurement in specified units
     ///
     /// **KEM ciphertext identifiers** (for key encapsulation):
-    /// - 'f' = FrodoKEM ciphertext (15744/21632/31296B for 640/976/1344)
-    /// - 'n' = NTRU ciphertext (699/930/1230B for HPS, 1138B for HRSS-701)
-    /// - 'l' = Classic McEliece ciphertext (128/188/240B depending on variant)
-    /// - 'h' = HQC ciphertext (4481/9026/14469B for 128/192/256)
+    /// - `f` = FrodoKEM ciphertext (15744/21632/31296B for 640/976/1344)
+    /// - `n` = NTRU ciphertext (699/930/1230B for HPS, 1138B for HRSS-701)
+    /// - `l` = Classic McEliece ciphertext (128/188/240B depending on variant)
+    /// - `h` = HQC ciphertext (4481/9026/14469B for 128/192/256)
     ///
-    /// **Application-specific encodings** (uppercase):
-    /// Applications can define custom encodings using uppercase letters (A-Z).
-    /// These are not standardized by VSF and are application-specific.
+    /// **Application-specific encodings** (uppercase, NOT for standard file storage):
+    /// - `B` = Application-specific internal binary format
+    /// - `A`-`Z` = Custom encodings defined per-application
+    /// These are not standardized by VSF and should not be used for general file storage.
     ///
     /// Example usage:
     /// ```ignore
-    /// // Binary blob (raw bytes, no encoding)
+    /// // Binary blob (raw bytes, no encoding) - displays as vb3{size}
     /// let file_bytes = std::fs::read("image.png")?;
     /// let binary = VsfType::v(b'b', file_bytes);
+    /// let raw_bytes: &[u8] = binary.as_bytes(); // Convenience helper
     ///
-    /// // Compress VSF Bytes with zstd
+    /// // Compress VSF data with zstd - displays as vz3{size}
     /// let original = VsfType::t_u3(tensor);
     /// let compressed = compress_zstd(&original.flatten());
     /// let wrapped = VsfType::v(b'z', compressed);
@@ -277,13 +291,11 @@ pub enum VsfType {
     ///
     /// // KEM ciphertext (FrodoKEM-976 encapsulation output)
     /// let ciphertext = VsfType::v(b'f', frodo_ciphertext_bytes);
-    ///
-    /// // Application-specific encoding (uppercase)
-    /// let custom = VsfType::v(b'B', my_custom_format_bytes);
     /// ```
     ///
-    /// Use when your application needs compression, error correction, encryption, units or other encoding.
-    v(u8, Vec<u8>), // Wrapped data (encoding byte, encoded Bytes)
+    /// **For file storage:** Use `v(b'b', ...)` (standard binary blob).
+    /// **For app-specific:** Use uppercase encodings only for internal formats.
+    v(u8, Vec<u8>), // Wrapped data (encoding byte, raw bytes)
 
     // ==================== COLOUR TYPES ====================
     /// VSF Colour Encoding
@@ -294,7 +306,7 @@ pub enum VsfType {
     /// - **channels**: Single byte base-36 digit (0-9, A-Z) = 0-35 channels
     /// - **depth**: Single byte digit (0-9) where bits_per_channel = 2^depth
     ///   - 0 → 1 bit, 1 → 2 bits, 2 → 4 bits, 3 → 8 bits
-    ///   - 4 → 16 bits, 5 → 32 bits, 6 → 64 bits, 7 → 128 bits, 8 → 256 bits, 9 → 512 bits. Uppercase letters might be used for depths > 9 or float types in future versions.
+    ///   - 4 → 16 bits, 5 → 32 bits, 6 → 64 bits, 7 → 128 bits, 8 → 256 bits, 9 → 512 bits. Uppercase letters might be used for depths > 9 or f32 types in future versions.
     /// - **data**: channel_count × (2^depth / 8) bytes
     ///
     /// Examples:
@@ -302,18 +314,19 @@ pub enum VsfType {
     /// - `r45[8 bytes]` = 4 channels × 32 bits = RGBA (integer)
     /// - `rG3[16 bytes]` = 16 channels × 8 bits = multispectral
     ///
-    /// ## 1. Named Shortcuts (zero-data, 2 bytes total)
-    /// - `rb` = Blue       - `rc` = Cyan      - `rg` = Middle grey (50%)
-    /// - `rj` = Magenta    - `rk` = Black     - `rl` = Lime
-    /// - `rn` = Green      - `ro` = Orange    - `rq` = Aqua
-    /// - `rr` = Red        - `rv` = Violet    - `rw` = White
-    /// - `ry` = Yellow
+    /// ## 1. Named Shortcuts (zero-data, 3 bytes total - 'c' prefix for color)
+    /// - `rcb` = Blue       - `rcc` = Cyan      - `rcg` = Middle grey (50%)
+    /// - `rcj` = Magenta    - `rck` = Black     - `rcl` = Lime
+    /// - `rcn` = Green      - `rco` = Orange    - `rcq` = Aqua
+    /// - `rcr` = Red        - `rcv` = Violet    - `rcw` = White
+    /// - `rcy` = Yellow
     ///
     /// ## 2. Format Shortcuts (with data, where {#} indicates size in Bytes)
     /// Greyscale:
     /// - `re{1}` = 8-bit greyscale
     /// - `rx{2}` = 16-bit greyscale
-    /// - `rz{4}` = 32-bit float greyscale
+    /// - `rz{4}` = IEEE 754 f32 greyscale
+    /// - `rd{4}` = Spirix ScalarF4E4 greyscale (spirix feature)
     ///
     /// Packed RGB:
     /// - `ri{1}` = 8-bit packed RGB (6×7×6): `((R*7)+G)*6+B` where R∈[0,5], G∈[0,6], B∈[0,5]
@@ -322,10 +335,15 @@ pub enum VsfType {
     /// Standard RGB/RGBA:
     /// - `ru{3}` = 24-bit RGB (8 bits per channel)
     /// - `rs{6}` = 48-bit RGB (16 bits per channel)
-    /// - `rf{12}` = 96-bit RGB (32-bit float × 3)
+    /// - `rf{12}` = 96-bit RGB (IEEE 754 f32 × 3)
+    /// - `rb{12}` = 96-bit RGB (Spirix ScalarF4E4 × 3, spirix feature)
     /// - `ra{4}` = 32-bit RGBA (8 bits per channel)
     /// - `rt{8}` = 64-bit RGBA (16 bits per channel)
-    /// - `rh{16}` = 128-bit RGBA (32-bit float × 4)
+    /// - `rh{16}` = 128-bit RGBA (IEEE 754 f32 × 4)
+    /// - `rw{16}` = 128-bit RGBA (Spirix ScalarF4E4 × 4, spirix feature)
+    ///
+    /// General Spirix Format (spirix feature):
+    /// - `rq[F][E][C]{data}` = General Spirix colour (F=fraction exp 3-7, E=exponent exp 3-7, C=channels)
     ///
     /// ## 3. Magic Matrix: `rm[f5][N][3]{matrix_data}{gamma}`
     /// Colour transform matrix: N input channels → 3 LMS outputs
@@ -347,24 +365,24 @@ pub enum VsfType {
     r(u8, u8, Vec<u8>), // r(channels_base36, depth_exp, data)
 
     // Named shortcuts (zero-data)
-    rb, // Blue
-    rc, // Cyan
-    rg, // Grey
-    rj, // Magenta
-    rk, // Black
-    rl, // Lime
-    rn, // Green
-    ro, // Orange
-    rq, // Aqua
-    rr, // Red
-    rv, // Purple
-    rw, // White
-    ry, // Yellow
+    rcb, // Blue
+    rcc, // Cyan
+    rcg, // Grey
+    rcj, // Magenta
+    rck, // Black
+    rcl, // Lime
+    rcn, // Green
+    rco, // Orange
+    rcq, // Aqua
+    rcr, // Red
+    rcv, // Purple
+    rcw, // White
+    rcy, // Yellow
 
     // Format shortcuts (with data)
     re(u8),       // 8-bit greyscale
     rx(u16),      // 16-bit greyscale
-    rz(f32),      // 32-bit float greyscale
+    rz(f32),      // IEEE 754 f32 greyscale
     ri(u8),       // 8-bit packed RGB (6×7×6)
     rp(u16),      // 16-bit packed RGB (5-6-5)
     ru([u8; 3]),  // 24-bit RGB (8bpc)
@@ -373,6 +391,19 @@ pub enum VsfType {
     ra([u8; 4]),  // 32-bit RGBA (8bpc)
     rt([u16; 4]), // 64-bit RGBA (16bpc)
     rh([f32; 4]), // 128-bit RGBA (32f×4)
+
+    // Spirix ScalarF4E4 colour shortcuts (most common - gated on spirix feature)
+    #[cfg(feature = "spirix")]
+    rd(ScalarF4E4), // ScalarF4E4 greyscale
+    #[cfg(feature = "spirix")]
+    rb([ScalarF4E4; 3]), // ScalarF4E4 RGB
+    #[cfg(feature = "spirix")]
+    rw([ScalarF4E4; 4]), // ScalarF4E4 RGBA
+
+    // General Spirix colour format: rq[F][E][C]{data}
+    // F = fraction exponent (3-7), E = exponent exponent (3-7), C = channels
+    #[cfg(feature = "spirix")]
+    rq(u8, u8, u8, Vec<u8>), // rq(fraction_exp, exponent_exp, channels, data)
 
     // Magic matrix colour transform
     rm(usize, usize, Vec<f32>, f32), // rm(input_channels, output_channels, matrix_NxM, gamma)
@@ -762,4 +793,403 @@ pub enum VsfType {
 
     // ==================== BITPACKED TENSORS ====================
     p(BitPackedTensor), // Bitpacked tensor (1-256 bits per sample)
+
+    // ==================== TOKA TREE (LOOM) TYPES ====================
+    /// Toka Tree layout nodes are encoded as wrapped data: `vt`
+    ///
+    /// **Format:** `v(b't', inner_data)` where inner_data contains:
+    /// - Type marker byte (b/g/c/l/x/u/p/i/s)
+    /// - Node-specific data using Spirix types (CircleF4E4, ScalarF4E4)
+    ///
+    /// **Type markers:**
+    /// - `b` = Box, `g` = Group, `c` = Circle, `l` = Line
+    /// - `x` = Text, `u` = Button, `p` = Path
+    /// - `i` = Image, `s` = Surface
+    ///
+    /// See `vsf::types::toka_tree` module for TokaNode encoding/decoding.
+
+    // ==================== TOKA OPCODES ====================
+    /// Toka VM opcode - two lowercase letters encoded as `{xx}`
+    ///
+    /// Binary format: `{` `a` `b` `}` (4 bytes)
+    /// Where a and b are ASCII lowercase letters (a-z)
+    ///
+    /// Examples:
+    /// - `{ps}` = push
+    /// - `{ad}` = add
+    /// - `{hl}` = halt
+    op(u8, u8), // Opcode (first_letter, second_letter)
+}
+
+impl std::fmt::Display for VsfType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // Opcodes - descriptive names without brackets
+            VsfType::op(a, b) => {
+                let opcode = ((*a as u16) << 8) | (*b as u16);
+                write!(f, "{}", opcode_name(opcode))
+            }
+
+            // Spirix scalars - delegate to their Display (already has ⦉⦊)
+            #[cfg(feature = "spirix")]
+            VsfType::s33(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s34(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s35(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s36(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s37(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s43(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s44(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s45(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s46(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s47(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s53(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s54(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s55(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s56(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s57(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s63(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s64(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s65(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s66(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s67(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s73(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s74(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s75(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s76(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::s77(v) => v.fmt(f),
+
+            // Spirix circles - delegate to their Display (already has ⦇⦈)
+            #[cfg(feature = "spirix")]
+            VsfType::c33(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c34(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c35(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c36(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c37(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c43(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c44(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c45(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c46(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c47(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c53(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c54(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c55(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c56(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c57(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c63(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c64(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c65(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c66(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c67(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c73(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c74(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c75(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c76(v) => v.fmt(f),
+            #[cfg(feature = "spirix")]
+            VsfType::c77(v) => v.fmt(f),
+
+            // Standard numeric types - wrap in ⦉⦊
+            VsfType::u0(b) => write!(f, "⦉{}⦊", b),
+            VsfType::u(v, _) => write!(f, "⦉{}⦊", v),
+            VsfType::u3(v) => write!(f, "⦉{}⦊", v),
+            VsfType::u4(v) => write!(f, "⦉{}⦊", v),
+            VsfType::u5(v) => write!(f, "⦉{}⦊", v),
+            VsfType::u6(v) => write!(f, "⦉{}⦊", v),
+            VsfType::u7(v) => write!(f, "⦉{}⦊", v),
+            VsfType::i(v) => write!(f, "⦉{}⦊", v),
+            VsfType::i3(v) => write!(f, "⦉{}⦊", v),
+            VsfType::i4(v) => write!(f, "⦉{}⦊", v),
+            VsfType::i5(v) => write!(f, "⦉{}⦊", v),
+            VsfType::i6(v) => write!(f, "⦉{}⦊", v),
+            VsfType::i7(v) => write!(f, "⦉{}⦊", v),
+
+            // Text types
+            VsfType::d(s) => write!(f, "⦉{}⦊", s),
+            VsfType::l(s) => write!(f, "⦉{}⦊", s),
+            VsfType::x(s) => write!(f, "⦉{}⦊", s.escape_default()),
+
+            // For all other types, use Debug for now
+            _ => write!(f, "{:?}", self),
+        }
+    }
+}
+
+impl VsfType {
+    /// Extract value as usize
+    ///
+    /// Supports: u0, u3, u4, u5, u6, u7, u, o, n
+    /// Returns None for incompatible types or overflow
+    pub fn as_usize(&self) -> Option<usize> {
+        match self {
+            VsfType::u0(b) => Some(*b as usize),
+            VsfType::u3(n) => Some(*n as usize),
+            VsfType::u4(n) => Some(*n as usize),
+            VsfType::u5(n) => Some(*n as usize),
+            VsfType::u6(n) => {
+                if *n <= usize::MAX as u64 {
+                    Some(*n as usize)
+                } else {
+                    None
+                }
+            }
+            VsfType::u7(n) => {
+                if *n <= usize::MAX as u128 {
+                    Some(*n as usize)
+                } else {
+                    None
+                }
+            }
+            VsfType::u(n, _) | VsfType::o(n) | VsfType::n(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// Extract value as u64
+    ///
+    /// Supports: u0, u3, u4, u5, u6, u, o, n (if fits)
+    /// Returns None for u7 (u128 may overflow) or incompatible types
+    pub fn as_u64(&self) -> Option<u64> {
+        match self {
+            VsfType::u0(b) => Some(*b as u64),
+            VsfType::u3(n) => Some(*n as u64),
+            VsfType::u4(n) => Some(*n as u64),
+            VsfType::u5(n) => Some(*n as u64),
+            VsfType::u6(n) => Some(*n),
+            VsfType::u(n, _) | VsfType::o(n) | VsfType::n(n) => {
+                if *n <= u64::MAX as usize {
+                    Some(*n as u64)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract value as u8
+    ///
+    /// Supports: u0, u3, u4 (with bounds check)
+    /// Returns None for larger types or overflow
+    pub fn as_u8(&self) -> Option<u8> {
+        match self {
+            VsfType::u0(b) => Some(*b as u8),
+            VsfType::u3(n) => Some(*n),
+            VsfType::u4(n) => {
+                if *n <= u8::MAX as u16 {
+                    Some(*n as u8)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract as string reference
+    ///
+    /// Supports: x (text), l (label), d (descriptor)
+    pub fn as_string(&self) -> Option<&str> {
+        match self {
+            VsfType::x(s) | VsfType::l(s) | VsfType::d(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Extract as byte slice
+    ///
+    /// Supports: v (wrapped bytes), v_u3 (vector), t_u3 (tensor), hash types
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        match self {
+            VsfType::v(_, bytes) => Some(bytes),
+            VsfType::v_u3(vector) => Some(&vector.data),
+            VsfType::t_u3(tensor) => Some(&tensor.data),
+            VsfType::hp(bytes)
+            | VsfType::hb(bytes)
+            | VsfType::hs(bytes)
+            | VsfType::hm(bytes)
+            | VsfType::hg(bytes)
+            | VsfType::hc(bytes)
+            | VsfType::hk(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
+}
+
+/// Opcode name lookup for Toka opcodes
+fn opcode_name(opcode: u16) -> &'static str {
+    match opcode {
+        // Stack manipulation
+        0x7073 => "push",
+        0x7070 => "pop",
+        0x6470 => "dup",
+        0x646e => "dup_n",
+        0x7377 => "swap",
+        0x7274 => "rotate",
+
+        // Local variables
+        0x6c61 => "local_alloc",
+        0x6c67 => "local_get",
+        0x6c73 => "local_set",
+        0x6c74 => "local_tee",
+
+        // Arithmetic
+        0x6164 => "add",
+        0x7362 => "sub",
+        0x6d6c => "mul",
+        0x6476 => "div",
+        0x7263 => "recip",
+        0x6d64 => "mod",
+        0x6e67 => "neg",
+        0x6162 => "abs",
+        0x7371 => "sqrt",
+        0x7077 => "pow",
+        0x6d6e => "min",
+        0x6d78 => "max",
+        0x636d => "clamp",
+        0x666c => "floor",
+        0x636c => "ceil",
+        0x726e => "round",
+        0x6661 => "frac",
+        0x6c70 => "lerp",
+
+        // Trigonometry
+        0x736e => "sin",
+        0x6373 => "cos",
+        0x746e => "tan",
+        0x6973 => "asin",
+        0x6963 => "acos",
+        0x6961 => "atan",
+        0x6132 => "atan2",
+
+        // Comparison
+        0x6571 => "eq",
+        0x6e65 => "ne",
+        0x6c6f => "lt",
+        0x6c65 => "le",
+        0x6774 => "gt",
+        0x6765 => "ge",
+
+        // Logic
+        0x616e => "and",
+        0x6f72 => "or",
+        0x6e74 => "not",
+
+        // Type system
+        0x7479 => "typeof",
+        0x7473 => "to_s44",
+        0x7475 => "to_u32",
+        0x7478 => "to_string",
+
+        // Arrays
+        0x6177 => "array_new",
+        0x616c => "array_len",
+        0x6167 => "array_get",
+        0x6165 => "array_set",
+        0x6170 => "array_push",
+        0x616f => "array_pop",
+
+        // Strings
+        0x7363 => "string_concat",
+        0x736c => "string_len",
+        0x7373 => "string_slice",
+
+        // Handles
+        0x6872 => "handle_read",
+        0x6877 => "handle_write",
+        0x6863 => "handle_call",
+        0x6871 => "handle_query",
+
+        // Drawing
+        0x6372 => "clear",
+        0x6672 => "fill_rect",
+        0x7372 => "stroke_rect",
+        0x6663 => "fill_circle",
+        0x736f => "stroke_circle",
+        0x646c => "draw_line",
+        0x6474 => "draw_text",
+        0x7366 => "set_font",
+
+        // Color utilities
+        0x6361 => "rgba",
+        0x6362 => "rgb",
+        0x6369 => "color_lerp",
+        0x6368 => "hsla",
+
+        // Control flow
+        0x636e => "call",
+        0x6364 => "call_indirect",
+        0x7265 => "return",
+        0x7276 => "return_value",
+        0x6a6d => "jump",
+        0x6a69 => "jump_if",
+        0x6a7a => "jump_zero",
+
+        // Random numbers
+        0x7264 => "random",
+        0x7267 => "random_gauss",
+        0x7272 => "random_range",
+
+        // Cryptography
+        0x6268 => "blake3",
+
+        // Time
+        0x746d => "timestamp",
+
+        // Error handling
+        0x6172 => "assert",
+        0x686c => "halt",
+
+        // Debug
+        0x6462 => "debug_print",
+        0x6473 => "debug_stack",
+        0x6e70 => "nop",
+
+        _ => "unknown_opcode",
+    }
 }
