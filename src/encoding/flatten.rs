@@ -228,20 +228,20 @@ impl VsfType {
                 flat
             }
 
-            // Named shortcuts (zero-data)
-            VsfType::rb => vec![b'r', b'b'], // Blue
-            VsfType::rc => vec![b'r', b'c'], // Cyan
-            VsfType::rg => vec![b'r', b'g'], // Middle grey
-            VsfType::rj => vec![b'r', b'j'], // Magenta
-            VsfType::rk => vec![b'r', b'k'], // Black
-            VsfType::rl => vec![b'r', b'l'], // Lime
-            VsfType::rn => vec![b'r', b'n'], // Green
-            VsfType::ro => vec![b'r', b'o'], // Orange
-            VsfType::rq => vec![b'r', b'q'], // Aqua
-            VsfType::rr => vec![b'r', b'r'], // Red
-            VsfType::rv => vec![b'r', b'v'], // Violet
-            VsfType::rw => vec![b'r', b'w'], // White
-            VsfType::ry => vec![b'r', b'y'], // Yellow
+            // Named shortcuts (zero-data) - 'c' prefix for color
+            VsfType::rcb => vec![b'r', b'c', b'b'], // Blue
+            VsfType::rcc => vec![b'r', b'c', b'c'], // Cyan
+            VsfType::rcg => vec![b'r', b'c', b'g'], // Middle grey
+            VsfType::rcj => vec![b'r', b'c', b'j'], // Magenta
+            VsfType::rck => vec![b'r', b'c', b'k'], // Black
+            VsfType::rcl => vec![b'r', b'c', b'l'], // Lime
+            VsfType::rcn => vec![b'r', b'c', b'n'], // Green
+            VsfType::rco => vec![b'r', b'c', b'o'], // Orange
+            VsfType::rcq => vec![b'r', b'c', b'q'], // Aqua
+            VsfType::rcr => vec![b'r', b'c', b'r'], // Red
+            VsfType::rcv => vec![b'r', b'c', b'v'], // Violet
+            VsfType::rcw => vec![b'r', b'c', b'w'], // White
+            VsfType::rcy => vec![b'r', b'c', b'y'], // Yellow
 
             // Format shortcuts with data
             VsfType::re(grey) => vec![b'r', b'e', *grey],
@@ -303,6 +303,39 @@ impl VsfType {
                 for channel in rgba {
                     flat.extend_from_slice(&channel.to_be_bytes());
                 }
+                flat
+            }
+
+            // Spirix ScalarF4E4 colour formats
+            #[cfg(feature = "spirix")]
+            VsfType::rd(grey) => {
+                let mut flat = vec![b'r', b'd'];
+                flat.extend_from_slice(&grey.fraction.to_be_bytes());
+                flat.extend_from_slice(&grey.exponent.to_be_bytes());
+                flat
+            }
+            #[cfg(feature = "spirix")]
+            VsfType::rb(rgb) => {
+                let mut flat = vec![b'r', b'b'];
+                for channel in rgb {
+                    flat.extend_from_slice(&channel.fraction.to_be_bytes());
+                    flat.extend_from_slice(&channel.exponent.to_be_bytes());
+                }
+                flat
+            }
+            #[cfg(feature = "spirix")]
+            VsfType::rw(rgba) => {
+                let mut flat = vec![b'r', b'w'];
+                for channel in rgba {
+                    flat.extend_from_slice(&channel.fraction.to_be_bytes());
+                    flat.extend_from_slice(&channel.exponent.to_be_bytes());
+                }
+                flat
+            }
+            #[cfg(feature = "spirix")]
+            VsfType::rq(frac_exp, exp_exp, channels, data) => {
+                let mut flat = vec![b'r', b'q', *frac_exp, *exp_exp, *channels];
+                flat.extend_from_slice(data);
                 flat
             }
 
@@ -4097,6 +4130,13 @@ impl VsfType {
 
                 flat
             }
+
+            // ==================== TOKA OPCODES ====================
+            VsfType::op(a, b) => {
+                // Format: { a b } (4 bytes)
+                vec![b'{', *a, *b, b'}']
+            }
+
         }
     }
 
@@ -4227,13 +4267,13 @@ impl VsfType {
                 3 + encoded_usize_len(bytes.len()) + bytes.len()
             }
 
-            VsfType::ah(bytes)
-            | VsfType::ap(bytes)
-            | VsfType::ab(bytes)
-            | VsfType::ac(bytes) => {
+            VsfType::ah(bytes) | VsfType::ap(bytes) | VsfType::ab(bytes) | VsfType::ac(bytes) => {
                 // prefix + encoded_length + data
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
             }
+
+            // Toka opcodes: { a b } = 4 bytes
+            VsfType::op(_, _) => 4,
 
             // For complex types, fall back to flatten().len()
             // TODO: add optimized versions for these
