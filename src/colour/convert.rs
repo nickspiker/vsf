@@ -57,6 +57,7 @@
 use crate::colour::legacy::{
     delinearize_srgb, encode_bt709, linearize_bt709, linearize_srgb_u16, linearize_srgb_u8,
 };
+use crate::colour::legacy::constants::VSF_RGB2SRGB;
 use crate::colour::rec2020::REC2020_2VSF_RGB;
 use crate::colour::{
     LMS2PHOTOPIC,
@@ -69,6 +70,28 @@ use crate::types::VsfType;
 use spirix::ScalarF4E4;
 #[cfg(feature = "spirix")]
 pub type S44 = ScalarF4E4;
+
+/// VSF RGB → sRGB colour space conversion matrix (S44 format)
+///
+/// This is the ScalarF4E4 version of VSF_RGB2SRGB for use in pure S44 pipelines.
+/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries) to linear sRGB.
+///
+/// Returns the matrix as a 9-element array in column-major order.
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn vsf_rgb2srgb_s44() -> [ScalarF4E4; 9] {
+    [
+        ScalarF4E4::from(VSF_RGB2SRGB[0]),
+        ScalarF4E4::from(VSF_RGB2SRGB[1]),
+        ScalarF4E4::from(VSF_RGB2SRGB[2]),
+        ScalarF4E4::from(VSF_RGB2SRGB[3]),
+        ScalarF4E4::from(VSF_RGB2SRGB[4]),
+        ScalarF4E4::from(VSF_RGB2SRGB[5]),
+        ScalarF4E4::from(VSF_RGB2SRGB[6]),
+        ScalarF4E4::from(VSF_RGB2SRGB[7]),
+        ScalarF4E4::from(VSF_RGB2SRGB[8]),
+    ]
+}
 
 /// Trait for colour value types that can be converted to/from linear
 ///
@@ -2381,6 +2404,55 @@ pub fn delinearize_gamma2_rgb_s44(r: ScalarF4E4, g: ScalarF4E4, b: ScalarF4E4) -
         delinearize_gamma2_u8_s44(g),
         delinearize_gamma2_u8_s44(b),
     )
+}
+
+/// Apply sRGB OETF (gamma encoding) using S44 arithmetic
+///
+/// Converts linear sRGB values to gamma-encoded sRGB using the piecewise sRGB transfer function.
+/// This is the ScalarF4E4 version for use in pure S44 pipelines without IEEE-754 floats.
+///
+/// # Arguments
+/// * `linear` - Linear sRGB value in range [0.0, 1.0]
+///
+/// # Returns
+/// Gamma-encoded sRGB value in range [0.0, 1.0]
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn srgb_oetf_s44(linear: ScalarF4E4) -> ScalarF4E4 {
+    let threshold = ScalarF4E4::from(0.0031308);
+    if linear <= threshold {
+        ScalarF4E4::from(12.92) * linear
+    } else {
+        let gamma_exp = ScalarF4E4::from(1.0 / 2.4);
+        ScalarF4E4::from(1.055) * linear.pow(gamma_exp) - ScalarF4E4::from(0.055)
+    }
+}
+
+/// Quantize S44 value in [0,1] to u8 in [0,255]
+///
+/// Clamps the input to [0,1], scales by 255, and rounds to nearest integer.
+/// This is a helper for converting S44 colour values to 8-bit output.
+///
+/// # Arguments
+/// * `value` - ScalarF4E4 value (nominally in [0.0, 1.0] but will be clamped)
+///
+/// # Returns
+/// Quantized u8 value in [0, 255]
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn quantize_s44_to_u8(value: ScalarF4E4) -> u8 {
+    // Clamp to [0, 1]
+    let clamped = if value < ScalarF4E4::ZERO {
+        ScalarF4E4::ZERO
+    } else if value > ScalarF4E4::ONE {
+        ScalarF4E4::ONE
+    } else {
+        value
+    };
+
+    // Scale by 255 and round to nearest integer
+    let scaled = clamped * ScalarF4E4::from(255);
+    scaled.to_i32() as u8
 }
 
 #[cfg(test)]
