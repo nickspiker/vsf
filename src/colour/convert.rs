@@ -2428,33 +2428,6 @@ pub fn srgb_oetf_s44(linear: ScalarF4E4) -> ScalarF4E4 {
     }
 }
 
-/// Quantize S44 value in [0,1] to u8 in [0,255]
-///
-/// Clamps the input to [0,1], scales by 255, and rounds to nearest integer.
-/// This is a helper for converting S44 colour values to 8-bit output.
-///
-/// # Arguments
-/// * `value` - ScalarF4E4 value (nominally in [0.0, 1.0] but will be clamped)
-///
-/// # Returns
-/// Quantized u8 value in [0, 255]
-#[cfg(feature = "spirix")]
-#[inline]
-pub fn quantize_s44_to_u8(value: ScalarF4E4) -> u8 {
-    // Clamp to [0, 1]
-    let clamped = if value < ScalarF4E4::ZERO {
-        ScalarF4E4::ZERO
-    } else if value > ScalarF4E4::ONE {
-        ScalarF4E4::ONE
-    } else {
-        value
-    };
-
-    // Scale by 255 and round to nearest integer
-    let scaled = clamped * ScalarF4E4::from(255);
-    scaled.to_i32() as u8
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

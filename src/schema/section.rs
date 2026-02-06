@@ -405,8 +405,8 @@ impl SectionBuilder {
         // Section start marker
         bytes.push(b'[');
 
-        // Section name as dictionary key
-        bytes.extend(VsfType::d(self.schema.name.clone()).flatten());
+        // NOTE: Section name is NOT included here for sections within 1MB of header.
+        // For sections >1MB away, the name would be required with metadata (not yet implemented).
 
         // Encode each field using FieldValue.flatten()
         for field in &self.fields {

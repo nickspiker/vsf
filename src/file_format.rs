@@ -996,12 +996,13 @@ impl VsfSection {
         let mut bytes = Vec::new();
         bytes.push(b'[');
 
-        // Section name first (so you know what you're looking at)
-        bytes.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
-
-        // Add n{count}b{length} suffix for sections >1MB from file start
+        // Add n{count}b{length} suffix + section name for sections >1MB from file start
+        // For sections <=1MB, section name is ONLY in the header TOC, not in the body
         const ONE_MB: usize = 1_048_576;
         if file_offset > ONE_MB {
+            // Section name + metadata only for distant sections (>1MB from header)
+            bytes.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
+
             let field_count = self.fields.len();
 
             // Encode fields to know their size
@@ -1073,34 +1074,35 @@ impl VsfSection {
         let section_start = *ptr;
         *ptr += 1;
 
-        // Parse section name first
-        let name = match crate::parse(data, ptr).map_err(|e| format!("VsfSection: Failed to parse name: {}", e))? {
-            VsfType::d(s) => s,
-            other => return Err(format!("VsfSection: Expected section name (d type), found {:?}", other)),
-        };
+        // For sections <1MB, no name is present - fields start immediately with '('
+        // For sections >1MB, name is REQUIRED with n{count}b{length}: [d"name"n{count}b{length}(fields...)]
+        let (name, length_hint, count_hint) = if *ptr < data.len() && data[*ptr] == b'(' {
+            // No name - section within 1MB of header
+            (String::from(""), None, None)
+        } else {
+            // Parse section name
+            let section_name = match crate::parse(data, ptr).map_err(|e| format!("VsfSection: Failed to parse name: {}", e))? {
+                VsfType::d(s) => s,
+                other => return Err(format!("VsfSection: Expected section name (d type), found {:?}", other)),
+            };
 
-        // Check for optional n{count}b{length} suffix AFTER name (sections >1MB)
-        // Format: [d"name"n{5}b{203}(fields...)]
-        let mut length_hint = None;
-        let mut count_hint = None;
-
-        if *ptr < data.len() && data[*ptr] == b'n' {
+            // When section name is present, n{count} and b{length} are REQUIRED
             // Parse n{count}
-            match crate::parse(data, ptr) {
-                Ok(VsfType::n(count)) => count_hint = Some(count),
-                Ok(_) => {} // Not an n type, rewind would be needed but we'll just skip
-                Err(_) => {}
-            }
+            let count = match crate::parse(data, ptr) {
+                Ok(VsfType::n(c)) => c,
+                Ok(other) => return Err(format!("VsfSection: Expected n{{count}} after section name, found {:?}", other)),
+                Err(e) => return Err(format!("VsfSection: Failed to parse n{{count}}: {}", e)),
+            };
 
-            // Parse b{length} after n{count}
-            if *ptr < data.len() && data[*ptr] == b'b' {
-                match crate::parse(data, ptr) {
-                    Ok(VsfType::b(len, _)) => length_hint = Some(len),
-                    Ok(_) => {}
-                    Err(_) => {}
-                }
-            }
-        }
+            // Parse b{length}
+            let length = match crate::parse(data, ptr) {
+                Ok(VsfType::b(len, _)) => len,
+                Ok(other) => return Err(format!("VsfSection: Expected b{{length}} after n{{count}}, found {:?}", other)),
+                Err(e) => return Err(format!("VsfSection: Failed to parse b{{length}}: {}", e)),
+            };
+
+            (section_name, Some(length), Some(count))
+        };
 
         let mut fields = Vec::new();
 

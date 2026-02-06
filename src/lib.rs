@@ -291,12 +291,12 @@
 
 // VSF format version constants
 /// Current VSF format version
-/// v6: L (file length) field in header for TCP streaming (always present in v6+)
-pub const VSF_VERSION: usize = 6;
+/// v7: Added opcodes (op type), literal VSF format, proper bracket notation (⦉⦊ vs {})
+pub const VSF_VERSION: usize = 7;
 
 /// Backward compatibility version (oldest version this implementation can read)
-/// v5 files (without L) are still readable
-pub const VSF_BACKWARD_COMPAT: usize = 5;
+/// v7: Breaking changes to type system (opcodes, bracket notation)
+pub const VSF_BACKWARD_COMPAT: usize = 7;
 
 // Core type system
 pub mod types;
