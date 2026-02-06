@@ -270,475 +270,156 @@ fn decrypt_chacha20poly1305(encrypted: &[u8], key: &[u8; 32]) -> Result<Vec<u8>,
         .map_err(|e| format!("Decryption failed: {} (wrong key?)", e))
 }
 
-/// Show basic file information (default mode)
-fn show_info(data: &[u8], detailed: bool, key_path: Option<&Path>) -> Result<(), String> {
-    // Load keypair for decryption if provided
-    #[cfg(feature = "crypto")]
-    let keypair = if let Some(path) = key_path {
-        Some(vsf::decrypt::Keypair::load_from_vsf(path)?)
-    } else {
-        None
-    };
-    #[cfg(not(feature = "crypto"))]
-    let _ = key_path;
+/// Show basic file information in literal VSF format
+fn show_info(data: &[u8], _detailed: bool, _key_path: Option<&Path>) -> Result<(), String> {
+    use vsf::inspect::format_value_literal;
 
+    // Parse header
     let (header, _consumed) = VsfHeader::decode(data)?;
     let labels = labels_from_header(&header);
 
-    // Calculate actual header length by parsing
-    let mut pointer = 4; // After "RÅ<"
+    // Parse header fields manually to get the literal values as they appear in the file
+    let mut ptr = 4; // Skip "RÅ<"
 
-    // Parse version and backward_compat first (VSF v4+ format)
-    let _ = parse(data, &mut pointer).map_err(|e| format!("Failed to parse version: {}", e))?;
-    let _ =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+    // Print magic number
+    println!("{}", "RÅ<".truecolor(128, 128, 128));
 
-    // Now parse header length
-    let header_length_type =
-        parse(data, &mut pointer).map_err(|e| format!("Failed to parse header length: {}", e))?;
-    let header_length_bytes_encoded = match header_length_type {
-        VsfType::b(bytes, _) => bytes,
-        _ => return Err("Expected b type for header length".to_string()),
-    };
+    // Parse and print version
+    let version_vsf = parse(data, &mut ptr).map_err(|e| format!("Failed to parse version: {}", e))?;
+    print!("{}", format_value_literal(&version_vsf));
+    println!(" {}", "version".truecolor(100, 100, 100));
 
-    // Title
-    println!("{}", "VSF File".cyan().bold());
-    println!(
-        "{} ({} Bytes)",
-        format_bytes(data.len()).yellow(),
-        format_number(data.len()).truecolor(64, 50, 255)
-    );
-    println!();
+    // Parse and print backward compat
+    let backward_compat_vsf = parse(data, &mut ptr).map_err(|e| format!("Failed to parse backward compat: {}", e))?;
+    print!("{}", format_value_literal(&backward_compat_vsf));
+    println!(" {}", "backward compat".truecolor(100, 100, 100));
 
-    // Header section
-    if detailed {
-        // Detailed mode - show raw encoding
-        println!(
-            "{:<25} {}",
-            "RÅ".truecolor(128, 128, 128),
-            "Magic".truecolor(128, 128, 128)
-        );
-        println!(
-            "{:<25} {}",
-            "<".truecolor(128, 128, 128),
-            "Header start".truecolor(128, 128, 128)
-        );
-        println!(
-            " {:<24} {} {}",
-            format!("z3 {:02x}", header.version).truecolor(128, 128, 128),
-            "Version".cyan(),
-            header.version.to_string().white()
-        );
-        println!(
-            " {:<24} {} {}",
-            format!("y3 {:02x}", header.backward_compat).truecolor(128, 128, 128),
-            "Backward compat".cyan(),
-            header.backward_compat.to_string().white()
-        );
+    // Parse and print header size
+    let header_size_vsf = parse(data, &mut ptr).map_err(|e| format!("Failed to parse header size: {}", e))?;
+    print!("{}", format_value_literal(&header_size_vsf));
+    println!(" {}", "header size".truecolor(100, 100, 100));
 
-        // Display creation time with encoding
-        if let VsfType::e(ref et) = header.creation_time {
-            let timestamp = match et {
-                vsf::types::EtType::f5(v) => *v as f64,
-                vsf::types::EtType::f6(v) => *v,
-                _ => 0.0,
-            };
-            println!(
-                " {:<24} {} {}",
-                format!("ef6 {:.10}", timestamp).truecolor(128, 128, 128),
-                "Created".cyan(),
-                format_eagle_time(et).white()
-            );
-        }
-
-        // Display provenance hash with encoding
-        if let VsfType::hp(ref hash_bytes) = header.provenance_hash {
-            let preview = if hash_bytes.len() >= 8 {
-                format!("{}...", hex::encode(&hash_bytes[..8]).to_uppercase())
-            } else {
-                hex::encode(hash_bytes).to_uppercase()
-            };
-            println!(
-                " {:<24} {} 0x{}",
-                format!("hp3 1f [{} Bytes]", hash_bytes.len()).truecolor(128, 128, 128),
-                "Provenance hash:".cyan(),
-                preview.white()
-            );
-        }
-
-        // Display signer pubkey (ke) with encoding
-        if let Some(VsfType::ke(ref pk_bytes)) = header.signer_pubkey {
-            let preview = if pk_bytes.len() >= 8 {
-                format!("{}...", hex::encode(&pk_bytes[..8]).to_uppercase())
-            } else {
-                hex::encode(pk_bytes).to_uppercase()
-            };
-            println!(
-                " {:<24} {} 0x{}",
-                format!("ke3 1f [{} Bytes]", pk_bytes.len()).truecolor(128, 128, 128),
-                "Signer pubkey:".cyan(),
-                preview.white()
-            );
-        }
-
-        // Display Ed25519 signature with encoding
-        if let Some(VsfType::ge(ref sig_bytes)) = header.signature {
-            let preview = if sig_bytes.len() >= 8 {
-                format!("{}...", hex::encode(&sig_bytes[..8]).to_uppercase())
-            } else {
-                hex::encode(sig_bytes).to_uppercase()
-            };
-            println!(
-                " {:<24} {} 0x{}",
-                format!("ge3 3f [{} Bytes]", sig_bytes.len()).truecolor(128, 128, 128),
-                "Ed25519 signature:".cyan(),
-                preview.white()
-            );
-        }
-
-        // Display rolling hash with encoding
-        if let Some(VsfType::hb(ref hash_bytes)) = header.rolling_hash {
-            let preview = if hash_bytes.len() >= 8 {
-                format!("{}...", hex::encode(&hash_bytes[..8]).to_uppercase())
-            } else {
-                hex::encode(hash_bytes).to_uppercase()
-            };
-            println!(
-                " {:<24} {} 0x{}",
-                format!("hb3 1f [{} Bytes]", hash_bytes.len()).truecolor(128, 128, 128),
-                "Rolling hash:".cyan(),
-                preview.white()
-            );
-        }
-
-        // Display label count with encoding
-        let label_count = labels.len();
-        let encoding = if label_count <= 63 {
-            format!("n3 {:02x}", label_count)
-        } else if label_count <= 255 {
-            format!("n4 {:02x}", label_count)
-        } else {
-            format!("n [{}]", label_count)
-        };
-        println!(
-            " {:<24} {} {}",
-            encoding.truecolor(128, 128, 128),
-            "Labels:".cyan(),
-            label_count.to_string().white()
-        );
-    } else {
-        // Normal mode - just descriptions
-        println!("{}", "<".truecolor(128, 128, 128));
-        println!(
-            " {} {}",
-            "Version".cyan(),
-            header.version.to_string().white()
-        );
-        println!(
-            " {} {}",
-            "Backward compat".cyan(),
-            header.backward_compat.to_string().white()
-        );
-
-        // Display creation time if present
-        if let VsfType::e(ref et) = header.creation_time {
-            println!(" {} {}", "Created".cyan(), format_eagle_time(et).white());
-        }
+    // Parse and print file length (optional - only if next byte is 'L')
+    if ptr < data.len() && data[ptr] == b'L' {
+        let file_length_vsf = parse(data, &mut ptr).map_err(|e| format!("Failed to parse file length: {}", e))?;
+        print!("{}", format_value_literal(&file_length_vsf));
+        println!(" {}", "file length".truecolor(100, 100, 100));
     }
 
-    println!(
-        " {} {} Bytes",
-        "Header size:".cyan(),
-        header_length_bytes_encoded.to_string().white()
-    );
-
-    // Integrity check (includes hash display)
-    let integrity_ok = verify_integrity_summary(data, &header, &labels)?;
-
-    println!();
-
-    // Labels section
-    println!(" {} labels", labels.len().to_string().yellow().bold());
-
-    // Calculate max widths
-    let max_size_len = labels
-        .iter()
-        .map(|l| format_bytes(l.size).len())
-        .max()
-        .unwrap_or(0);
-    let max_name_len = labels.iter().map(|l| l.name.len()).max().unwrap_or(0);
-    let max_offset_str_len = labels
-        .iter()
-        .map(|l| format_number(l.offset).len())
-        .max()
-        .unwrap_or(0);
-
-    for label in &labels {
-        let size_str = format_bytes(label.size);
-        let offset_str = format_number(label.offset);
-
-        // Build crypto suffix
-        let mut crypto_parts = Vec::new();
-        if let Some(ref sig) = label.signature {
-            match sig {
-                VsfType::ge(_) => crypto_parts.push("Signed with Ed25519".to_string()),
-                VsfType::gp(_) => crypto_parts.push("Signed with ECDSA-P256".to_string()),
-                VsfType::gr(_) => crypto_parts.push("Signed with RSA".to_string()),
-                _ => {}
-            }
-        }
-        if let Some(ref _w) = label.wrap {
-            if let Some(ref key) = label.key {
-                match key {
-                    VsfType::kc(_) => {
-                        crypto_parts.push("Encrypted with ChaCha20-Poly1305".to_string())
-                    }
-                    VsfType::ka(_) => crypto_parts.push("Encrypted with AES-256-GCM".to_string()),
-                    _ => {}
-                }
-            }
-        }
-        let crypto_str = if crypto_parts.is_empty() {
-            String::new()
-        } else {
-            crypto_parts.join(", ")
-        };
-
-        // Field count string - empty sections (size=0) are intentionally empty
-        let field_str = if label.size == 0 {
-            String::new() // Empty section - no field info needed
-        } else if label.child_count == 0 {
-            "with unknown".to_string()
-        } else if label.child_count == 1 {
-            "with 1 field".to_string()
-        } else {
-            format!("with {} fields", label.child_count)
-        };
-
-        // Print with alignment
-        print!(" {}", "(".truecolor(128, 128, 128));
-        if label.size == 0 {
-            // Empty section or inline field - show name
-            print!("{}", label.name.white().bold());
-            // Show inline values if present: (name:val1,val2,...)
-            if !label.inline_values.is_empty() {
-                print!("{}", ":".truecolor(128, 128, 128));
-                for (i, val) in label.inline_values.iter().enumerate() {
-                    if i > 0 {
-                        print!("{}", ",".truecolor(128, 128, 128));
-                    }
-                    print!("{}", format_value_short(val));
-                }
-            }
-        } else {
-            // Regular section with size/offset info
-            print!("{:>width$}", size_str.bright_yellow(), width = max_size_len);
-            print!("      ");
-            print!(
-                "{:<width$}",
-                label.name.white().bold(),
-                width = max_name_len
-            );
-            print!("    @");
-            print!(
-                "{:>width$}",
-                offset_str.truecolor(64, 50, 255),
-                width = max_offset_str_len
-            );
-            print!("   ");
-            print!("{:<15}", field_str.cyan());
-            print!(" ");
-            print!("{:<33}", crypto_str.magenta());
-        }
-        println!("{}", ")".truecolor(128, 128, 128));
+    // Print creation time if present
+    if let VsfType::e(_) = header.creation_time {
+        print!("{}", format_value_literal(&header.creation_time));
+        println!(" {}", "created".truecolor(100, 100, 100));
     }
 
-    // Check if there are any non-empty sections to display
-    let has_nonempty_sections = labels.iter().any(|l| l.size > 0);
+    // Print provenance hash
+    print!("{}", format_value_literal(&header.provenance_hash));
+    println!(" {}", "provenance".truecolor(100, 100, 100));
 
-    if has_nonempty_sections {
-        print!("{}", ">".truecolor(128, 128, 128));
-        println!("{}", "┐".white());
-    } else {
-        // All sections are empty - just show the closing bracket
-        println!("{}", ">".truecolor(128, 128, 128));
+    // Print signer pubkey if present
+    if let Some(ref pk) = header.signer_pubkey {
+        print!("{}", format_value_literal(pk));
+        println!(" {}", "signer pubkey".truecolor(100, 100, 100));
     }
 
-    // Track validation errors
-    let mut has_errors = false;
+    // Print signature if present
+    if let Some(ref sig) = header.signature {
+        print!("{}", format_value_literal(sig));
+        println!(" {}", "signature".truecolor(100, 100, 100));
+    }
 
-    // Show sections with their actual structure (skip empty sections)
-    let nonempty_labels: Vec<_> = labels.iter().filter(|l| l.size > 0).collect();
-    for (i, label) in nonempty_labels.iter().enumerate() {
-        let is_last = i == nonempty_labels.len() - 1;
-        let connector = if is_last { " └─" } else { " ├─" };
+    // Print rolling hash if present
+    if let Some(ref hb) = header.rolling_hash {
+        print!("{}", format_value_literal(hb));
+        println!(" {}", "integrity".truecolor(100, 100, 100));
+    }
 
-        // Show section (crypto is in header label now, not preamble)
-        println!(
-            "{}{}{}",
-            connector,
-            "[".truecolor(128, 128, 128),
-            label.name.bold()
-        );
+    // Print section TOC
+    let label_count_vsf = VsfType::n(labels.len());
+    print!("{}", format_value_literal(&label_count_vsf));
+    println!("{}", "(".truecolor(80, 80, 80));
 
-        // Parse and show fields (skip for n[0] unboxed blobs)
-        if label.child_count == 0 {
-            let field_prefix = if is_last { "   " } else { " │ " };
+    // Print each section TOC entry
+    for (i, label) in labels.iter().enumerate() {
+        let is_last = i == labels.len() - 1;
 
-            // Check if this is an empty section vs opaque blob
-            let section_start = label.offset;
-            let section_end = section_start + label.size;
-            let is_empty_section = if section_end <= data.len() {
-                let section_data = &data[section_start..section_end];
-                let mut ptr = 0;
-                if ptr < section_data.len() && section_data[ptr] == b'[' {
-                    ptr += 1;
-                    if parse(section_data, &mut ptr).is_ok() {
-                        ptr < section_data.len() && section_data[ptr] == b']'
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
+        // Section name
+        let name_vsf = VsfType::d(label.name.clone());
+        print!("  {}", format_value_literal(&name_vsf));
+        print!("{}", ":".truecolor(80, 80, 80));
 
-            if is_empty_section {
-                // Empty section - don't display anything
-            } else {
-                // Try to decrypt if we have a key and this is encrypted
-                #[cfg(feature = "crypto")]
-                let decrypted = if let Some(ref kp) = keypair {
-                    if section_end <= data.len() {
-                        let section_data = &data[section_start..section_end];
-                        let mut ptr = 0;
-                        if ptr < section_data.len() && section_data[ptr] == b'[' {
-                            ptr += 1;
-                            if parse(section_data, &mut ptr).is_ok() {
-                                if let Ok(VsfType::v(b'e', encrypted_bytes)) =
-                                    parse(section_data, &mut ptr)
-                                {
-                                    match vsf::decrypt::decrypt_ve(&encrypted_bytes, &kp.x25519_secret)
-                                    {
-                                        Ok(plaintext) => {
-                                            println!(
-                                                "{}  {} Decrypted content:",
-                                                field_prefix,
-                                                "🔓".green()
-                                            );
-                                            let mut ptr = 0;
-                                            while ptr < plaintext.len() {
-                                                match parse(&plaintext, &mut ptr) {
-                                                    Ok(val) => {
-                                                        println!(
-                                                            "{}    {}",
-                                                            field_prefix,
-                                                            format_value_short(&val)
-                                                        );
-                                                    }
-                                                    Err(e) => {
-                                                        println!(
-                                                            "{}    <parse error: {}>",
-                                                            field_prefix, e
-                                                        );
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                            Some(())
-                                        }
-                                        Err(e) => {
-                                            println!(
-                                                "{}  {} Decryption failed: {}",
-                                                field_prefix,
-                                                "✗".red(),
-                                                e
-                                            );
-                                            None
-                                        }
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
+        // Offset
+        let offset_vsf = VsfType::o(label.offset);
+        print!("{}", format_value_literal(&offset_vsf));
+        print!("{}", ",".truecolor(80, 80, 80));
 
-                #[cfg(feature = "crypto")]
-                if decrypted.is_none() {
-                    println!(
-                        "{}  (opaque blob - encrypted or unstructured)",
-                        field_prefix
-                    );
-                }
+        // Size
+        let size_vsf = VsfType::b(label.size, false);
+        print!("{}", format_value_literal(&size_vsf));
+        print!("{}", ",".truecolor(80, 80, 80));
 
-                #[cfg(not(feature = "crypto"))]
-                println!(
-                    "{}  (opaque blob - encrypted or unstructured)",
-                    field_prefix
-                );
-            }
-        } else {
-            match parse_section_fields(data, label) {
-                Ok(fields) => {
-                    if fields.is_empty() && label.child_count > 0 {
-                        let field_prefix = if is_last { "   " } else { " │ " };
-                        println!(
-                            "{}  <parsing error: expected {} fields>",
-                            field_prefix, label.child_count
-                        );
-                    }
-                    for (j, field) in fields.iter().enumerate() {
-                        let is_field_last = j == fields.len() - 1;
-                        let field_prefix = if is_last { "   " } else { " │ " };
-                        let field_connector = if is_field_last { "└─" } else { "├─" };
-                        // Format multi-value fields as: name: val1, val2, val3
-                        let values_str: Vec<String> = field
-                            .values
-                            .iter()
-                            .map(|v| format_value_short(v))
-                            .collect();
-                        println!(
-                            "{}{} {}: {}",
-                            field_prefix,
-                            field_connector,
-                            field.name,
-                            values_str.join(", ")
-                        );
-                    }
-                }
-                Err(e) => {
-                    has_errors = true;
-                    let field_prefix = if is_last { "   " } else { " │ " };
-                    println!("{}  <error parsing: {}>", field_prefix, e);
-                }
-            }
-        }
-        println!(
-            "{}{}",
-            if is_last { "   " } else { " │ " },
-            "]".truecolor(128, 128, 128)
-        );
+        // Field count
+        let count_vsf = VsfType::n(label.child_count);
+        print!("{}", format_value_literal(&count_vsf));
+
         if !is_last {
-            println!(" │");
+            println!("{}", ",".truecolor(80, 80, 80));
+        } else {
+            println!();
         }
     }
 
-    // Print validation status if no errors found
-    if !has_errors && integrity_ok {
-        println!();
-        println!("{}", "Valid".truecolor(0, 255, 0).bold());
+    println!("{}", ")>".truecolor(80, 80, 80));
+
+    // Print section bodies
+    let nonempty_labels: Vec<_> = labels.iter().filter(|l| l.size > 0).collect();
+
+    for (i, label) in nonempty_labels.iter().enumerate() {
+        println!("{}", "[".truecolor(80, 80, 80));
+
+        // Parse section fields
+        match parse_section_fields(data, label) {
+            Ok(fields) => {
+                for (j, field) in fields.iter().enumerate() {
+                    let is_last_field = j == fields.len() - 1;
+
+                    // Field name
+                    let field_name_vsf = VsfType::d(field.name.clone());
+                    print!("  {}", "(".truecolor(80, 80, 80));
+                    print!("{}", format_value_literal(&field_name_vsf));
+                    println!("{}",":".truecolor(80, 80, 80));
+
+                    // Field values
+                    for (k, val) in field.values.iter().enumerate() {
+                        let is_last_value = k == field.values.len() - 1;
+                        print!("    {}", format_value_literal(val));
+
+                        if !is_last_value {
+                            println!("{}", ",".truecolor(80, 80, 80));
+                        } else {
+                            println!();
+                        }
+                    }
+
+                    print!("  {}", ")".truecolor(80, 80, 80));
+                    if !is_last_field {
+                        println!("{}", ",".truecolor(80, 80, 80));
+                    } else {
+                        println!();
+                    }
+                }
+            }
+            Err(e) => {
+                println!("  {} {}", "<parse error:".truecolor(220, 100, 100), format!("{}>", e).truecolor(220, 100, 100));
+            }
+        }
+
+        println!("{}", "]".truecolor(80, 80, 80));
+
+        // Add newline between sections
+        if i < nonempty_labels.len() - 1 {
+            println!();
+        }
     }
 
     Ok(())
@@ -1044,19 +725,33 @@ fn show_tree(data: &[u8]) -> Result<(), String> {
                 let field_prefix = if is_last { "    " } else { "│   " };
                 let field_marker = if is_field_last { "└── " } else { "├── " };
 
-                // Format multi-value fields as: name: val1, val2, val3
-                let values_str: Vec<String> = field
-                    .values
-                    .iter()
-                    .map(|v| format_value_short(v))
-                    .collect();
-                println!(
-                    "{}{}{}: {}",
-                    field_prefix,
-                    field_marker,
-                    field.name,
-                    values_str.join(", ")
-                );
+                // Format multi-value fields: newline before each opcode
+                println!("{}{}{}: ", field_prefix, field_marker, field.name);
+
+                let continuation_prefix = if is_field_last { "   " } else { "│  " };
+                let mut line_buffer = String::new();
+
+                for val_vsf in field.values.iter() {
+                    let val_str = format_value_short(val_vsf);
+                    let is_opcode = matches!(val_vsf, VsfType::op(_, _));
+
+                    // If we hit an opcode and have buffered content, flush the line
+                    if is_opcode && !line_buffer.is_empty() {
+                        println!("{}{}", field_prefix, line_buffer);
+                        line_buffer.clear();
+                    }
+
+                    // Add spacing and append value
+                    if line_buffer.is_empty() {
+                        line_buffer.push_str(&format!("{}   ", continuation_prefix));
+                    }
+                    line_buffer.push_str(&val_str);
+                }
+
+                // Flush remaining buffer
+                if !line_buffer.is_empty() {
+                    println!("{}{}", field_prefix, line_buffer);
+                }
             }
         }
 

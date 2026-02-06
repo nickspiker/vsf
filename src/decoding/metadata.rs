@@ -63,14 +63,11 @@ pub fn parse_eagle_time(data: &[u8], pointer: &mut usize) -> Result<VsfType, Err
     }
 
     let time_type = data[*pointer];
-    eprintln!("DEBUG parse_eagle_time: time_type={} ('{}')", time_type, time_type as char);
     *pointer += 1;
 
     match time_type {
         b'u' => {
-            eprintln!("DEBUG: Parsing unsigned Eagle Time");
             let value = decode_usize(data, pointer)?;
-            eprintln!("DEBUG: Decoded value = {}", value);
             Ok(VsfType::e(EtType::u(value)))
         }
         b'i' => {

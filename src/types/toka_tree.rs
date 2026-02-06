@@ -408,3 +408,128 @@ impl TokaNode {
         super::VsfType::v(b't', inner_data)
     }
 }
+
+// Display implementations for human-readable output in vsfinfo
+#[cfg(feature = "spirix")]
+impl std::fmt::Display for TokaBox {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Box {{ pos: {}, size: {}, colour: [{}, {}, {}, {}] }}",
+            self.pos, self.size,
+            self.color[0], self.color[1], self.color[2], self.color[3]
+        )
+    }
+}
+
+#[cfg(feature = "spirix")]
+impl std::fmt::Display for TokaCircle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Circle {{ pos: {}, span: {}, colour: [{}, {}, {}, {}] }}",
+            self.pos, self.span,
+            self.color[0], self.color[1], self.color[2], self.color[3]
+        )
+    }
+}
+
+#[cfg(feature = "spirix")]
+impl std::fmt::Display for TokaLine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Line {{ start: {}, end: {}, width: {}, colour: [{}, {}, {}, {}] }}",
+            self.start, self.end, self.width,
+            self.color[0], self.color[1], self.color[2], self.color[3]
+        )
+    }
+}
+
+#[cfg(feature = "spirix")]
+impl std::fmt::Display for TokaText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Text {{ pos: {}, size: {}, content: \"{}\", colour: [...] }}",
+            self.pos, self.size, self.content
+        )
+    }
+}
+
+#[cfg(feature = "spirix")]
+impl std::fmt::Display for TokaButton {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let variant_str = match self.variant {
+            ButtonVariant::Filled => "Filled",
+            ButtonVariant::Outlined => "Outlined",
+            ButtonVariant::Text => "Text",
+        };
+        write!(
+            f,
+            "Button {{ pos: {}, size: {}, label: \"{}\", variant: {} }}",
+            self.pos, self.size, self.label, variant_str
+        )
+    }
+}
+
+#[cfg(feature = "spirix")]
+impl std::fmt::Display for TokaGroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Group {{ pos: {}, size: {}, children: {} }}",
+            self.pos, self.size, self.children.len()
+        )
+    }
+}
+
+#[cfg(feature = "spirix")]
+impl std::fmt::Display for TokaPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Path {{ width: {}, {} commands, colour: [...] }}",
+            self.width, self.commands.len()
+        )
+    }
+}
+
+#[cfg(feature = "spirix")]
+impl std::fmt::Display for TokaImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Image {{ pos: {}, size: {}, handle: {} }}",
+            self.pos, self.size, self.handle
+        )
+    }
+}
+
+#[cfg(feature = "spirix")]
+impl std::fmt::Display for TokaSurface {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Surface {{ pos: {}, size: {}, handle: {} }}",
+            self.pos, self.size, self.handle
+        )
+    }
+}
+
+#[cfg(feature = "spirix")]
+impl std::fmt::Display for TokaNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TokaNode::Box(b) => write!(f, "{}", b),
+            TokaNode::Circle(c) => write!(f, "{}", c),
+            TokaNode::Line(l) => write!(f, "{}", l),
+            TokaNode::Text(t) => write!(f, "{}", t),
+            TokaNode::Button(b) => write!(f, "{}", b),
+            TokaNode::Group(g) => write!(f, "{}", g),
+            TokaNode::Path(p) => write!(f, "{}", p),
+            TokaNode::Image(i) => write!(f, "{}", i),
+            TokaNode::Surface(s) => write!(f, "{}", s),
+        }
+    }
+}
