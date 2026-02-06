@@ -9,13 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Opcode type (`VsfType::op`)** - Added dedicated type for executable bytecode with two-character ASCII identifiers
-- **Literal VSF format** - `vsfinfo` now displays 1:1 file representation showing exact wire format
-- **Proper bracket notation** - Semantic distinction between `⦉⦊` (interpreted values) and `{}` (opcodes)
-- **G^0* base notation** - Hexadecimal display with proper mathematical base prefix (replaces legacy 0x)
+- **Literal VSF format (vsfinfo)** - `vsfinfo` now displays 1:1 file representation showing exact wire format with colour-coded syntax
+- **Proper bracket notation (vsfinfo)** - Semantic distinction between `⦉⦊` (interpreted values) and `{}` (opcodes)
+- **G^0* base notation (vsfinfo)** - Hexadecimal display with proper mathematical base prefix (replaces legacy 0x)
 
 ### Fixed
-- **Eagle Time millisecond precision** - Now correctly calculates milliseconds from oscillation counts for integer types (eu6, ei6) instead of truncating to .000
-- **Removed DEBUG prints** - Cleaned up debug output from Eagle Time metadata parsing
+- **Eagle Time millisecond precision (vsfinfo)** - Now correctly calculates milliseconds from oscillation counts for integer types (eu6, ei6) instead of truncating to .000
+- **Removed DEBUG prints (vsfinfo)** - Cleaned up debug output from Eagle Time metadata parsing
 
 ### Changed
 - **BREAKING**: VSF format version bumped to 7 (z7 y7)
