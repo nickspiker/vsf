@@ -8,6 +8,8 @@ A self-describing binary format designed for optimal integer encoding and type s
 
 VSF addresses a fundamental challenge in binary formats: how to efficiently encode integers of any size while maintaining O(1) skip-ability. The solution enables efficient storage of everything from a single photon's wavelength to the number of atoms in the observable universe (and yes, both fit comfortably).
 
+**📚 [Full Documentation & Examples](https://holdmyoscilloscope.com/vsf/)**
+
 ---
 
 ## Core Innovation: Exponential-Width Integer Encoding
@@ -402,7 +404,15 @@ VsfType::x(text)  // Automatically compressed
 - Both parse the same binary format; high-level adds enforcement layer
 - See "Parsing APIs" section below for details
 
-### Coming Next (v0.3.0)
+### Released in v0.3.0
+
+✅ **Opcode type** - Added `VsfType::op` for executable bytecode
+✅ **Literal VSF format** - `vsfinfo` now displays 1:1 file representation
+✅ **Proper bracket notation** - `⦉⦊` for values, `{}` for opcodes
+✅ **G^0* base notation** - Hexadecimal with proper base prefix (replaces 0x)
+✅ **Eagle Time precision** - Fixed millisecond calculation from oscillation counts
+
+### Coming Next (v0.4.0)
 
 🚧 **Structured capability tokens** - Formal capability types built on existing crypto primitives (`g`, `k`, `h`, `a`)
 
