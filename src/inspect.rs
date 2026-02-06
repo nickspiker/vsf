@@ -524,6 +524,112 @@ fn size_marker(len: usize) -> char {
     }
 }
 
+/// Get a short hint for an opcode (e.g., "ps" -> "push")
+fn opcode_hint(a: u8, b: u8) -> Option<&'static str> {
+    let opcode = [a, b];
+    match &opcode {
+        // Stack manipulation
+        b"ps" => Some("push"),
+        b"pp" => Some("pop"),
+        b"dp" => Some("dup"),
+        b"dn" => Some("dup n"),
+        b"sw" => Some("swap"),
+        b"rt" => Some("rotate"),
+
+        // Local variables
+        b"la" => Some("alloc locals"),
+        b"lg" => Some("get local"),
+        b"ls" => Some("set local"),
+        b"lt" => Some("tee local"),
+
+        // Arithmetic
+        b"ad" => Some("add"),
+        b"sb" => Some("sub"),
+        b"ml" => Some("mul"),
+        b"dv" => Some("div"),
+        b"rc" => Some("recip"),
+        b"md" => Some("mod"),
+        b"ng" => Some("negate"),
+        b"ab" => Some("abs"),
+        b"sq" => Some("sqrt"),
+        b"pw" => Some("pow"),
+        b"mn" => Some("min"),
+        b"mx" => Some("max"),
+        b"cm" => Some("clamp"),
+        b"fl" => Some("floor"),
+        b"cl" => Some("ceil"),
+        b"rn" => Some("round"),
+        b"fa" => Some("frac"),
+        b"lp" => Some("lerp"),
+
+        // Trigonometry
+        b"sn" => Some("sin"),
+        b"cs" => Some("cos"),
+        b"tn" => Some("tan"),
+        b"is" => Some("asin"),
+        b"ic" => Some("acos"),
+        b"ia" => Some("atan"),
+        b"at" => Some("atan2"),
+
+        // Comparison
+        b"eq" => Some("equal"),
+        b"ne" => Some("not equal"),
+        b"lo" => Some("less than"),
+        b"le" => Some("less or equal"),
+        b"gt" => Some("greater than"),
+        b"ge" => Some("greater or equal"),
+
+        // Logic
+        b"an" => Some("and"),
+        b"or" => Some("or"),
+        b"nt" => Some("not"),
+
+        // Bitwise
+        b"ba" => Some("bit and"),
+        b"bo" => Some("bit or"),
+        b"bx" => Some("bit xor"),
+        b"bn" => Some("bit not"),
+
+        // Type system
+        b"ty" => Some("typeof"),
+        b"ts" => Some("to scalar"),
+        b"tu" => Some("to uint"),
+        b"tx" => Some("to string"),
+
+        // Drawing
+        b"cr" => Some("clear"),
+        b"fr" => Some("fill rect"),
+        b"sr" => Some("stroke rect"),
+        b"fc" => Some("fill circle"),
+        b"so" => Some("stroke circle"),
+        b"dl" => Some("draw line"),
+        b"dt" => Some("draw text"),
+        b"sf" => Some("set font"),
+
+        // Colour utilities
+        b"ca" => Some("rgba"),
+        b"cb" => Some("rgb"),
+        b"ci" => Some("colour lerp"),
+
+        // Control flow
+        b"cn" => Some("call"),
+        b"cd" => Some("call indirect"),
+        b"re" => Some("return"),
+        b"rv" => Some("return value"),
+        b"jm" => Some("jump"),
+        b"ji" => Some("jump if"),
+        b"jz" => Some("jump if zero"),
+        b"hl" => Some("halt"),
+
+        // Debug
+        b"db" => Some("debug print"),
+        b"ds" => Some("debug stack"),
+        b"np" => Some("nop"),
+
+        _ => None,
+    }
+}
+
 /// Format a VsfType as literal VSF wire notation with semantic colour coding
 /// Shows actual encoding: type code, size marker, length/value, content
 ///
@@ -887,14 +993,27 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             )
         }
 
-        // Opcodes: {xx} format
-        VsfType::op(a, b) => format!(
-            "{}{}{}{}",
-            tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
-            char::from(*a).to_string().truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
-            char::from(*b).to_string().truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
-            tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
-        ),
+        // Opcodes: {xx} format with optional hint
+        VsfType::op(a, b) => {
+            let base = format!(
+                "{}{}{}{}",
+                tc("{", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
+                char::from(*a).to_string().truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+                char::from(*b).to_string().truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
+                tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
+            );
+
+            // Add hint if available
+            if let Some(hint) = opcode_hint(*a, *b) {
+                format!(
+                    "{} {}",
+                    base,
+                    format!("# {}", hint).truecolor(COL_HINT.0, COL_HINT.1, COL_HINT.2)
+                )
+            } else {
+                base
+            }
+        },
 
         // Spirix scalars (25 types: s33-s77) - scalar Display already includes ⦉value⦊
         #[cfg(feature = "spirix")]

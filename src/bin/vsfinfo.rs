@@ -346,21 +346,21 @@ fn show_info(data: &[u8], _detailed: bool, _key_path: Option<&Path>) -> Result<(
         // Section name
         let name_vsf = VsfType::d(label.name.clone());
         print!("  {}", format_value_literal(&name_vsf));
-        print!("{}", ":".truecolor(80, 80, 80));
+        println!("{}", ":".truecolor(80, 80, 80));
 
         // Offset
         let offset_vsf = VsfType::o(label.offset);
-        print!("{}", format_value_literal(&offset_vsf));
-        print!("{}", ",".truecolor(80, 80, 80));
+        print!("    {}", format_value_literal(&offset_vsf));
+        println!("{}", ",".truecolor(80, 80, 80));
 
         // Size
         let size_vsf = VsfType::b(label.size, false);
-        print!("{}", format_value_literal(&size_vsf));
-        print!("{}", ",".truecolor(80, 80, 80));
+        print!("    {}", format_value_literal(&size_vsf));
+        println!("{}", ",".truecolor(80, 80, 80));
 
         // Field count
         let count_vsf = VsfType::n(label.child_count);
-        print!("{}", format_value_literal(&count_vsf));
+        print!("    {}", format_value_literal(&count_vsf));
 
         if !is_last {
             println!("{}", ",".truecolor(80, 80, 80));
