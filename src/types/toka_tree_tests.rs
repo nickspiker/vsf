@@ -32,7 +32,7 @@ mod tests {
         let node = TokaNode::Box(TokaBox {
             pos: test_circle(100, 200, 0),
             size: test_circle(300, 400, 0),
-            color: test_circle(255, 0, 0),
+            colour: test_circle(255, 0, 0),
         });
 
         // Encode to vt wrapped VsfType
@@ -56,7 +56,7 @@ mod tests {
         let node = TokaNode::Circle(TokaCircle {
             pos: test_circle(500, 500, 0),
             span: test_scalar(200, 0),
-            color: test_circle(0, 0, 255),
+            colour: test_circle(0, 0, 255),
         });
 
         let vsf_type = node.to_vsf_type();
@@ -76,7 +76,7 @@ mod tests {
             start: test_circle(0, 0, 0),
             end: test_circle(1000, 1000, 0),
             width: test_scalar(10, 0),
-            color: test_circle(128, 128, 128),
+            colour: test_circle(128, 128, 128),
         });
 
         let vsf_type = node.to_vsf_type();
@@ -96,7 +96,7 @@ mod tests {
             pos: test_circle(10, 10, 0),
             size: test_circle(200, 50, 0),
             content: "Hello, Loom!".to_string(),
-            color: test_circle(0, 0, 0),
+            colour: test_circle(0, 0, 0),
         });
 
         let vsf_type = node.to_vsf_type();
@@ -117,7 +117,7 @@ mod tests {
             size: test_circle(100, 30, 0),
             label: "Click Me".to_string(),
             variant: ButtonVariant::Filled,
-            color: test_circle(0, 128, 255),
+            colour: test_circle(0, 128, 255),
         });
 
         let vsf_type = node.to_vsf_type();
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn test_path_vt_roundtrip() {
         let node = TokaNode::Path(TokaPath {
-            color: test_circle(255, 0, 0),
+            colour: test_circle(255, 0, 0),
             width: test_scalar(5, 0),
             commands: vec![
                 PathCommand::MoveTo(test_circle(0, 0, 0)),
@@ -203,12 +203,12 @@ mod tests {
                 TokaNode::Box(TokaBox {
                     pos: test_circle(10, 10, 0),
                     size: test_circle(100, 100, 0),
-                    color: test_circle(255, 0, 0),
+                    colour: test_circle(255, 0, 0),
                 }),
                 TokaNode::Circle(TokaCircle {
                     pos: test_circle(500, 500, 0),
                     span: test_scalar(50, 0),
-                    color: test_circle(0, 255, 0),
+                    colour: test_circle(0, 255, 0),
                 }),
             ],
         });

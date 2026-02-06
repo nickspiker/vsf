@@ -52,8 +52,8 @@ pub fn parse_toka_tree_inner(data: &[u8], pointer: &mut usize) -> Result<TokaNod
         b'b' => {
             let pos = parse_circle_f4e4(data, pointer)?;
             let size = parse_circle_f4e4(data, pointer)?;
-            let color = parse_rgba(data, pointer)?;
-            Ok(TokaNode::Box(TokaBox { pos, size, color }))
+            let colour = parse_rgba(data, pointer)?;
+            Ok(TokaNode::Box(TokaBox { pos, size, colour }))
         }
         b'g' => {
             let pos = parse_circle_f4e4(data, pointer)?;
@@ -74,19 +74,19 @@ pub fn parse_toka_tree_inner(data: &[u8], pointer: &mut usize) -> Result<TokaNod
         b'c' => {
             let pos = parse_circle_f4e4(data, pointer)?;
             let span = parse_scalar_f4e4(data, pointer)?;
-            let color = parse_rgba(data, pointer)?;
-            Ok(TokaNode::Circle(TokaCircle { pos, span, color }))
+            let colour = parse_rgba(data, pointer)?;
+            Ok(TokaNode::Circle(TokaCircle { pos, span, colour }))
         }
         b'l' => {
             let start = parse_circle_f4e4(data, pointer)?;
             let end = parse_circle_f4e4(data, pointer)?;
             let width = parse_scalar_f4e4(data, pointer)?;
-            let color = parse_rgba(data, pointer)?;
+            let colour = parse_rgba(data, pointer)?;
             Ok(TokaNode::Line(TokaLine {
                 start,
                 end,
                 width,
-                color,
+                colour,
             }))
         }
         b'x' => {
@@ -102,12 +102,12 @@ pub fn parse_toka_tree_inner(data: &[u8], pointer: &mut usize) -> Result<TokaNod
                     ))
                 }
             };
-            let color = parse_rgba(data, pointer)?;
+            let colour = parse_rgba(data, pointer)?;
             Ok(TokaNode::Text(TokaText {
                 pos,
                 size,
                 content,
-                color,
+                colour,
             }))
         }
         b'u' => {
@@ -136,17 +136,17 @@ pub fn parse_toka_tree_inner(data: &[u8], pointer: &mut usize) -> Result<TokaNod
                     ))
                 }
             };
-            let color = parse_rgba(data, pointer)?;
+            let colour = parse_rgba(data, pointer)?;
             Ok(TokaNode::Button(TokaButton {
                 pos,
                 size,
                 label,
                 variant,
-                color,
+                colour,
             }))
         }
         b'p' => {
-            let color = parse_rgba(data, pointer)?;
+            let colour = parse_rgba(data, pointer)?;
             let width = parse_scalar_f4e4(data, pointer)?;
             let command_count = data[*pointer] as usize;
             *pointer += 1;
@@ -156,7 +156,7 @@ pub fn parse_toka_tree_inner(data: &[u8], pointer: &mut usize) -> Result<TokaNod
                 commands.push(cmd);
             }
             Ok(TokaNode::Path(TokaPath {
-                color,
+                colour,
                 width,
                 commands,
             }))

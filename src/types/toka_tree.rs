@@ -12,7 +12,7 @@ use spirix::{CircleF4E4, ScalarF4E4};
 pub struct TokaBox {
     pub pos: CircleF4E4,
     pub size: CircleF4E4,
-    pub color: [ScalarF4E4; 4], // RGBA
+    pub colour: [ScalarF4E4; 4], // RGBA
 }
 
 #[cfg(feature = "spirix")]
@@ -26,7 +26,7 @@ impl TokaBox {
         bytes.extend_from_slice(&self.size.imaginary.to_be_bytes());
         bytes.extend_from_slice(&self.size.exponent.to_be_bytes());
         // RGBA: 4 ScalarF4E4 values (16 bytes total)
-        for channel in &self.color {
+        for channel in &self.colour {
             bytes.extend_from_slice(&channel.fraction.to_be_bytes());
             bytes.extend_from_slice(&channel.exponent.to_be_bytes());
         }
@@ -75,7 +75,7 @@ impl TokaGroup {
 pub struct TokaCircle {
     pub pos: CircleF4E4,
     pub span: ScalarF4E4,
-    pub color: [ScalarF4E4; 4], // RGBA
+    pub colour: [ScalarF4E4; 4], // RGBA
 }
 
 #[cfg(feature = "spirix")]
@@ -88,7 +88,7 @@ impl TokaCircle {
         bytes.extend_from_slice(&self.span.fraction.to_be_bytes());
         bytes.extend_from_slice(&self.span.exponent.to_be_bytes());
         // RGBA: 4 ScalarF4E4 values (16 bytes total)
-        for channel in &self.color {
+        for channel in &self.colour {
             bytes.extend_from_slice(&channel.fraction.to_be_bytes());
             bytes.extend_from_slice(&channel.exponent.to_be_bytes());
         }
@@ -107,7 +107,7 @@ pub struct TokaLine {
     pub start: CircleF4E4,
     pub end: CircleF4E4,
     pub width: ScalarF4E4,
-    pub color: [ScalarF4E4; 4], // RGBA
+    pub colour: [ScalarF4E4; 4], // RGBA
 }
 
 #[cfg(feature = "spirix")]
@@ -123,7 +123,7 @@ impl TokaLine {
         bytes.extend_from_slice(&self.width.fraction.to_be_bytes());
         bytes.extend_from_slice(&self.width.exponent.to_be_bytes());
         // RGBA: 4 ScalarF4E4 values (16 bytes total)
-        for channel in &self.color {
+        for channel in &self.colour {
             bytes.extend_from_slice(&channel.fraction.to_be_bytes());
             bytes.extend_from_slice(&channel.exponent.to_be_bytes());
         }
@@ -142,7 +142,7 @@ pub struct TokaText {
     pub pos: CircleF4E4,
     pub size: CircleF4E4,
     pub content: String,
-    pub color: [ScalarF4E4; 4], // RGBA
+    pub colour: [ScalarF4E4; 4], // RGBA
 }
 
 #[cfg(feature = "spirix")]
@@ -159,7 +159,7 @@ impl TokaText {
         let content_vsf = super::VsfType::x(self.content.clone());
         bytes.extend_from_slice(&content_vsf.flatten());
         // RGBA: 4 ScalarF4E4 values (16 bytes total)
-        for channel in &self.color {
+        for channel in &self.colour {
             bytes.extend_from_slice(&channel.fraction.to_be_bytes());
             bytes.extend_from_slice(&channel.exponent.to_be_bytes());
         }
@@ -179,7 +179,7 @@ pub struct TokaButton {
     pub size: CircleF4E4,
     pub label: String,
     pub variant: ButtonVariant,
-    pub color: [ScalarF4E4; 4], // RGBA
+    pub colour: [ScalarF4E4; 4], // RGBA
 }
 
 #[cfg(feature = "spirix")]
@@ -197,7 +197,7 @@ impl TokaButton {
         bytes.extend_from_slice(&label_vsf.flatten());
         bytes.push(self.variant as u8);
         // RGBA: 4 ScalarF4E4 values (16 bytes total)
-        for channel in &self.color {
+        for channel in &self.colour {
             bytes.extend_from_slice(&channel.fraction.to_be_bytes());
             bytes.extend_from_slice(&channel.exponent.to_be_bytes());
         }
@@ -222,7 +222,7 @@ pub enum ButtonVariant {
 /// Vector path primitive
 #[derive(Debug, Clone, PartialEq)]
 pub struct TokaPath {
-    pub color: [ScalarF4E4; 4], // RGBA
+    pub colour: [ScalarF4E4; 4], // RGBA
     pub width: ScalarF4E4,
     pub commands: Vec<PathCommand>,
 }
@@ -232,7 +232,7 @@ impl TokaPath {
     pub fn encode_inner(&self) -> Vec<u8> {
         let mut bytes = vec![b'p'];
         // RGBA: 4 ScalarF4E4 values (16 bytes total)
-        for channel in &self.color {
+        for channel in &self.colour {
             bytes.extend_from_slice(&channel.fraction.to_be_bytes());
             bytes.extend_from_slice(&channel.exponent.to_be_bytes());
         }
@@ -417,7 +417,7 @@ impl std::fmt::Display for TokaBox {
             f,
             "Box {{ pos: {}, size: {}, colour: [{}, {}, {}, {}] }}",
             self.pos, self.size,
-            self.color[0], self.color[1], self.color[2], self.color[3]
+            self.colour[0], self.colour[1], self.colour[2], self.colour[3]
         )
     }
 }
@@ -429,7 +429,7 @@ impl std::fmt::Display for TokaCircle {
             f,
             "Circle {{ pos: {}, span: {}, colour: [{}, {}, {}, {}] }}",
             self.pos, self.span,
-            self.color[0], self.color[1], self.color[2], self.color[3]
+            self.colour[0], self.colour[1], self.colour[2], self.colour[3]
         )
     }
 }
@@ -441,7 +441,7 @@ impl std::fmt::Display for TokaLine {
             f,
             "Line {{ start: {}, end: {}, width: {}, colour: [{}, {}, {}, {}] }}",
             self.start, self.end, self.width,
-            self.color[0], self.color[1], self.color[2], self.color[3]
+            self.colour[0], self.colour[1], self.colour[2], self.colour[3]
         )
     }
 }
