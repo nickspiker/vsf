@@ -12,6 +12,8 @@ use crate::decoding::parse::parse;
 #[cfg(feature = "spirix")]
 use crate::decoding::toka_tree::parse_vt_toka_node;
 use crate::file_format::{VsfField, VsfHeader};
+#[cfg(feature = "spirix")]
+use crate::types::Fill;
 use crate::types::{EagleTime, EtType, VsfType};
 use chrono::{Datelike, Local, Timelike};
 use colored::*;
@@ -320,10 +322,10 @@ pub fn strip_ansi(input: &str) -> String {
 }
 
 // Box-drawing characters (heavy variants for consistent stroke weight)
-const BOX_VERT: &str = "┃";      // U+2503 Heavy vertical
-const BOX_CORNER: &str = "┗";   // U+2517 Heavy up and right
-const BOX_TEE: &str = "┣";      // U+2523 Heavy vertical and right
-const BOX_HORIZ: &str = "━";    // U+2501 Heavy horizontal
+const BOX_VERT: &str = "│";      // U+2502 Light vertical
+const BOX_CORNER: &str = "╰";   // U+2570 Light arc up and right
+const BOX_TEE: &str = "├";      // U+251C Light vertical and right
+const BOX_HORIZ: &str = "─";    // U+2500 Light horizontal
 
 // ==================== SEMANTIC COLOUR PALETTE ====================
 // Type markers are coloured by semantic category for visual grouping
@@ -370,7 +372,7 @@ const COL_TENSOR: (u8, u8, u8) = (150, 200, 255);  // Light blue
 const COL_WORLD: (u8, u8, u8) = (100, 180, 120);  // Earth green
 
 /// Hints, labels, descriptions
-const COL_HINT: (u8, u8, u8) = (100, 100, 100);  // Dark gray
+const COL_HINT: (u8, u8, u8) = (64, 64, 64);  // Darker grey for hints
 
 /// Punctuation: {}, (), :, size markers
 const COL_PUNCT: (u8, u8, u8) = (80, 80, 80);  // Darker gray
@@ -386,19 +388,88 @@ const COL_FAIL: (u8, u8, u8) = (220, 100, 100);  // Soft red
 
 // Tree drawing helpers - darkest grey for subtlety
 fn tree_vert() -> ColoredString { BOX_VERT.truecolor(COL_TREE.0, COL_TREE.1, COL_TREE.2) }
-fn tree_corner() -> ColoredString { format!("{}{}", BOX_CORNER, BOX_HORIZ).truecolor(COL_TREE.0, COL_TREE.1, COL_TREE.2) }
-fn tree_tee() -> ColoredString { format!("{}{}", BOX_TEE, BOX_HORIZ).truecolor(COL_TREE.0, COL_TREE.1, COL_TREE.2) }
+fn tree_corner() -> ColoredString { BOX_CORNER.truecolor(COL_TREE.0, COL_TREE.1, COL_TREE.2) }
+fn tree_corner_line() -> String {
+    format!("{}{}", BOX_CORNER.truecolor(COL_TREE.0, COL_TREE.1, COL_TREE.2), BOX_HORIZ.truecolor(COL_TREE.0, COL_TREE.1, COL_TREE.2))
+}
+fn tree_tee() -> ColoredString { BOX_TEE.truecolor(COL_TREE.0, COL_TREE.1, COL_TREE.2) }
+fn tree_tee_line() -> String {
+    format!("{}{}", BOX_TEE.truecolor(COL_TREE.0, COL_TREE.1, COL_TREE.2), BOX_HORIZ.truecolor(COL_TREE.0, COL_TREE.1, COL_TREE.2))
+}
 
-/// Format hex data as lines of 16 bytes (32 hex chars each)
+// Rounded box-drawing for ro* types (lighter, more subtle)
+const RO_TOP: &str = "╭─";       // U+256D U+2500 Arc down-right + horizontal
+const RO_MID: &str = "├─";       // U+251C U+2500 Vert + right + horizontal
+const RO_BOT: &str = "╰─";       // U+2570 U+2500 Arc up-right + horizontal
+const RO_VERT: &str = "│";       // U+2502 Light vertical
+const RO_SPACE: &str = " ";      // Continuation indent
+
+// Helper to format a field for ro* display: value first, label as hint
+fn ro_field(value: String, label: &str) -> String {
+    format!("  {} {}",
+        value,
+        label.truecolor(64, 64, 64))  // Darker grey (64) for hints
+}
+
+// Helper to add semantic hint for color types
+fn color_hint(vsf: &VsfType) -> &'static str {
+    match vsf {
+        VsfType::rcr => " VSF Red",
+        VsfType::rcn => " VSF Green",
+        VsfType::rcb => " VSF Blue",
+        VsfType::rcw => " VSF White",
+        VsfType::rck => " VSF Black",
+        _ => "",
+    }
+}
+
+// Helper to format children with proper indentation
+fn format_children(children: &[VsfType]) -> String {
+    if children.is_empty() {
+        return "[]".to_string();
+    }
+
+    let mut result = String::from("[\n");
+    for child in children {
+        // Format each child and indent by 4 spaces
+        let child_str = format_value_literal(child);
+        for line in child_str.lines() {
+            result.push_str(&format!("    {}\n", line));
+        }
+    }
+    result.push_str("  ]");
+    result
+}
+
+/// Universal VSF formatter: value first, label as hint, with indentation tracking
+/// This provides consistent formatting across all VSF types
+fn format_vsf_universal(vsf: &VsfType, indent_level: usize, label: Option<&str>) -> String {
+    let indent = "  ".repeat(indent_level);
+    let hint_color = (64, 64, 64);  // Dark grey for hints
+
+    // Get the value representation
+    let value = format_value_literal(vsf);
+
+    // Add label if provided
+    let label_str = if let Some(l) = label {
+        format!(" {}", l.truecolor(hint_color.0, hint_color.1, hint_color.2))
+    } else {
+        String::new()
+    };
+
+    format!("{}{}{}", indent, value, label_str)
+}
+
+/// Format hex data as lines of 8 bytes (16 hex chars each)
 /// Returns a Vec of hex line strings for caller to join with appropriate indent
 fn format_hex_lines(data: &[u8]) -> Vec<String> {
     let hex_str = hex::encode(data).to_uppercase();
-    if data.len() <= 16 {
+    if data.len() <= 8 {
         vec![hex_str]
     } else {
         hex_str
             .as_bytes()
-            .chunks(32)
+            .chunks(16)  // 16 hex chars = 8 bytes
             .map(|chunk| std::str::from_utf8(chunk).unwrap().to_string())
             .collect()
     }
@@ -1003,12 +1074,12 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
                 tc("}", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
             );
 
-            // Add hint if available
+            // Add hint if available (without # comment marker)
             if let Some(hint) = opcode_hint(*a, *b) {
                 format!(
                     "{} {}",
                     base,
-                    format!("# {}", hint).truecolor(COL_HINT.0, COL_HINT.1, COL_HINT.2)
+                    hint.truecolor(COL_HINT.0, COL_HINT.1, COL_HINT.2)
                 )
             } else {
                 base
@@ -1118,6 +1189,264 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         VsfType::c76(c) => format!("{}{}", "c76".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2), c),
         #[cfg(feature = "spirix")]
         VsfType::c77(c) => format!("{}{}", "c77".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2), c),
+
+        // Renderable object types (ro* - scene graph primitives)
+        #[cfg(feature = "spirix")]
+        VsfType::rob(pos, size, fill, stroke, children) => {
+            let mut result = format!("rob {}", "rectangle".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
+            // Add fill with color hint
+            let fill_str = match fill {
+                Fill::Solid(color) => {
+                    format!("Solid({}{})",
+                        match color.as_ref() {
+                            VsfType::rcr => "rcr",
+                            VsfType::rcn => "rcn",
+                            VsfType::rcb => "rcb",
+                            VsfType::rcw => "rcw",
+                            VsfType::rck => "rck",
+                            _ => "?",
+                        },
+                        color_hint(color.as_ref()).truecolor(64, 64, 64))
+                },
+                _ => format!("{:?}", fill),
+            };
+            result.push_str(&format!("\n{}", ro_field(fill_str, "fill")));
+            if stroke.is_some() {
+                result.push_str(&format!("\n{}", ro_field(format!("{:?}", stroke), "stroke")));
+            }
+            if !children.is_empty() {
+                result.push_str(&format!("\n{}", ro_field(format_children(children), "children")));
+            }
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::roc(center, radius, fill, stroke) => {
+            let mut result = format!("roc {}", "circle".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", center), "center")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", radius), "radius")));
+            // Add fill with color hint
+            let fill_str = match fill {
+                Fill::Solid(color) => {
+                    format!("Solid({}{})",
+                        match color.as_ref() {
+                            VsfType::rcr => "rcr",
+                            VsfType::rcn => "rcn",
+                            VsfType::rcb => "rcb",
+                            VsfType::rcw => "rcw",
+                            VsfType::rck => "rck",
+                            _ => "?",
+                        },
+                        color_hint(color.as_ref()).truecolor(64, 64, 64))
+                },
+                _ => format!("{:?}", fill),
+            };
+            result.push_str(&format!("\n{}", ro_field(fill_str, "fill")));
+            if stroke.is_some() {
+                result.push_str(&format!("\n{}", ro_field(format!("{:?}", stroke), "stroke")));
+            }
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::ron(pos, size, children) => {
+            let mut result = format!("ron {}", "container".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
+            result.push_str(&format!("\n{}", ro_field(format_children(children), "children")));
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::roe(center, size, fill, stroke) => {
+            let mut result = format!("roe {}", "ellipse".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", center), "center")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
+            let fill_str = match fill {
+                Fill::Solid(color) => {
+                    format!("Solid({}{})",
+                        match color.as_ref() {
+                            VsfType::rcr => "rcr",
+                            VsfType::rcn => "rcn",
+                            VsfType::rcb => "rcb",
+                            VsfType::rcw => "rcw",
+                            VsfType::rck => "rck",
+                            _ => "?",
+                        },
+                        color_hint(color.as_ref()).truecolor(64, 64, 64))
+                },
+                _ => format!("{:?}", fill),
+            };
+            result.push_str(&format!("\n{}", ro_field(fill_str, "fill")));
+            if stroke.is_some() {
+                result.push_str(&format!("\n{}", ro_field(format!("{:?}", stroke), "stroke")));
+            }
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::rol(start, end, width, colour) => {
+            let mut result = format!("rol {}", "line".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", start), "start")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", end), "end")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", width), "width")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", colour), "colour")));
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::rop(commands, fill, stroke) => {
+            let mut result = format!("rop {}", "path".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", commands), "commands")));
+            let fill_str = match fill {
+                Fill::Solid(color) => {
+                    format!("Solid({}{})",
+                        match color.as_ref() {
+                            VsfType::rcr => "rcr",
+                            VsfType::rcn => "rcn",
+                            VsfType::rcb => "rcb",
+                            VsfType::rcw => "rcw",
+                            VsfType::rck => "rck",
+                            _ => "?",
+                        },
+                        color_hint(color.as_ref()).truecolor(64, 64, 64))
+                },
+                _ => format!("{:?}", fill),
+            };
+            result.push_str(&format!("\n{}", ro_field(fill_str, "fill")));
+            if stroke.is_some() {
+                result.push_str(&format!("\n{}", ro_field(format!("{:?}", stroke), "stroke")));
+            }
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::roo(points, width, colour, closed) => {
+            let mut result = format!("roo {}", "polyline".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", points), "points")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", width), "width")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", colour), "colour")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", closed), "closed")));
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::ror(controls, knots, degree, fill, stroke) => {
+            let mut result = format!("ror {}", "NURBS".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", controls), "controls")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", knots), "knots")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", degree), "degree")));
+            let fill_str = match fill {
+                Fill::Solid(color) => {
+                    format!("Solid({}{})",
+                        match color.as_ref() {
+                            VsfType::rcr => "rcr",
+                            VsfType::rcn => "rcn",
+                            VsfType::rcb => "rcb",
+                            VsfType::rcw => "rcw",
+                            VsfType::rck => "rck",
+                            _ => "?",
+                        },
+                        color_hint(color.as_ref()).truecolor(64, 64, 64))
+                },
+                _ => format!("{:?}", fill),
+            };
+            result.push_str(&format!("\n{}", ro_field(fill_str, "fill")));
+            if stroke.is_some() {
+                result.push_str(&format!("\n{}", ro_field(format!("{:?}", stroke), "stroke")));
+            }
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::rox(points, spline_type, fill, stroke) => {
+            let mut result = format!("rox {}", "spline".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", points), "points")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", spline_type), "type")));
+            let fill_str = match fill {
+                Fill::Solid(color) => {
+                    format!("Solid({}{})",
+                        match color.as_ref() {
+                            VsfType::rcr => "rcr",
+                            VsfType::rcn => "rcn",
+                            VsfType::rcb => "rcb",
+                            VsfType::rcw => "rcw",
+                            VsfType::rck => "rck",
+                            _ => "?",
+                        },
+                        color_hint(color.as_ref()).truecolor(64, 64, 64))
+                },
+                _ => format!("{:?}", fill),
+            };
+            result.push_str(&format!("\n{}", ro_field(fill_str, "fill")));
+            if stroke.is_some() {
+                result.push_str(&format!("\n{}", ro_field(format!("{:?}", stroke), "stroke")));
+            }
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::rot(pos, text, size, colour, font) => {
+            let mut result = format!("rot {}", "text".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", text), "text")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", colour), "colour")));
+            if font.is_some() {
+                result.push_str(&format!("\n{}", ro_field(format!("{:?}", font), "font")));
+            }
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::rou(pos, size, label, variant, colour) => {
+            let mut result = format!("rou {}", "button".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", label), "label")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", variant), "variant")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", colour), "colour")));
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::roi(pos, size, handle, tint) => {
+            let mut result = format!("roi {}", "image".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", handle), "handle")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", tint), "tint")));
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::rof(pos, size, handle) => {
+            let mut result = format!("rof {}", "surface".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", handle), "handle")));
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::rom(shape, children) => {
+            let mut result = format!("rom {}", "mask".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", shape), "shape")));
+            result.push_str(&format!("\n{}", ro_field(format_children(children), "children")));
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::row(transform, children) => {
+            let mut result = format!("row {}", "group".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", transform), "transform")));
+            result.push_str(&format!("\n{}", ro_field(format_children(children), "children")));
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::rog(variant, stops) => {
+            let mut result = format!("rog {}", "gradient".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", variant), "variant")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", stops), "stops")));
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::rok(width, colour, join, cap) => {
+            let mut result = format!("rok {}", "stroke".truecolor(64, 64, 64));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", width), "width")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", colour), "colour")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", join), "join")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", cap), "cap")));
+            result
+        }
 
         // Fall back to debug for unhandled types
         _ => format!("{:?}", vsf),
@@ -1732,41 +2061,30 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
 
     let mut out = String::new();
 
-    // Title (not literal VSF data, so darker)
-    out.push_str(&format!("{}\n", tc("Versatile Storage Format", COL_HINT.0, COL_HINT.1, COL_HINT.2)));
-    out.push_str(&format!(
-        "{} {}{} {}{}\n",
-        tc(&format_bytes(data.len()), COL_HINT.0, COL_HINT.1, COL_HINT.2),
-        tc("(", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
-        tc(&format_number(data.len()), COL_HINT.0, COL_HINT.1, COL_HINT.2),
-        tc("Bytes", COL_HINT.0, COL_HINT.1, COL_HINT.2),
-        tc(")", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
-    ));
-    out.push('\n');
-
-    // Header section marker
-    out.push_str(&format!("{}\n", tc("<", COL_HINT.0, COL_HINT.1, COL_HINT.2)));
+    // Show literal magic number with title as hint
+    out.push_str("RÅ\n");
+    out.push_str(&format!("< {}\n", tc("Versatile Storage Format", 64, 64, 64)));
 
     // Version: z3{N} - metadata/unsigned (soft green)
     out.push_str(&format!(
-        " {}{}{}{}{} {}\n",
+        "  {}{}{}{}{} {}\n",
         "z".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
         tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
         tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
         header.version.to_string().white(),
         tc("⦊", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
-        tc("Version", COL_HINT.0, COL_HINT.1, COL_HINT.2)
+        tc("version", 64, 64, 64)
     ));
 
     // Backward compat: y3{N} - metadata/unsigned (soft green)
     out.push_str(&format!(
-        " {}{}{}{}{} {}\n",
+        "  {}{}{}{}{} {}\n",
         "y".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
         tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
         tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
         header.backward_compat.to_string().white(),
         tc("⦊", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
-        tc("Backward compat", COL_HINT.0, COL_HINT.1, COL_HINT.2)
+        tc("backward compat", 64, 64, 64)
     ));
 
     // Creation time: ef6{timestamp} - time (pink-magenta)
@@ -1777,7 +2095,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             _ => "?",
         };
         out.push_str(&format!(
-            " {}{}{}{}{}\n",
+            "  {}{}{}{}{}\n",
             "e".truecolor(COL_TIME.0, COL_TIME.1, COL_TIME.2),
             format!("f{}", tier).truecolor(COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1790,7 +2108,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     let header_size_valid = header_length_bytes == actual_header_size;
     if header_size_valid {
         out.push_str(&format!(
-            " {}{}{}{}{} {} {} {}\n",
+            "  {}{}{}{}{} {} {} {}\n",
             "b".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
             tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1802,7 +2120,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         ));
     } else {
         out.push_str(&format!(
-            " {}{}{}{}{} {} {} {} {}\n",
+            "  {}{}{}{}{} {} {} {} {}\n",
             "b".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
             tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1821,7 +2139,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         let length_valid = file_len == actual_len;
         if length_valid {
             out.push_str(&format!(
-                " {}{}{}{}{} {} {} {}\n",
+                "  {}{}{}{}{} {} {} {}\n",
                 "L".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
                 tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
                 tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1833,7 +2151,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             ));
         } else {
             out.push_str(&format!(
-                " {}{}{}{}{} {} {} {} {}\n",
+                "  {}{}{}{}{} {} {} {} {}\n",
                 "L".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
                 tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
                 tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1850,7 +2168,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     // Provenance hash: hp3{31} (32 Bytes) - encoded as len-1
     if let VsfType::hp(ref hash) = header.provenance_hash {
         out.push_str(&format!(
-            " {}{}{}{}{} {} {}\n",
+            "  {}{}{}{}{} {} {}\n",
             "hp".truecolor(COL_HASH.0, COL_HASH.1, COL_HASH.2),
             tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1868,7 +2186,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     // Signer pubkey: ke3{31} (32 Bytes) - encoded as len-1
     if let Some(VsfType::ke(ref key)) = header.signer_pubkey {
         out.push_str(&format!(
-            " {}{}{}{}{} {} {}\n",
+            "  {}{}{}{}{} {} {}\n",
             "ke".truecolor(COL_KEY.0, COL_KEY.1, COL_KEY.2),
             tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1886,7 +2204,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     // Signature: ge3{63} (64 Bytes) - encoded as len-1
     if let Some(VsfType::ge(ref sig)) = header.signature {
         out.push_str(&format!(
-            " {}{}{}{}{} {} {}\n",
+            "  {}{}{}{}{} {} {}\n",
             "ge".truecolor(COL_SIG.0, COL_SIG.1, COL_SIG.2),
             tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1904,7 +2222,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     // Rolling hash: hb3{31} (32 Bytes) - encoded as len-1 like other crypto types
     if let Some(VsfType::hb(ref hash)) = header.rolling_hash {
         out.push_str(&format!(
-            " {}{}{}{}{} {} {}\n",
+            "  {}{}{}{}{} {} {}\n",
             "hb".truecolor(COL_HASH.0, COL_HASH.1, COL_HASH.2),
             tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1921,13 +2239,13 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         if let Ok(computed) = crate::verification::compute_file_hash(data) {
             if computed.as_slice() == hash.as_slice() {
                 out.push_str(&format!(
-                    " {} {}\n",
+                    "  {} {}\n",
                     tc("Verification:", COL_HINT.0, COL_HINT.1, COL_HINT.2),
                     tc("PASS", COL_PASS.0, COL_PASS.1, COL_PASS.2)
                 ));
             } else {
                 out.push_str(&format!(
-                    " {} {}\n",
+                    "  {} {}\n",
                     tc("Verification:", COL_HINT.0, COL_HINT.1, COL_HINT.2),
                     tc("FAIL", COL_FAIL.0, COL_FAIL.1, COL_FAIL.2)
                 ));
@@ -1937,7 +2255,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
 
     // Label count: n3{N} - metadata/unsigned (soft green)
     out.push_str(&format!(
-        " {}{}{}{}{} {}\n",
+        "  {}{}{}{}{} {}\n",
         "n".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
         tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
         tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1948,11 +2266,11 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
 
     for label in &labels {
         // Show literal VSF encoding: (d3{N}name o3{offset} b3{size} n3{count} ke3{31}... ge3{63}...)
-        out.push_str(&format!(" {}", tc("(", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)));
+        out.push_str(&format!("  {}", tc("(", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)));
 
         // d3{len}name - field name with length prefix - text (light blue)
         out.push_str(&format!(
-            "{}{}{}{}{}{}",
+            "{}{}{}{}{}{}\n",
             "d".truecolor(COL_TEXT.0, COL_TEXT.1, COL_TEXT.2),
             tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
             tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1964,18 +2282,20 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         if label.size == 0 {
             // Inline field: (d3{N}name:val1,val2,...)
             if !label.inline_values.is_empty() {
-                out.push_str(&format!(" {}", tc(":", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)));
+                out.push_str("    ");
+                out.push_str(&format!("{}", tc(":", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)));
                 for (i, val) in label.inline_values.iter().enumerate() {
                     if i > 0 {
                         out.push_str(&format!("{}", tc(",", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)));
                     }
                     out.push_str(&format!("{}", format_value_literal(val)));
                 }
+                out.push_str("\n");
             }
         } else {
-            // Section pointer: o3{offset} b3{size} n3{count} - metadata/unsigned (soft green)
+            // Section pointer: o3{offset} b3{size} n3{count} - metadata/unsigned (soft green) - each on own line
             out.push_str(&format!(
-                " {}{}{}{}{}",
+                "    {}{}{}{}{}\n",
                 "o".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
                 tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
                 tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1983,7 +2303,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                 tc("⦊", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
             ));
             out.push_str(&format!(
-                " {}{}{}{}{}",
+                "    {}{}{}{}{}\n",
                 "b".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
                 tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
                 tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -1991,7 +2311,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                 tc("⦊", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)
             ));
             out.push_str(&format!(
-                " {}{}{}{}{}",
+                "    {}{}{}{}{}\n",
                 "n".truecolor(COL_UINT.0, COL_UINT.1, COL_UINT.2),
                 tc("3", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
                 tc("⦉", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2),
@@ -2001,14 +2321,14 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         }
 
         // NOTE: ke/ge are NOT part of the label pointer - they appear in section content
-        out.push_str(&format!("{}\n", tc(")", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)));
+        out.push_str(&format!("  {}\n", tc(")", COL_PUNCT.0, COL_PUNCT.1, COL_PUNCT.2)));
     }
 
     // Check if there are any non-empty sections
     let has_nonempty_sections = labels.iter().any(|l| l.size > 0);
 
     if has_nonempty_sections {
-        out.push_str(&format!("{}{}\n", tc(">", 64, 64, 64), tc("┓", 64, 64, 64))); // Heavy down and left
+        out.push_str(&format!("{}{}\n", tc(">", 64, 64, 64), tc("╮", 64, 64, 64))); // Light arc down and left
     } else {
         out.push_str(&format!("{}\n", tc(">", 64, 64, 64)));
     }
@@ -2048,7 +2368,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         // Parse and show fields
         // For child_count == 0 (signed/wrapped sections), try dynamic parsing
         // For child_count > 0, use the known count
-        let field_prefix = if is_last { "   " } else { &format!(" {} ", tree_vert()) };
+        let field_prefix = if is_last { "  " } else { &format!(" {} ", tree_vert()) };
 
         let fields_result = if label.child_count == 0 {
             // Try to parse fields dynamically (for signed sections where count is omitted)
@@ -2097,8 +2417,8 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                 // Show parsed fields in literal VSF notation
                 for (j, field) in fields.iter().enumerate() {
                     let is_field_last = j == fields.len() - 1;
-                    let field_connector = if is_field_last { tree_corner() } else { tree_tee() };
-                    let continuation_bar = if is_field_last { "   " } else { &format!("{}  ", tree_vert()) };
+                    let field_connector = if is_field_last { tree_corner_line() } else { tree_tee_line() };
+                    let continuation_bar = if is_field_last { "    " } else { &format!("{}   ", tree_vert()) };
                     let name_literal = format_value_literal(&VsfType::d(field.name.clone()));
                     let values_literal: Vec<String> = field
                         .values
@@ -2114,7 +2434,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                             let hex_indent = format!("{}{}    ", field_prefix, continuation_bar);
                             let formatted = val.replace(CRYPTO_LINE_SEP, &format!("\n{}", hex_indent));
                             out.push_str(&format!(
-                                "{}{} {}{} {} {}{}\n",
+                                "{}{}{}{} {} {}{}\n",
                                 field_prefix,
                                 field_connector,
                                 tc("(", 64, 64, 64),
@@ -2125,7 +2445,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                             ));
                         } else {
                             out.push_str(&format!(
-                                "{}{} {}{} {} {}{}\n",
+                                "{}{}{}{} {} {}{}\n",
                                 field_prefix,
                                 field_connector,
                                 tc("(", 64, 64, 64),
@@ -2138,7 +2458,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                     } else {
                         // Multi-value: group opcodes with following values (newline before each opcode)
                         out.push_str(&format!(
-                            "{}{} {}{}:\n",
+                            "{}{}{}{}:\n",
                             field_prefix,
                             field_connector,
                             tc("(", 64, 64, 64),
@@ -2146,6 +2466,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                         ));
 
                         let mut line_buffer = String::new();
+                        let mut prev_was_opcode = false;
                         for (k, val_vsf) in field.values.iter().enumerate() {
                             let val = &values_literal[k];
                             let is_val_last = k == values_literal.len() - 1;
@@ -2155,27 +2476,42 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
 
                             // If we hit an opcode and have buffered content, flush the line
                             if is_opcode && !line_buffer.is_empty() {
-                                out.push_str(&format!(
-                                    "{}{}  {}\n",
-                                    field_prefix,
-                                    continuation_bar,
-                                    line_buffer,
-                                ));
+                                // Indent multi-line content: first line at 6 spaces, subsequent at 6 spaces (they already have 2 from ro_field)
+                                let lines: Vec<&str> = line_buffer.lines().collect();
+                                for (i, line) in lines.iter().enumerate() {
+                                    if i == 0 {
+                                        out.push_str(&format!("      {}\n", line));
+                                    } else {
+                                        out.push_str(&format!("      {}\n", line));
+                                    }
+                                }
                                 line_buffer.clear();
                             }
 
-                            // Add value to buffer (no separator, opcodes group with following values)
+                            // Add value to buffer
+                            // If previous value was an opcode and this isn't, add newline before this value
+                            if prev_was_opcode && !is_opcode && !line_buffer.is_empty() {
+                                line_buffer.push('\n');
+                            }
                             line_buffer.push_str(val);
+                            prev_was_opcode = is_opcode;
 
                             // If this is the last value, flush buffer with closing paren
                             if is_val_last {
-                                out.push_str(&format!(
-                                    "{}{}  {}{}\n",
-                                    field_prefix,
-                                    continuation_bar,
-                                    line_buffer,
-                                    tc(")", 64, 64, 64),
-                                ));
+                                // Indent multi-line content: all lines at 6 spaces (ro_field already adds 2 for nested fields)
+                                let lines: Vec<&str> = line_buffer.lines().collect();
+                                if lines.is_empty() {
+                                    out.push_str(&format!("      {}\n", tc(")", 64, 64, 64)));
+                                } else {
+                                    for (i, line) in lines.iter().enumerate() {
+                                        if i == lines.len() - 1 {
+                                            // Last line gets closing paren
+                                            out.push_str(&format!("      {}{}\n", line, tc(")", 64, 64, 64)));
+                                        } else {
+                                            out.push_str(&format!("      {}\n", line));
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -2302,8 +2638,8 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
 
     for (i, field) in fields.iter().enumerate() {
         let is_last_field = i == fields.len() - 1;
-        let connector = if is_last_field { tree_corner() } else { tree_tee() };
-        let continuation = if is_last_field { "  ".to_string() } else { pipe.clone() };
+        let connector = if is_last_field { tree_corner_line() } else { tree_tee_line() };
+        let continuation = if is_last_field { "   ".to_string() } else { format!("{}  ", pipe) };
 
         // First line: connector + (name : first_value
         let name_literal = format_value_literal(&VsfType::d(field.name.clone()));

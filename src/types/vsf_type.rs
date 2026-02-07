@@ -60,8 +60,9 @@ use super::eagle_time::EtType;
 use super::tensor::{BitPackedTensor, StridedTensor, Tensor, Vector};
 #[cfg(feature = "spirix")]
 use super::toka_tree::{
-    TokaBox, TokaButton, TokaCircle, TokaGroup, TokaImage, TokaLine, TokaPath, TokaSurface,
-    TokaText,
+    ButtonVariant, Fill, GradientStop, GradientVariant, PathCommand, SplineType, Stroke,
+    StrokeCap, StrokeJoin, TokaBox, TokaButton, TokaCircle, TokaImage, TokaLine,
+    TokaNodeContainer, TokaPath, TokaSurface, TokaText, Transform,
 };
 use super::world_coord::WorldCoord;
 
@@ -412,6 +413,57 @@ pub enum VsfType {
     // output_channels - Number of output colour channels (M, usually 3 for LMS)
     // matrix_NxM - Flattened N×M matrix as Vec<f32>
     // gamma - Gamma correction value as f32
+
+    // ==================== RENDERABLE OBJECT TYPES ====================
+    // Scene graph primitives - everything you can draw (ro* prefix - 3 letters)
+    //
+    // These types expand the 'r' (renderable) family to include drawing primitives
+    // alongside colours. They form the foundation of the Toka scene graph system.
+    //
+    // Coordinate system: All positions/sizes use Spirix CircleF4E4 (window coords: -1 to +1)
+    // Fill/Stroke: Use Fill/Stroke types from toka_tree module
+
+    #[cfg(feature = "spirix")]
+    // Shape primitives
+    rob(CircleF4E4, CircleF4E4, Fill, Option<Stroke>, Vec<VsfType>), // Box: pos, size, fill, stroke, children
+    #[cfg(feature = "spirix")]
+    roc(CircleF4E4, ScalarF4E4, Fill, Option<Stroke>),               // Circle: center, radius, fill, stroke
+    #[cfg(feature = "spirix")]
+    roe(CircleF4E4, CircleF4E4, Fill, Option<Stroke>),               // Ellipse: center, size, fill, stroke
+    #[cfg(feature = "spirix")]
+    rol(CircleF4E4, CircleF4E4, ScalarF4E4, Box<VsfType>),           // Line: start, end, width, colour
+    #[cfg(feature = "spirix")]
+    rop(Vec<PathCommand>, Fill, Option<Stroke>),                     // Path: commands, fill, stroke
+    #[cfg(feature = "spirix")]
+    roo(Vec<CircleF4E4>, ScalarF4E4, Box<VsfType>, bool),            // Polyline: points, width, colour, closed
+    #[cfg(feature = "spirix")]
+    ror(Vec<CircleF4E4>, Vec<ScalarF4E4>, u8, Fill, Option<Stroke>), // NURBS: control_points, knots, degree, fill, stroke
+    #[cfg(feature = "spirix")]
+    rox(Vec<CircleF4E4>, SplineType, Fill, Option<Stroke>),          // Spline: control_points, type, fill, stroke
+
+    #[cfg(feature = "spirix")]
+    // UI/Content primitives
+    rot(CircleF4E4, String, ScalarF4E4, Box<VsfType>, Option<String>), // Text: pos, text, size, colour, font
+    #[cfg(feature = "spirix")]
+    rou(CircleF4E4, CircleF4E4, String, ButtonVariant, Box<VsfType>),  // Button: pos, size, label, variant, colour
+    #[cfg(feature = "spirix")]
+    roi(CircleF4E4, CircleF4E4, u64, Box<VsfType>),                    // Image: pos, size, handle, tint
+    #[cfg(feature = "spirix")]
+    rof(CircleF4E4, CircleF4E4, u64),                                  // Surface: pos, size, handle
+
+    #[cfg(feature = "spirix")]
+    // Container/Effect primitives
+    ron(CircleF4E4, CircleF4E4, Vec<VsfType>),                         // Node: pos, size, children
+    #[cfg(feature = "spirix")]
+    rom(Box<VsfType>, Vec<VsfType>),                                   // Mask: shape, children
+    #[cfg(feature = "spirix")]
+    row(Transform, Vec<VsfType>),                                      // Group: transform, children
+
+    #[cfg(feature = "spirix")]
+    // Style types (used within other ro* types)
+    rog(GradientVariant, Vec<GradientStop>),                           // Gradient: variant, stops
+    #[cfg(feature = "spirix")]
+    rok(ScalarF4E4, Box<VsfType>, StrokeJoin, StrokeCap),              // Stroke: width, colour, join, cap
 
     // ==================== SPIRIX SCALARS ====================
     #[cfg(feature = "spirix")]
