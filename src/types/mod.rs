@@ -24,8 +24,9 @@ pub use eagle_time::{
 pub use tensor::{BitPackedTensor, LayoutOrder, StridedTensor, Tensor, Vector};
 #[cfg(feature = "spirix")]
 pub use toka_tree::{
-    ButtonVariant, PathCommand, TokaBox, TokaButton, TokaCircle, TokaGroup, TokaImage, TokaLine,
-    TokaNode, TokaPath, TokaSurface, TokaText,
+    ButtonVariant, Fill, GradientStop, GradientVariant, PathCommand, SplineType, Stroke,
+    StrokeCap, StrokeJoin, TokaBox, TokaButton, TokaCircle, TokaImage, TokaLine, TokaNode,
+    TokaNodeContainer, TokaPath, TokaSurface, TokaText, Transform,
 };
 pub use vsf_type::VsfType;
 pub use world_coord::WorldCoord;

@@ -354,6 +354,192 @@ impl VsfType {
                 flat
             }
 
+            // ==================== RENDERABLE OBJECT TYPES ====================
+            // Scene graph primitives (ro* prefix - 3 letters)
+            #[cfg(feature = "spirix")]
+            VsfType::rob(pos, size, fill, stroke, children) => {
+                let mut flat = vec![b'r', b'o', b'b'];
+                // Encode pos (c44)
+                flat.extend_from_slice(&pos.real.to_be_bytes());
+                flat.extend_from_slice(&pos.imaginary.to_be_bytes());
+                flat.extend_from_slice(&pos.exponent.to_be_bytes());
+                // Encode size (c44)
+                flat.extend_from_slice(&size.real.to_be_bytes());
+                flat.extend_from_slice(&size.imaginary.to_be_bytes());
+                flat.extend_from_slice(&size.exponent.to_be_bytes());
+                // Encode fill
+                match fill {
+                    crate::types::Fill::Solid(colour) => {
+                        flat.push(0x00);
+                        flat.extend_from_slice(&colour.flatten());
+                    }
+                    crate::types::Fill::Gradient(grad) => {
+                        flat.push(0x01);
+                        flat.extend_from_slice(&grad.flatten());
+                    }
+                }
+                // Encode stroke (Option)
+                match stroke {
+                    None => flat.push(0x00),
+                    Some(s) => {
+                        flat.push(0x01);
+                        // Encode stroke: width, colour, join, cap
+                        flat.extend_from_slice(&s.width.fraction.to_be_bytes());
+                        flat.extend_from_slice(&s.width.exponent.to_be_bytes());
+                        flat.extend_from_slice(&s.colour.flatten());
+                        flat.push(match s.join {
+                            crate::types::StrokeJoin::Miter => 0,
+                            crate::types::StrokeJoin::Round => 1,
+                            crate::types::StrokeJoin::Bevel => 2,
+                        });
+                        flat.push(match s.cap {
+                            crate::types::StrokeCap::Butt => 0,
+                            crate::types::StrokeCap::Round => 1,
+                            crate::types::StrokeCap::Square => 2,
+                        });
+                    }
+                }
+                // Encode children count and children
+                flat.push(children.len() as u8);
+                for child in children {
+                    flat.extend_from_slice(&child.flatten());
+                }
+                flat
+            }
+
+            #[cfg(feature = "spirix")]
+            VsfType::roc(center, radius, fill, stroke) => {
+                let mut flat = vec![b'r', b'o', b'c'];
+                // Encode center (c44)
+                flat.extend_from_slice(&center.real.to_be_bytes());
+                flat.extend_from_slice(&center.imaginary.to_be_bytes());
+                flat.extend_from_slice(&center.exponent.to_be_bytes());
+                // Encode radius (s44)
+                flat.extend_from_slice(&radius.fraction.to_be_bytes());
+                flat.extend_from_slice(&radius.exponent.to_be_bytes());
+                // Encode fill and stroke (same as rob)
+                match fill {
+                    crate::types::Fill::Solid(colour) => {
+                        flat.push(0x00);
+                        flat.extend_from_slice(&colour.flatten());
+                    }
+                    crate::types::Fill::Gradient(grad) => {
+                        flat.push(0x01);
+                        flat.extend_from_slice(&grad.flatten());
+                    }
+                }
+                match stroke {
+                    None => flat.push(0x00),
+                    Some(s) => {
+                        flat.push(0x01);
+                        flat.extend_from_slice(&s.width.fraction.to_be_bytes());
+                        flat.extend_from_slice(&s.width.exponent.to_be_bytes());
+                        flat.extend_from_slice(&s.colour.flatten());
+                        flat.push(match s.join {
+                            crate::types::StrokeJoin::Miter => 0,
+                            crate::types::StrokeJoin::Round => 1,
+                            crate::types::StrokeJoin::Bevel => 2,
+                        });
+                        flat.push(match s.cap {
+                            crate::types::StrokeCap::Butt => 0,
+                            crate::types::StrokeCap::Round => 1,
+                            crate::types::StrokeCap::Square => 2,
+                        });
+                    }
+                }
+                flat
+            }
+
+            #[cfg(feature = "spirix")]
+            VsfType::rog(variant, stops) => {
+                let mut flat = vec![b'r', b'o', b'g'];
+                // Encode variant type and parameters
+                match variant {
+                    crate::types::GradientVariant::Linear { start, end } => {
+                        flat.push(0);
+                        flat.extend_from_slice(&start.real.to_be_bytes());
+                        flat.extend_from_slice(&start.imaginary.to_be_bytes());
+                        flat.extend_from_slice(&start.exponent.to_be_bytes());
+                        flat.extend_from_slice(&end.real.to_be_bytes());
+                        flat.extend_from_slice(&end.imaginary.to_be_bytes());
+                        flat.extend_from_slice(&end.exponent.to_be_bytes());
+                    }
+                    crate::types::GradientVariant::Radial { center, radius } => {
+                        flat.push(1);
+                        flat.extend_from_slice(&center.real.to_be_bytes());
+                        flat.extend_from_slice(&center.imaginary.to_be_bytes());
+                        flat.extend_from_slice(&center.exponent.to_be_bytes());
+                        flat.extend_from_slice(&radius.fraction.to_be_bytes());
+                        flat.extend_from_slice(&radius.exponent.to_be_bytes());
+                    }
+                    crate::types::GradientVariant::Conic { center, angle } => {
+                        flat.push(2);
+                        flat.extend_from_slice(&center.real.to_be_bytes());
+                        flat.extend_from_slice(&center.imaginary.to_be_bytes());
+                        flat.extend_from_slice(&center.exponent.to_be_bytes());
+                        flat.extend_from_slice(&angle.fraction.to_be_bytes());
+                        flat.extend_from_slice(&angle.exponent.to_be_bytes());
+                    }
+                }
+                // Encode stops
+                flat.push(stops.len() as u8);
+                for stop in stops {
+                    flat.extend_from_slice(&stop.offset.fraction.to_be_bytes());
+                    flat.extend_from_slice(&stop.offset.exponent.to_be_bytes());
+                    for channel in &stop.colour {
+                        flat.extend_from_slice(&channel.fraction.to_be_bytes());
+                        flat.extend_from_slice(&channel.exponent.to_be_bytes());
+                    }
+                }
+                flat
+            }
+
+            #[cfg(feature = "spirix")]
+            VsfType::ron(pos, size, children) => {
+                let mut flat = vec![b'r', b'o', b'n'];
+                // Encode pos and size (same as rob)
+                flat.extend_from_slice(&pos.real.to_be_bytes());
+                flat.extend_from_slice(&pos.imaginary.to_be_bytes());
+                flat.extend_from_slice(&pos.exponent.to_be_bytes());
+                flat.extend_from_slice(&size.real.to_be_bytes());
+                flat.extend_from_slice(&size.imaginary.to_be_bytes());
+                flat.extend_from_slice(&size.exponent.to_be_bytes());
+                // Encode children
+                flat.push(children.len() as u8);
+                for child in children {
+                    flat.extend_from_slice(&child.flatten());
+                }
+                flat
+            }
+
+            // Placeholder match arms for remaining ro* types (TODO: implement encoding)
+            #[cfg(feature = "spirix")]
+            VsfType::roe(_, _, _, _) => todo!("Implement roe (ellipse) encoding"),
+            #[cfg(feature = "spirix")]
+            VsfType::rol(_, _, _, _) => todo!("Implement rol (line) encoding"),
+            #[cfg(feature = "spirix")]
+            VsfType::rop(_, _, _) => todo!("Implement rop (path) encoding"),
+            #[cfg(feature = "spirix")]
+            VsfType::roo(_, _, _, _) => todo!("Implement roo (polyline) encoding"),
+            #[cfg(feature = "spirix")]
+            VsfType::ror(_, _, _, _, _) => todo!("Implement ror (NURBS) encoding"),
+            #[cfg(feature = "spirix")]
+            VsfType::rox(_, _, _, _) => todo!("Implement rox (spline) encoding"),
+            #[cfg(feature = "spirix")]
+            VsfType::rot(_, _, _, _, _) => todo!("Implement rot (text) encoding"),
+            #[cfg(feature = "spirix")]
+            VsfType::rou(_, _, _, _, _) => todo!("Implement rou (button) encoding"),
+            #[cfg(feature = "spirix")]
+            VsfType::roi(_, _, _, _) => todo!("Implement roi (image) encoding"),
+            #[cfg(feature = "spirix")]
+            VsfType::rof(_, _, _) => todo!("Implement rof (surface) encoding"),
+            #[cfg(feature = "spirix")]
+            VsfType::rom(_, _) => todo!("Implement rom (mask) encoding"),
+            #[cfg(feature = "spirix")]
+            VsfType::row(_, _) => todo!("Implement row (group/transform) encoding"),
+            #[cfg(feature = "spirix")]
+            VsfType::rok(_, _, _, _) => todo!("Implement rok (stroke) encoding"),
+
             // VSF Metadata
             VsfType::d(value) => {
                 let mut flat = Vec::new();

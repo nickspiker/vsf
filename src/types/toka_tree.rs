@@ -39,18 +39,18 @@ impl TokaBox {
     }
 }
 
-/// Group container (logical only, no visual)
+/// Node container (logical only, no visual)
 #[derive(Debug, Clone, PartialEq)]
-pub struct TokaGroup {
+pub struct TokaNodeContainer {
     pub pos: CircleF4E4,
     pub size: CircleF4E4,
     pub children: Vec<TokaNode>,
 }
 
 #[cfg(feature = "spirix")]
-impl TokaGroup {
+impl TokaNodeContainer {
     pub fn encode_inner(&self) -> Vec<u8> {
-        let mut bytes = vec![b'g'];
+        let mut bytes = vec![b'n'];
         bytes.extend_from_slice(&self.pos.real.to_be_bytes());
         bytes.extend_from_slice(&self.pos.imaginary.to_be_bytes());
         bytes.extend_from_slice(&self.pos.exponent.to_be_bytes());
@@ -58,8 +58,10 @@ impl TokaGroup {
         bytes.extend_from_slice(&self.size.imaginary.to_be_bytes());
         bytes.extend_from_slice(&self.size.exponent.to_be_bytes());
         bytes.push(self.children.len() as u8);
+        // Encode each child as a complete vt capsule (nested VSF fields)
         for child in &self.children {
-            bytes.extend_from_slice(&child.encode_inner());
+            let child_vt = child.to_vsf_type(); // Wrap in v(b't', inner_bytes)
+            bytes.extend_from_slice(&child_vt.flatten()); // Flatten to complete vt capsule
         }
         bytes
     }
@@ -377,7 +379,7 @@ impl TokaSurface {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokaNode {
     Box(TokaBox),
-    Group(TokaGroup),
+    Node(TokaNodeContainer),
     Circle(TokaCircle),
     Line(TokaLine),
     Text(TokaText),
@@ -392,7 +394,7 @@ impl TokaNode {
     pub fn encode_inner(&self) -> Vec<u8> {
         match self {
             TokaNode::Box(b) => b.encode_inner(),
-            TokaNode::Group(g) => g.encode_inner(),
+            TokaNode::Node(n) => n.encode_inner(),
             TokaNode::Circle(c) => c.encode_inner(),
             TokaNode::Line(l) => l.encode_inner(),
             TokaNode::Text(t) => t.encode_inner(),
@@ -474,11 +476,11 @@ impl std::fmt::Display for TokaButton {
 }
 
 #[cfg(feature = "spirix")]
-impl std::fmt::Display for TokaGroup {
+impl std::fmt::Display for TokaNodeContainer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Group {{ pos: {}, size: {}, children: {} }}",
+            "Node {{ pos: {}, size: {}, children: {} }}",
             self.pos, self.size, self.children.len()
         )
     }
@@ -526,10 +528,103 @@ impl std::fmt::Display for TokaNode {
             TokaNode::Line(l) => write!(f, "{}", l),
             TokaNode::Text(t) => write!(f, "{}", t),
             TokaNode::Button(b) => write!(f, "{}", b),
-            TokaNode::Group(g) => write!(f, "{}", g),
+            TokaNode::Node(n) => write!(f, "{}", n),
             TokaNode::Path(p) => write!(f, "{}", p),
             TokaNode::Image(i) => write!(f, "{}", i),
             TokaNode::Surface(s) => write!(f, "{}", s),
         }
+    }
+}
+
+// ==================== NEW SUPPORTING TYPES FOR RO* ====================
+
+/// Fill type for renderable objects - solid colour or gradient
+#[derive(Debug, Clone)]
+pub enum Fill {
+    Solid(Box<super::VsfType>),    // Any colour type (rcr, ra, rw, etc.)
+    Gradient(Box<super::VsfType>), // rog type
+}
+
+/// Stroke properties for renderable objects
+#[derive(Debug, Clone)]
+pub struct Stroke {
+    pub width: ScalarF4E4,
+    pub colour: Box<super::VsfType>,
+    pub join: StrokeJoin,
+    pub cap: StrokeCap,
+}
+
+/// Stroke line join style
+#[derive(Debug, Clone, PartialEq)]
+pub enum StrokeJoin {
+    Miter,
+    Round,
+    Bevel,
+}
+
+/// Stroke line cap style
+#[derive(Debug, Clone, PartialEq)]
+pub enum StrokeCap {
+    Butt,
+    Round,
+    Square,
+}
+
+/// Gradient variant - linear, radial, or conic
+#[derive(Debug, Clone, PartialEq)]
+pub enum GradientVariant {
+    Linear {
+        start: CircleF4E4,
+        end: CircleF4E4,
+    },
+    Radial {
+        center: CircleF4E4,
+        radius: ScalarF4E4,
+    },
+    Conic {
+        center: CircleF4E4,
+        angle: ScalarF4E4,
+    },
+}
+
+/// Gradient colour stop
+#[derive(Debug, Clone, PartialEq)]
+pub struct GradientStop {
+    pub offset: ScalarF4E4,      // 0.0 to 1.0
+    pub colour: [ScalarF4E4; 4], // RGBA
+}
+
+/// Spline curve type
+#[derive(Debug, Clone, PartialEq)]
+pub enum SplineType {
+    Bezier,
+    Cubic,
+    CatmullRom,
+}
+
+/// Transform properties for group nodes
+#[derive(Debug, Clone, PartialEq)]
+pub struct Transform {
+    pub translate: Option<CircleF4E4>,
+    pub rotate: Option<ScalarF4E4>, // Radians
+    pub scale: Option<CircleF4E4>,
+    pub origin: Option<CircleF4E4>, // Transform origin point
+}
+
+impl Transform {
+    pub fn identity() -> Self {
+        Self {
+            translate: None,
+            rotate: None,
+            scale: None,
+            origin: None,
+        }
+    }
+
+    pub fn is_identity(&self) -> bool {
+        self.translate.is_none()
+            && self.rotate.is_none()
+            && self.scale.is_none()
+            && self.origin.is_none()
     }
 }

@@ -252,6 +252,53 @@ pub fn parse_marker_ref(data: &[u8], pointer: &mut usize) -> Result<VsfType, Err
     Ok(VsfType::m(value))
 }
 
+/// Parse colour constant: `rc[a-z]`
+///
+/// Format: 3 bytes total - 'r', 'c', colour letter
+/// Examples: rcn (green), rcr (red), rcb (blue), etc.
+pub fn parse_colour_constant(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+    // Already consumed 'r', now expect 'c' and colour letter
+    if *pointer + 2 > data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Incomplete colour constant (need 2 more bytes after 'r')",
+        ));
+    }
+
+    let second = data[*pointer];
+    let third = data[*pointer + 1];
+    *pointer += 2;
+
+    // Validate 'c' marker
+    if second != b'c' {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Invalid colour constant: expected 'c', got '{}'", second as char),
+        ));
+    }
+
+    // Match colour letter
+    match third {
+        b'k' => Ok(VsfType::rck), // Black
+        b'w' => Ok(VsfType::rcw), // White
+        b'r' => Ok(VsfType::rcr), // Red
+        b'n' => Ok(VsfType::rcn), // Green
+        b'b' => Ok(VsfType::rcb), // Blue
+        b'c' => Ok(VsfType::rcc), // Cyan
+        b'j' => Ok(VsfType::rcj), // Magenta
+        b'y' => Ok(VsfType::rcy), // Yellow
+        b'g' => Ok(VsfType::rcg), // Gray
+        b'o' => Ok(VsfType::rco), // Orange
+        b'v' => Ok(VsfType::rcv), // Violet
+        b'l' => Ok(VsfType::rcl), // Lime
+        b'q' => Ok(VsfType::rcq), // Aqua
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Unknown colour constant: rc{}", third as char),
+        )),
+    }
+}
+
 pub fn parse_mac(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
     // Read algorithm byte (h for HMAC-SHA256, s for HMAC-SHA512, etc.)
     if *pointer >= data.len() {

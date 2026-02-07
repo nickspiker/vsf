@@ -2,14 +2,14 @@
 //!
 //! Toka Tree nodes are encoded as `vt` wrapped data: `v(b't', inner_bytes)`
 //! The inner bytes contain: `[type_marker][data...]` where type_marker is one of:
-//! - `b` = Box, `g` = Group, `c` = Circle, `l` = Line
+//! - `b` = Box, `n` = Node, `c` = Circle, `l` = Line
 //! - `x` = Text, `u` = Button, `p` = Path, `i` = Image, `s` = Surface
 
 use crate::types::VsfType;
 #[cfg(feature = "spirix")]
-use crate::types::{
-    ButtonVariant, PathCommand, TokaBox, TokaButton, TokaCircle, TokaGroup, TokaImage, TokaLine,
-    TokaNode, TokaPath, TokaSurface, TokaText,
+use crate::types::toka_tree::{
+    ButtonVariant, PathCommand, TokaBox, TokaButton, TokaCircle, TokaNodeContainer, TokaImage,
+    TokaLine, TokaNode, TokaPath, TokaSurface, TokaText,
 };
 #[cfg(feature = "spirix")]
 use spirix::{CircleF4E4, ScalarF4E4};
@@ -55,17 +55,21 @@ pub fn parse_toka_tree_inner(data: &[u8], pointer: &mut usize) -> Result<TokaNod
             let colour = parse_rgba(data, pointer)?;
             Ok(TokaNode::Box(TokaBox { pos, size, colour }))
         }
-        b'g' => {
+        b'n' => {
             let pos = parse_circle_f4e4(data, pointer)?;
             let size = parse_circle_f4e4(data, pointer)?;
             let child_count = data[*pointer] as usize;
             *pointer += 1;
             let mut children = Vec::with_capacity(child_count);
+            // Parse each child as a complete vt capsule (nested VSF field)
             for _ in 0..child_count {
-                let child = parse_toka_tree_inner(data, pointer)?;
+                // Parse complete vt capsule: v(b't', inner_bytes)
+                let child_vsf = super::parse::parse(data, pointer)?;
+                // Unwrap vt capsule and parse inner TokaNode
+                let child = parse_vt_toka_node(&child_vsf)?;
                 children.push(child);
             }
-            Ok(TokaNode::Group(TokaGroup {
+            Ok(TokaNode::Node(TokaNodeContainer {
                 pos,
                 size,
                 children,
