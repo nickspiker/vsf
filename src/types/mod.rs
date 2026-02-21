@@ -10,23 +10,24 @@
 
 pub mod eagle_time;
 pub mod tensor;
-#[cfg(feature = "spirix")]
-pub mod toka_tree;
-#[cfg(all(test, feature = "spirix"))]
-mod toka_tree_tests;
 pub mod vsf_type;
 pub mod world_coord;
+
+#[cfg(feature = "spirix")]
+pub mod toka_tree;
 
 // Re-export main types
 pub use eagle_time::{
     datetime_to_eagle_time, eagle_time_nanos, eagle_time_oscillations, EagleTime, EtType,
 };
 pub use tensor::{BitPackedTensor, LayoutOrder, StridedTensor, Tensor, Vector};
-#[cfg(feature = "spirix")]
-pub use toka_tree::{
-    ButtonVariant, Fill, GradientStop, GradientVariant, PathCommand, SplineType, Stroke,
-    StrokeCap, StrokeJoin, TokaBox, TokaButton, TokaCircle, TokaImage, TokaLine, TokaNode,
-    TokaNodeContainer, TokaPath, TokaSurface, TokaText, Transform,
-};
 pub use vsf_type::VsfType;
 pub use world_coord::WorldCoord;
+
+// Re-export ro* supporting types
+#[cfg(feature = "spirix")]
+pub use toka_tree::{
+    ButtonVariant, Fill, GradientStop, GradientVariant, Node, NodeKind, PathCommand, SplineType,
+    Stroke, StrokeCap, StrokeJoin, TextStyle, TokaBox, TokaButton, TokaCircle, TokaContainer,
+    TokaImage, TokaLine, TokaPath, TokaSurface, TokaText, Transform,
+};

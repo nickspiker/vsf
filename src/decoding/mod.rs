@@ -9,7 +9,6 @@ pub mod primitives;
 #[cfg(feature = "spirix")]
 pub mod spirix;
 pub mod tensors;
-pub mod toka_tree;
 
 // Re-export the main parse function
 pub use metadata::parse_file_length;

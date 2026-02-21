@@ -5,9 +5,9 @@ use std::io::{Error, ErrorKind};
 
 // Import sub-parsers from sibling modules
 use super::metadata::{
-    parse_backward_version, parse_colour_constant, parse_count, parse_dtype, parse_eagle_time,
-    parse_file_length, parse_hash, parse_key, parse_label, parse_length, parse_mac,
-    parse_marker_def, parse_marker_ref, parse_offset, parse_signature, parse_string,
+    parse_backward_version, parse_colour_array, parse_colour_constant, parse_count, parse_dtype,
+    parse_eagle_time, parse_file_length, parse_hash, parse_key, parse_label, parse_length,
+    parse_mac, parse_marker_def, parse_marker_ref, parse_offset, parse_signature, parse_string,
     parse_version, parse_world_coord, parse_wrapped,
 };
 use super::primitives::{parse_complex, parse_float, parse_signed, parse_unsigned};
@@ -83,11 +83,17 @@ pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
         b'r' => {
             // Look ahead to distinguish:
             // - rc[a-z]: colour constants
+            // - ra/rt/rp: colour arrays
             // - ro[a-z]: renderable objects
             // - r + usize: marker refs
             if *pointer < data.len() {
                 match data[*pointer] {
                     b'c' => parse_colour_constant(data, pointer),
+                    b'a' | b't' | b'p' => {
+                        let colour_type = data[*pointer];
+                        *pointer += 1;
+                        parse_colour_array(data, pointer, colour_type)
+                    }
                     #[cfg(feature = "spirix")]
                     b'o' => parse_renderable_object(data, pointer),
                     _ => parse_marker_ref(data, pointer),
@@ -157,8 +163,6 @@ fn parse_opcode(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
 /// Format: 3+ bytes - 'r', 'o', type letter, then type-specific data
 #[cfg(feature = "spirix")]
 fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
-    use spirix::{CircleF4E4, ScalarF4E4};
-
     // Already consumed 'r', now expect 'o' and type letter
     if *pointer + 2 > data.len() {
         return Err(Error::new(
@@ -214,6 +218,138 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
             let children = parse_children(data, pointer)?;
             Ok(VsfType::ron(pos, size, children))
         }
+        b'e' => {
+            // roe: Ellipse (center, size, fill, stroke)
+            let center = parse_c44(data, pointer)?;
+            let size = parse_c44(data, pointer)?;
+            let fill = parse_fill(data, pointer)?;
+            let stroke = parse_option_stroke(data, pointer)?;
+            Ok(VsfType::roe(center, size, fill, stroke))
+        }
+        b'l' => {
+            // rol: Line (start, end, width, colour)
+            let start = parse_c44(data, pointer)?;
+            let end = parse_c44(data, pointer)?;
+            let width = parse_s44(data, pointer)?;
+            let colour = Box::new(parse(data, pointer)?);
+            Ok(VsfType::rol(start, end, width, colour))
+        }
+        b'p' => {
+            // rop: Path (commands, fill, stroke)
+            let commands = parse_path_commands(data, pointer)?;
+            let fill = parse_fill(data, pointer)?;
+            let stroke = parse_option_stroke(data, pointer)?;
+            Ok(VsfType::rop(commands, fill, stroke))
+        }
+        b'o' => {
+            // roo: Polyline (points, width, colour, closed)
+            let points = parse_points(data, pointer)?;
+            let width = parse_s44(data, pointer)?;
+            let colour = Box::new(parse(data, pointer)?);
+            let closed = parse_bool(data, pointer)?;
+            Ok(VsfType::roo(points, width, colour, closed))
+        }
+        b'r' => {
+            // ror: NURBS (control_points, knots, degree, fill, stroke)
+            let control_points = parse_points(data, pointer)?;
+            let knots = parse_scalars(data, pointer)?;
+            let degree = parse_u8(data, pointer)?;
+            let fill = parse_fill(data, pointer)?;
+            let stroke = parse_option_stroke(data, pointer)?;
+            Ok(VsfType::ror(control_points, knots, degree, fill, stroke))
+        }
+        b'x' => {
+            // rox: Spline (control_points, type, fill, stroke)
+            let control_points = parse_points(data, pointer)?;
+            let spline_type = parse_spline_type(data, pointer)?;
+            let fill = parse_fill(data, pointer)?;
+            let stroke = parse_option_stroke(data, pointer)?;
+            Ok(VsfType::rox(control_points, spline_type, fill, stroke))
+        }
+        b't' => {
+            // rot: Text (pos, text (l or x), size, colour, style)
+            let pos = parse_c44(data, pointer)?;
+            let text = Box::new(parse(data, pointer)?); // Can be l or x type
+            let size = parse_s44(data, pointer)?;
+            let colour = Box::new(parse(data, pointer)?);
+            // TODO: Parse Option<TextStyle> properly
+            // For now, just check if present and skip
+            let style_present = if *pointer < data.len() {
+                let has_style = data[*pointer] != 0x00;
+                *pointer += 1;
+                has_style
+            } else {
+                false
+            };
+            let style = if style_present {
+                // TODO: Parse TextStyle fields
+                None // Placeholder
+            } else {
+                None
+            };
+            Ok(VsfType::rot(pos, text, size, colour, style))
+        }
+        b'u' => {
+            // rou: Button (pos, size, label, variant, colour)
+            let pos = parse_c44(data, pointer)?;
+            let size = parse_c44(data, pointer)?;
+            let label_vsf = parse(data, pointer)?;
+            let label = match label_vsf {
+                VsfType::x(s) => s,
+                _ => {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        "Expected string for label",
+                    ))
+                }
+            };
+            let variant = parse_button_variant(data, pointer)?;
+            let colour = Box::new(parse(data, pointer)?);
+            Ok(VsfType::rou(pos, size, label, variant, colour))
+        }
+        b'i' => {
+            // roi: Image (pos, size, handle, tint)
+            let pos = parse_c44(data, pointer)?;
+            let size = parse_c44(data, pointer)?;
+            let handle_vsf = parse(data, pointer)?;
+            let handle = match handle_vsf {
+                VsfType::u6(h) => h,
+                _ => return Err(Error::new(ErrorKind::InvalidData, "Expected u6 for handle")),
+            };
+            let tint = Box::new(parse(data, pointer)?);
+            Ok(VsfType::roi(pos, size, handle, tint))
+        }
+        b'f' => {
+            // rof: Surface (pos, size, handle)
+            let pos = parse_c44(data, pointer)?;
+            let size = parse_c44(data, pointer)?;
+            let handle_vsf = parse(data, pointer)?;
+            let handle = match handle_vsf {
+                VsfType::u6(h) => h,
+                _ => return Err(Error::new(ErrorKind::InvalidData, "Expected u6 for handle")),
+            };
+            Ok(VsfType::rof(pos, size, handle))
+        }
+        b'm' => {
+            // rom: Mask (shape, children)
+            let shape = Box::new(parse(data, pointer)?);
+            let children = parse_children(data, pointer)?;
+            Ok(VsfType::rom(shape, children))
+        }
+        b'w' => {
+            // row: Group (transform, children)
+            let transform = parse_transform(data, pointer)?;
+            let children = parse_children(data, pointer)?;
+            Ok(VsfType::row(transform, children))
+        }
+        b'k' => {
+            // rok: Stroke (width, colour, join, cap)
+            let width = parse_s44(data, pointer)?;
+            let colour = Box::new(parse(data, pointer)?);
+            let join = parse_stroke_join(data, pointer)?;
+            let cap = parse_stroke_cap(data, pointer)?;
+            Ok(VsfType::rok(width, colour, join, cap))
+        }
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Unknown renderable object type: ro{}", third as char),
@@ -226,19 +362,29 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
 #[cfg(feature = "spirix")]
 fn parse_c44(data: &[u8], pointer: &mut usize) -> Result<spirix::CircleF4E4, Error> {
     if *pointer + 6 > data.len() {
-        return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for c44"));
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for c44",
+        ));
     }
     let real = i16::from_be_bytes([data[*pointer], data[*pointer + 1]]);
     let imaginary = i16::from_be_bytes([data[*pointer + 2], data[*pointer + 3]]);
     let exponent = i16::from_be_bytes([data[*pointer + 4], data[*pointer + 5]]);
     *pointer += 6;
-    Ok(spirix::CircleF4E4 { real, imaginary, exponent })
+    Ok(spirix::CircleF4E4 {
+        real,
+        imaginary,
+        exponent,
+    })
 }
 
 #[cfg(feature = "spirix")]
 fn parse_s44(data: &[u8], pointer: &mut usize) -> Result<spirix::ScalarF4E4, Error> {
     if *pointer + 4 > data.len() {
-        return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for s44"));
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for s44",
+        ));
     }
     let fraction = i16::from_be_bytes([data[*pointer], data[*pointer + 1]]);
     let exponent = i16::from_be_bytes([data[*pointer + 2], data[*pointer + 3]]);
@@ -249,7 +395,10 @@ fn parse_s44(data: &[u8], pointer: &mut usize) -> Result<spirix::ScalarF4E4, Err
 #[cfg(feature = "spirix")]
 fn parse_fill(data: &[u8], pointer: &mut usize) -> Result<Fill, Error> {
     if *pointer >= data.len() {
-        return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for fill type"));
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for fill type",
+        ));
     }
     let fill_type = data[*pointer];
     *pointer += 1;
@@ -275,7 +424,10 @@ fn parse_fill(data: &[u8], pointer: &mut usize) -> Result<Fill, Error> {
 #[cfg(feature = "spirix")]
 fn parse_option_stroke(data: &[u8], pointer: &mut usize) -> Result<Option<Stroke>, Error> {
     if *pointer >= data.len() {
-        return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for stroke option"));
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for stroke option",
+        ));
     }
     let has_stroke = data[*pointer];
     *pointer += 1;
@@ -288,7 +440,10 @@ fn parse_option_stroke(data: &[u8], pointer: &mut usize) -> Result<Option<Stroke
             let colour = parse(data, pointer)?;
 
             if *pointer + 2 > data.len() {
-                return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for stroke properties"));
+                return Err(Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "Not enough data for stroke properties",
+                ));
             }
             let join = match data[*pointer] {
                 0 => StrokeJoin::Miter,
@@ -321,7 +476,10 @@ fn parse_option_stroke(data: &[u8], pointer: &mut usize) -> Result<Option<Stroke
 #[cfg(feature = "spirix")]
 fn parse_gradient_variant(data: &[u8], pointer: &mut usize) -> Result<GradientVariant, Error> {
     if *pointer >= data.len() {
-        return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for gradient variant"));
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for gradient variant",
+        ));
     }
     let variant_type = data[*pointer];
     *pointer += 1;
@@ -355,7 +513,10 @@ fn parse_gradient_variant(data: &[u8], pointer: &mut usize) -> Result<GradientVa
 #[cfg(feature = "spirix")]
 fn parse_gradient_stops(data: &[u8], pointer: &mut usize) -> Result<Vec<GradientStop>, Error> {
     if *pointer >= data.len() {
-        return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for gradient stop count"));
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for gradient stop count",
+        ));
     }
     let count = data[*pointer] as usize;
     *pointer += 1;
@@ -374,15 +535,346 @@ fn parse_gradient_stops(data: &[u8], pointer: &mut usize) -> Result<Vec<Gradient
 
 #[cfg(feature = "spirix")]
 fn parse_children(data: &[u8], pointer: &mut usize) -> Result<Vec<VsfType>, Error> {
+    // Expect '(' to start children
     if *pointer >= data.len() {
-        return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for children count"));
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Expected '(' for children",
+        ));
+    }
+    if data[*pointer] != b'(' {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Expected '(' for children, got {:02x}", data[*pointer]),
+        ));
+    }
+    *pointer += 1;
+
+    // Parse children until ')'
+    let mut children = Vec::new();
+    while *pointer < data.len() && data[*pointer] != b')' {
+        children.push(parse(data, pointer)?);
+    }
+
+    // Expect ')' to end children
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Expected ')' to close children",
+        ));
+    }
+    if data[*pointer] != b')' {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "Expected ')' to close children",
+        ));
+    }
+    *pointer += 1;
+
+    Ok(children)
+}
+
+#[cfg(feature = "spirix")]
+fn parse_path_commands(
+    data: &[u8],
+    pointer: &mut usize,
+) -> Result<Vec<crate::types::PathCommand>, Error> {
+    use crate::types::PathCommand;
+
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for command count",
+        ));
     }
     let count = data[*pointer] as usize;
     *pointer += 1;
 
-    let mut children = Vec::with_capacity(count);
+    let mut commands = Vec::with_capacity(count);
     for _ in 0..count {
-        children.push(parse(data, pointer)?);
+        if *pointer >= data.len() {
+            return Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                "Not enough data for command type",
+            ));
+        }
+        let cmd_type = data[*pointer];
+        *pointer += 1;
+
+        let command = match cmd_type {
+            0 => PathCommand::MoveTo(parse_c44(data, pointer)?),
+            1 => PathCommand::LineTo(parse_c44(data, pointer)?),
+            2 => {
+                let ctrl = parse_c44(data, pointer)?;
+                let end = parse_c44(data, pointer)?;
+                PathCommand::QuadraticTo(ctrl, end)
+            }
+            3 => {
+                let ctrl1 = parse_c44(data, pointer)?;
+                let ctrl2 = parse_c44(data, pointer)?;
+                let end = parse_c44(data, pointer)?;
+                PathCommand::CubicTo(ctrl1, ctrl2, end)
+            }
+            4 => PathCommand::Close,
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Invalid path command type: {}", cmd_type),
+                ))
+            }
+        };
+        commands.push(command);
     }
-    Ok(children)
+    Ok(commands)
+}
+
+#[cfg(feature = "spirix")]
+fn parse_points(data: &[u8], pointer: &mut usize) -> Result<Vec<spirix::CircleF4E4>, Error> {
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for point count",
+        ));
+    }
+    let count = data[*pointer] as usize;
+    *pointer += 1;
+
+    let mut points = Vec::with_capacity(count);
+    for _ in 0..count {
+        points.push(parse_c44(data, pointer)?);
+    }
+    Ok(points)
+}
+
+#[cfg(feature = "spirix")]
+fn parse_scalars(data: &[u8], pointer: &mut usize) -> Result<Vec<spirix::ScalarF4E4>, Error> {
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for scalar count",
+        ));
+    }
+    let count = data[*pointer] as usize;
+    *pointer += 1;
+
+    let mut scalars = Vec::with_capacity(count);
+    for _ in 0..count {
+        scalars.push(parse_s44(data, pointer)?);
+    }
+    Ok(scalars)
+}
+
+#[cfg(feature = "spirix")]
+fn parse_bool(data: &[u8], pointer: &mut usize) -> Result<bool, Error> {
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for bool",
+        ));
+    }
+    let value = data[*pointer];
+    *pointer += 1;
+    Ok(value != 0)
+}
+
+#[cfg(feature = "spirix")]
+fn parse_u8(data: &[u8], pointer: &mut usize) -> Result<u8, Error> {
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for u8",
+        ));
+    }
+    let value = data[*pointer];
+    *pointer += 1;
+    Ok(value)
+}
+
+#[cfg(feature = "spirix")]
+fn parse_spline_type(data: &[u8], pointer: &mut usize) -> Result<crate::types::SplineType, Error> {
+    use crate::types::SplineType;
+
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for spline type",
+        ));
+    }
+    let type_byte = data[*pointer];
+    *pointer += 1;
+
+    match type_byte {
+        0 => Ok(SplineType::Bezier),
+        1 => Ok(SplineType::Cubic),
+        2 => Ok(SplineType::CatmullRom),
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Invalid spline type: {}", type_byte),
+        )),
+    }
+}
+
+#[cfg(feature = "spirix")]
+#[allow(dead_code)]
+fn parse_option_string(data: &[u8], pointer: &mut usize) -> Result<Option<String>, Error> {
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for option flag",
+        ));
+    }
+    let has_value = data[*pointer];
+    *pointer += 1;
+
+    if has_value == 0 {
+        Ok(None)
+    } else {
+        let string_vsf = parse(data, pointer)?;
+        match string_vsf {
+            VsfType::x(s) => Ok(Some(s)),
+            _ => Err(Error::new(
+                ErrorKind::InvalidData,
+                "Expected string in Option<String>",
+            )),
+        }
+    }
+}
+
+#[cfg(feature = "spirix")]
+fn parse_button_variant(
+    data: &[u8],
+    pointer: &mut usize,
+) -> Result<crate::types::ButtonVariant, Error> {
+    use crate::types::ButtonVariant;
+
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for button variant",
+        ));
+    }
+    let variant_byte = data[*pointer];
+    *pointer += 1;
+
+    match variant_byte {
+        0 => Ok(ButtonVariant::Filled),
+        1 => Ok(ButtonVariant::Outlined),
+        2 => Ok(ButtonVariant::Text),
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Invalid button variant: {}", variant_byte),
+        )),
+    }
+}
+
+#[cfg(feature = "spirix")]
+fn parse_transform(data: &[u8], pointer: &mut usize) -> Result<crate::types::Transform, Error> {
+    use crate::types::Transform;
+
+    // Parse translate (Option<c44>)
+    let translate = if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for translate option",
+        ));
+    } else if data[*pointer] == 0 {
+        *pointer += 1;
+        None
+    } else {
+        *pointer += 1;
+        Some(parse_c44(data, pointer)?)
+    };
+
+    // Parse rotate (Option<s44>)
+    let rotate = if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for rotate option",
+        ));
+    } else if data[*pointer] == 0 {
+        *pointer += 1;
+        None
+    } else {
+        *pointer += 1;
+        Some(parse_s44(data, pointer)?)
+    };
+
+    // Parse scale (Option<c44>)
+    let scale = if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for scale option",
+        ));
+    } else if data[*pointer] == 0 {
+        *pointer += 1;
+        None
+    } else {
+        *pointer += 1;
+        Some(parse_c44(data, pointer)?)
+    };
+
+    // Parse origin (Option<c44>)
+    let origin = if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for origin option",
+        ));
+    } else if data[*pointer] == 0 {
+        *pointer += 1;
+        None
+    } else {
+        *pointer += 1;
+        Some(parse_c44(data, pointer)?)
+    };
+
+    Ok(Transform {
+        translate,
+        rotate,
+        scale,
+        origin,
+    })
+}
+
+#[cfg(feature = "spirix")]
+fn parse_stroke_join(data: &[u8], pointer: &mut usize) -> Result<StrokeJoin, Error> {
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for stroke join",
+        ));
+    }
+    let join_byte = data[*pointer];
+    *pointer += 1;
+
+    match join_byte {
+        0 => Ok(StrokeJoin::Miter),
+        1 => Ok(StrokeJoin::Round),
+        2 => Ok(StrokeJoin::Bevel),
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Invalid stroke join: {}", join_byte),
+        )),
+    }
+}
+
+#[cfg(feature = "spirix")]
+fn parse_stroke_cap(data: &[u8], pointer: &mut usize) -> Result<StrokeCap, Error> {
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for stroke cap",
+        ));
+    }
+    let cap_byte = data[*pointer];
+    *pointer += 1;
+
+    match cap_byte {
+        0 => Ok(StrokeCap::Butt),
+        1 => Ok(StrokeCap::Round),
+        2 => Ok(StrokeCap::Square),
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Invalid stroke cap: {}", cap_byte),
+        )),
+    }
 }

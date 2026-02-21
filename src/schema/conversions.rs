@@ -381,7 +381,7 @@ impl FromVsfType for String {
     }
 }
 
-impl<'a> IntoVsfType for &'a str {
+impl IntoVsfType for &str {
     fn into_vsf_type(self) -> VsfType {
         VsfType::x(self.to_string())
     }

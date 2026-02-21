@@ -387,8 +387,6 @@ impl SectionBuilder {
     /// Format: [d"section_name" (d"field1":val1,val2) (d"field2") ...]
     /// Uses FieldValue.flatten() for each field
     pub fn encode(&self) -> ValidationResult<Vec<u8>> {
-        use crate::VsfType;
-
         // Check all required fields are set
         for field_schema in &self.schema.fields {
             if field_schema.required && !self.fields.iter().any(|f| f.name == field_schema.name) {

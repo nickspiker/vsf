@@ -31,7 +31,7 @@ pub enum LayoutOrder {
 ///     vec![0u8; 100 * 200 * 3]
 /// );
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Tensor<T> {
     pub shape: Vec<usize>,
     pub data: Vec<T>,
@@ -52,7 +52,7 @@ pub struct Tensor<T> {
 /// - Vector<u8> with 10 elements: `[t][n][0x0A][u][3][bytes...]`
 /// - IPv4 address: `[t][n][0x04][u][3][4 bytes]`
 /// - IPv6 address: `[t][n][0x10][u][3][16 bytes]`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Vector<T> {
     pub data: Vec<T>,
 }
@@ -82,7 +82,7 @@ pub struct Vector<T> {
 ///     vec![0u8; 10_000]
 /// );
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StridedTensor<T> {
     pub shape: Vec<usize>,
     pub stride: Vec<usize>,
@@ -191,7 +191,7 @@ impl<T> StridedTensor<T> {
 /// let tensor = BitPackedTensor::pack_u16(12, vec![1920, 1080], &samples);
 /// let unpacked: Vec<u16> = tensor.unpack_u16();  // Explicit, no enum
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BitPackedTensor {
     /// Bits per sample (1-128): 0x01-0x80
     pub bit_depth: u8,

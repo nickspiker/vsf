@@ -65,7 +65,7 @@ impl std::fmt::Debug for FieldSchema {
             .field("constraint", &self.constraint)
             .field("required", &self.required)
             .field("description", &self.description)
-            .field("default", &self.default.as_ref().map(|v| vsf_type_name(v)))
+            .field("default", &self.default.as_ref().map(vsf_type_name))
             .finish()
     }
 }

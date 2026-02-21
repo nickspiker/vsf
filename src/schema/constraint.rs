@@ -200,7 +200,15 @@ impl TypeConstraint {
             TypeConstraint::AsciiText => matches!(value, VsfType::l(_)),
 
             TypeConstraint::AnyHash => {
-                matches!(value, VsfType::hp(_) | VsfType::hb(_) | VsfType::hs(_) | VsfType::hm(_) | VsfType::hg(_) | VsfType::hP(_))
+                matches!(
+                    value,
+                    VsfType::hp(_)
+                        | VsfType::hb(_)
+                        | VsfType::hs(_)
+                        | VsfType::hm(_)
+                        | VsfType::hg(_)
+                        | VsfType::hP(_)
+                )
             }
 
             TypeConstraint::Blake3Provenance => matches!(value, VsfType::hp(_)),

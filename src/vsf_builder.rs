@@ -317,8 +317,10 @@ impl VsfBuilder {
 
         // Header field count (sections + unboxed + inline_fields + optional avatar_id)
         let avatar_field_count = if self.avatar_hash.is_some() { 1 } else { 0 };
-        let total_fields =
-            self.sections.len() + self.unboxed.len() + self.inline_fields.len() + avatar_field_count;
+        let total_fields = self.sections.len()
+            + self.unboxed.len()
+            + self.inline_fields.len()
+            + avatar_field_count;
         vsf[header_index].extend_from_slice(&VsfType::n(total_fields).flatten());
 
         // Create header field definitions (section pointers)

@@ -24,7 +24,7 @@ const OSCILLATIONS_PER_SECOND: u64 = 1_420_407_826;
 /// **IEEE 754 Float types store seconds:**
 /// - f32: ~2 minute effective precision (for timestamps since 1969)
 /// - f64: ~200 nanosecond effective precision (for timestamps since 1969)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[allow(non_camel_case_types)]
 pub enum EtType {
     u(usize), // Oscillation count
@@ -169,8 +169,12 @@ impl EagleTime {
     /// Panics if the timestamp is outside chrono's representable range.
     /// For non-panicking version, use `to_datetime_opt()`.
     pub fn to_datetime(&self) -> DateTime<Utc> {
-        self.to_datetime_opt()
-            .unwrap_or_else(|| panic!("Timestamp outside representable range: {:?}", self.et_seconds))
+        self.to_datetime_opt().unwrap_or_else(|| {
+            panic!(
+                "Timestamp outside representable range: {:?}",
+                self.et_seconds
+            )
+        })
     }
 
     /// Get a reference to the underlying EtType

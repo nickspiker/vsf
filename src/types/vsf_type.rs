@@ -58,13 +58,13 @@ use spirix::{
 
 use super::eagle_time::EtType;
 use super::tensor::{BitPackedTensor, StridedTensor, Tensor, Vector};
+use super::world_coord::WorldCoord;
+
 #[cfg(feature = "spirix")]
 use super::toka_tree::{
-    ButtonVariant, Fill, GradientStop, GradientVariant, PathCommand, SplineType, Stroke,
-    StrokeCap, StrokeJoin, TokaBox, TokaButton, TokaCircle, TokaImage, TokaLine,
-    TokaNodeContainer, TokaPath, TokaSurface, TokaText, Transform,
+    ButtonVariant, Fill, GradientStop, GradientVariant, PathCommand, SplineType, Stroke, StrokeCap,
+    StrokeJoin, TextStyle, Transform,
 };
-use super::world_coord::WorldCoord;
 
 /// Main VSF type enum representing all supported data types
 ///
@@ -116,18 +116,18 @@ use super::world_coord::WorldCoord;
 /// - `k`: Cryptographic key
 /// - `w`: World coordinate (Dymaxion icosahedral)
 /// - `v`: Wrapped/encoded data (optional: compression, error correction, encryption)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[allow(non_camel_case_types)]
 pub enum VsfType {
     // VSF Structure
-    d(String),      // VSF internal dictionary key (internal naming: section names, field names, keys)
-    o(usize),       // Offset in Bytes
+    d(String), // VSF internal dictionary key (internal naming: section names, field names, keys)
+    o(usize),  // Offset in Bytes
     b(usize, bool), // Length in Bytes (value, inclusive_mode)
     L(usize, bool), // File length in Bytes (value, inclusive_mode)
-    n(usize),       // Number/count
-    z(usize),       // Version
-    y(usize),       // Backward version
-    m(usize),       // Marker
+    n(usize),  // Number/count
+    z(usize),  // Version
+    y(usize),  // Backward version
+    m(usize),  // Marker
 
     // ==================== CRYPTOGRAPHIC TYPES ====================
     // Hash algorithms
@@ -213,7 +213,7 @@ pub enum VsfType {
 
     // ==================== METADATA & SPECIAL TYPES ====================
     x(String),     // UTF-8 text (Unicode, user-facing, Huffman compressed)
-    l(String),      // ASCII text (user-facing, ASCII-only alternative to x)
+    l(String),     // ASCII text (user-facing, ASCII-only alternative to x)
     e(EtType),     // Eagle Time
     w(WorldCoord), // World coordinate (Dymaxion icosahedral)
 
@@ -315,7 +315,7 @@ pub enum VsfType {
     /// - `r45[8 bytes]` = 4 channels × 32 bits = RGBA (integer)
     /// - `rG3[16 bytes]` = 16 channels × 8 bits = multispectral
     ///
-    /// ## 1. Named Shortcuts (zero-data, 3 bytes total - 'c' prefix for color)
+    /// ## 1. Named Shortcuts (zero-data, 3 bytes total - 'c' prefix for colour)
     /// - `rcb` = Blue       - `rcc` = Cyan      - `rcg` = Middle grey (50%)
     /// - `rcj` = Magenta    - `rck` = Black     - `rcl` = Lime
     /// - `rcn` = Green      - `rco` = Orange    - `rcq` = Aqua
@@ -422,48 +422,53 @@ pub enum VsfType {
     //
     // Coordinate system: All positions/sizes use Spirix CircleF4E4 (window coords: -1 to +1)
     // Fill/Stroke: Use Fill/Stroke types from toka_tree module
-
     #[cfg(feature = "spirix")]
     // Shape primitives
     rob(CircleF4E4, CircleF4E4, Fill, Option<Stroke>, Vec<VsfType>), // Box: pos, size, fill, stroke, children
     #[cfg(feature = "spirix")]
-    roc(CircleF4E4, ScalarF4E4, Fill, Option<Stroke>),               // Circle: center, radius, fill, stroke
+    roc(CircleF4E4, ScalarF4E4, Fill, Option<Stroke>), // Circle: center, radius, fill, stroke
     #[cfg(feature = "spirix")]
-    roe(CircleF4E4, CircleF4E4, Fill, Option<Stroke>),               // Ellipse: center, size, fill, stroke
+    roe(CircleF4E4, CircleF4E4, Fill, Option<Stroke>), // Ellipse: center, size, fill, stroke
     #[cfg(feature = "spirix")]
-    rol(CircleF4E4, CircleF4E4, ScalarF4E4, Box<VsfType>),           // Line: start, end, width, colour
+    rol(CircleF4E4, CircleF4E4, ScalarF4E4, Box<VsfType>), // Line: start, end, width, colour
     #[cfg(feature = "spirix")]
-    rop(Vec<PathCommand>, Fill, Option<Stroke>),                     // Path: commands, fill, stroke
+    rop(Vec<PathCommand>, Fill, Option<Stroke>), // Path: commands, fill, stroke
     #[cfg(feature = "spirix")]
-    roo(Vec<CircleF4E4>, ScalarF4E4, Box<VsfType>, bool),            // Polyline: points, width, colour, closed
+    roo(Vec<CircleF4E4>, ScalarF4E4, Box<VsfType>, bool), // Polyline: points, width, colour, closed
     #[cfg(feature = "spirix")]
     ror(Vec<CircleF4E4>, Vec<ScalarF4E4>, u8, Fill, Option<Stroke>), // NURBS: control_points, knots, degree, fill, stroke
     #[cfg(feature = "spirix")]
-    rox(Vec<CircleF4E4>, SplineType, Fill, Option<Stroke>),          // Spline: control_points, type, fill, stroke
+    rox(Vec<CircleF4E4>, SplineType, Fill, Option<Stroke>), // Spline: control_points, type, fill, stroke
 
     #[cfg(feature = "spirix")]
     // UI/Content primitives
-    rot(CircleF4E4, String, ScalarF4E4, Box<VsfType>, Option<String>), // Text: pos, text, size, colour, font
+    rot(
+        CircleF4E4,
+        Box<VsfType>,
+        ScalarF4E4,
+        Box<VsfType>,
+        Option<TextStyle>,
+    ), // Text: pos, text (l or x), size, colour, style
     #[cfg(feature = "spirix")]
-    rou(CircleF4E4, CircleF4E4, String, ButtonVariant, Box<VsfType>),  // Button: pos, size, label, variant, colour
+    rou(CircleF4E4, CircleF4E4, String, ButtonVariant, Box<VsfType>), // Button: pos, size, label, variant, colour
     #[cfg(feature = "spirix")]
-    roi(CircleF4E4, CircleF4E4, u64, Box<VsfType>),                    // Image: pos, size, handle, tint
+    roi(CircleF4E4, CircleF4E4, u64, Box<VsfType>), // Image: pos, size, handle, tint
     #[cfg(feature = "spirix")]
-    rof(CircleF4E4, CircleF4E4, u64),                                  // Surface: pos, size, handle
+    rof(CircleF4E4, CircleF4E4, u64), // Surface: pos, size, handle
 
     #[cfg(feature = "spirix")]
     // Container/Effect primitives
-    ron(CircleF4E4, CircleF4E4, Vec<VsfType>),                         // Node: pos, size, children
+    ron(CircleF4E4, CircleF4E4, Vec<VsfType>), // Node: pos, size, children
     #[cfg(feature = "spirix")]
-    rom(Box<VsfType>, Vec<VsfType>),                                   // Mask: shape, children
+    rom(Box<VsfType>, Vec<VsfType>), // Mask: shape, children
     #[cfg(feature = "spirix")]
-    row(Transform, Vec<VsfType>),                                      // Group: transform, children
+    row(Transform, Vec<VsfType>), // Group: transform, children
 
     #[cfg(feature = "spirix")]
     // Style types (used within other ro* types)
-    rog(GradientVariant, Vec<GradientStop>),                           // Gradient: variant, stops
+    rog(GradientVariant, Vec<GradientStop>), // Gradient: variant, stops
     #[cfg(feature = "spirix")]
-    rok(ScalarF4E4, Box<VsfType>, StrokeJoin, StrokeCap),              // Stroke: width, colour, join, cap
+    rok(ScalarF4E4, Box<VsfType>, StrokeJoin, StrokeCap), // Stroke: width, colour, join, cap
 
     // ==================== SPIRIX SCALARS ====================
     #[cfg(feature = "spirix")]
@@ -1111,6 +1116,71 @@ impl VsfType {
             _ => None,
         }
     }
+
+    /// Check if value is truthy (non-zero)
+    ///
+    /// Returns true for any non-zero numeric value.
+    /// Returns error for non-numeric types.
+    ///
+    /// Supported types: s44, c44, u/u3-u7, i/i3-i7, u0 (bool)
+    pub fn is_truthy(&self) -> Result<bool, String> {
+        match self {
+            // Spirix types
+            #[cfg(feature = "spirix")]
+            VsfType::s44(v) => Ok(!v.is_zero()),
+            #[cfg(feature = "spirix")]
+            VsfType::c44(v) => Ok(!v.is_zero()),
+
+            // Boolean
+            VsfType::u0(v) => Ok(*v),
+
+            // Unsigned integers
+            VsfType::u(v, _) => Ok(*v != 0),
+            VsfType::u3(v) => Ok(*v != 0),
+            VsfType::u4(v) => Ok(*v != 0),
+            VsfType::u5(v) => Ok(*v != 0),
+            VsfType::u6(v) => Ok(*v != 0),
+            VsfType::u7(v) => Ok(*v != 0),
+
+            // Signed integers
+            VsfType::i(v) => Ok(*v != 0),
+            VsfType::i3(v) => Ok(*v != 0),
+            VsfType::i4(v) => Ok(*v != 0),
+            VsfType::i5(v) => Ok(*v != 0),
+            VsfType::i6(v) => Ok(*v != 0),
+            VsfType::i7(v) => Ok(*v != 0),
+
+            _ => Err(format!(
+                "Cannot check truthiness of non-numeric type: {:?}",
+                self
+            )),
+        }
+    }
+
+    /// Check if this is a numeric type
+    ///
+    /// Returns true for all integer, boolean, and scalar types.
+    /// Does not require the value to be truthy.
+    pub fn is_numeric(&self) -> bool {
+        match self {
+            #[cfg(feature = "spirix")]
+            VsfType::s44(_) | VsfType::c44(_) => true,
+            VsfType::u0(_)
+            | VsfType::u(_, _)
+            | VsfType::u3(_)
+            | VsfType::u4(_)
+            | VsfType::u5(_)
+            | VsfType::u6(_)
+            | VsfType::u7(_) => true,
+            VsfType::i(_)
+            | VsfType::i3(_)
+            | VsfType::i4(_)
+            | VsfType::i5(_)
+            | VsfType::i6(_)
+            | VsfType::i7(_) => true,
+            _ => false,
+        }
+    }
 }
 
 /// Opcode name lookup for Toka opcodes
@@ -1210,7 +1280,7 @@ fn opcode_name(opcode: u16) -> &'static str {
         // Color utilities
         0x6361 => "rgba",
         0x6362 => "rgb",
-        0x6369 => "color_lerp",
+        0x6369 => "colour_lerp",
         0x6368 => "hsla",
 
         // Control flow

@@ -336,18 +336,21 @@ pub mod decrypt;
 // Colour system (spectral and legacy colourspaces)
 pub mod colour;
 
-// Inspection and formatting utilities (colored output)
+// Theme definitions for inspection output
+pub mod themes;
+
+// Inspection and formatting utilities (coloured output)
 #[cfg(feature = "inspect")]
 pub mod inspect;
 
 // Re-export main types
 pub use types::{
-    datetime_to_eagle_time, eagle_time_nanos, eagle_time_oscillations, EagleTime, EtType, LayoutOrder, StridedTensor,
-    Tensor, VsfType, WorldCoord,
+    datetime_to_eagle_time, eagle_time_nanos, eagle_time_oscillations, EagleTime, EtType,
+    LayoutOrder, StridedTensor, Tensor, VsfType, WorldCoord,
 };
 
 // Re-export colour conversion types
-pub use colour::convert::{ColourFormat, RgbLinear, RgbaLinear};
+pub use colour::convert::{ColourFormat, RgbLinearF32, RgbaLinearF32};
 
 // Re-export encoding traits
 pub use encoding::{EncodeNumber, EncodeNumberInclusive};

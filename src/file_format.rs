@@ -337,7 +337,10 @@ impl VsfHeader {
             match parse(data, &mut ptr) {
                 Ok(VsfType::L(len, _)) => len,
                 Ok(other) => {
-                    return Err(format!("Expected L value after 'L' marker, got {:?}", other))
+                    return Err(format!(
+                        "Expected L value after 'L' marker, got {:?}",
+                        other
+                    ))
                 }
                 Err(e) => return Err(format!("Failed to parse file_length: {}", e)),
             }
@@ -469,8 +472,9 @@ impl VsfHeader {
                 }
                 _ => {
                     // Unknown type - just parse and continue (VSF is extensible)
-                    let _ = parse(data, &mut ptr)
-                        .map_err(|e| format!("Failed to parse unknown type at byte {}: {}", ptr, e))?;
+                    let _ = parse(data, &mut ptr).map_err(|e| {
+                        format!("Failed to parse unknown type at byte {}: {}", ptr, e)
+                    })?;
                 }
             }
         }
@@ -600,15 +604,11 @@ impl VsfHeader {
             return Ok(()); // No L field, nothing to do
         }
 
-        let l_start = ptr;
         ptr += 1; // Skip 'L'
 
         // Find end of L field value
         let value_start = ptr;
-        while ptr < header_bytes.len()
-            && header_bytes[ptr] != b'e'
-            && header_bytes[ptr] != b'h'
-        {
+        while ptr < header_bytes.len() && header_bytes[ptr] != b'e' && header_bytes[ptr] != b'h' {
             ptr += 1;
         }
         let placeholder_len = ptr - value_start;
@@ -732,9 +732,16 @@ impl VsfField {
         *ptr += 1;
 
         // Parse field name
-        let name = match crate::parse(data, ptr).map_err(|e| format!("VsfField: Failed to parse name: {}", e))? {
+        let name = match crate::parse(data, ptr)
+            .map_err(|e| format!("VsfField: Failed to parse name: {}", e))?
+        {
             VsfType::d(s) => s,
-            other => return Err(format!("VsfField: Expected field name (d type), found {:?}", other)),
+            other => {
+                return Err(format!(
+                    "VsfField: Expected field name (d type), found {:?}",
+                    other
+                ))
+            }
         };
 
         let mut values = Vec::new();
@@ -762,7 +769,8 @@ impl VsfField {
                 }
 
                 // Parse value
-                let value = crate::parse(data, ptr).map_err(|e| format!("VsfField: Failed to parse value: {}", e))?;
+                let value = crate::parse(data, ptr)
+                    .map_err(|e| format!("VsfField: Failed to parse value: {}", e))?;
                 values.push(value);
             }
         }
@@ -1081,23 +1089,40 @@ impl VsfSection {
             (String::from(""), None, None)
         } else {
             // Parse section name
-            let section_name = match crate::parse(data, ptr).map_err(|e| format!("VsfSection: Failed to parse name: {}", e))? {
+            let section_name = match crate::parse(data, ptr)
+                .map_err(|e| format!("VsfSection: Failed to parse name: {}", e))?
+            {
                 VsfType::d(s) => s,
-                other => return Err(format!("VsfSection: Expected section name (d type), found {:?}", other)),
+                other => {
+                    return Err(format!(
+                        "VsfSection: Expected section name (d type), found {:?}",
+                        other
+                    ))
+                }
             };
 
             // When section name is present, n{count} and b{length} are REQUIRED
             // Parse n{count}
             let count = match crate::parse(data, ptr) {
                 Ok(VsfType::n(c)) => c,
-                Ok(other) => return Err(format!("VsfSection: Expected n{{count}} after section name, found {:?}", other)),
+                Ok(other) => {
+                    return Err(format!(
+                        "VsfSection: Expected n{{count}} after section name, found {:?}",
+                        other
+                    ))
+                }
                 Err(e) => return Err(format!("VsfSection: Failed to parse n{{count}}: {}", e)),
             };
 
             // Parse b{length}
             let length = match crate::parse(data, ptr) {
                 Ok(VsfType::b(len, _)) => len,
-                Ok(other) => return Err(format!("VsfSection: Expected b{{length}} after n{{count}}, found {:?}", other)),
+                Ok(other) => {
+                    return Err(format!(
+                        "VsfSection: Expected b{{length}} after n{{count}}, found {:?}",
+                        other
+                    ))
+                }
                 Err(e) => return Err(format!("VsfSection: Failed to parse b{{length}}: {}", e)),
             };
 

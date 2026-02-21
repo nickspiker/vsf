@@ -67,7 +67,8 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     if backward_compat > crate::VSF_VERSION {
         return Err(format!(
             "File requires VSF v{} but this implementation is v{}",
-            backward_compat, crate::VSF_VERSION
+            backward_compat,
+            crate::VSF_VERSION
         ));
     }
 
@@ -110,16 +111,20 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
 
     // Check for ke (signer pubkey) - starts with 'k'
     if ptr < data.len() && data[ptr] == b'k' {
-        let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse signer pubkey: {}", e))?;
+        let _ =
+            parse(data, &mut ptr).map_err(|e| format!("Failed to parse signer pubkey: {}", e))?;
 
         // ke must be followed by ge (signature)
         if ptr < data.len() && data[ptr] == b'g' {
-            let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse signature: {}", e))?;
+            let _ =
+                parse(data, &mut ptr).map_err(|e| format!("Failed to parse signature: {}", e))?;
         }
     }
     // Check for hb (rolling hash) - starts with 'h'
     else if ptr < data.len() && data[ptr] == b'h' {
-        rolling_hash = Some(parse(data, &mut ptr).map_err(|e| format!("Failed to parse rolling hash: {}", e))?);
+        rolling_hash = Some(
+            parse(data, &mut ptr).map_err(|e| format!("Failed to parse rolling hash: {}", e))?,
+        );
     }
 
     // Parse header field count
@@ -157,8 +162,8 @@ fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, Strin
     use crate::file_format::{validate_name, VsfField};
 
     // Use generic field parser
-    let field = VsfField::parse(data, ptr)
-        .map_err(|e| format!("Failed to parse header field: {}", e))?;
+    let field =
+        VsfField::parse(data, ptr).map_err(|e| format!("Failed to parse header field: {}", e))?;
 
     // Validate field name
     validate_name(&field.name)?;
@@ -259,9 +264,8 @@ fn rebuild_with_header(
         // Check if converged
         if new_header_size == prev_header_size {
             // Extract signatures from fields BEFORE we consume them
-            let field_signatures: Vec<Option<VsfType>> = fields.iter()
-                .map(|f| f.signature.clone())
-                .collect();
+            let field_signatures: Vec<Option<VsfType>> =
+                fields.iter().map(|f| f.signature.clone()).collect();
 
             // Build final header with these offsets
             let mut final_header = VsfHeader::new(version, backward_compat);
@@ -614,7 +618,10 @@ pub fn fill_provenance_hash(vsf_bytes: &mut [u8], hash: &[u8; 32]) -> Result<(),
 ///
 pub fn fill_signature(vsf_bytes: &mut [u8], signature: &[u8]) -> Result<(), String> {
     if signature.len() != 64 {
-        return Err(format!("Signature must be 64 bytes, got {}", signature.len()));
+        return Err(format!(
+            "Signature must be 64 bytes, got {}",
+            signature.len()
+        ));
     }
 
     // Find ge position (after hp, optionally after ke)
@@ -888,16 +895,14 @@ fn write_header_field_signatures_from_list(
 
     // Extract signature bytes from the provided list
     let mut signatures = Vec::new();
-    for sig_opt in field_signatures {
-        if let Some(sig_vsf) = sig_opt {
-            let sig_bytes = match sig_vsf {
-                VsfType::ge(bytes) => bytes,
-                VsfType::gp(bytes) => bytes,
-                VsfType::gr(bytes) => bytes,
-                _ => continue,
-            };
-            signatures.push(sig_bytes);
-        }
+    for sig_vsf in field_signatures.into_iter().flatten() {
+        let sig_bytes = match sig_vsf {
+            VsfType::ge(bytes) => bytes,
+            VsfType::gp(bytes) => bytes,
+            VsfType::gr(bytes) => bytes,
+            _ => continue,
+        };
+        signatures.push(sig_bytes);
     }
 
     // Now scan header for signature placeholders and write them
@@ -943,7 +948,6 @@ fn write_header_field_signatures_from_list(
 
     Ok(vsf_bytes)
 }
-
 
 ///
 /// This function:
@@ -1176,7 +1180,10 @@ fn write_section_signature(
     signature: &[u8],
 ) -> Result<Vec<u8>, String> {
     if signature.len() != 64 {
-        return Err(format!("Signature must be 64 bytes, got {}", signature.len()));
+        return Err(format!(
+            "Signature must be 64 bytes, got {}",
+            signature.len()
+        ));
     }
 
     let sig_position = find_section_signature_position(&vsf_bytes, section_name)?;
@@ -1424,7 +1431,10 @@ pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
     // Find ke (public key)
     let ke_info = find_header_ke(vsf_bytes)?;
     if ke_info.value_len != 32 {
-        return Err(format!("Expected 32-byte Ed25519 pubkey, got {}", ke_info.value_len));
+        return Err(format!(
+            "Expected 32-byte Ed25519 pubkey, got {}",
+            ke_info.value_len
+        ));
     }
     let pubkey_bytes: [u8; 32] = vsf_bytes[ke_info.value_start..ke_info.value_start + 32]
         .try_into()
@@ -1433,7 +1443,10 @@ pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
     // Find ge (signature)
     let ge_info = find_header_ge(vsf_bytes)?;
     if ge_info.value_len != 64 {
-        return Err(format!("Expected 64-byte Ed25519 signature, got {}", ge_info.value_len));
+        return Err(format!(
+            "Expected 64-byte Ed25519 signature, got {}",
+            ge_info.value_len
+        ));
     }
     let sig_bytes: [u8; 64] = vsf_bytes[ge_info.value_start..ge_info.value_start + 64]
         .try_into()
@@ -1454,8 +1467,8 @@ pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
     let file_hash = blake3::hash(&temp_bytes);
 
     // Verify signature
-    let verifying_key = VerifyingKey::from_bytes(&pubkey_bytes)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let verifying_key =
+        VerifyingKey::from_bytes(&pubkey_bytes).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let signature = Signature::from_bytes(&sig_bytes);
 
     match verifying_key.verify(file_hash.as_bytes(), &signature) {
@@ -1475,7 +1488,10 @@ pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
 pub fn extract_signer_pubkey(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     let ke_info = find_header_ke(vsf_bytes)?;
     if ke_info.value_len != 32 {
-        return Err(format!("Expected 32-byte Ed25519 pubkey, got {}", ke_info.value_len));
+        return Err(format!(
+            "Expected 32-byte Ed25519 pubkey, got {}",
+            ke_info.value_len
+        ));
     }
     vsf_bytes[ke_info.value_start..ke_info.value_start + 32]
         .try_into()
@@ -1483,15 +1499,17 @@ pub fn extract_signer_pubkey(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
 }
 
 /// Info about a header field location
+#[allow(dead_code)]
 struct HeaderFieldInfo {
     #[allow(dead_code)]
-    marker_pos: usize,    // Position of type marker (e.g., 'h' for hp)
+    marker_pos: usize, // Position of type marker (e.g., 'h' for hp)
     value_start: usize,   // Position where value bytes start
     value_len: usize,     // Length of value bytes
     is_placeholder: bool, // True if all value bytes are zero
 }
 
 /// Find hp (provenance hash) in header
+#[allow(dead_code)]
 fn find_header_hp(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     if data.len() < 4 || &data[0..3] != "RÅ".as_bytes() || data[3] != b'<' {
         return Err("Invalid VSF magic".to_string());
@@ -1535,6 +1553,7 @@ fn find_header_hp(data: &[u8]) -> Result<HeaderFieldInfo, String> {
 }
 
 /// Find ke (Ed25519 pubkey) in header
+#[allow(dead_code)]
 fn find_header_ke(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     if data.len() < 4 || &data[0..3] != "RÅ".as_bytes() || data[3] != b'<' {
         return Err("Invalid VSF magic".to_string());
@@ -1581,6 +1600,7 @@ fn find_header_ke(data: &[u8]) -> Result<HeaderFieldInfo, String> {
 }
 
 /// Find ge (Ed25519 signature) in header
+#[allow(dead_code)]
 fn find_header_ge(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     if data.len() < 4 || &data[0..3] != "RÅ".as_bytes() || data[3] != b'<' {
         return Err("Invalid VSF magic".to_string());
@@ -1645,7 +1665,7 @@ mod tests {
 
         // Build a simple VSF file similar to what Photon does
         let meta = SectionMeta::new(
-            VsfType::ke(vec![0u8; 32]),    // Ed25519 device public key
+            VsfType::ke(vec![0u8; 32]), // Ed25519 device public key
         );
 
         let encrypted = vec![0u8; 100]; // Fake encrypted data
@@ -1677,7 +1697,10 @@ mod tests {
         match sign_section(unsigned_bytes.clone(), "announce", &signing_key) {
             Ok(signed) => {
                 println!("\nSigned VSF: {} bytes", signed.len());
-                assert!(signed.len() > unsigned_bytes.len(), "Signed should be larger");
+                assert!(
+                    signed.len() > unsigned_bytes.len(),
+                    "Signed should be larger"
+                );
             }
             Err(e) => {
                 panic!("Sign error: {}", e);
@@ -1757,35 +1780,30 @@ mod tests {
         // Build VSF with ke + ge placeholder
         let unsigned = VsfBuilder::new()
             .signature_ed25519(pubkey, [0u8; 64]) // ke + ge placeholder
-            .add_section("test", vec![
-                ("value".to_string(), VsfType::u(42, false)),
-            ])
+            .add_section("test", vec![("value".to_string(), VsfType::u(42, false))])
             .build()
             .expect("Failed to build unsigned VSF");
 
         println!("Unsigned VSF: {} bytes", unsigned.len());
 
         // Sign the file
-        let signed = sign_file(unsigned.clone(), signing_key.as_bytes())
-            .expect("Failed to sign file");
+        let signed =
+            sign_file(unsigned.clone(), signing_key.as_bytes()).expect("Failed to sign file");
 
         println!("Signed VSF: {} bytes", signed.len());
 
         // Verify the signature
-        let valid = verify_file_signature(&signed)
-            .expect("Failed to verify signature");
+        let valid = verify_file_signature(&signed).expect("Failed to verify signature");
         assert!(valid, "Signature should be valid");
 
         // Corrupt a byte and verify it fails
         let mut corrupted = signed.clone();
         corrupted[signed.len() - 10] ^= 0xFF;
-        let valid = verify_file_signature(&corrupted)
-            .expect("Should parse corrupted file");
+        let valid = verify_file_signature(&corrupted).expect("Should parse corrupted file");
         assert!(!valid, "Corrupted file should fail verification");
 
         // Extract signer pubkey
-        let extracted = extract_signer_pubkey(&signed)
-            .expect("Failed to extract pubkey");
+        let extracted = extract_signer_pubkey(&signed).expect("Failed to extract pubkey");
         assert_eq!(extracted, pubkey, "Extracted pubkey should match");
     }
 
@@ -1807,20 +1825,21 @@ mod tests {
         let unsigned = VsfBuilder::new()
             .provenance_hash(ceremony_hp)
             .signature_ed25519(pubkey, [0u8; 64])
-            .add_section("clutch_full_offer", vec![
-                ("lower".to_string(), VsfType::hb(vec![1u8; 32])),
-                ("higher".to_string(), VsfType::hb(vec![2u8; 32])),
-            ])
+            .add_section(
+                "clutch_full_offer",
+                vec![
+                    ("lower".to_string(), VsfType::hb(vec![1u8; 32])),
+                    ("higher".to_string(), VsfType::hb(vec![2u8; 32])),
+                ],
+            )
             .build()
             .expect("Failed to build unsigned VSF");
 
         // Sign the file (should NOT recompute hp since it's not all zeros)
-        let signed = sign_file(unsigned, signing_key.as_bytes())
-            .expect("Failed to sign file");
+        let signed = sign_file(unsigned, signing_key.as_bytes()).expect("Failed to sign file");
 
         // Verify
-        let valid = verify_file_signature(&signed)
-            .expect("Failed to verify signature");
+        let valid = verify_file_signature(&signed).expect("Failed to verify signature");
         assert!(valid, "Signature should be valid with custom provenance");
     }
 }

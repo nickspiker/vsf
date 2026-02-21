@@ -81,7 +81,7 @@ impl EncodeNumberInclusive for usize {
         }
 
         // Try u4 (16-bit)
-        size = size * 2;
+        size *= 2;
         adder = base + size; // 24 bits overhead
         cutoff = u16::MAX as usize - adder; // FIX: use u16 max for u4
         if *self <= cutoff {
@@ -91,7 +91,7 @@ impl EncodeNumberInclusive for usize {
         }
 
         // Try u5 (32-bit)
-        size = size * 2;
+        size *= 2;
         adder = base + size; // 40 bits overhead
         cutoff = u32::MAX as usize - adder; // FIX: use u32 max for u5
         if *self <= cutoff {
@@ -101,7 +101,7 @@ impl EncodeNumberInclusive for usize {
         }
 
         // Try u6 (64-bit)
-        size = size * 2;
+        size *= 2;
         adder = base + size; // 72 bits overhead
         cutoff = u64::MAX as usize - adder; // FIX: use u64 max for u6
         if *self <= cutoff {
@@ -111,7 +111,7 @@ impl EncodeNumberInclusive for usize {
         }
 
         // Try u7 (128-bit)
-        size = size * 2;
+        size *= 2;
         adder = base + size; // 136 bits overhead
         cutoff = u128::MAX as usize - adder; // FIX: use u128 max for u7
         if *self <= cutoff {
@@ -121,7 +121,7 @@ impl EncodeNumberInclusive for usize {
         }
 
         // Try u8 (256-bit) - not yet implemented
-        size = size * 2;
+        size *= 2;
         adder = base + size;
         cutoff = u128::MAX as usize - adder;
         if *self <= cutoff {
@@ -199,26 +199,24 @@ impl EncodeNumber for isize {
                 result.extend_from_slice(&(*self as i128).to_be_bytes());
                 result
             }
+        } else if *self >= i8::MIN as isize {
+            vec![b'3', *self as u8]
+        } else if *self >= i16::MIN as isize {
+            let mut result = vec![b'4'];
+            result.extend_from_slice(&(*self as i16).to_be_bytes());
+            result
+        } else if *self >= i32::MIN as isize {
+            let mut result = vec![b'5'];
+            result.extend_from_slice(&(*self as i32).to_be_bytes());
+            result
+        } else if *self >= i64::MIN as isize {
+            let mut result = vec![b'6'];
+            result.extend_from_slice(&(*self as i64).to_be_bytes());
+            result
         } else {
-            if *self >= i8::MIN as isize {
-                vec![b'3', *self as u8]
-            } else if *self >= i16::MIN as isize {
-                let mut result = vec![b'4'];
-                result.extend_from_slice(&(*self as i16).to_be_bytes());
-                result
-            } else if *self >= i32::MIN as isize {
-                let mut result = vec![b'5'];
-                result.extend_from_slice(&(*self as i32).to_be_bytes());
-                result
-            } else if *self >= i64::MIN as isize {
-                let mut result = vec![b'6'];
-                result.extend_from_slice(&(*self as i64).to_be_bytes());
-                result
-            } else {
-                let mut result = vec![b'7'];
-                result.extend_from_slice(&(*self as i128).to_be_bytes());
-                result
-            }
+            let mut result = vec![b'7'];
+            result.extend_from_slice(&(*self as i128).to_be_bytes());
+            result
         }
     }
 }

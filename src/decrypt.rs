@@ -34,8 +34,8 @@ impl Keypair {
     /// Load keypair from VSF file (expects fgtw_device_key or similar format)
     /// Format: [d"fgtw_device_key" (d"secret":ke{32}{bytes}) (d"public":ke{32}{bytes})]
     pub fn load_from_vsf(path: impl AsRef<Path>) -> Result<Self, String> {
-        let bytes = fs::read(path.as_ref())
-            .map_err(|e| format!("Failed to read key file: {}", e))?;
+        let bytes =
+            fs::read(path.as_ref()).map_err(|e| format!("Failed to read key file: {}", e))?;
 
         // Verify magic number
         if bytes.len() < 4 || &bytes[0..4] != b"R\xC3\x85<" {
@@ -61,8 +61,8 @@ impl Keypair {
         ptr += 1; // Skip '['
 
         // Parse section name
-        let _section_name = parse(&bytes, &mut ptr)
-            .map_err(|e| format!("Parse section name: {}", e))?;
+        let _section_name =
+            parse(&bytes, &mut ptr).map_err(|e| format!("Parse section name: {}", e))?;
 
         // Parse fields until ']'
         use std::collections::HashMap;
@@ -74,7 +74,8 @@ impl Keypair {
 
                 // Parse field name
                 let field_name = match parse(&bytes, &mut ptr)
-                    .map_err(|e| format!("Parse field name: {}", e))? {
+                    .map_err(|e| format!("Parse field name: {}", e))?
+                {
                     VsfType::d(name) => name,
                     _ => return Err("Expected field name".to_string()),
                 };
@@ -82,8 +83,8 @@ impl Keypair {
                 // Check for ':' and parse value
                 if ptr < bytes.len() && bytes[ptr] == b':' {
                     ptr += 1;
-                    let value = parse(&bytes, &mut ptr)
-                        .map_err(|e| format!("Parse field value: {}", e))?;
+                    let value =
+                        parse(&bytes, &mut ptr).map_err(|e| format!("Parse field value: {}", e))?;
                     fields.insert(field_name, value);
                 }
 
