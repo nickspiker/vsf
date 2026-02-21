@@ -16,7 +16,7 @@ fn download_if_missing(url: &str, path: &str) -> std::io::Result<()> {
 
     let response = ureq::get(url)
         .call()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
 
     let mut file = File::create(path)?;
     let mut reader = response.into_reader();

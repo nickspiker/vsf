@@ -527,7 +527,7 @@ fn levenshtein(a: &str, b: &str) -> i32 {
 }
 
 /// 3,177-word mnemonic list
-pub const WORD_LIST: [&str; 3177] = [
+pub static WORD_LIST: [&str; 3177] = [
     "work",
     "kid",
     "long",

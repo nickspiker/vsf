@@ -273,7 +273,10 @@ pub fn parse_colour_constant(data: &[u8], pointer: &mut usize) -> Result<VsfType
     if second != b'c' {
         return Err(Error::new(
             ErrorKind::InvalidData,
-            format!("Invalid colour constant: expected 'c', got '{}'", second as char),
+            format!(
+                "Invalid colour constant: expected 'c', got '{}'",
+                second as char
+            ),
         ));
     }
 
@@ -295,6 +298,66 @@ pub fn parse_colour_constant(data: &[u8], pointer: &mut usize) -> Result<VsfType
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Unknown colour constant: rc{}", third as char),
+        )),
+    }
+}
+
+/// Parse colour array types: ra (RGBA u8x4), rt (RGBA u16x4), rp (RGB565 u16)
+pub fn parse_colour_array(
+    data: &[u8],
+    pointer: &mut usize,
+    colour_type: u8,
+) -> Result<VsfType, Error> {
+    match colour_type {
+        b'a' => {
+            // ra: [u8; 4] RGBA
+            if *pointer + 4 > data.len() {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "Incomplete ra colour (need 4 bytes)",
+                ));
+            }
+            let rgba = [
+                data[*pointer],
+                data[*pointer + 1],
+                data[*pointer + 2],
+                data[*pointer + 3],
+            ];
+            *pointer += 4;
+            Ok(VsfType::ra(rgba))
+        }
+        b't' => {
+            // rt: [u16; 4] RGBA
+            if *pointer + 8 > data.len() {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "Incomplete rt colour (need 8 bytes)",
+                ));
+            }
+            let rt_rgba = [
+                u16::from_le_bytes([data[*pointer], data[*pointer + 1]]),
+                u16::from_le_bytes([data[*pointer + 2], data[*pointer + 3]]),
+                u16::from_le_bytes([data[*pointer + 4], data[*pointer + 5]]),
+                u16::from_le_bytes([data[*pointer + 6], data[*pointer + 7]]),
+            ];
+            *pointer += 8;
+            Ok(VsfType::rt(rt_rgba))
+        }
+        b'p' => {
+            // rp: u16 RGB565
+            if *pointer + 2 > data.len() {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "Incomplete rp colour (need 2 bytes)",
+                ));
+            }
+            let rgb565 = u16::from_le_bytes([data[*pointer], data[*pointer + 1]]);
+            *pointer += 2;
+            Ok(VsfType::rp(rgb565))
+        }
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Unknown colour array type: r{}", colour_type as char),
         )),
     }
 }

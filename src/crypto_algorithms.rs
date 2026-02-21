@@ -292,8 +292,8 @@ pub fn key_length(id: u8) -> Option<usize> {
     match id {
         KEY_ED25519 => Some(32),
         KEY_X25519 => Some(32),
-        KEY_P_CURVE => None,           // 33/65 (P-256) or 49/97 (P-384)
-        KEY_SECP256K1 => Some(33),     // Compressed
+        KEY_P_CURVE => None,       // 33/65 (P-256) or 49/97 (P-384)
+        KEY_SECP256K1 => Some(33), // Compressed
         KEY_CHACHA20_POLY1305 => Some(32),
         KEY_AES256_GCM => Some(32),
         KEY_ML_KEM => None,            // 800/1184/1568 depending on variant

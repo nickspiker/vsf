@@ -46,7 +46,7 @@ pub fn parse_bitpacked_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfTyp
         bit_depth as usize
     };
     let total_bits = total_elements * bits_per_sample;
-    let byte_count = (total_bits + 7) / 8;
+    let byte_count = total_bits.div_ceil(8);
 
     // Read packed data
     if *pointer + byte_count > data.len() {
@@ -584,7 +584,7 @@ pub fn parse_tensor_data_u0(
     total_elements: usize,
 ) -> Result<VsfType, Error> {
     // Bitpacked: 8 bools per byte
-    let byte_count = (total_elements + 7) / 8;
+    let byte_count = total_elements.div_ceil(8);
     if *pointer + byte_count > data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
@@ -1045,7 +1045,7 @@ pub fn parse_vector_data_u0(
     count: usize,
 ) -> Result<VsfType, Error> {
     // Bitpacked: 8 bools per byte
-    let byte_count = (count + 7) / 8;
+    let byte_count = count.div_ceil(8);
     if *pointer + byte_count > data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
@@ -1491,7 +1491,7 @@ pub fn parse_strided_tensor_data_u0(
     total_elements: usize,
 ) -> Result<VsfType, Error> {
     // Bitpacked: 8 bools per byte
-    let byte_count = (total_elements + 7) / 8;
+    let byte_count = total_elements.div_ceil(8);
     if *pointer + byte_count > data.len() {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
@@ -1641,7 +1641,7 @@ pub fn parse_strided_tensor_data_u128(
     let mut values = Vec::with_capacity(total_elements);
     for _ in 0..total_elements {
         let val = u128::from_be_bytes([
-            data[*pointer + 0],
+            data[*pointer],
             data[*pointer + 1],
             data[*pointer + 2],
             data[*pointer + 3],
@@ -1789,7 +1789,7 @@ pub fn parse_strided_tensor_data_i128(
     let mut values = Vec::with_capacity(total_elements);
     for _ in 0..total_elements {
         let val = i128::from_be_bytes([
-            data[*pointer + 0],
+            data[*pointer],
             data[*pointer + 1],
             data[*pointer + 2],
             data[*pointer + 3],
@@ -1892,7 +1892,7 @@ pub fn parse_strided_tensor_data_j32(
     let mut values = Vec::with_capacity(total_elements);
     for _ in 0..total_elements {
         let re = f32::from_be_bytes([
-            data[*pointer + 0],
+            data[*pointer],
             data[*pointer + 1],
             data[*pointer + 2],
             data[*pointer + 3],
@@ -1927,7 +1927,7 @@ pub fn parse_strided_tensor_data_j64(
     let mut values = Vec::with_capacity(total_elements);
     for _ in 0..total_elements {
         let re = f64::from_be_bytes([
-            data[*pointer + 0],
+            data[*pointer],
             data[*pointer + 1],
             data[*pointer + 2],
             data[*pointer + 3],

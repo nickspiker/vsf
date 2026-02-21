@@ -201,7 +201,10 @@ fn decrypt_photon_contact_state(
         hex::decode(their_seed_hex).map_err(|e| format!("Invalid their_seed hex: {}", e))?;
 
     if our_seed.len() != 32 {
-        return Err(format!("Our seed must be 32 bytes (got {})", our_seed.len()));
+        return Err(format!(
+            "Our seed must be 32 bytes (got {})",
+            our_seed.len()
+        ));
     }
     if their_seed.len() != 32 {
         return Err(format!(
@@ -256,8 +259,8 @@ fn decrypt_chacha20poly1305(encrypted: &[u8], key: &[u8; 32]) -> Result<Vec<u8>,
         return Err("File too short for ChaCha20-Poly1305 (need at least 28 bytes)".to_string());
     }
 
-    let cipher = ChaCha20Poly1305::new_from_slice(key)
-        .map_err(|e| format!("Key init error: {}", e))?;
+    let cipher =
+        ChaCha20Poly1305::new_from_slice(key).map_err(|e| format!("Key init error: {}", e))?;
 
     let nonce_bytes: [u8; 12] = encrypted[..12]
         .try_into()
@@ -343,8 +346,7 @@ fn verify_integrity_summary(
     // Display and verify rolling hash (hb)
     let (file_hash_verified, stored_hash, computed_hash) =
         if let Some(VsfType::hb(ref stored_hash)) = header.rolling_hash {
-            let computed =
-                vsf::verification::compute_file_hash(data).unwrap_or_else(|_| [0u8; 32]);
+            let computed = vsf::verification::compute_file_hash(data).unwrap_or_else(|_| [0u8; 32]);
             let verified = computed.as_slice() == stored_hash.as_slice();
             (verified, Some(stored_hash.clone()), Some(computed.to_vec()))
         } else {
@@ -577,7 +579,11 @@ fn show_tree(data: &[u8]) -> Result<(), String> {
             for (j, field) in fields.iter().enumerate() {
                 let is_field_last = j == fields.len() - 1;
                 let field_prefix = if is_last { "    " } else { "│   " };
-                let field_marker = if is_field_last { "└── " } else { "├── " };
+                let field_marker = if is_field_last {
+                    "└── "
+                } else {
+                    "├── "
+                };
 
                 // Format multi-value fields: newline before each opcode
                 println!("{}{}{}: ", field_prefix, field_marker, field.name);

@@ -548,9 +548,9 @@ impl RawMetadataBuilder {
         }
 
         Ok(Some(RawMetadata {
-            cfa_pattern: self.cfa_pattern.map(|p| CfaPattern::new(p)).transpose()?,
-            black_level: self.black_level.map(|l| BlackLevel::new(l)).transpose()?,
-            white_level: self.white_level.map(|l| WhiteLevel::new(l)).transpose()?,
+            cfa_pattern: self.cfa_pattern.map(CfaPattern::new).transpose()?,
+            black_level: self.black_level.map(BlackLevel::new).transpose()?,
+            white_level: self.white_level.map(WhiteLevel::new).transpose()?,
             dark_frame_hash: self
                 .dark_frame_hash
                 .map(|(alg, hash)| CalibrationHash::new(alg, hash))
@@ -571,7 +571,7 @@ impl RawMetadataBuilder {
                 .distortion_correction_hash
                 .map(|(alg, hash)| CalibrationHash::new(alg, hash))
                 .transpose()?,
-            magic_9: self.magic_9.map(|m| Magic9::new(m)).transpose()?,
+            magic_9: self.magic_9.map(Magic9::new).transpose()?,
         }))
     }
 }
@@ -611,38 +611,20 @@ impl CameraBuilder {
         }
 
         Ok(Some(CameraSettings {
-            make: self.make.map(|m| Manufacturer::new(m)).transpose()?,
-            model: self.model.map(|m| ModelName::new(m)).transpose()?,
-            serial_number: self
-                .serial_number
-                .map(|s| SerialNumber::new(s))
-                .transpose()?,
-            iso_speed: self.iso_speed.map(|i| IsoSpeed::new(i)).transpose()?,
-            shutter_time_s: self
-                .shutter_time_s
-                .map(|s| ShutterTime::new(s))
-                .transpose()?,
-            aperture_f_number: self
-                .aperture_f_number
-                .map(|a| Aperture::new(a))
-                .transpose()?,
-            focal_length_m: self
-                .focal_length_m
-                .map(|f| FocalLength::new(f))
-                .transpose()?,
+            make: self.make.map(Manufacturer::new).transpose()?,
+            model: self.model.map(ModelName::new).transpose()?,
+            serial_number: self.serial_number.map(SerialNumber::new).transpose()?,
+            iso_speed: self.iso_speed.map(IsoSpeed::new).transpose()?,
+            shutter_time_s: self.shutter_time_s.map(ShutterTime::new).transpose()?,
+            aperture_f_number: self.aperture_f_number.map(Aperture::new).transpose()?,
+            focal_length_m: self.focal_length_m.map(FocalLength::new).transpose()?,
             exposure_compensation: self
                 .exposure_compensation
-                .map(|e| ExposureCompensation::new(e))
+                .map(ExposureCompensation::new)
                 .transpose()?,
-            focus_distance_m: self
-                .focus_distance_m
-                .map(|f| FocusDistance::new(f))
-                .transpose()?,
-            flash_fired: self.flash_fired.map(|f| FlashFired::new(f)).transpose()?,
-            metering_mode: self
-                .metering_mode
-                .map(|m| MeteringMode::new(m))
-                .transpose()?,
+            focus_distance_m: self.focus_distance_m.map(FocusDistance::new).transpose()?,
+            flash_fired: self.flash_fired.map(FlashFired::new).transpose()?,
+            metering_mode: self.metering_mode.map(MeteringMode::new).transpose()?,
         }))
     }
 }
@@ -674,22 +656,13 @@ impl LensBuilder {
         }
 
         Ok(Some(LensInfo {
-            make: self.make.map(|m| Manufacturer::new(m)).transpose()?,
-            model: self.model.map(|m| ModelName::new(m)).transpose()?,
-            serial_number: self
-                .serial_number
-                .map(|s| SerialNumber::new(s))
-                .transpose()?,
-            min_focal_length_m: self
-                .min_focal_length_m
-                .map(|f| FocalLength::new(f))
-                .transpose()?,
-            max_focal_length_m: self
-                .max_focal_length_m
-                .map(|f| FocalLength::new(f))
-                .transpose()?,
-            min_aperture_f: self.min_aperture_f.map(|a| Aperture::new(a)).transpose()?,
-            max_aperture_f: self.max_aperture_f.map(|a| Aperture::new(a)).transpose()?,
+            make: self.make.map(Manufacturer::new).transpose()?,
+            model: self.model.map(ModelName::new).transpose()?,
+            serial_number: self.serial_number.map(SerialNumber::new).transpose()?,
+            min_focal_length_m: self.min_focal_length_m.map(FocalLength::new).transpose()?,
+            max_focal_length_m: self.max_focal_length_m.map(FocalLength::new).transpose()?,
+            min_aperture_f: self.min_aperture_f.map(Aperture::new).transpose()?,
+            max_aperture_f: self.max_aperture_f.map(Aperture::new).transpose()?,
         }))
     }
 }
@@ -1054,7 +1027,7 @@ pub fn lumis_raw_capture(samples: Vec<u64>, iso: f32, shutter_s: f32) -> Result<
 /// AV1 encoding marker for v-wrapped data
 pub const ENCODING_AV1: u8 = b'a';
 
-/// Build a compressed image (AV1 payload in VSF RGB colorspace)
+/// Build a compressed image (AV1 payload in VSF RGB colourspace)
 ///
 /// Creates a minimal VSF file with:
 /// - Provenance hash only (no rolling hash, no signature)
@@ -1063,7 +1036,7 @@ pub const ENCODING_AV1: u8 = b'a';
 /// The `va` encoding tells us it's AV1, and AV1 bitstream contains dimensions.
 /// Provenance hash ensures integrity. No redundant metadata needed.
 ///
-/// Assumes VSF RGB colorspace (gamma 2, Rec.2020 primaries).
+/// Assumes VSF RGB colourspace (gamma 2, Rec.2020 primaries).
 ///
 /// # Arguments
 /// * `av1_data` - AV1-encoded pixel data
@@ -1073,9 +1046,10 @@ pub const ENCODING_AV1: u8 = b'a';
 pub fn compressed_image(av1_data: Vec<u8>) -> Result<Vec<u8>, String> {
     VsfBuilder::new()
         .provenance_only()
-        .add_section("image", vec![
-            ("pixels".to_string(), VsfType::v(ENCODING_AV1, av1_data)),
-        ])
+        .add_section(
+            "image",
+            vec![("pixels".to_string(), VsfType::v(ENCODING_AV1, av1_data))],
+        )
         .build()
 }
 
@@ -1118,10 +1092,7 @@ pub fn parse_compressed_image(data: &[u8]) -> Result<ParsedCompressedImage, Stri
         .ok_or("Missing 'pixels' field in image section")?;
 
     // Get first value (the v-wrapped data)
-    let value = pixels_field
-        .values
-        .first()
-        .ok_or("Empty 'pixels' field")?;
+    let value = pixels_field.values.first().ok_or("Empty 'pixels' field")?;
 
     match value {
         VsfType::v(encoding, pixel_data) => Ok(ParsedCompressedImage {
@@ -1230,7 +1201,11 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         match value {
             VsfType::hb(v) => Some((HASH_BLAKE3, v.clone())),
             VsfType::hs(v) => {
-                let algo = if v.len() == 32 { HASH_SHA256 } else { HASH_SHA512 };
+                let algo = if v.len() == 32 {
+                    HASH_SHA256
+                } else {
+                    HASH_SHA512
+                };
                 Some((algo, v.clone()))
             }
             _ => None,
@@ -1375,9 +1350,9 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         || magic_9.is_some()
     {
         Some(RawMetadata {
-            cfa_pattern: cfa_pattern.map(|p| CfaPattern::new(p)).transpose()?,
-            black_level: black_level.map(|l| BlackLevel::new(l)).transpose()?,
-            white_level: white_level.map(|l| WhiteLevel::new(l)).transpose()?,
+            cfa_pattern: cfa_pattern.map(CfaPattern::new).transpose()?,
+            black_level: black_level.map(BlackLevel::new).transpose()?,
+            white_level: white_level.map(WhiteLevel::new).transpose()?,
             dark_frame_hash: dark_frame_hash
                 .map(|(alg, hash)| CalibrationHash::new(alg, hash))
                 .transpose()?,
@@ -1393,7 +1368,7 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
             distortion_correction_hash: distortion_correction_hash
                 .map(|(alg, hash)| CalibrationHash::new(alg, hash))
                 .transpose()?,
-            magic_9: magic_9.map(|m| Magic9::new(m)).transpose()?,
+            magic_9: magic_9.map(Magic9::new).transpose()?,
         })
     } else {
         None
@@ -1412,21 +1387,19 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         || metering_mode.is_some()
     {
         Some(CameraSettings {
-            make: camera_make.map(|m| Manufacturer::new(m)).transpose()?,
-            model: camera_model.map(|m| ModelName::new(m)).transpose()?,
-            serial_number: camera_serial.map(|s| SerialNumber::new(s)).transpose()?,
-            iso_speed: iso_speed.map(|i| IsoSpeed::new(i)).transpose()?,
-            shutter_time_s: shutter_time_s.map(|s| ShutterTime::new(s)).transpose()?,
-            aperture_f_number: aperture_f_number.map(|a| Aperture::new(a)).transpose()?,
-            focal_length_m: focal_length_m.map(|f| FocalLength::new(f)).transpose()?,
+            make: camera_make.map(Manufacturer::new).transpose()?,
+            model: camera_model.map(ModelName::new).transpose()?,
+            serial_number: camera_serial.map(SerialNumber::new).transpose()?,
+            iso_speed: iso_speed.map(IsoSpeed::new).transpose()?,
+            shutter_time_s: shutter_time_s.map(ShutterTime::new).transpose()?,
+            aperture_f_number: aperture_f_number.map(Aperture::new).transpose()?,
+            focal_length_m: focal_length_m.map(FocalLength::new).transpose()?,
             exposure_compensation: exposure_compensation
-                .map(|e| ExposureCompensation::new(e))
+                .map(ExposureCompensation::new)
                 .transpose()?,
-            focus_distance_m: focus_distance_m
-                .map(|f| FocusDistance::new(f))
-                .transpose()?,
-            flash_fired: flash_fired.map(|f| FlashFired::new(f)).transpose()?,
-            metering_mode: metering_mode.map(|m| MeteringMode::new(m)).transpose()?,
+            focus_distance_m: focus_distance_m.map(FocusDistance::new).transpose()?,
+            flash_fired: flash_fired.map(FlashFired::new).transpose()?,
+            metering_mode: metering_mode.map(MeteringMode::new).transpose()?,
         })
     } else {
         None
@@ -1441,13 +1414,13 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         || lens_max_aperture.is_some()
     {
         Some(LensInfo {
-            make: lens_make.map(|m| Manufacturer::new(m)).transpose()?,
-            model: lens_model.map(|m| ModelName::new(m)).transpose()?,
-            serial_number: lens_serial.map(|s| SerialNumber::new(s)).transpose()?,
-            min_focal_length_m: lens_min_focal_m.map(|f| FocalLength::new(f)).transpose()?,
-            max_focal_length_m: lens_max_focal_m.map(|f| FocalLength::new(f)).transpose()?,
-            min_aperture_f: lens_min_aperture.map(|a| Aperture::new(a)).transpose()?,
-            max_aperture_f: lens_max_aperture.map(|a| Aperture::new(a)).transpose()?,
+            make: lens_make.map(Manufacturer::new).transpose()?,
+            model: lens_model.map(ModelName::new).transpose()?,
+            serial_number: lens_serial.map(SerialNumber::new).transpose()?,
+            min_focal_length_m: lens_min_focal_m.map(FocalLength::new).transpose()?,
+            max_focal_length_m: lens_max_focal_m.map(FocalLength::new).transpose()?,
+            min_aperture_f: lens_min_aperture.map(Aperture::new).transpose()?,
+            max_aperture_f: lens_max_aperture.map(Aperture::new).transpose()?,
         })
     } else {
         None
