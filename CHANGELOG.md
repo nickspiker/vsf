@@ -5,10 +5,24 @@ All notable changes to VSF will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.1] - 2026-02-05
+## [0.3.2] - 2026-02-20
 
 ### Added
-- **Opcode hints (vsfinfo)** - Inline hints showing opcode meaning in literal format (e.g., `{ps} # push`, `{fr} # fill rect`)
+- **Scene graph primitives** - Full set of renderable object types: `rob` (rectangle), `roc` (circle), `ron` (container), `roe` (ellipse), `rol` (line), `rop` (path), `roo` (polyline), `ror` (NURBS), `rox` (spline), `rot` (text), `rou` (button), `roi` (image), `rof` (surface), `rom` (mask), `row` (group), `rog` (gradient), `rok` (stroke)
+- **Dual-pipeline colour conversion** - Separate spectral and legacy pipelines with Rec2020 support; new `RgbLinearF32`, `RgbLinearF64`, `XyzF32`, `XyzF64` types
+- **Theming system (`themes.rs`)** - Centralized colour scheme with five built-in themes: `dark`, `light`, `solarized-dark`, `nord`, `gruvbox-dark`; all inspect output colours routed through `Theme` struct
+- **`inspect_vsf()` function** - Public API for programmatic VSF inspection
+- **Spirix tensor/colour integration** - `VsfType::tensor` and colour types display via spirix feature
+
+### Fixed
+- **Colour API renames** - `RgbLinear` → `RgbLinearF32`, `Xyz` → `XyzF32`, `Lab` → `LabF32`, `Lch` → `LchF32`, `Oklab` → `OklabF32`, `Oklch` → `OklchF32` (F64 variants added throughout)
+- **Method renames for consistency** - `to_rgb_linear()` → `to_rgb_linear_f32()`, `from_rgb_linear()` → `from_rgb_linear_f32()`, etc.
+- **Toka Tree reorganization** - Consolidated `toka_tree.rs` decoder into `types/toka_tree.rs`; removed separate decode file
+
+### Changed
+- **Colour inspect wiring** - All hardcoded RGB values in `inspect.rs` replaced with theme accessors (`col_ro()`, `col_colour()`, `col_size()`, `col_pass()`, `col_fail()`, `col_hint()`, `col_punct()`)
+- **Spirix dependency** - Updated to `spirix = "0.0.7"` (no longer requires local path)
+- **Opcode hints (vsfinfo)** - Inline hints showing opcode meaning in literal format (e.g., `{ps} # push`, `{fr} # fill rect`) *(moved from 0.3.1)*
 
 ## [0.3.0] - 2026-02-05
 
@@ -44,5 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.3.2]: https://github.com/nickspiker/vsf/compare/v0.3.0...v0.3.2
 [0.3.0]: https://github.com/nickspiker/vsf/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/nickspiker/vsf/releases/tag/v0.2.3
