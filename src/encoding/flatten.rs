@@ -798,14 +798,48 @@ impl VsfType {
                 flat.extend_from_slice(&size.exponent.to_be_bytes());
                 // Encode colour
                 flat.extend_from_slice(&colour.flatten());
-                // Encode optional TextStyle
+                // Encode optional TextStyle — tagged fields, terminated by 0x00.
+                // Tags: b'l'=left, b'r'=right (no value), b'f'+32=font hash,
+                //       b'e'/b'k'/b'w'/b'i'/b'x' + s44 (4 bytes each).
+                // Absence of l/r tag = center (default).
                 match style {
                     None => flat.push(0x00),
-                    Some(_) => {
-                        flat.push(0x01);
-                        // Encode TextStyle fields
-                        // TODO: Implement proper TextStyle encoding
-                        // For now, just mark as present
+                    Some(s) => {
+                        if let Some(hash) = &s.font {
+                            flat.push(b'f');
+                            flat.extend_from_slice(hash);
+                        }
+                        match s.align {
+                            Some(1) => flat.push(b'l'),
+                            Some(2) => flat.push(b'r'),
+                            _ => {} // center = default, no tag needed
+                        }
+                        if let Some(v) = s.leading {
+                            flat.push(b'e');
+                            flat.extend_from_slice(&v.fraction.to_be_bytes());
+                            flat.extend_from_slice(&v.exponent.to_be_bytes());
+                        }
+                        if let Some(v) = s.kerning {
+                            flat.push(b'k');
+                            flat.extend_from_slice(&v.fraction.to_be_bytes());
+                            flat.extend_from_slice(&v.exponent.to_be_bytes());
+                        }
+                        if let Some(v) = s.weight {
+                            flat.push(b'w');
+                            flat.extend_from_slice(&v.fraction.to_be_bytes());
+                            flat.extend_from_slice(&v.exponent.to_be_bytes());
+                        }
+                        if let Some(v) = s.tilt {
+                            flat.push(b'i');
+                            flat.extend_from_slice(&v.fraction.to_be_bytes());
+                            flat.extend_from_slice(&v.exponent.to_be_bytes());
+                        }
+                        if let Some(v) = s.wrap {
+                            flat.push(b'x');
+                            flat.extend_from_slice(&v.fraction.to_be_bytes());
+                            flat.extend_from_slice(&v.exponent.to_be_bytes());
+                        }
+                        flat.push(0x00); // terminator
                     }
                 }
                 flat

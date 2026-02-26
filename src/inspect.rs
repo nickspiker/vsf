@@ -298,7 +298,7 @@ pub fn inspect_vsf_html(data: &[u8]) -> Result<String, String> {
 /// Inspect VSF and return plain text (no colours)
 pub fn inspect_vsf_plain(data: &[u8]) -> Result<String, String> {
     let terminal_output = inspect_vsf(data)?;
-    Ok(strip_ansi(&terminal_output))
+    Ok(strip_ansi(&terminal_output).replace(CRYPTO_LINE_SEP, "\n    "))
 }
 
 /// Inspect a standalone VSF section and return HTML
@@ -1550,17 +1550,25 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             result
         }
         #[cfg(feature = "spirix")]
-        VsfType::rot(pos, text, size, colour, font) => {
+        VsfType::rot(pos, text, size, colour, style) => {
             let mut result = format!("rot {}", trc("text", col_ro()));
             result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
             result.push_str(&format!("\n{}", ro_field(format!("{:?}", text), "text")));
             result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", colour), "colour")
-            ));
-            if font.is_some() {
-                result.push_str(&format!("\n{}", ro_field(format!("{:?}", font), "font")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", colour), "colour")));
+            if let Some(s) = style {
+                let align_str = match s.align {
+                    Some(1) => "left",
+                    Some(2) => "right",
+                    _       => "center",
+                };
+                result.push_str(&format!("\n{}", ro_field(align_str.to_string(), "align")));
+                if let Some(v) = s.leading { result.push_str(&format!("\n{}", ro_field(format!("{}", v), "leading"))); }
+                if let Some(v) = s.kerning { result.push_str(&format!("\n{}", ro_field(format!("{}", v), "kerning"))); }
+                if let Some(v) = s.weight  { result.push_str(&format!("\n{}", ro_field(format!("{}", v), "weight"))); }
+                if let Some(v) = s.tilt    { result.push_str(&format!("\n{}", ro_field(format!("{}", v), "tilt"))); }
+                if let Some(v) = s.wrap    { result.push_str(&format!("\n{}", ro_field(format!("{}", v), "wrap"))); }
+                if let Some(h) = s.font    { result.push_str(&format!("\n{}", ro_field(hex::encode(h), "font hash"))); }
             }
             result
         }

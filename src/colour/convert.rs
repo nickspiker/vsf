@@ -62,6 +62,8 @@ use crate::colour::{LMS2PHOTOPIC, VSF_RGB2LMS};
 use crate::types::VsfType;
 #[cfg(feature = "spirix")]
 use spirix::ScalarF4E4 as S44;
+#[cfg(feature = "spirix")]
+use spirix::sf;
 /// Trait for colour value types that can be converted to/from linear
 ///
 /// **Convention**:
@@ -246,63 +248,92 @@ impl ColourValue<f32> for u8 {
 }
 
 #[cfg(feature = "spirix")]
+// Shared colour transfer constants (compile-time, no IEEE runtime ops)
+mod colour_tf_consts {
+    use spirix::ScalarF4E4 as S44;
+    use spirix::sf;
+    pub const SRGB_EOTF_THRESH: S44 = sf!(0.04045);
+    pub const SRGB_OETF_THRESH: S44 = sf!(0.0031308);
+    pub const SRGB_LINEAR_SLOPE: S44 = sf!(12.92);
+    pub const SRGB_GAMMA: S44 = sf!(2.4);
+    pub const SRGB_INV_GAMMA: S44 = sf!(1.0 / 2.4);
+    pub const SRGB_A: S44 = sf!(1.055);
+    pub const SRGB_B: S44 = sf!(0.055);
+    pub const BT709_EOTF_THRESH: S44 = sf!(0.081);
+    pub const BT709_OETF_THRESH: S44 = sf!(0.018);
+    pub const BT709_LINEAR_SLOPE: S44 = sf!(4.5);
+    pub const BT709_GAMMA: S44 = sf!(0.45);
+    pub const BT709_INV_GAMMA: S44 = sf!(1.0 / 0.45);
+    pub const BT709_A: S44 = sf!(1.099);
+    pub const BT709_B: S44 = sf!(0.099);
+    pub const ADOBE_GAMMA: S44 = sf!(2.2);
+    pub const ADOBE_INV_GAMMA: S44 = sf!(1.0 / 2.2);
+}
+
+#[cfg(feature = "spirix")]
 impl ColourValue<S44> for u8 {
     #[inline]
     fn to_linear_srgb(self) -> S44 {
-        let normalized = S44::from(self) / 255f64;
+        use colour_tf_consts::*;
+        let normalized = S44::from(self) / 255i16;
         // sRGB EOTF
-        if normalized <= 0.04045 {
-            normalized / 12.92
+        if normalized <= SRGB_EOTF_THRESH {
+            normalized / SRGB_LINEAR_SLOPE
         } else {
-            ((normalized + 0.055f64) / 1.055f64).pow(2.4)
+            ((normalized + SRGB_B) / SRGB_A).pow(SRGB_GAMMA)
         }
     }
 
     #[inline]
     fn from_linear_srgb(linear: S44) -> Self {
+        use colour_tf_consts::*;
         // sRGB OETF
-        let encoded: S44 = if linear <= 0.0031308 {
-            linear * 12.92
+        let encoded: S44 = if linear <= SRGB_OETF_THRESH {
+            linear * SRGB_LINEAR_SLOPE
         } else {
-            linear.pow(1. / 2.4) * 1.055 - 0.055
+            linear.pow(SRGB_INV_GAMMA) * SRGB_A - SRGB_B
         };
         (encoded * 255i16).round().to_u8()
     }
 
     #[inline]
     fn to_linear_rec709(self) -> S44 {
+        use colour_tf_consts::*;
         // Rec.709 integers use studio range: [16, 235]
         let normalized = (S44::from(self) - 16i16) / 219i16; // 235-16=219
         let normalized = normalized.clamp(0i16, 1i16);
         // Rec.709 EOTF
-        if normalized < 0.081f64 {
-            normalized / 4.5f64
+        if normalized < BT709_EOTF_THRESH {
+            normalized / BT709_LINEAR_SLOPE
         } else {
-            ((normalized + 0.099f64) / 1.099f64).pow(1.0f64 / 0.45f64)
+            ((normalized + BT709_B) / BT709_A).pow(BT709_INV_GAMMA)
         }
     }
 
     #[inline]
     fn from_linear_rec709(linear: S44) -> Self {
+        use colour_tf_consts::*;
         // Rec.709 OETF
-        let encoded: S44 = if linear < 0.018f64 {
-            linear * 4.5f64
+        let encoded: S44 = if linear < BT709_OETF_THRESH {
+            linear * BT709_LINEAR_SLOPE
         } else {
-            linear.pow(0.45f64) * 1.099f64 - 0.099f64
+            linear.pow(BT709_GAMMA) * BT709_A - BT709_B
         };
         (encoded * 219i16).round().to_u8() + 16
     }
 
     #[inline]
     fn to_linear_adobe_rgb(self) -> S44 {
+        use colour_tf_consts::*;
         let normalized = S44::from(self) / 255i16;
         // Adobe RGB gamma 2.2
-        normalized.pow(2.2)
+        normalized.pow(ADOBE_GAMMA)
     }
 
     #[inline]
     fn from_linear_adobe_rgb(linear: S44) -> Self {
-        let encoded = linear.pow(1. / 2.2);
+        use colour_tf_consts::*;
+        let encoded = linear.pow(ADOBE_INV_GAMMA);
         (encoded).round().to_u8()
     }
 
@@ -372,60 +403,66 @@ impl ColourValue<f32> for u16 {
 impl ColourValue<S44> for u16 {
     #[inline]
     fn to_linear_srgb(self) -> S44 {
+        use colour_tf_consts::*;
         let normalized = S44::from(self) / 65535i32;
         // sRGB EOTF
-        if normalized <= 0.04045f64 {
-            normalized / 12.92f64
+        if normalized <= SRGB_EOTF_THRESH {
+            normalized / SRGB_LINEAR_SLOPE
         } else {
-            ((normalized + 0.055f64) / 1.055f64).pow(2.4f64)
+            ((normalized + SRGB_B) / SRGB_A).pow(SRGB_GAMMA)
         }
     }
 
     #[inline]
     fn from_linear_srgb(linear: S44) -> Self {
+        use colour_tf_consts::*;
         // sRGB OETF
-        let encoded: S44 = if linear <= 0.0031308f64 {
-            linear * 12.92f64
+        let encoded: S44 = if linear <= SRGB_OETF_THRESH {
+            linear * SRGB_LINEAR_SLOPE
         } else {
-            linear.pow(1.0f64 / 2.4f64) * 1.055f64 - 0.055f64
+            linear.pow(SRGB_INV_GAMMA) * SRGB_A - SRGB_B
         };
         (encoded * 65535i32).round().to_u16()
     }
 
     #[inline]
     fn to_linear_rec709(self) -> S44 {
+        use colour_tf_consts::*;
         // Rec.709 integers use studio range: [4096, 60160]
         let normalized = (S44::from(self) - 4096i32) / 56064i32; // 60160-4096=56064
         let normalized = normalized.clamp(0i16, 1i16);
         // Rec.709 EOTF
-        if normalized < 0.081f64 {
-            normalized / 4.5f64
+        if normalized < BT709_EOTF_THRESH {
+            normalized / BT709_LINEAR_SLOPE
         } else {
-            ((normalized + 0.099f64) / 1.099f64).pow(1.0f64 / 0.45f64)
+            ((normalized + BT709_B) / BT709_A).pow(BT709_INV_GAMMA)
         }
     }
 
     #[inline]
     fn from_linear_rec709(linear: S44) -> Self {
+        use colour_tf_consts::*;
         // Rec.709 OETF
-        let encoded: S44 = if linear < 0.018 {
-            linear * 4.5
+        let encoded: S44 = if linear < BT709_OETF_THRESH {
+            linear * BT709_LINEAR_SLOPE
         } else {
-            linear.pow(0.45f64) * 1.099 - 0.099
+            linear.pow(BT709_GAMMA) * BT709_A - BT709_B
         };
         (encoded * 56064i32).round().to_u16() + 4096
     }
 
     #[inline]
     fn to_linear_adobe_rgb(self) -> S44 {
+        use colour_tf_consts::*;
         let normalized = S44::from(self) / 65535i32;
         // Adobe RGB gamma 2.2
-        normalized.pow(2.2)
+        normalized.pow(ADOBE_GAMMA)
     }
 
     #[inline]
     fn from_linear_adobe_rgb(linear: S44) -> Self {
-        let encoded = linear.pow(1. / 2.2);
+        use colour_tf_consts::*;
+        let encoded = linear.pow(ADOBE_INV_GAMMA);
         (encoded * 65535i32).round().to_u16()
     }
 
@@ -828,6 +865,8 @@ impl VsfType {
     /// All VSF integers are gamma 2 encoded whereas floats are linear
     #[cfg(feature = "spirix")]
     pub fn to_rgb_linear_s44(&self) -> Option<RgbLinearS44> {
+        const QUARTER: S44 = sf!(0.25);
+        const HALF: S44 = sf!(0.5);
         match self {
             // Named shortcuts (gamma 2 encoded)
             VsfType::rck => Some(RgbLinearS44 {
@@ -841,9 +880,9 @@ impl VsfType {
                 b: S44::ONE,
             }),
             VsfType::rcg => Some(RgbLinearS44 {
-                r: S44::from(0.25),
-                g: S44::from(0.25),
-                b: S44::from(0.25),
+                r: QUARTER,
+                g: QUARTER,
+                b: QUARTER,
             }),
             VsfType::rcr => Some(RgbLinearS44 {
                 r: S44::ONE,
@@ -877,21 +916,21 @@ impl VsfType {
             }),
             VsfType::rco => Some(RgbLinearS44 {
                 r: S44::ONE,
-                g: S44::from(0.5),
+                g: HALF,
                 b: S44::ZERO,
             }),
             VsfType::rcl => Some(RgbLinearS44 {
-                r: S44::from(0.5),
+                r: HALF,
                 g: S44::ONE,
                 b: S44::ZERO,
             }),
             VsfType::rcq => Some(RgbLinearS44 {
                 r: S44::ZERO,
                 g: S44::ONE,
-                b: S44::from(0.5),
+                b: HALF,
             }),
             VsfType::rcv => Some(RgbLinearS44 {
-                r: S44::from(0.25),
+                r: QUARTER,
                 g: S44::ZERO,
                 b: S44::ONE,
             }),
@@ -914,9 +953,9 @@ impl VsfType {
                 })
             }
             VsfType::rz(grey) => Some(RgbLinearS44 {
-                r: S44::from(*grey),
-                g: S44::from(*grey),
-                b: S44::from(*grey),
+                r: S44::from_f32(*grey),
+                g: S44::from_f32(*grey),
+                b: S44::from_f32(*grey),
             }),
 
             // Packed RGB (gamma-encoded, lossy - linearize)
@@ -941,9 +980,9 @@ impl VsfType {
                 b: linearize_gamma2_u16_s44(*b),
             }),
             VsfType::rf([r, g, b]) => Some(RgbLinearS44 {
-                r: S44::from(*r),
-                g: S44::from(*g),
-                b: S44::from(*b),
+                r: S44::from_f32(*r),
+                g: S44::from_f32(*g),
+                b: S44::from_f32(*b),
             }),
 
             // RGBA → RGB (drop alpha, linearize)
@@ -958,9 +997,9 @@ impl VsfType {
                 b: linearize_gamma2_u16_s44(*b),
             }),
             VsfType::rh([r, g, b, _]) => Some(RgbLinearS44 {
-                r: S44::from(*r),
-                g: S44::from(*g),
-                b: S44::from(*b),
+                r: S44::from_f32(*r),
+                g: S44::from_f32(*g),
+                b: S44::from_f32(*b),
             }),
 
             _ => None,
@@ -985,10 +1024,10 @@ impl VsfType {
                 a: S44::from(a) >> 16, // Alpha is already linear!
             }),
             VsfType::rh([r, g, b, a]) => Some(RgbaLinearS44 {
-                r: S44::from(*r),
-                g: S44::from(*g),
-                b: S44::from(*b),
-                a: S44::from(*a),
+                r: S44::from_f32(*r),
+                g: S44::from_f32(*g),
+                b: S44::from_f32(*b),
+                a: S44::from_f32(*a),
             }),
 
             // RGB formats → add opaque alpha
@@ -1028,7 +1067,7 @@ impl VsfType {
             // Greyscale formats (direct)
             VsfType::re(grey) => Some(*grey),
             VsfType::rx(grey) => Some((*grey >> 8) as u8),
-            VsfType::rz(grey) => Some(delinearize_gamma2_u8_s44(S44::from(*grey))),
+            VsfType::rz(grey) => Some(delinearize_gamma2_u8_s44(S44::from_f32(*grey))),
 
             // RGB → Grey: Use VSF RGB photopic luminance (in linear space)
             _ => self.to_rgb_linear_s44().map(|rgb| {
@@ -1098,21 +1137,8 @@ impl VsfType {
     #[cfg(feature = "spirix")]
     pub fn to_lms_linear_s44(&self) -> Option<(S44, S44, S44)> {
         let rgb = self.to_rgb_linear_s44()?;
-        use crate::colour::VSF_RGB2LMS;
-        let result = apply_matrix_3x3_s44(
-            &[
-                S44::from(VSF_RGB2LMS[0]),
-                S44::from(VSF_RGB2LMS[1]),
-                S44::from(VSF_RGB2LMS[2]),
-                S44::from(VSF_RGB2LMS[3]),
-                S44::from(VSF_RGB2LMS[4]),
-                S44::from(VSF_RGB2LMS[5]),
-                S44::from(VSF_RGB2LMS[6]),
-                S44::from(VSF_RGB2LMS[7]),
-                S44::from(VSF_RGB2LMS[8]),
-            ],
-            &[rgb.r, rgb.g, rgb.b],
-        );
+        use crate::colour::VSF_RGB2LMS_S44;
+        let result = apply_matrix_3x3_s44(&VSF_RGB2LMS_S44, &[rgb.r, rgb.g, rgb.b]);
         Some((result[0], result[1], result[2]))
     }
 
@@ -1120,21 +1146,8 @@ impl VsfType {
     #[cfg(feature = "spirix")]
     pub fn to_xyz_linear_s44(&self) -> Option<(S44, S44, S44)> {
         let rgb = self.to_rgb_linear_s44()?;
-        use crate::colour::VSF_RGB2XYZ;
-        let result = apply_matrix_3x3_s44(
-            &[
-                S44::from(VSF_RGB2XYZ[0]),
-                S44::from(VSF_RGB2XYZ[1]),
-                S44::from(VSF_RGB2XYZ[2]),
-                S44::from(VSF_RGB2XYZ[3]),
-                S44::from(VSF_RGB2XYZ[4]),
-                S44::from(VSF_RGB2XYZ[5]),
-                S44::from(VSF_RGB2XYZ[6]),
-                S44::from(VSF_RGB2XYZ[7]),
-                S44::from(VSF_RGB2XYZ[8]),
-            ],
-            &[rgb.r, rgb.g, rgb.b],
-        );
+        use crate::colour::VSF_RGB2XYZ_S44;
+        let result = apply_matrix_3x3_s44(&VSF_RGB2XYZ_S44, &[rgb.r, rgb.g, rgb.b]);
         Some((result[0], result[1], result[2]))
     }
 
@@ -1180,21 +1193,8 @@ impl VsfType {
     #[cfg(feature = "spirix")]
     pub fn to_srgb_linear_s44(&self) -> Option<(S44, S44, S44)> {
         let rgb = self.to_rgb_linear_s44()?;
-        use crate::colour::VSF_RGB2SRGB;
-        let result = apply_matrix_3x3_s44(
-            &[
-                S44::from(VSF_RGB2SRGB[0]),
-                S44::from(VSF_RGB2SRGB[1]),
-                S44::from(VSF_RGB2SRGB[2]),
-                S44::from(VSF_RGB2SRGB[3]),
-                S44::from(VSF_RGB2SRGB[4]),
-                S44::from(VSF_RGB2SRGB[5]),
-                S44::from(VSF_RGB2SRGB[6]),
-                S44::from(VSF_RGB2SRGB[7]),
-                S44::from(VSF_RGB2SRGB[8]),
-            ],
-            &[rgb.r, rgb.g, rgb.b],
-        );
+        use crate::colour::VSF_RGB2SRGB_S44;
+        let result = apply_matrix_3x3_s44(&VSF_RGB2SRGB_S44, &[rgb.r, rgb.g, rgb.b]);
         Some((result[0], result[1], result[2]))
     }
 
@@ -1202,21 +1202,8 @@ impl VsfType {
     #[cfg(feature = "spirix")]
     pub fn to_rec2020_linear_s44(&self) -> Option<(S44, S44, S44)> {
         let rgb = self.to_rgb_linear_s44()?;
-        use crate::colour::VSF_RGB2REC2020;
-        let result = apply_matrix_3x3_s44(
-            &[
-                S44::from(VSF_RGB2REC2020[0]),
-                S44::from(VSF_RGB2REC2020[1]),
-                S44::from(VSF_RGB2REC2020[2]),
-                S44::from(VSF_RGB2REC2020[3]),
-                S44::from(VSF_RGB2REC2020[4]),
-                S44::from(VSF_RGB2REC2020[5]),
-                S44::from(VSF_RGB2REC2020[6]),
-                S44::from(VSF_RGB2REC2020[7]),
-                S44::from(VSF_RGB2REC2020[8]),
-            ],
-            &[rgb.r, rgb.g, rgb.b],
-        );
+        use crate::colour::VSF_RGB2REC2020_S44;
+        let result = apply_matrix_3x3_s44(&VSF_RGB2REC2020_S44, &[rgb.r, rgb.g, rgb.b]);
         Some((result[0], result[1], result[2]))
     }
 
@@ -1224,21 +1211,8 @@ impl VsfType {
     #[cfg(feature = "spirix")]
     pub fn to_adobe_rgb_linear_s44(&self) -> Option<(S44, S44, S44)> {
         let rgb = self.to_rgb_linear_s44()?;
-        use crate::colour::VSF_RGB2ADOBE_RGB;
-        let result = apply_matrix_3x3_s44(
-            &[
-                S44::from(VSF_RGB2ADOBE_RGB[0]),
-                S44::from(VSF_RGB2ADOBE_RGB[1]),
-                S44::from(VSF_RGB2ADOBE_RGB[2]),
-                S44::from(VSF_RGB2ADOBE_RGB[3]),
-                S44::from(VSF_RGB2ADOBE_RGB[4]),
-                S44::from(VSF_RGB2ADOBE_RGB[5]),
-                S44::from(VSF_RGB2ADOBE_RGB[6]),
-                S44::from(VSF_RGB2ADOBE_RGB[7]),
-                S44::from(VSF_RGB2ADOBE_RGB[8]),
-            ],
-            &[rgb.r, rgb.g, rgb.b],
-        );
+        use crate::colour::VSF_RGB2ADOBE_RGB_S44;
+        let result = apply_matrix_3x3_s44(&VSF_RGB2ADOBE_RGB_S44, &[rgb.r, rgb.g, rgb.b]);
         Some((result[0], result[1], result[2]))
     }
 
@@ -1509,21 +1483,8 @@ impl VsfType {
         let g_lin = g.to_linear_srgb();
         let b_lin = b.to_linear_srgb();
 
-        use crate::colour::SRGB2VSF_RGB;
-        let result = apply_matrix_3x3_s44(
-            &[
-                S44::from(SRGB2VSF_RGB[0]),
-                S44::from(SRGB2VSF_RGB[1]),
-                S44::from(SRGB2VSF_RGB[2]),
-                S44::from(SRGB2VSF_RGB[3]),
-                S44::from(SRGB2VSF_RGB[4]),
-                S44::from(SRGB2VSF_RGB[5]),
-                S44::from(SRGB2VSF_RGB[6]),
-                S44::from(SRGB2VSF_RGB[7]),
-                S44::from(SRGB2VSF_RGB[8]),
-            ],
-            &[r_lin, g_lin, b_lin],
-        );
+        use crate::colour::SRGB2VSF_RGB_S44;
+        let result = apply_matrix_3x3_s44(&SRGB2VSF_RGB_S44, &[r_lin, g_lin, b_lin]);
         let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
 
         Self::from_rgb_linear_s44(vsf_r, vsf_g, vsf_b, format)
@@ -1566,21 +1527,8 @@ impl VsfType {
         let g_lin = g.to_linear_rec709();
         let b_lin = b.to_linear_rec709();
 
-        use crate::colour::SRGB2VSF_RGB;
-        let result = apply_matrix_3x3_s44(
-            &[
-                S44::from(SRGB2VSF_RGB[0]),
-                S44::from(SRGB2VSF_RGB[1]),
-                S44::from(SRGB2VSF_RGB[2]),
-                S44::from(SRGB2VSF_RGB[3]),
-                S44::from(SRGB2VSF_RGB[4]),
-                S44::from(SRGB2VSF_RGB[5]),
-                S44::from(SRGB2VSF_RGB[6]),
-                S44::from(SRGB2VSF_RGB[7]),
-                S44::from(SRGB2VSF_RGB[8]),
-            ],
-            &[r_lin, g_lin, b_lin],
-        );
+        use crate::colour::SRGB2VSF_RGB_S44;
+        let result = apply_matrix_3x3_s44(&SRGB2VSF_RGB_S44, &[r_lin, g_lin, b_lin]);
         let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
 
         Self::from_rgb_linear_s44(vsf_r, vsf_g, vsf_b, format)
@@ -1620,20 +1568,8 @@ impl VsfType {
         let g_lin = g.to_linear_rec709();
         let b_lin = b.to_linear_rec709();
 
-        let result = apply_matrix_3x3_s44(
-            &[
-                S44::from(REC2020_2VSF_RGB[0]),
-                S44::from(REC2020_2VSF_RGB[1]),
-                S44::from(REC2020_2VSF_RGB[2]),
-                S44::from(REC2020_2VSF_RGB[3]),
-                S44::from(REC2020_2VSF_RGB[4]),
-                S44::from(REC2020_2VSF_RGB[5]),
-                S44::from(REC2020_2VSF_RGB[6]),
-                S44::from(REC2020_2VSF_RGB[7]),
-                S44::from(REC2020_2VSF_RGB[8]),
-            ],
-            &[r_lin, g_lin, b_lin],
-        );
+        use crate::colour::rec2020::REC2020_2VSF_RGB_S44;
+        let result = apply_matrix_3x3_s44(&REC2020_2VSF_RGB_S44, &[r_lin, g_lin, b_lin]);
         let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
 
         Self::from_rgb_linear_s44(vsf_r, vsf_g, vsf_b, format)
@@ -1688,21 +1624,8 @@ impl VsfType {
     /// Convert from LMS cone space to VSF RGB (S44 version)
     #[cfg(feature = "spirix")]
     pub fn from_lms_s44(l: S44, m: S44, s: S44, format: ColourFormat) -> Self {
-        use crate::colour::LMS2VSF_RGB;
-        let result = apply_matrix_3x3_s44(
-            &[
-                S44::from(LMS2VSF_RGB[0]),
-                S44::from(LMS2VSF_RGB[1]),
-                S44::from(LMS2VSF_RGB[2]),
-                S44::from(LMS2VSF_RGB[3]),
-                S44::from(LMS2VSF_RGB[4]),
-                S44::from(LMS2VSF_RGB[5]),
-                S44::from(LMS2VSF_RGB[6]),
-                S44::from(LMS2VSF_RGB[7]),
-                S44::from(LMS2VSF_RGB[8]),
-            ],
-            &[l, m, s],
-        );
+        use crate::colour::LMS2VSF_RGB_S44;
+        let result = apply_matrix_3x3_s44(&LMS2VSF_RGB_S44, &[l, m, s]);
         let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
         Self::from_rgb_linear_s44(vsf_r, vsf_g, vsf_b, format)
     }
@@ -1710,21 +1633,8 @@ impl VsfType {
     /// Convert from CIE 1931 XYZ tristimulus values to VSF RGB (S44 version)
     #[cfg(feature = "spirix")]
     pub fn from_xyz_s44(x: S44, y: S44, z: S44, format: ColourFormat) -> Self {
-        use crate::colour::XYZ2VSF_RGB;
-        let result = apply_matrix_3x3_s44(
-            &[
-                S44::from(XYZ2VSF_RGB[0]),
-                S44::from(XYZ2VSF_RGB[1]),
-                S44::from(XYZ2VSF_RGB[2]),
-                S44::from(XYZ2VSF_RGB[3]),
-                S44::from(XYZ2VSF_RGB[4]),
-                S44::from(XYZ2VSF_RGB[5]),
-                S44::from(XYZ2VSF_RGB[6]),
-                S44::from(XYZ2VSF_RGB[7]),
-                S44::from(XYZ2VSF_RGB[8]),
-            ],
-            &[x, y, z],
-        );
+        use crate::colour::XYZ2VSF_RGB_S44;
+        let result = apply_matrix_3x3_s44(&XYZ2VSF_RGB_S44, &[x, y, z]);
         let (vsf_r, vsf_g, vsf_b) = (result[0], result[1], result[2]);
         Self::from_rgb_linear_s44(vsf_r, vsf_g, vsf_b, format)
     }
@@ -2301,24 +2211,18 @@ pub fn vsf_rgb_to_photopic_f32(r: f32, g: f32, b: f32) -> f32 {
 /// 3. Normalize so Illuminant E white [1,1,1] → 1.0
 #[cfg(feature = "spirix")]
 pub fn vsf_rgb_to_photopic_s44(r: S44, g: S44, b: S44) -> S44 {
-    // Convert matrix constants to S44
-    let l = S44::from(VSF_RGB2LMS[0]) * r
-        + S44::from(VSF_RGB2LMS[1]) * g
-        + S44::from(VSF_RGB2LMS[2]) * b;
-    let m = S44::from(VSF_RGB2LMS[3]) * r
-        + S44::from(VSF_RGB2LMS[4]) * g
-        + S44::from(VSF_RGB2LMS[5]) * b;
-    let s = S44::from(VSF_RGB2LMS[6]) * r
-        + S44::from(VSF_RGB2LMS[7]) * g
-        + S44::from(VSF_RGB2LMS[8]) * b;
+    use crate::colour::{LMS2PHOTOPIC_S44, VSF_RGB2LMS_S44};
+    const PHOTOPIC_WHITE_NORM_S44: S44 = sf!(PHOTOPIC_WHITE_NORM);
+
+    let l = VSF_RGB2LMS_S44[0] * r + VSF_RGB2LMS_S44[1] * g + VSF_RGB2LMS_S44[2] * b;
+    let m = VSF_RGB2LMS_S44[3] * r + VSF_RGB2LMS_S44[4] * g + VSF_RGB2LMS_S44[5] * b;
+    let s = VSF_RGB2LMS_S44[6] * r + VSF_RGB2LMS_S44[7] * g + VSF_RGB2LMS_S44[8] * b;
 
     // LMS → Photopic luminance (raw)
-    let photopic_raw = S44::from(LMS2PHOTOPIC[0]) * l
-        + S44::from(LMS2PHOTOPIC[1]) * m
-        + S44::from(LMS2PHOTOPIC[2]) * s;
+    let photopic_raw = LMS2PHOTOPIC_S44[0] * l + LMS2PHOTOPIC_S44[1] * m + LMS2PHOTOPIC_S44[2] * s;
 
     // Normalize by precomputed white point so [1,1,1] → 1.0
-    photopic_raw / S44::from(PHOTOPIC_WHITE_NORM)
+    photopic_raw / PHOTOPIC_WHITE_NORM_S44
 }
 
 // ==================== GAMMA 2 FUNCTIONS ====================
@@ -2501,10 +2405,15 @@ pub fn delinearize_gamma2_rgb_s44(r: S44, g: S44, b: S44) -> (u8, u8, u8) {
 #[cfg(feature = "spirix")]
 #[inline]
 pub fn srgb_oetf_s44(linear: S44) -> S44 {
-    if linear <= 0.0031308 {
-        12.92 * linear
+    const THRESH: S44 = sf!(0.0031308);
+    const A: S44 = sf!(12.92);
+    const B: S44 = sf!(1.055);
+    const GAMMA: S44 = sf!(1.0 / 2.4);
+    const C: S44 = sf!(0.055);
+    if linear <= THRESH {
+        A * linear
     } else {
-        1.055 * linear.pow(1. / 2.4) - 0.055
+        B * linear.pow(GAMMA) - C
     }
 }
 
@@ -2521,10 +2430,15 @@ pub fn srgb_oetf_s44(linear: S44) -> S44 {
 #[cfg(feature = "spirix")]
 #[inline]
 pub fn encode_bt709_s44(linear: S44) -> S44 {
-    if linear < 0.018 {
-        linear * 4.5
+    const THRESH: S44 = sf!(0.018);
+    const A: S44 = sf!(4.5);
+    const B: S44 = sf!(1.099);
+    const GAMMA: S44 = sf!(0.45);
+    const C: S44 = sf!(0.099);
+    if linear < THRESH {
+        linear * A
     } else {
-        1.099 * linear.pow(0.45) - 0.099
+        B * linear.pow(GAMMA) - C
     }
 }
 
@@ -2543,7 +2457,8 @@ pub fn encode_bt709_s44(linear: S44) -> S44 {
 #[cfg(feature = "spirix")]
 #[inline]
 pub fn adobe_rgb_oetf_s44(linear: S44) -> S44 {
-    linear.pow(1. / 2.2)
+    const GAMMA: S44 = sf!(1.0 / 2.2);
+    linear.pow(GAMMA)
 }
 
 #[cfg(test)]
@@ -2753,45 +2668,45 @@ mod tests {
         assert!(vsf_red.r > vsf_red.g && vsf_red.r > vsf_red.b);
     }
 
-    // #[test]
-    // #[cfg(feature = "spirix")]
-    // fn test_scalar_f4e4_conversions() {
-    //     use super::*;
-    //     use spirix::S44;
+    #[test]
+    #[cfg(feature = "spirix")]
+    fn test_scalar_f4e4_conversions() {
+        use super::*;
+        use spirix::S44;
 
-    //     // Test u8 → S44 conversion (direct, no f32 roundtrip)
-    //     let u8_val = 128u8;
-    //     let s44_linear: S44 = <u8 as ColourValue<S44>>::to_linear_srgb(u8_val);
+        // Test u8 → S44 conversion (direct, no f32 roundtrip)
+        let u8_val = 128u8;
+        let s44_linear: S44 = <u8 as ColourValue<S44>>::to_linear_srgb(u8_val);
 
-    //     // Verify it's approximately in the right range (128/255 with sRGB curve ≈ 0.2)
-    //     let s44_f32 = s44_linear.to_f32();
-    //     assert!(s44_f32 > 0.15 && s44_f32 < 0.25, "s44_linear = {}", s44_f32);
+        // Verify it's approximately in the right range (128/255 with sRGB curve ≈ 0.2)
+        let s44_f32 = s44_linear.to_f32();
+        assert!(s44_f32 > 0.15 && s44_f32 < 0.25, "s44_linear = {}", s44_f32);
 
-    //     // Test roundtrip: u8 → S44 → u8
-    //     let roundtrip = <u8 as ColourValue<S44>>::from_linear_srgb(s44_linear);
-    //     assert!(
-    //         (roundtrip as i16 - u8_val as i16).abs() <= 2,
-    //         "Roundtrip failed: {} → {} → {}",
-    //         u8_val,
-    //         s44_f32,
-    //         roundtrip
-    //     );
+        // Test roundtrip: u8 → S44 → u8
+        let roundtrip = <u8 as ColourValue<S44>>::from_linear_srgb(s44_linear);
+        assert!(
+            (roundtrip as i16 - u8_val as i16).abs() <= 2,
+            "Roundtrip failed: {} → {} → {}",
+            u8_val,
+            s44_f32,
+            roundtrip
+        );
 
-    //     // Test that S44 passthru works
-    //     let s44_val = S44::from(0.5);
-    //     let s44_out: S44 = <S44 as ColourValue<S44>>::to_linear_srgb(s44_val);
-    //     assert!((s44_out.to_f32() - 0.5).abs() < 0.001, "Passthru failed");
+        // Test that S44 passthru works
+        let s44_val = S44::from(0.5);
+        let s44_out: S44 = <S44 as ColourValue<S44>>::to_linear_srgb(s44_val);
+        assert!((s44_out.to_f32() - 0.5).abs() < 0.001, "Passthru failed");
 
-    //     // Test gamma2 conversions with S44
-    //     let u8_gamma = 180u8;
-    //     let s44_gamma2: S44 = <u8 as ColourValue<S44>>::to_linear_gamma2(u8_gamma);
-    //     let u8_back = <u8 as ColourValue<S44>>::from_linear_gamma2(s44_gamma2);
-    //     assert!(
-    //         (u8_back as i16 - u8_gamma as i16).abs() <= 1,
-    //         "Gamma2 roundtrip failed: {} → {} → {}",
-    //         u8_gamma,
-    //         s44_gamma2.to_f32(),
-    //         u8_back
-    //     );
-    // }
+        // Test gamma2 conversions with S44
+        let u8_gamma = 180u8;
+        let s44_gamma2: S44 = <u8 as ColourValue<S44>>::to_linear_gamma2(u8_gamma);
+        let u8_back = <u8 as ColourValue<S44>>::from_linear_gamma2(s44_gamma2);
+        assert!(
+            (u8_back as i16 - u8_gamma as i16).abs() <= 1,
+            "Gamma2 roundtrip failed: {} → {} → {}",
+            u8_gamma,
+            s44_gamma2.to_f32(),
+            u8_back
+        );
+    }
 }

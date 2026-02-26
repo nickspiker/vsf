@@ -119,20 +119,33 @@ impl Transform {
     }
 }
 
-/// Text styling options for rot (text rendering)
+/// Text styling options for rot (text rendering).
+///
+/// Binary encoding: tagged fields, loop until 0x00 terminator.
+/// Tags (all lowercase ASCII; no caps to avoid collision with 2^N length-prefix scheme):
+///   0x00      — end of style
+///   b'l'      — align left  (no value bytes; absence = center default)
+///   b'r'      — align right (no value bytes)
+///   b'f' + 32 — font BLAKE3 hash
+///   b'e' + s44 — leading (line height multiplier)
+///   b'k' + s44 — kerning (letter spacing in RU)
+///   b'w' + s44 — weight (100–900)
+///   b'i' + s44 — tilt (italic angle in degrees)
+///   b'x' + s44 — wrap width (box width in RU; enables word wrap)
+/// s44 = i16 BE fraction + i16 BE exponent (4 bytes total)
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextStyle {
-    pub font: Option<String>,        // Font name or handle
-    pub leading: Option<ScalarF4E4>, // Line height multiplier (default 1.0)
-    pub kerning: Option<ScalarF4E4>, // Letter spacing in RU (default 0.0)
-    pub weight: Option<ScalarF4E4>,  // Font weight 100-900 (default 400)
-    pub tilt: Option<ScalarF4E4>,    // Italic angle in degrees (default 0.0)
-    pub width: Option<ScalarF4E4>,   // Box width for wrapping (None = single line)
-    pub align: Option<String>,       // "left" | "center" | "right" (default "left")
+    pub font:    Option<[u8; 32]>,   // BLAKE3 hash of font bytes  (tag b'f' + 32 bytes)
+    pub leading: Option<ScalarF4E4>, // Line height multiplier     (tag b'e' + s44)
+    pub kerning: Option<ScalarF4E4>, // Letter spacing in RU       (tag b'k' + s44)
+    pub weight:  Option<ScalarF4E4>, // Font weight 100–900        (tag b'w' + s44)
+    pub tilt:    Option<ScalarF4E4>, // Italic angle in degrees    (tag b'i' + s44)
+    pub wrap:    Option<ScalarF4E4>, // Wrap box width in RU       (tag b'x' + s44)
+    pub align:   Option<u8>,         // 0=center(default), 1=left(b'l'), 2=right(b'r')
 }
 
 impl TextStyle {
-    /// Create default text style (all None)
+    /// Create default text style (all None = centered, no wrap, default weight/leading)
     pub fn default() -> Self {
         TextStyle {
             font: None,
@@ -140,7 +153,7 @@ impl TextStyle {
             kerning: None,
             weight: None,
             tilt: None,
-            width: None,
+            wrap: None,
             align: None,
         }
     }
@@ -152,7 +165,7 @@ impl TextStyle {
             && self.kerning.is_none()
             && self.weight.is_none()
             && self.tilt.is_none()
-            && self.width.is_none()
+            && self.wrap.is_none()
             && self.align.is_none()
     }
 }
