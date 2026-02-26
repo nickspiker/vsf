@@ -1402,3 +1402,41 @@ pub const LMS2PHOTOPIC: [f32; 3] = [
     1.0, // m cone weight
     0.0, // s cone weight (S-cones don't contribute to photopic luminance)
 ];
+
+#[cfg(feature = "spirix")]
+pub use s44_consts::*;
+
+#[cfg(feature = "spirix")]
+mod s44_consts {
+    use spirix::{ScalarF4E4 as S44, sf};
+
+    pub const VSF_RGB2LMS_S44: [S44; 9] = [
+        sf!(0.358_562_77_f32),
+        sf!(0.024_773_11_f32),
+        sf!(0.000_000_427_165_5_f32),
+        sf!(0.559_762_66_f32),
+        sf!(0.809_180_2_f32),
+        sf!(0.018_622_711_f32),
+        sf!(0.081_674_57_f32),
+        sf!(0.166_046_68_f32),
+        sf!(0.981_376_9_f32),
+    ];
+
+    pub const LMS2VSF_RGB_S44: [S44; 9] = [
+        sf!(2.929_061_7_f32),
+        sf!(-0.090_023_72_f32),
+        sf!(0.001_707_024_6_f32),
+        sf!(-2.028_511_5_f32),
+        sf!(1.302_995_3_f32),
+        sf!(-0.024_724_893_f32),
+        sf!(0.099_449_806_f32),
+        sf!(-0.212_971_58_f32),
+        sf!(1.023_017_9_f32),
+    ];
+
+    pub const LMS2PHOTOPIC_S44: [S44; 3] = [
+        S44::ONE,
+        S44::ONE,
+        S44::ZERO,
+    ];
+}

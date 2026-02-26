@@ -272,21 +272,10 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
             let text = Box::new(parse(data, pointer)?); // Can be l or x type
             let size = parse_s44(data, pointer)?;
             let colour = Box::new(parse(data, pointer)?);
-            // TODO: Parse Option<TextStyle> properly
-            // For now, just check if present and skip
-            let style_present = if *pointer < data.len() {
-                let has_style = data[*pointer] != 0x00;
-                *pointer += 1;
-                has_style
-            } else {
-                false
-            };
-            let style = if style_present {
-                // TODO: Parse TextStyle fields
-                None // Placeholder
-            } else {
-                None
-            };
+            // Parse TextStyle: tagged fields terminated by 0x00.
+            // Tags: b'l'=left, b'r'=right (no value), b'f'+32=font hash,
+            //       b'e'/b'k'/b'w'/b'i'/b'x' + s44 (4 bytes each).
+            let style = parse_text_style(data, pointer)?;
             Ok(VsfType::rot(pos, text, size, colour, style))
         }
         b'u' => {
@@ -390,6 +379,61 @@ fn parse_s44(data: &[u8], pointer: &mut usize) -> Result<spirix::ScalarF4E4, Err
     let exponent = i16::from_be_bytes([data[*pointer + 2], data[*pointer + 3]]);
     *pointer += 4;
     Ok(spirix::ScalarF4E4 { fraction, exponent })
+}
+
+#[cfg(feature = "spirix")]
+fn parse_text_style(
+    data: &[u8],
+    pointer: &mut usize,
+) -> Result<Option<crate::types::TextStyle>, Error> {
+    use crate::types::TextStyle;
+
+    if *pointer >= data.len() || data[*pointer] == 0x00 {
+        // No style or empty style — consume the terminator if present
+        if *pointer < data.len() && data[*pointer] == 0x00 {
+            *pointer += 1;
+        }
+        return Ok(None);
+    }
+
+    let mut style = TextStyle::default();
+
+    loop {
+        if *pointer >= data.len() {
+            return Err(Error::new(ErrorKind::UnexpectedEof, "Unexpected end in TextStyle"));
+        }
+        let tag = data[*pointer];
+        *pointer += 1;
+
+        match tag {
+            0x00 => break, // terminator
+            b'l' => style.align = Some(1), // left (no value bytes)
+            b'r' => style.align = Some(2), // right (no value bytes)
+            b'f' => {
+                // font hash: 32 bytes
+                if *pointer + 32 > data.len() {
+                    return Err(Error::new(ErrorKind::UnexpectedEof, "TextStyle: truncated font hash"));
+                }
+                let mut hash = [0u8; 32];
+                hash.copy_from_slice(&data[*pointer..*pointer + 32]);
+                *pointer += 32;
+                style.font = Some(hash);
+            }
+            b'e' => { style.leading = Some(parse_s44(data, pointer)?); }
+            b'k' => { style.kerning = Some(parse_s44(data, pointer)?); }
+            b'w' => { style.weight  = Some(parse_s44(data, pointer)?); }
+            b'i' => { style.tilt    = Some(parse_s44(data, pointer)?); }
+            b'x' => { style.wrap    = Some(parse_s44(data, pointer)?); }
+            other => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("TextStyle: unknown tag {other:#04x}"),
+                ));
+            }
+        }
+    }
+
+    if style.is_default() { Ok(None) } else { Ok(Some(style)) }
 }
 
 #[cfg(feature = "spirix")]
