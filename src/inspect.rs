@@ -9,7 +9,6 @@
 //! - `Plain` - No colour codes, just text
 
 use crate::decoding::parse::parse;
-#[cfg(feature = "spirix")]
 // vt hack support removed - use ro* types instead
 // use crate::decoding::toka_tree::parse_vt_node;
 use crate::file_format::{VsfField, VsfHeader};
@@ -2793,13 +2792,14 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             }
         }
 
+        let tree_suffix = if is_last {
+            "   ".to_string()
+        } else {
+            format!(" {} ", tree_vert())
+        };
         out.push_str(&format!(
             "{}{}\n",
-            if is_last {
-                "   "
-            } else {
-                &format!(" {} ", tree_vert())
-            },
+            tree_suffix,
             tc("]", col_tree())
         ));
 
