@@ -329,6 +329,9 @@ pub mod crypto_algorithms;
 // Verification functions for hashing and signing VSF files
 pub mod verification;
 
+// Handle identity: plaintext → proof-of-work → public ID
+pub mod handle;
+
 // Decryption utilities
 #[cfg(feature = "crypto")]
 pub mod decrypt;
