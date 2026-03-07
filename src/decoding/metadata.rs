@@ -68,11 +68,11 @@ pub fn parse_eagle_time(data: &[u8], pointer: &mut usize) -> Result<VsfType, Err
     match time_type {
         b'u' => {
             let value = decode_usize(data, pointer)?;
-            Ok(VsfType::e(EtType::u(value)))
+            Ok(VsfType::e(EtType::u(value as u64)))
         }
         b'i' => {
             let value = decode_isize(data, pointer)?;
-            Ok(VsfType::e(EtType::i(value)))
+            Ok(VsfType::e(EtType::i(value as i64)))
         }
         b'f' => {
             // Eagle Time floats: [e][f][5 or 6][bytes]
