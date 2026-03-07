@@ -297,7 +297,7 @@ pub fn inspect_vsf_html(data: &[u8]) -> Result<String, String> {
 /// Inspect VSF and return plain text (no colours)
 pub fn inspect_vsf_plain(data: &[u8]) -> Result<String, String> {
     let terminal_output = inspect_vsf(data)?;
-    Ok(strip_ansi(&terminal_output).replace(CRYPTO_LINE_SEP, "\n    "))
+    Ok(strip_ansi(&terminal_output))
 }
 
 /// Inspect a standalone VSF section and return HTML
@@ -564,57 +564,63 @@ fn format_vsf_universal(vsf: &VsfType, indent_level: usize, label: Option<&str>)
     format!("{}{}{}", indent, value, label_str)
 }
 
-/// Format hex data as lines of 8 bytes (16 hex chars each)
-/// Returns a Vec of hex line strings for caller to join with appropriate indent
+/// Bytes per line in hex display (default 32 — future: user configurable)
+const HEX_BYTES_PER_LINE: usize = 32;
+/// Max bytes shown at the head of a binary blob (default 1KB)
+const HEX_MAX_HEAD: usize = 1024;
+/// Max bytes shown at the tail of a binary blob (default 1KB)
+const HEX_MAX_TAIL: usize = 1024;
+
+/// Format hex data as lines of HEX_BYTES_PER_LINE bytes each
+/// Returns a Vec of hex line strings for caller to join with appropriate separator
 fn format_hex_lines(data: &[u8]) -> Vec<String> {
     let hex_str = hex::encode(data).to_uppercase();
-    if data.len() <= 8 {
+    let chars_per_line = HEX_BYTES_PER_LINE * 2;
+    if data.len() <= HEX_BYTES_PER_LINE {
         vec![hex_str]
     } else {
         hex_str
             .as_bytes()
-            .chunks(16) // 16 hex chars = 8 bytes
+            .chunks(chars_per_line)
             .map(|chunk| std::str::from_utf8(chunk).unwrap().to_string())
             .collect()
     }
 }
 
-/// Format hex data with newlines every 16 bytes (for header display)
-#[allow(dead_code)]
-fn format_hex_wrapped(data: &[u8]) -> String {
-    format_hex_lines(data).join("\n")
+/// Format binary data with head+tail truncation and omission notice
+/// Returns (head_lines, omitted_notice, tail_lines)
+fn format_hex_head_tail(data: &[u8]) -> (Vec<String>, Option<String>, Vec<String>) {
+    let total = data.len();
+    if total <= HEX_MAX_HEAD + HEX_MAX_TAIL {
+        (format_hex_lines(data), None, vec![])
+    } else {
+        let head = format_hex_lines(&data[..HEX_MAX_HEAD]);
+        let omitted = total - HEX_MAX_HEAD - HEX_MAX_TAIL;
+        let notice = format!("... {} bytes omitted ...", omitted);
+        let tail = format_hex_lines(&data[total - HEX_MAX_TAIL..]);
+        (head, Some(notice), tail)
+    }
 }
 
-/// Format crypto literal (no colours) showing first 64 bytes with line wrapping
-/// Returns format like "hp{32}0x\nHEXLINE..." with CRYPTO_LINE_SEP markers
-/// Large PQC keys (McEliece 512KB, Frodo 15KB) are truncated to keep logs readable
+/// Format crypto literal (no colours) with head+tail truncation
 fn format_crypto_literal(type_name: &str, data: &[u8]) -> String {
-    let max_bytes = 64; // Show first 64 bytes - enough for 32-byte hashes/keys
-    let truncated = data.len() > max_bytes;
-    let display_data = if truncated { &data[..max_bytes] } else { data };
-    let hex_lines = format_hex_lines(display_data);
-    let suffix = if truncated { "..." } else { "" };
-
-    if hex_lines.len() == 1 && !truncated {
-        format!("{}{{{}}}0x{}", type_name, data.len(), hex_lines[0])
+    let (head, notice, tail) = format_hex_head_tail(data);
+    if head.len() == 1 && notice.is_none() {
+        format!("{}{{{}}}0x{}", type_name, data.len(), head[0])
     } else {
-        format!(
-            "{}{{{}}}0x{}{}{}",
-            type_name,
-            data.len(),
-            CRYPTO_LINE_SEP,
-            hex_lines.join(CRYPTO_LINE_SEP),
-            suffix
-        )
+        let mut parts = head;
+        if let Some(n) = notice {
+            parts.push(n);
+            parts.extend(tail);
+        }
+        format!("{}{{{}}}0x\n{}", type_name, data.len(), parts.join("\n"))
     }
 }
 
 /// Format crypto field with colour coding: type{size}0xHEX
 /// Type markers are coloured by semantic category (hash=teal, sig=purple, key=blue, etc.)
 /// Size shown as len-1 (wire encoding) with punctuation in dark gray
-/// For multi-line hex, lines are joined with CRYPTO_LINE_SEP marker for later replacement
 /// Large PQC keys (McEliece 512KB, Frodo 15KB) are truncated to 64 bytes for readable logs
-const CRYPTO_LINE_SEP: &str = "\x00HEXLINE\x00";
 
 /// Get semantic colour for a crypto type based on its prefix
 fn crypto_type_colour(type_name: &str) -> (u8, u8, u8) {
@@ -629,13 +635,16 @@ fn crypto_type_colour(type_name: &str) -> (u8, u8, u8) {
 }
 
 fn format_crypto_hex(type_name: &str, data: &[u8]) -> String {
-    // Wire encoding uses len-1 for crypto types (no zero-length crypto primitives)
     let wire_len = if data.len() > 0 { data.len() - 1 } else { 0 };
     let size_str = format!("3⦉{}⦊", wire_len);
     let col = crypto_type_colour(type_name);
 
-    // Literal format: hp3⦉31⦊⦉G^0*\nHEXVALUE\n⦊
-    let hex_str = hex::encode(data).to_uppercase();
+    let (head, notice, tail) = format_hex_head_tail(data);
+    let mut lines: Vec<String> = head.iter().map(|l| l.white().to_string()).collect();
+    if let Some(n) = notice {
+        lines.push(n.dimmed().to_string());
+        lines.extend(tail.iter().map(|l| l.white().to_string()));
+    }
 
     format!(
         "{}{}{}{}\n{}\n{}",
@@ -643,52 +652,37 @@ fn format_crypto_hex(type_name: &str, data: &[u8]) -> String {
         tc(&size_str, col_punct()),
         tc("⦉", col_punct()),
         trc("G^0*", col_punct()),
-        hex_str.white(),
+        lines.join("\n"),
         tc("⦊", col_punct())
     )
 }
 
-/// Format v wrapper type with colour coding: ve{size}0xHEX
-/// Shows first 64 bytes of data with line wrapping, truncates larger data with ...
-/// Large PQC ciphertexts are truncated to keep logs readable
+/// Format v wrapper type with colour coding: v{algo}3⦉size⦊0xHEX
 fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
-    // Wire encoding uses len-1 for wrapped data (no zero-length wrappers)
     let wire_len = if data.len() > 0 { data.len() - 1 } else { 0 };
-    // Wire format: v{algo} + "3" (length field size) + {len-1}
     let size_str = format!("3⦉{}⦊", wire_len);
-    let max_bytes = 64; // Show first 64 bytes
-    let truncated = data.len() > max_bytes;
-    let display_data = if truncated { &data[..max_bytes] } else { data };
-    let hex_lines = format_hex_lines(display_data);
 
-    if hex_lines.len() == 1 && !truncated {
-        // Single line - inline
+    let (head, notice, tail) = format_hex_head_tail(data);
+    if head.len() == 1 && notice.is_none() {
         format!(
             "{}{}{}{}",
             trc(format!("v{}", algo as char), col_wrap()),
             tc(&size_str, col_punct()),
             tc("0x", col_punct()),
-            hex_lines[0].white()
+            head[0].white()
         )
     } else {
-        // Multi-line with optional truncation indicator
-        let suffix = if truncated {
-            tc("...", col_punct()).to_string()
-        } else {
-            String::new()
-        };
+        let mut lines: Vec<String> = head.iter().map(|l| l.white().to_string()).collect();
+        if let Some(n) = notice {
+            lines.push(n.dimmed().to_string());
+            lines.extend(tail.iter().map(|l| l.white().to_string()));
+        }
         format!(
-            "{}{}{}{}{}{}",
+            "{}{}{}\n{}",
             trc(format!("v{}", algo as char), col_wrap()),
             tc(&size_str, col_punct()),
             tc("0x", col_punct()),
-            CRYPTO_LINE_SEP,
-            hex_lines
-                .iter()
-                .map(|l| l.white().to_string())
-                .collect::<Vec<_>>()
-                .join(CRYPTO_LINE_SEP),
-            suffix
+            lines.join("\n")
         )
     }
 }
@@ -2675,11 +2669,11 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                     if values_literal.len() == 1 {
                         // Single value: (name : value) - handle multi-line hex
                         let val = &values_literal[0];
-                        if val.contains(CRYPTO_LINE_SEP) {
+                        if val.contains('\n') {
                             // Multi-line crypto value
                             let hex_indent = format!("{}{}    ", field_prefix, continuation_bar);
                             let formatted =
-                                val.replace(CRYPTO_LINE_SEP, &format!("\n{}", hex_indent));
+                                val.replace('\n', &format!("\n{}", hex_indent));
                             out.push_str(&format!(
                                 "{}{}{}{} {} {}{}\n",
                                 field_prefix,
@@ -2923,14 +2917,13 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
             if vi == 0 {
                 // First value on same line as field name
                 // Check if it has hex lines that need continuation
-                if val_str.contains(CRYPTO_LINE_SEP) {
-                    let parts: Vec<&str> = val_str.split(CRYPTO_LINE_SEP).collect();
+                if val_str.contains('\n') {
+                    let parts: Vec<&str> = val_str.split('\n').collect();
                     out.push_str(parts[0]);
                     out.push('\n');
                     for (hi, hex_line) in parts[1..].iter().enumerate() {
                         out.push_str(&format!("  {}     {}", continuation, hex_line));
                         if hi == parts.len() - 2 {
-                            // Last hex line - add comma if not last value
                             if !is_last_val {
                                 out.push_str(&comma);
                             }
@@ -2946,8 +2939,8 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
                 }
             } else {
                 // Subsequent values on new lines with continuation
-                if val_str.contains(CRYPTO_LINE_SEP) {
-                    let parts: Vec<&str> = val_str.split(CRYPTO_LINE_SEP).collect();
+                if val_str.contains('\n') {
+                    let parts: Vec<&str> = val_str.split('\n').collect();
                     out.push_str(&format!("  {}   {}", continuation, parts[0]));
                     out.push('\n');
                     for (hi, hex_line) in parts[1..].iter().enumerate() {
