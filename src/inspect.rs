@@ -1161,7 +1161,6 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         VsfType::e(et) => {
             let formatted = format_eagle_time(et);
             let type_marker = match et {
-                EtType::u(_) => "eu",
                 EtType::i(_) => "ei",
                 EtType::f5(_) => "ef5",
                 EtType::f6(_) => "ef6",
@@ -1582,6 +1581,29 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             result
         }
         #[cfg(feature = "spirix")]
+        VsfType::roq(pos, size, placeholder, colour) => {
+            let mut result = format!("roq {}", trc("text_input", col_ro()));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
+            result.push_str(&format!("\n{}", ro_field(format!("{:?}", placeholder), "placeholder")));
+            result.push_str(&format!(
+                "\n{}",
+                ro_field(format!("{:?}", colour), "colour")
+            ));
+            result
+        }
+        #[cfg(feature = "spirix")]
+        VsfType::roa(cols, rows, children) => {
+            let mut result = format!("roa {}", trc("array", col_ro()));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", cols), "cols")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", rows), "rows")));
+            result.push_str(&format!("\n{}", ro_field(format!("{}", children.len()), "children")));
+            for (i, child) in children.iter().enumerate() {
+                result.push_str(&format!("\n{}", ro_field(format!("{:?}", child), &format!("[{}]", i))));
+            }
+            result
+        }
+        #[cfg(feature = "spirix")]
         VsfType::roi(pos, size, handle, tint) => {
             let mut result = format!("roi {}", trc("image", col_ro()));
             result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
@@ -1770,7 +1792,6 @@ pub fn format_eagle_time(et: &EtType) -> String {
         None => {
             // Fallback: show the raw wire encoding
             return match et {
-                EtType::u(v) => format!("eu{{{}}}", v),
                 EtType::i(v) => format!("ei{{{}}}", v),
                 EtType::f5(v) => format!("ef5{{{}}}", v),
                 EtType::f6(v) => format!("ef6{{{}}}", v),
@@ -1914,7 +1935,6 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::e(et) => {
             // Wire literal format: eu{value}, ei{value}, ef5{value}, or ef6{value}
             match et {
-                EtType::u(v) => format!("eu{{{}}}", v),
                 EtType::i(v) => format!("ei{{{}}}", v),
                 EtType::f5(v) => format!("ef5{{{:.2}}}", v),
                 EtType::f6(v) => format!("ef6{{{:.2}}}", v),
@@ -2316,7 +2336,6 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     // Creation time: et{timestamp} - time (pink-magenta)
     if let VsfType::e(ref et) = header.creation_time {
         let type_suffix = match et {
-            crate::types::EtType::u(_) => "u".to_string(),
             crate::types::EtType::i(_) => "i".to_string(),
             crate::types::EtType::f5(_) => "f5".to_string(),
             crate::types::EtType::f6(_) => "f6".to_string(),

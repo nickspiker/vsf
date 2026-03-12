@@ -6,38 +6,37 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 ///
 /// This is the 21cm hydrogen line at 1420.405751 MHz.
 /// One oscillation period ≈ 704.032 picoseconds.
-const OSCILLATIONS_PER_SECOND: u64 = 1_420_407_826;
+pub const OSCILLATIONS_PER_SECOND: u64 = 1_420_407_826;
 
 /// Eagle Time type - represents time values as either oscillation counts or seconds.
 ///
 /// Binary format: `[e][type][value...]`
 /// - `[e]` = Eagle Time marker
-/// - `[type]` = u/i/f (unsigned/signed/float)
+/// - `[type]` = i/f (integer/float)
 /// - `[value]` = encoded value
 ///
-/// **Integer types store actual oscillation counts:**
+/// **Integer type stores oscillation counts as i64:**
 /// - Each count represents one complete 21cm hydrogen-1 hyperfine transition
 /// - Precision: 704.032 picoseconds per oscillation
-/// - u64: 411 years range at picosecond precision
-/// - i64: ±206 years range at picosecond precision
+/// - i64: ±206 years range at picosecond precision (covers 1763–2175)
+/// - Positive = after epoch, negative = before epoch
 ///
-/// **IEEE 754 Float types store seconds:**
+/// **IEEE 754 Float types store seconds (legacy):**
 /// - f32: ~2 minute effective precision (for timestamps since 1969)
 /// - f64: ~200 nanosecond effective precision (for timestamps since 1969)
 #[derive(Debug, Clone, PartialEq)]
 #[allow(non_camel_case_types)]
 pub enum EtType {
-    u(u64), // Oscillation count
-    i(i64), // Oscillation count
-    f5(f32),  // Seconds as 32-bit float (2-3min precision)
-    f6(f64),  // Seconds as 64-bit float (lossy)
+    i(i64),   // Oscillation count (signed, covers ±206 years from epoch)
+    f5(f32),  // Seconds as 32-bit float (2-3min precision, legacy)
+    f6(f64),  // Seconds as 64-bit float (lossy, legacy)
 }
 
 /// EagleTime represents a point in time in the Eagle Time standard.
 ///
 /// Stores time as either:
-/// - **Oscillation counts** (integer types): Count of hydrogen-1 transition events since epoch (lunar landing)
-/// - **Seconds** (float types): Floating-point seconds since epoch (lunar landing)
+/// - **Oscillation counts** (i64): Count of hydrogen-1 transition events since epoch (lunar landing)
+/// - **Seconds** (float types): Floating-point seconds since epoch (lunar landing, legacy)
 ///
 /// Eagle epoch: Apollo 11 lunar landing - July 20, 1969 at 20:17:40 UTC
 /// (The moment "The Eagle has landed" was transmitted)
@@ -51,18 +50,11 @@ pub enum EtType {
 ///
 /// # Precision Characteristics
 ///
-/// All integer types (u3-u7, i3-i7) are supported for oscillation counts.
-/// Common configurations:
-///
 /// | Type | Range | Precision | Use Case |
 /// |------|-------|-----------|----------|
-/// | u32 | 1.5 years | 704 ps | Short-term timing |
-/// | u64 | 411 years (1969-2380) | 704 ps | Absolute timestamps (default) |
-/// | i64 | ±206 years | 704 ps | Time deltas |
+/// | i64 | ±206 years (1763–2175) | 704 ps | Absolute timestamps & deltas (default) |
 /// | f32 | Arbitrary | ~2 min | Low-precision timestamps (legacy) |
 /// | f64 | Arbitrary | ~200 ns | High-precision timestamps (legacy) |
-///
-/// Note: All u/i types use generic encoding, so u8/u16/u128/etc. are also valid.
 #[derive(Debug, Clone)]
 pub struct EagleTime {
     et_seconds: EtType,
@@ -85,12 +77,13 @@ impl EagleTime {
             // Float types: already in seconds
             VsfType::f5(v) => EtType::f5(v),
             VsfType::f6(v) => EtType::f6(v),
-            // Integer types: oscillation counts
-            VsfType::u(v, false) => EtType::u(v as u64),
-            VsfType::u3(v) => EtType::u(v as u64),
-            VsfType::u4(v) => EtType::u(v as u64),
-            VsfType::u5(v) => EtType::u(v as u64),
-            VsfType::u6(v) => EtType::u(v as u64),
+            // Unsigned integer types: convert to i64 oscillation counts
+            VsfType::u(v, false) => EtType::i(v as i64),
+            VsfType::u3(v) => EtType::i(v as i64),
+            VsfType::u4(v) => EtType::i(v as i64),
+            VsfType::u5(v) => EtType::i(v as i64),
+            VsfType::u6(v) => EtType::i(v as i64),
+            // Signed integer types: direct i64
             VsfType::i(v) => EtType::i(v as i64),
             VsfType::i3(v) => EtType::i(v as i64),
             VsfType::i4(v) => EtType::i(v as i64),
@@ -106,15 +99,8 @@ impl EagleTime {
         EagleTime { et_seconds }
     }
 
-    /// Creates an EagleTime from a raw oscillation count
-    pub fn from_oscillations(count: u64) -> Self {
-        EagleTime {
-            et_seconds: EtType::u(count),
-        }
-    }
-
-    /// Creates an EagleTime from a signed oscillation count (for deltas)
-    pub fn from_oscillations_signed(count: i64) -> Self {
+    /// Creates an EagleTime from an oscillation count (i64)
+    pub fn from_oscillations(count: i64) -> Self {
         EagleTime {
             et_seconds: EtType::i(count),
         }
@@ -122,17 +108,17 @@ impl EagleTime {
 
     /// Creates an EagleTime from seconds (f64), converting to oscillation count
     pub fn from_seconds_f64(seconds: f64) -> Self {
-        let oscillations = (seconds * OSCILLATIONS_PER_SECOND as f64).round() as u64;
+        let oscillations = (seconds * OSCILLATIONS_PER_SECOND as f64).round() as i64;
         EagleTime {
-            et_seconds: EtType::u(oscillations),
+            et_seconds: EtType::i(oscillations),
         }
     }
 
     /// Creates an EagleTime from seconds (f32), converting to oscillation count
     pub fn from_seconds_f32(seconds: f32) -> Self {
-        let oscillations = (seconds * OSCILLATIONS_PER_SECOND as f32).round() as u64;
+        let oscillations = (seconds * OSCILLATIONS_PER_SECOND as f32).round() as i64;
         EagleTime {
-            et_seconds: EtType::u(oscillations),
+            et_seconds: EtType::i(oscillations),
         }
     }
 
@@ -143,7 +129,6 @@ impl EagleTime {
         match self.et_seconds {
             EtType::f5(v) => VsfType::f5(v),
             EtType::f6(v) => VsfType::f6(v),
-            EtType::u(v) => VsfType::u6(v),
             EtType::i(v) => VsfType::i6(v),
         }
     }
@@ -157,14 +142,16 @@ impl EagleTime {
     pub fn to_datetime_opt(&self) -> Option<DateTime<Utc>> {
         let eagle_epoch = Utc.with_ymd_and_hms(1969, 7, 20, 20, 17, 40).unwrap();
         let seconds = self.to_seconds_f64();
-        let duration = Duration::from_std(std::time::Duration::from_secs_f64(seconds)).ok()?;
-        Some(eagle_epoch + duration)
+        if seconds >= 0.0 {
+            let duration = Duration::from_std(std::time::Duration::from_secs_f64(seconds)).ok()?;
+            Some(eagle_epoch + duration)
+        } else {
+            let duration = Duration::from_std(std::time::Duration::from_secs_f64(-seconds)).ok()?;
+            Some(eagle_epoch - duration)
+        }
     }
 
     /// Converts the EagleTime to a UTC DateTime.
-    ///
-    /// For integer types, divides oscillation count by OSCILLATIONS_PER_SECOND.
-    /// For float types, uses the stored seconds directly.
     ///
     /// Panics if the timestamp is outside chrono's representable range.
     /// For non-panicking version, use `to_datetime_opt()`.
@@ -188,7 +175,6 @@ impl EagleTime {
     /// For float types: returns the stored seconds directly
     pub fn to_seconds_f64(&self) -> f64 {
         match self.et_seconds {
-            EtType::u(oscillations) => oscillations as f64 / OSCILLATIONS_PER_SECOND as f64,
             EtType::i(oscillations) => oscillations as f64 / OSCILLATIONS_PER_SECOND as f64,
             EtType::f5(seconds) => seconds as f64,
             EtType::f6(seconds) => seconds,
@@ -198,7 +184,6 @@ impl EagleTime {
     /// Converts to f32 seconds, regardless of storage type.
     pub fn to_seconds_f32(&self) -> f32 {
         match self.et_seconds {
-            EtType::u(oscillations) => oscillations as f32 / OSCILLATIONS_PER_SECOND as f32,
             EtType::i(oscillations) => oscillations as f32 / OSCILLATIONS_PER_SECOND as f32,
             EtType::f5(seconds) => seconds,
             EtType::f6(seconds) => seconds as f32,
@@ -206,20 +191,10 @@ impl EagleTime {
     }
 
     /// Returns the oscillation count as i64 if stored as integer, None if stored as float.
-    /// For unsigned values that may exceed i64::MAX, use `oscillations_u64()`.
     pub fn oscillations(&self) -> Option<i64> {
         match self.et_seconds {
-            EtType::u(v) => Some(v as i64),
             EtType::i(v) => Some(v),
             EtType::f5(_) | EtType::f6(_) => None,
-        }
-    }
-
-    /// Returns the oscillation count as u64 if stored as unsigned integer, None otherwise.
-    pub fn oscillations_u64(&self) -> Option<u64> {
-        match self.et_seconds {
-            EtType::u(v) => Some(v),
-            _ => None,
         }
     }
 
@@ -233,11 +208,8 @@ impl EagleTime {
 
 impl PartialEq for EagleTime {
     fn eq(&self, other: &Self) -> bool {
-        // Compare at oscillation precision if both are integers
         match (&self.et_seconds, &other.et_seconds) {
-            (EtType::u(a), EtType::u(b)) => a == b,
             (EtType::i(a), EtType::i(b)) => a == b,
-            (EtType::u(a), EtType::i(b)) | (EtType::i(b), EtType::u(a)) => *a as i64 == *b,
             // Fall back to f64 comparison for any float involvement
             _ => self.to_seconds_f64() == other.to_seconds_f64(),
         }
@@ -254,12 +226,8 @@ impl PartialOrd for EagleTime {
 
 impl Ord for EagleTime {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Compare at oscillation precision if both are integers
         match (&self.et_seconds, &other.et_seconds) {
-            (EtType::u(a), EtType::u(b)) => a.cmp(b),
             (EtType::i(a), EtType::i(b)) => a.cmp(b),
-            (EtType::u(a), EtType::i(b)) => (*a as i64).cmp(b),
-            (EtType::i(a), EtType::u(b)) => a.cmp(&(*b as i64)),
             // Fall back to f64 comparison for any float involvement
             _ => self
                 .to_seconds_f64()
@@ -269,9 +237,10 @@ impl Ord for EagleTime {
     }
 }
 
-/// Converts a UTC DateTime to Eagle Time (as oscillation count in u64)
+/// Converts a UTC DateTime to Eagle Time (as oscillation count in i64)
 ///
 /// Returns the number of hydrogen-1 hyperfine oscillations since the Apollo 11 landing.
+/// Negative values represent times before the landing.
 pub fn datetime_to_eagle_time(dt: DateTime<Utc>) -> EagleTime {
     let eagle_epoch = Utc.with_ymd_and_hms(1969, 7, 20, 20, 17, 40).unwrap();
     let duration = dt - eagle_epoch;
@@ -281,7 +250,7 @@ pub fn datetime_to_eagle_time(dt: DateTime<Utc>) -> EagleTime {
         duration.num_seconds() as f64 + duration.subsec_nanos() as f64 / 1_000_000_000.0;
 
     // Convert to oscillations
-    let oscillations = (total_seconds * OSCILLATIONS_PER_SECOND as f64).round() as u64;
+    let oscillations = (total_seconds * OSCILLATIONS_PER_SECOND as f64).round() as i64;
 
     EagleTime::from_oscillations(oscillations)
 }
@@ -294,18 +263,18 @@ pub fn eagle_time_now() -> EagleTime {
     datetime_to_eagle_time(Utc::now())
 }
 
-/// Get current Eagle Time as oscillations (integer, 704ps precision)
+/// Get current Eagle Time as i64 oscillations (704ps precision)
 ///
 /// Returns the oscillation count since Apollo 11 landing.
 /// Preferred method for timestamps - preserves full precision.
-pub fn eagle_time_oscillations() -> u64 {
-    eagle_time_now().oscillations().unwrap_or(0) as u64
+pub fn eagle_time_oscillations() -> i64 {
+    eagle_time_now().oscillations().unwrap_or(0)
 }
 
 /// Get current Eagle Time as nanosecond-precision f64 seconds (for compatibility)
 ///
 /// Note: This loses the picosecond precision available in the oscillation count.
-/// Prefer `eagle_time_oscillations()` for maximum precision.
+/// Prefer `eagle_time_oscillations()` for integer timestamps.
 #[deprecated(note = "Use eagle_time_oscillations() for integer timestamps")]
 pub fn eagle_time_nanos() -> f64 {
     eagle_time_now().to_seconds_f64()
@@ -336,12 +305,12 @@ mod tests {
     #[test]
     fn test_oscillation_counting() {
         // One second should be exactly OSCILLATIONS_PER_SECOND oscillations
-        let one_second = EagleTime::from_oscillations(OSCILLATIONS_PER_SECOND as u64);
+        let one_second = EagleTime::from_oscillations(OSCILLATIONS_PER_SECOND as i64);
         assert_eq!(one_second.to_seconds_f64(), 1.0);
 
         // 100 seconds
         let hundred_seconds =
-            EagleTime::from_oscillations(OSCILLATIONS_PER_SECOND * 100);
+            EagleTime::from_oscillations(OSCILLATIONS_PER_SECOND as i64 * 100);
         assert_eq!(hundred_seconds.to_seconds_f64(), 100.0);
     }
 
@@ -402,7 +371,7 @@ mod tests {
         let mut times = vec![
             EagleTime::from_oscillations(3000),
             EagleTime::from_oscillations(1000),
-            EagleTime::from_oscillations_signed(2000),
+            EagleTime::from_oscillations(2000),
             EagleTime::from_oscillations(500),
         ];
 
@@ -415,28 +384,27 @@ mod tests {
     }
 
     #[test]
-    fn test_range_limits() {
-        // u64 should give us ~411 years
-        // From 1969 to 2380 is 411 years
-        let year_2380 = Utc.with_ymd_and_hms(2380, 1, 1, 0, 0, 0).unwrap();
-        let et = datetime_to_eagle_time(year_2380);
+    fn test_negative_oscillations() {
+        // Before epoch
+        let before = EagleTime::from_oscillations(-1000);
+        assert_eq!(before.oscillations(), Some(-1000));
 
-        // Should be within u64 range
-        if let Some(osc) = et.oscillations_u64() {
-            assert!(osc > 0);
-            // ~411 years * 365.25 days * 86400 seconds * 1.42e9 oscillations/sec
-            // Should be less than u64::MAX
-        }
+        // Should order correctly vs positive
+        let after = EagleTime::from_oscillations(500);
+        assert!(before < after);
     }
 
     #[test]
-    fn test_signed_oscillations() {
-        // Test negative time deltas
-        let before_epoch = EagleTime::from_oscillations_signed(-1000);
-        assert_eq!(before_epoch.oscillations(), Some(-1000));
+    fn test_pre_epoch_datetime() {
+        // 1960 is before the eagle epoch (1969)
+        let pre_epoch = Utc.with_ymd_and_hms(1960, 1, 1, 0, 0, 0).unwrap();
+        let et = datetime_to_eagle_time(pre_epoch);
 
-        // Should handle comparison with positive values
-        let after_epoch = EagleTime::from_oscillations(500);
-        assert!(before_epoch < after_epoch);
+        // Should be negative
+        assert!(et.oscillations().unwrap() < 0);
+
+        // Round trip
+        let back = et.to_datetime();
+        assert_eq!((pre_epoch - back).num_seconds().abs(), 0);
     }
 }

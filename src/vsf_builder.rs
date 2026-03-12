@@ -74,9 +74,9 @@ impl VsfBuilder {
     /// Set creation time with integer oscillations (eu)
     /// Use this for protocols that need unique timestamps with integer precision.
     /// 1,420,407,826 oscillations per second (21cm hydrogen line) = 704ps precision
-    pub fn creation_time_oscillations(mut self, oscillations: u64) -> Self {
+    pub fn creation_time_oscillations(mut self, oscillations: i64) -> Self {
         use crate::types::EtType;
-        self.creation_time = VsfType::e(EtType::u(oscillations));
+        self.creation_time = VsfType::e(EtType::i(oscillations));
         self
     }
 

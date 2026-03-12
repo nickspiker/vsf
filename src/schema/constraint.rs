@@ -181,7 +181,6 @@ impl TypeConstraint {
             TypeConstraint::EagleTime(inner) => {
                 if let VsfType::e(et) = value {
                     match et {
-                        EtType::u(_) => inner.matches(&VsfType::u6(0)),
                         EtType::i(_) => inner.matches(&VsfType::i6(0)),
                         EtType::f5(_) => inner.matches(&VsfType::f5(0.0)),
                         EtType::f6(_) => inner.matches(&VsfType::f6(0.0)),
@@ -453,7 +452,7 @@ mod tests {
         let constraint = TypeConstraint::AnyEagleTime;
         assert!(constraint.matches(&VsfType::e(EtType::f6(123.456))));
         assert!(constraint.matches(&VsfType::e(EtType::f5(123.456))));
-        assert!(constraint.matches(&VsfType::e(EtType::u(123456))));
+        assert!(constraint.matches(&VsfType::e(EtType::i(123456))));
         assert!(constraint.matches(&VsfType::e(EtType::i(123456))));
         assert!(!constraint.matches(&VsfType::f6(123.456)));
     }
@@ -463,7 +462,7 @@ mod tests {
         let constraint = TypeConstraint::EagleTime(Box::new(TypeConstraint::AnyFloat));
         assert!(constraint.matches(&VsfType::e(EtType::f6(123.456))));
         assert!(constraint.matches(&VsfType::e(EtType::f5(123.456))));
-        assert!(!constraint.matches(&VsfType::e(EtType::u(123456))));
+        assert!(!constraint.matches(&VsfType::e(EtType::i(123456))));
         assert!(!constraint.matches(&VsfType::e(EtType::i(123456))));
     }
 

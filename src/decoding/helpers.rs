@@ -216,6 +216,122 @@ pub fn decode_isize(data: &[u8], pointer: &mut usize) -> Result<isize, Error> {
     }
 }
 
+/// Decode a variable-length u64 from VSF format (no truncation on 32-bit targets)
+pub fn decode_u64(data: &[u8], pointer: &mut usize) -> Result<u64, Error> {
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for size marker",
+        ));
+    }
+
+    match data[*pointer] {
+        b'3' => {
+            *pointer += 1;
+            if *pointer >= data.len() {
+                return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for u8"));
+            }
+            let value = data[*pointer] as u64;
+            *pointer += 1;
+            Ok(value)
+        }
+        b'4' => {
+            *pointer += 1;
+            if *pointer + 2 > data.len() {
+                return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for u16"));
+            }
+            let value = u16::from_be_bytes([data[*pointer], data[*pointer + 1]]) as u64;
+            *pointer += 2;
+            Ok(value)
+        }
+        b'5' => {
+            *pointer += 1;
+            if *pointer + 4 > data.len() {
+                return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for u32"));
+            }
+            let value = u32::from_be_bytes([
+                data[*pointer], data[*pointer + 1], data[*pointer + 2], data[*pointer + 3],
+            ]) as u64;
+            *pointer += 4;
+            Ok(value)
+        }
+        b'6' => {
+            *pointer += 1;
+            if *pointer + 8 > data.len() {
+                return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for u64"));
+            }
+            let value = u64::from_be_bytes([
+                data[*pointer], data[*pointer + 1], data[*pointer + 2], data[*pointer + 3],
+                data[*pointer + 4], data[*pointer + 5], data[*pointer + 6], data[*pointer + 7],
+            ]);
+            *pointer += 8;
+            Ok(value)
+        }
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Invalid u64 size marker: {}", data[*pointer]),
+        )),
+    }
+}
+
+/// Decode a variable-length i64 from VSF format (no truncation on 32-bit targets)
+pub fn decode_i64(data: &[u8], pointer: &mut usize) -> Result<i64, Error> {
+    if *pointer >= data.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "Not enough data for size marker",
+        ));
+    }
+
+    match data[*pointer] {
+        b'3' => {
+            *pointer += 1;
+            if *pointer >= data.len() {
+                return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for i8"));
+            }
+            let value = data[*pointer] as i8 as i64;
+            *pointer += 1;
+            Ok(value)
+        }
+        b'4' => {
+            *pointer += 1;
+            if *pointer + 2 > data.len() {
+                return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for i16"));
+            }
+            let value = i16::from_be_bytes([data[*pointer], data[*pointer + 1]]) as i64;
+            *pointer += 2;
+            Ok(value)
+        }
+        b'5' => {
+            *pointer += 1;
+            if *pointer + 4 > data.len() {
+                return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for i32"));
+            }
+            let value = i32::from_be_bytes([
+                data[*pointer], data[*pointer + 1], data[*pointer + 2], data[*pointer + 3],
+            ]) as i64;
+            *pointer += 4;
+            Ok(value)
+        }
+        b'6' => {
+            *pointer += 1;
+            if *pointer + 8 > data.len() {
+                return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough data for i64"));
+            }
+            let value = i64::from_be_bytes([
+                data[*pointer], data[*pointer + 1], data[*pointer + 2], data[*pointer + 3],
+                data[*pointer + 4], data[*pointer + 5], data[*pointer + 6], data[*pointer + 7],
+            ]);
+            *pointer += 8;
+            Ok(value)
+        }
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Invalid i64 size marker: {}", data[*pointer]),
+        )),
+    }
+}
+
 /// Parse shape dimensions from tensor header
 pub fn parse_shape(data: &[u8], pointer: &mut usize, ndim: usize) -> Result<Vec<usize>, Error> {
     let mut shape = Vec::with_capacity(ndim);

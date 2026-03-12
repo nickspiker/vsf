@@ -177,11 +177,6 @@ impl VsfType {
             VsfType::e(value) => {
                 let mut flat = Vec::new();
                 match value {
-                    EtType::u(value) => {
-                        flat.push(b'e');
-                        flat.push(b'u');
-                        flat.extend_from_slice(&value.encode_number());
-                    }
                     EtType::i(value) => {
                         flat.push(b'e');
                         flat.push(b'i');
@@ -857,7 +852,7 @@ impl VsfType {
                 flat.extend_from_slice(&size.imaginary.to_be_bytes());
                 flat.extend_from_slice(&size.exponent.to_be_bytes());
                 // Encode label (string as x type)
-                let label_vsf = VsfType::x(label.clone());
+                let label_vsf = VsfType::l(label.clone());
                 flat.extend_from_slice(&label_vsf.flatten());
                 // Encode variant
                 flat.push(match variant {
@@ -867,6 +862,37 @@ impl VsfType {
                 });
                 // Encode colour
                 flat.extend_from_slice(&colour.flatten());
+                flat
+            }
+
+            #[cfg(feature = "spirix")]
+            VsfType::roq(pos, size, placeholder, colour) => {
+                let mut flat = vec![b'r', b'o', b'q'];
+                // Encode pos (c44)
+                flat.extend_from_slice(&pos.real.to_be_bytes());
+                flat.extend_from_slice(&pos.imaginary.to_be_bytes());
+                flat.extend_from_slice(&pos.exponent.to_be_bytes());
+                // Encode size (c44)
+                flat.extend_from_slice(&size.real.to_be_bytes());
+                flat.extend_from_slice(&size.imaginary.to_be_bytes());
+                flat.extend_from_slice(&size.exponent.to_be_bytes());
+                // Encode placeholder (string as l type — ASCII, no Huffman dependency)
+                let placeholder_vsf = VsfType::l(placeholder.clone());
+                flat.extend_from_slice(&placeholder_vsf.flatten());
+                // Encode colour
+                flat.extend_from_slice(&colour.flatten());
+                flat
+            }
+
+            #[cfg(feature = "spirix")]
+            VsfType::roa(cols, rows, children) => {
+                let mut flat = vec![b'r', b'o', b'a'];
+                flat.extend_from_slice(&cols.encode_number());
+                flat.extend_from_slice(&rows.encode_number());
+                flat.extend_from_slice(&children.len().encode_number());
+                for child in children {
+                    flat.extend_from_slice(&child.flatten());
+                }
                 flat
             }
 

@@ -23,7 +23,6 @@ fn main() {
     let et_f32 = match et.et_type() {
         EtType::f6(v) => *v as f32,
         EtType::f5(v) => *v,
-        EtType::u(v) => *v as f32,
         EtType::i(v) => *v as f32,
     };
     let creation_time = VsfType::e(EtType::f5(et_f32));
