@@ -452,6 +452,10 @@ pub enum VsfType {
     #[cfg(feature = "spirix")]
     rou(CircleF4E4, CircleF4E4, String, ButtonVariant, Box<VsfType>), // Button: pos, size, label, variant, colour
     #[cfg(feature = "spirix")]
+    roq(CircleF4E4, CircleF4E4, String, Box<VsfType>), // TextInput: pos, size, placeholder, colour
+    #[cfg(feature = "spirix")]
+    roa(usize, usize, Vec<VsfType>), // Array/SubTable: cols, rows, children
+    #[cfg(feature = "spirix")]
     roi(CircleF4E4, CircleF4E4, u64, Box<VsfType>), // Image: pos, size, handle, tint
     #[cfg(feature = "spirix")]
     rof(CircleF4E4, CircleF4E4, u64), // Surface: pos, size, handle

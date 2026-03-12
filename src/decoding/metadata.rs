@@ -1,6 +1,6 @@
 //! Metadata parsers
 
-use super::helpers::{decode_isize, decode_usize};
+use super::helpers::{decode_i64, decode_u64, decode_usize};
 use crate::types::{EtType, VsfType, WorldCoord};
 use std::io::{Error, ErrorKind};
 
@@ -67,12 +67,13 @@ pub fn parse_eagle_time(data: &[u8], pointer: &mut usize) -> Result<VsfType, Err
 
     match time_type {
         b'u' => {
-            let value = decode_usize(data, pointer)?;
-            Ok(VsfType::e(EtType::u(value as u64)))
+            // Legacy unsigned wire format — decode as u64, widen to i64
+            let value = decode_u64(data, pointer)?;
+            Ok(VsfType::e(EtType::i(value as i64)))
         }
         b'i' => {
-            let value = decode_isize(data, pointer)?;
-            Ok(VsfType::e(EtType::i(value as i64)))
+            let value = decode_i64(data, pointer)?;
+            Ok(VsfType::e(EtType::i(value)))
         }
         b'f' => {
             // Eagle Time floats: [e][f][5 or 6][bytes]

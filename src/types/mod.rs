@@ -19,6 +19,7 @@ pub mod toka_tree;
 // Re-export main types
 pub use eagle_time::{
     datetime_to_eagle_time, eagle_time_nanos, eagle_time_oscillations, EagleTime, EtType,
+    OSCILLATIONS_PER_SECOND,
 };
 pub use tensor::{BitPackedTensor, LayoutOrder, StridedTensor, Tensor, Vector};
 pub use vsf_type::VsfType;

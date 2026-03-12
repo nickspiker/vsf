@@ -10,6 +10,7 @@ use super::metadata::{
     parse_mac, parse_marker_def, parse_marker_ref, parse_offset, parse_signature, parse_string,
     parse_version, parse_world_coord, parse_wrapped,
 };
+use super::helpers::decode_usize;
 use super::primitives::{parse_complex, parse_float, parse_signed, parse_unsigned};
 #[cfg(feature = "spirix")]
 use super::spirix::{parse_spirix_circle, parse_spirix_scalar};
@@ -284,7 +285,7 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
             let size = parse_c44(data, pointer)?;
             let label_vsf = parse(data, pointer)?;
             let label = match label_vsf {
-                VsfType::x(s) => s,
+                VsfType::x(s) | VsfType::l(s) => s,
                 _ => {
                     return Err(Error::new(
                         ErrorKind::InvalidData,
@@ -295,6 +296,34 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
             let variant = parse_button_variant(data, pointer)?;
             let colour = Box::new(parse(data, pointer)?);
             Ok(VsfType::rou(pos, size, label, variant, colour))
+        }
+        b'q' => {
+            // roq: TextInput (pos, size, placeholder, colour)
+            let pos = parse_c44(data, pointer)?;
+            let size = parse_c44(data, pointer)?;
+            let placeholder_vsf = parse(data, pointer)?;
+            let placeholder = match placeholder_vsf {
+                VsfType::x(s) | VsfType::l(s) => s,
+                _ => {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        "Expected string for placeholder",
+                    ))
+                }
+            };
+            let colour = Box::new(parse(data, pointer)?);
+            Ok(VsfType::roq(pos, size, placeholder, colour))
+        }
+        b'a' => {
+            // roa: Array/SubTable (cols, rows, children)
+            let cols = decode_usize(data, pointer)?;
+            let rows = decode_usize(data, pointer)?;
+            let count = decode_usize(data, pointer)?;
+            let mut children = Vec::with_capacity(count);
+            for _ in 0..count {
+                children.push(parse(data, pointer)?);
+            }
+            Ok(VsfType::roa(cols, rows, children))
         }
         b'i' => {
             // roi: Image (pos, size, handle, tint)

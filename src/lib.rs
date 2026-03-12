@@ -349,7 +349,7 @@ pub mod inspect;
 // Re-export main types
 pub use types::{
     datetime_to_eagle_time, eagle_time_nanos, eagle_time_oscillations, EagleTime, EtType,
-    LayoutOrder, StridedTensor, Tensor, VsfType, WorldCoord,
+    LayoutOrder, StridedTensor, Tensor, VsfType, WorldCoord, OSCILLATIONS_PER_SECOND,
 };
 
 // Re-export colour conversion types
@@ -628,15 +628,15 @@ mod tests {
 
     #[test]
     fn test_roundtrip_eagle_time() {
-        // Eagle time with usize
-        let val = VsfType::e(EtType::u(1000000));
+        // Eagle time with i64
+        let val = VsfType::e(EtType::i(1000000));
         let flat = val.flatten();
         let mut ptr = 0;
         let parsed = parse(&flat, &mut ptr).unwrap();
-        if let VsfType::e(EtType::u(v)) = parsed {
+        if let VsfType::e(EtType::i(v)) = parsed {
             assert_eq!(v, 1000000);
         } else {
-            panic!("Expected e(u)");
+            panic!("Expected e(i)");
         }
 
         // Eagle time with f64
