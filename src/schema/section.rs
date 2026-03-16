@@ -459,25 +459,25 @@ impl SectionBuilder {
         }
         ptr += 1;
 
-        // Parse section name
-        let section_name = parse(section_bytes, &mut ptr)
-            .map_err(|e| ValidationError::Custom(format!("Failed to parse section name: {}", e)))?;
-        let section_name_str = match section_name {
-            crate::VsfType::d(name) => name,
-            _ => {
+        // Parse section name if present (encoder omits it for sections within 1MB of header)
+        if ptr < section_bytes.len() && section_bytes[ptr] != b'(' && section_bytes[ptr] != b']' {
+            let section_name = parse(section_bytes, &mut ptr)
+                .map_err(|e| ValidationError::Custom(format!("Failed to parse section name: {}", e)))?;
+            let section_name_str = match section_name {
+                crate::VsfType::d(name) => name,
+                _ => {
+                    return Err(ValidationError::Custom(format!(
+                        "Expected section name (d), got {:?}",
+                        section_name
+                    )))
+                }
+            };
+            if section_name_str != schema.name {
                 return Err(ValidationError::Custom(format!(
-                    "Expected section name (d), got {:?}",
-                    section_name
-                )))
+                    "Section name mismatch: expected '{}', found '{}'",
+                    schema.name, section_name_str
+                )));
             }
-        };
-
-        // Verify section name matches schema
-        if section_name_str != schema.name {
-            return Err(ValidationError::Custom(format!(
-                "Section name mismatch: expected '{}', found '{}'",
-                schema.name, section_name_str
-            )));
         }
 
         let mut builder = SectionBuilder::new(schema.clone());

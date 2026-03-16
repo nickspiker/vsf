@@ -608,10 +608,10 @@ fn format_crypto_literal(type_name: &str, data: &[u8]) -> String {
     if head.len() == 1 && notice.is_none() {
         format!("{}{{{}}}0x{}", type_name, data.len(), head[0])
     } else {
-        let mut parts = head;
+        let mut parts: Vec<String> = head.into_iter().map(|l| format!("        {}", l)).collect();
         if let Some(n) = notice {
-            parts.push(n);
-            parts.extend(tail);
+            parts.push(format!("        {}", n));
+            parts.extend(tail.into_iter().map(|l| format!("        {}", l)));
         }
         format!("{}{{{}}}0x\n{}", type_name, data.len(), parts.join("\n"))
     }
@@ -672,10 +672,10 @@ fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
             head[0].white()
         )
     } else {
-        let mut lines: Vec<String> = head.iter().map(|l| l.white().to_string()).collect();
+        let mut lines: Vec<String> = head.iter().map(|l| format!("        {}", l.white())).collect();
         if let Some(n) = notice {
-            lines.push(n.dimmed().to_string());
-            lines.extend(tail.iter().map(|l| l.white().to_string()));
+            lines.push(format!("        {}", n.dimmed()));
+            lines.extend(tail.iter().map(|l| format!("        {}", l.white())));
         }
         format!(
             "{}{}{}\n{}",
@@ -2841,11 +2841,15 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
     let mut out = String::new();
     let mut pointer = 1usize; // Skip '['
 
-    // Parse section name first
-    let section_name = match parse(data, &mut pointer) {
-        Ok(VsfType::d(name)) => name,
-        Ok(_) => return Err("Expected d type for section name".into()),
-        Err(e) => return Err(format!("Failed to parse section name: {}", e)),
+    // Parse section name if present (encoder omits it for sections within 1MB of header)
+    let section_name = if pointer < data.len() && data[pointer] != b'(' && data[pointer] != b']' {
+        match parse(data, &mut pointer) {
+            Ok(VsfType::d(name)) => name,
+            Ok(_) => return Err("Expected d type for section name".into()),
+            Err(e) => return Err(format!("Failed to parse section name: {}", e)),
+        }
+    } else {
+        String::new()
     };
 
     // Check for optional n{count}b{length} suffix AFTER name (large sections)
@@ -3030,40 +3034,48 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
     Ok(out)
 }
 
-/// Hex dump with ASCII sidebar (like xxd)
+/// Hex dump with ASCII sidebar (like xxd), truncated to 1KB head + 1KB tail
 pub fn hex_dump(data: &[u8]) -> String {
+    const MAX_BYTES: usize = 1024;
     let mut out = String::new();
-    for (i, chunk) in data.chunks(16).enumerate() {
-        // Offset
-        out.push_str(&format!("{:08x}: ", i * 16));
 
-        // Hex bytes
+    let (head, omitted, tail_offset) = if data.len() > MAX_BYTES * 2 {
+        let omitted = data.len() - MAX_BYTES * 2;
+        (&data[..MAX_BYTES], Some(omitted), data.len() - MAX_BYTES)
+    } else {
+        (data, None, 0)
+    };
+
+    let mut format_chunk = |offset: usize, chunk: &[u8]| {
+        let mut line = format!("{:08x}: ", offset);
         for (j, byte) in chunk.iter().enumerate() {
-            if j == 8 {
-                out.push(' ');
-            }
-            out.push_str(&format!("{:02x} ", byte));
+            if j == 8 { line.push(' '); }
+            line.push_str(&format!("{:02x} ", byte));
         }
-
-        // Padding for incomplete lines
         let padding = 16 - chunk.len();
         for j in 0..padding {
-            if chunk.len() + j == 8 {
-                out.push(' ');
-            }
-            out.push_str("   ");
+            if chunk.len() + j == 8 { line.push(' '); }
+            line.push_str("   ");
         }
-
-        // ASCII
-        out.push(' ');
+        line.push(' ');
         for byte in chunk {
-            if *byte >= 0x20 && *byte < 0x7f {
-                out.push(*byte as char);
-            } else {
-                out.push('.');
-            }
+            if *byte >= 0x20 && *byte < 0x7f { line.push(*byte as char); } else { line.push('.'); }
         }
-        out.push('\n');
+        line.push('\n');
+        line
+    };
+
+    for (i, chunk) in head.chunks(16).enumerate() {
+        out.push_str(&format_chunk(i * 16, chunk));
     }
+
+    if let Some(n) = omitted {
+        out.push_str(&format!("... {} bytes omitted ...\n", n));
+        let tail = &data[tail_offset..];
+        for (i, chunk) in tail.chunks(16).enumerate() {
+            out.push_str(&format_chunk(tail_offset + i * 16, chunk));
+        }
+    }
+
     out
 }
