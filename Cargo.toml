@@ -40,10 +40,10 @@ i256 = { version = "0.2.3", default-features = false }
 colored = { version = "2", optional = true }
 num-traits = { version = "0.2.19", default-features = false, features = ["libm"] }
 libm = { version = "0.2" }
-spin = { version = "0.9", default-features = false, features = ["once", "rwlock"] }
+spin = { version = "0.9", default-features = false, features = ["once", "rwlock"], optional = true }
 
 [features]
-default = ["std"]
+default = ["std", "registry"]
 std = [
     "chrono/std",
     "chrono/clock",
@@ -53,10 +53,13 @@ std = [
     "num-traits/std",
     "num-complex/std",
 ]
+# `registry` enables the global SchemaRegistry singleton (spin::Once + spin::RwLock).
+# Cortex-M0+ lacks atomic CAS, which spin needs; embedded callers omit `registry` and use schema builders/parsers directly.
+registry = ["dep:spin"]
 crypto = ["ed25519-dalek", "x25519-dalek", "rand", "chacha20poly1305", "aes-gcm"]
 spirix = ["dep:spirix"]
-inspect = ["std", "dep:colored"]
-text = ["std", "dep:clap", "inspect"]
+inspect = ["std", "registry", "dep:colored"]
+text = ["std", "registry", "dep:clap", "inspect"]
 
 [build-dependencies]
 ureq = "2"

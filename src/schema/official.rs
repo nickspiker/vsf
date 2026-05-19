@@ -111,7 +111,9 @@ pub fn bridge_resp_schema() -> SectionSchema {
         .field("data", TypeConstraint::Wrapped(b'b'))
 }
 
-/// Register all official schemas
+/// Register all official schemas.
+/// Gated on `registry` because `SchemaRegistry` itself is — see `schema/mod.rs`.
+#[cfg(feature = "registry")]
 pub fn register_official_schemas(registry: &super::registry::SchemaRegistry) {
     registry.register(image_schema());
     registry.register(camera_schema());
