@@ -45,6 +45,9 @@ pub mod constraint;
 pub mod conversions;
 pub mod field;
 pub mod official;
+/// `SchemaRegistry` singleton — gated behind the `registry` feature because it depends on `spin` (which requires atomic CAS, unavailable on e.g. Cortex-M0+).
+/// Embedded callers that only need the per-schema builder/parser (no global lookup) can omit `registry` and still use `bridge_cmd_schema()`, `SectionBuilder::parse`, etc.
+#[cfg(feature = "registry")]
 pub mod registry;
 pub mod section;
 pub mod validate;
@@ -52,7 +55,10 @@ pub mod validate;
 pub use constraint::TypeConstraint;
 pub use conversions::{AsciiText, FromVsfType, IntoVsfType};
 pub use field::FieldSchema;
+pub use official::{bridge_cmd_schema, bridge_resp_schema};
+#[cfg(feature = "registry")]
 pub use official::register_official_schemas;
+#[cfg(feature = "registry")]
 pub use registry::{SchemaRegistry, UserRegistry};
 pub use section::{FieldValue, SectionBuilder, SectionSchema};
 pub use validate::{ValidationError, ValidationResult};
@@ -62,6 +68,7 @@ pub mod prelude {
     pub use super::constraint::TypeConstraint;
     pub use super::conversions::{AsciiText, FromVsfType, IntoVsfType};
     pub use super::field::FieldSchema;
+    #[cfg(feature = "registry")]
     pub use super::registry::{SchemaRegistry, UserRegistry};
     pub use super::section::{FieldValue, SectionBuilder, SectionSchema};
     pub use super::validate::{ValidationError, ValidationResult};

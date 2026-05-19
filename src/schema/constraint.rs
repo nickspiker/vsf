@@ -5,6 +5,7 @@
 use crate::prelude::*;
 use super::validate::{ValidationError, ValidationResult};
 use crate::types::{EtType, VsfType};
+#[cfg(target_has_atomic = "ptr")]
 use alloc::sync::Arc;
 use core::fmt;
 
@@ -111,7 +112,9 @@ pub enum TypeConstraint {
     AllOf(Vec<TypeConstraint>),
 
     // === CUSTOM VALIDATION ===
-    /// Custom predicate function for complex validation
+    /// Custom predicate function for complex validation.
+    /// Requires `Arc`, which requires `target_has_atomic = "ptr"`; gated out on single-core embedded targets (e.g., Cortex-M0+).
+    #[cfg(target_has_atomic = "ptr")]
     Custom {
         name: &'static str,
         description: &'static str,
@@ -357,6 +360,7 @@ impl TypeConstraint {
 
             TypeConstraint::AllOf(constraints) => constraints.iter().all(|c| c.matches(value)),
 
+            #[cfg(target_has_atomic = "ptr")]
             TypeConstraint::Custom { validator, .. } => validator(value),
 
             TypeConstraint::Any => true,
@@ -414,6 +418,7 @@ impl TypeConstraint {
                 let descs: Vec<String> = constraints.iter().map(|c| c.description()).collect();
                 format!("all of [{}]", descs.join(", "))
             }
+            #[cfg(target_has_atomic = "ptr")]
             TypeConstraint::Custom { description, .. } => (*description).into(),
             TypeConstraint::Any => "any type".into(),
         }
