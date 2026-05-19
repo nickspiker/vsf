@@ -1,6 +1,6 @@
-// Allow deprecated items within the crate - VSF must handle legacy types internally.
-// External users will still see deprecation warnings when they use legacy APIs.
+// Allow deprecated items within the crate - VSF must handle legacy types internally. External users will still see deprecation warnings when they use legacy APIs.
 #![allow(deprecated)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 //! # VSF (Versatile Storage Format)
 //!
@@ -71,15 +71,12 @@
 //! ```
 //!
 //! **Hash Strategy (Always BLAKE3):**
-//! - **hp** (hash provenance): Content identity - BLAKE3 hash of immutable content. Required.
-//!   Computed with hp field as zeros, then filled in. Creates stable identifier for original content.
+//! - **hp** (hash provenance): Content identity - BLAKE3 hash of immutable content. Required. Computed with hp field as zeros, then filled in. Creates stable identifier for original content.
 //! - **ge** (signature): Optional Ed25519 signature. When signing, compute hp, sign it, then **replace** hp bytes with ge signature.
-//! - **hb** (hash rolling): Current file state - Optional BLAKE3 hash including History section.
-//!   Updates when History updates. Useful for tracking mutable file evolution. ge or hb, must have one.
+//! - **hb** (hash rolling): Current file state - Optional BLAKE3 hash including History section. Updates when History updates. Useful for tracking mutable file evolution. ge or hb, must have one.
 //!
 //! **Provenance Verification:**
-//! To verify a file's provenance, zero the hp and signature/rolling hash fields and compute BLAKE3 - it will match the stored hp if original.
-//! If present, verify the ge signature against hp to authenticate the creator.
+//! To verify a file's provenance, zero the hp and signature/rolling hash fields and compute BLAKE3 - it will match the stored hp if original. If present, verify the ge signature against hp to authenticate the creator.
 //!
 //! **Terminology:**
 //! - **Header**: Everything between `RÅ<` and `>`
@@ -89,8 +86,7 @@
 //! - **Section field**: Individual `(field:value)` or `(field:v0,v1)` entries within a section
 //! - **`?` and `{}`**: `?` indicates length (ASCII 0-Z), `{}` indicates binary data
 //!
-//! The `:` and `,` separators in label records make the format human-readable in hex editors
-//! and aid in forensics and corruption analysis with minimal overhead.
+//! The `:` and `,` separators in label records make the format human-readable in hex editors and aid in forensics and corruption analysis with minimal overhead.
 //!
 //! ## Section Flattening Example
 //!
@@ -121,9 +117,7 @@
 //! [d3{0x07}Imaging(l3{0x0D}shutter_speed:f6{0x7B 14 AE 47 E1 7A 84 3F})(l3{0x08}aperture:f5{0x33 33 33 40})(l3{0x03}iso:u4{0x01 90})]
 //! ```
 //!
-//! Each section field is enclosed by `()`'s and always starts with a text identifier (`l` marker + ASCII string),
-//! followed by `:` and its value(s) separated by `,`. Section fields are flattened sequentially, creating a
-//! self-describing stream.
+//! Each section field is enclosed by `()`'s and always starts with a text identifier (`l` marker + ASCII string), followed by `:` and its value(s) separated by `,`. Section fields are flattened sequentially, creating a self-describing stream.
 //!
 //! ## Optional History Section (Will change heavily as design matures)
 //!
@@ -137,9 +131,7 @@
 //! ]
 //! ```
 //!
-//! Each history entry records the file's `hb` hash at that point in time, creating a verifiable
-//! chain of file states. To verify history integrity, recompute `hb` for each historical state
-//! by truncating the History section to that entry.
+//! Each history entry records the file's `hb` hash at that point in time, creating a verifiable chain of file states. To verify history integrity, recompute `hb` for each historical state by truncating the History section to that entry.
 //!
 //! Which flattens to:
 //!
@@ -161,9 +153,7 @@
 //!       'l' + '1' + {4u8} + "host" + ':' + 'x' + '1' + {12u8} + "mobile" + ')' + ']'
 //! ```
 //!
-//! Each history entry is a complete event enclosed in `()`'s with timestamp, tool, action, and context.
-//! The History section has its own hash in the header label record for integrity verification, but is
-//! NOT included in `hs` (static content hash). It IS included in `hb` (rolling file hash).
+//! Each history entry is a complete event enclosed in `()`'s with timestamp, tool, action, and context. The History section has its own hash in the header label record for integrity verification, but is NOT included in `hs` (static content hash). It IS included in `hb` (rolling file hash).
 //! ```
 //!
 //! ## Quick Start
@@ -171,23 +161,11 @@
 //! ```
 //! use vsf::{VsfType, VsfBuilder, Tensor, parse};
 //!
-//! // Encode a tensor
-//! let tensor = Tensor::new(vec![3, 4], vec![1u16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
-//! let encoded = VsfType::t_u4(tensor).flatten();
+//! // Encode a tensor let tensor = Tensor::new(vec![3, 4], vec![1u16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]); let encoded = VsfType::t_u4(tensor).flatten();
 //!
-//! // Decode it back
-//! let mut ptr = 0;
-//! let decoded = parse(&encoded, &mut ptr).unwrap();
+//! // Decode it back let mut ptr = 0; let decoded = parse(&encoded, &mut ptr).unwrap();
 //!
-//! // Build a complete VSF file with header
-//! let vsf_file = VsfBuilder::new()
-//!     .add_section("metadata", vec![
-//!         ("width".to_string(), VsfType::u(1920, false)),
-//!         ("height".to_string(), VsfType::u(1080, false)),
-//!     ])
-//!     .add_unboxed("pixels", vec![0xFF; 1024])
-//!     .build()
-//!     .unwrap();
+//! // Build a complete VSF file with header let vsf_file = VsfBuilder::new() .add_section("metadata", vec![ ("width".to_string(), VsfType::u(1920, false)), ("height".to_string(), VsfType::u(1080, false)), ]) .add_unboxed("pixels", vec![0xFF; 1024]) .build() .unwrap();
 //! ```
 //!
 //! ## Eagle Time Formats
@@ -205,17 +183,13 @@
 //!
 //! **Element-level parsing:**
 //! ```ignore
-//! use vsf::parse;
-//! let data = vec![b'u', b'3', 42];
-//! let mut ptr = 0;
+//! use vsf::parse; let data = vec![b'u', b'3', 42]; let mut ptr = 0;
 //! let value = parse(&data, &mut ptr)?;  // Parses one VsfType element
 //! ```
 //!
 //! **Header encoding (VsfHeader):**
 //! ```ignore
-//! use vsf::file_format::VsfHeader;
-//! let mut header = VsfHeader::new(version, backward_compat);
-//! header.add_field(field);
+//! use vsf::file_format::VsfHeader; let mut header = VsfHeader::new(version, backward_compat); header.add_field(field);
 //! let bytes = header.encode()?;  // Encodes header to bytes
 //! ```
 //!
@@ -234,10 +208,7 @@
 //! ```ignore
 //! use vsf::VsfSection;
 //!
-//! let mut ptr = 0;
-//! let section = VsfSection::parse(&bytes, &mut ptr)?;
-//! // Returns VsfSection with name and Vec<VsfField>
-//! // No schema required, no validation performed
+//! let mut ptr = 0; let section = VsfSection::parse(&bytes, &mut ptr)?; // Returns VsfSection with name and Vec<VsfField> // No schema required, no validation performed
 //! ```
 //!
 //! **Use when:**
@@ -253,14 +224,9 @@
 //! ```ignore
 //! use vsf::schema::{SectionSchema, SectionBuilder, TypeConstraint};
 //!
-//! let schema = SectionSchema::new("camera")
-//!     .field("iso", TypeConstraint::AnyUnsigned)
-//!     .field("shutter", TypeConstraint::AnyFloat);
+//! let schema = SectionSchema::new("camera") .field("iso", TypeConstraint::AnyUnsigned) .field("shutter", TypeConstraint::AnyFloat);
 //!
-//! let builder = SectionBuilder::parse(schema, &section_bytes)?;
-//! // Validates section name matches schema
-//! // Validates each field against type constraints
-//! // Returns SectionBuilder for modify → re-encode workflow
+//! let builder = SectionBuilder::parse(schema, &section_bytes)?; // Validates section name matches schema // Validates each field against type constraints // Returns SectionBuilder for modify → re-encode workflow
 //! ```
 //!
 //! **Use when:**
@@ -289,13 +255,25 @@
 //! - `inspect` - Inspection and formatting utilities (requires `inspect` feature)
 //!
 
+#[macro_use]
+extern crate alloc;
+
+/// no_std-friendly prelude: re-exports of the `alloc` types that std's prelude provides automatically.
+/// Individual files import via `use crate::prelude::*;` to stay compatible across `std` and `no_std + alloc` builds.
+pub mod prelude {
+    pub use alloc::borrow::ToOwned;
+    pub use alloc::boxed::Box;
+    pub use alloc::format;
+    pub use alloc::string::{String, ToString};
+    pub use alloc::vec;
+    pub use alloc::vec::Vec;
+}
+
 // VSF format version constants
-/// Current VSF format version
-/// v7: Added opcodes (op type), literal VSF format, proper bracket notation (⦉⦊ vs {})
+/// Current VSF format version v7: Added opcodes (op type), literal VSF format, proper bracket notation (⦉⦊ vs {})
 pub const VSF_VERSION: usize = 7;
 
-/// Backward compatibility version (oldest version this implementation can read)
-/// v7: Breaking changes to type system (opcodes, bracket notation)
+/// Backward compatibility version (oldest version this implementation can read) v7: Breaking changes to type system (opcodes, bracket notation)
 pub const VSF_BACKWARD_COMPAT: usize = 7;
 
 // Core type system
@@ -348,9 +326,11 @@ pub mod inspect;
 
 // Re-export main types
 pub use types::{
-    datetime_to_eagle_time, eagle_time_nanos, eagle_time_oscillations, EagleTime, EtType,
-    LayoutOrder, StridedTensor, Tensor, VsfType, WorldCoord, OSCILLATIONS_PER_SECOND,
+    datetime_to_eagle_time, EagleTime, EtType, LayoutOrder, NaScheme, StridedTensor, Tensor,
+    VsfType, WaAddress, WorldCoord, OSCILLATIONS_PER_SECOND,
 };
+#[cfg(feature = "std")]
+pub use types::{eagle_time_nanos, eagle_time_oscillations};
 
 // Re-export colour conversion types
 pub use colour::convert::{ColourFormat, RgbLinearF32, RgbaLinearF32};
@@ -592,15 +572,15 @@ mod tests {
 
     #[test]
     fn test_roundtrip_metadata() {
-        // Label
-        let val = VsfType::l("test_label".to_string());
+        // ASCII text
+        let val = VsfType::a("test_label".to_string());
         let flat = val.flatten();
         let mut ptr = 0;
         let parsed = parse(&flat, &mut ptr).unwrap();
-        if let VsfType::l(v) = parsed {
+        if let VsfType::a(v) = parsed {
             assert_eq!(v, "test_label");
         } else {
-            panic!("Expected l");
+            panic!("Expected a");
         }
 
         // Offset
@@ -628,26 +608,60 @@ mod tests {
 
     #[test]
     fn test_roundtrip_eagle_time() {
-        // Eagle time with i64
-        let val = VsfType::e(EtType::i(1000000));
+        // e6: canonical 64-bit oscillation count
+        let val = VsfType::e(EtType::e6(1000000));
         let flat = val.flatten();
+        assert_eq!(flat[0], b'e');
+        assert_eq!(flat[1], b'6');
+        assert_eq!(flat.len(), 10); // 2 tag + 8 bytes
         let mut ptr = 0;
         let parsed = parse(&flat, &mut ptr).unwrap();
-        if let VsfType::e(EtType::i(v)) = parsed {
+        if let VsfType::e(EtType::e6(v)) = parsed {
             assert_eq!(v, 1000000);
         } else {
-            panic!("Expected e(i)");
+            panic!("Expected e(e6)");
         }
 
-        // Eagle time with f64
-        let val = VsfType::e(EtType::f6(123456.789));
+        // e5: 32-bit oscillation count
+        let val = VsfType::e(EtType::e5(42000));
         let flat = val.flatten();
+        assert_eq!(flat[0], b'e');
+        assert_eq!(flat[1], b'5');
+        assert_eq!(flat.len(), 6); // 2 tag + 4 bytes
         let mut ptr = 0;
         let parsed = parse(&flat, &mut ptr).unwrap();
-        if let VsfType::e(EtType::f6(v)) = parsed {
-            assert!((v - 123456.789).abs() < 1e-10);
+        if let VsfType::e(EtType::e5(v)) = parsed {
+            assert_eq!(v, 42000);
         } else {
-            panic!("Expected e(f6)");
+            panic!("Expected e(e5)");
+        }
+
+        // e7: 128-bit oscillation count
+        let val = VsfType::e(EtType::e7(999_999_999_999_999_999_i128));
+        let flat = val.flatten();
+        assert_eq!(flat[0], b'e');
+        assert_eq!(flat[1], b'7');
+        assert_eq!(flat.len(), 18); // 2 tag + 16 bytes
+        let mut ptr = 0;
+        let parsed = parse(&flat, &mut ptr).unwrap();
+        if let VsfType::e(EtType::e7(v)) = parsed {
+            assert_eq!(v, 999_999_999_999_999_999_i128);
+        } else {
+            panic!("Expected e(e7)");
+        }
+
+        // deprecated ef6: still round-trips
+        #[allow(deprecated)]
+        {
+            let val = VsfType::e(EtType::f6(123456.789));
+            let flat = val.flatten();
+            let mut ptr = 0;
+            let parsed = parse(&flat, &mut ptr).unwrap();
+            if let VsfType::e(EtType::f6(v)) = parsed {
+                assert!((v - 123456.789).abs() < 1e-10);
+            } else {
+                panic!("Expected e(f6)");
+            }
         }
     }
 
@@ -694,8 +708,7 @@ mod tests {
 
     #[test]
     fn test_1d_vector_optimization_unsigned() {
-        // Test all unsigned types with 1D vector optimization
-        // 1D tensors encode with 'tn' format and decode as vectors
+        // Test all unsigned types with 1D vector optimization 1D tensors encode with 'tn' format and decode as vectors
         // Exception: u8 stays as tensor (since Vec<u8> == raw bytes)
 
         // u8 vector - special case: stays as tensor
@@ -773,8 +786,7 @@ mod tests {
 
     #[test]
     fn test_1d_vector_optimization_signed() {
-        // Test all signed types with 1D vector optimization
-        // 1D tensors encode with 'tn' format and decode as vectors
+        // Test all signed types with 1D vector optimization 1D tensors encode with 'tn' format and decode as vectors
 
         // i8 vector
         let data_i8 = vec![-10i8, -5, 0, 5, 10, 20, -20, 30];
@@ -853,9 +865,7 @@ mod tests {
         assert_ne!(flat_2d[1], b'n'); // Should NOT be 'n'
 
         // 1D should be more compact
-        // Format comparison:
-        // 1D: t n <count> u 4 <data>
-        // 2D: t <ndim> u 4 <shape[0]> <shape[1]> <data>
+        // Format comparison: 1D: t n <count> u 4 <data> 2D: t <ndim> u 4 <shape[0]> <shape[1]> <data>
         // For small shapes, 1D should save bytes
         assert!(flat_1d.len() <= flat_2d.len());
     }
@@ -1084,7 +1094,8 @@ mod tests {
         let flat = val.flatten();
 
         assert_eq!(flat[0], b'w');
-        assert_eq!(flat.len(), 9); // 1 marker + 8 bytes for u64
+        assert_eq!(flat[1], b'6'); // w6 = WorldCoord 64-bit standard precision
+        assert_eq!(flat.len(), 10); // "w6" + 8 bytes for u64
 
         let mut ptr = 0;
         let parsed = parse(&flat, &mut ptr).unwrap();

@@ -1,7 +1,8 @@
 //! VSF Inspector Themes
 //!
-//! Centralized colour scheme definitions for VSF inspection output.
-//! Supports terminal (ANSI), HTML, and plain text output formats.
+//! Centralized colour scheme definitions for VSF inspection output. Supports terminal (ANSI), HTML, and plain text output formats.
+
+use crate::prelude::*;
 
 /// RGB colour triplet
 pub type Colour = (u8, u8, u8);

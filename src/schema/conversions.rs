@@ -1,7 +1,6 @@
 //! Type conversions between Rust primitives and VsfType
 //!
-//! Provides ergonomic trait-based conversions for working with VsfType values
-//! without needing intermediate wrapper types.
+//! Provides ergonomic trait-based conversions for working with VsfType values without needing intermediate wrapper types.
 //!
 //! # Example: IntoVsfType (Rust → VsfType)
 //!
@@ -62,22 +61,21 @@
 //! assert!(result.is_err());  // 1000 doesn't fit in u8
 //! ```
 
+use crate::prelude::*;
 use super::constraint::vsf_type_name;
 use super::validate::{ValidationError, ValidationResult};
 use crate::types::VsfType;
 
 /// Convert Rust types to VsfType
 ///
-/// This trait provides automatic conversion from Rust primitives to the
-/// appropriate VsfType variant, making schema APIs ergonomic.
+/// This trait provides automatic conversion from Rust primitives to the appropriate VsfType variant, making schema APIs ergonomic.
 pub trait IntoVsfType {
     fn into_vsf_type(self) -> VsfType;
 }
 
 /// Extract Rust types from VsfType
 ///
-/// This trait provides type-safe extraction of Rust primitives from VsfType
-/// values, with appropriate error handling for type mismatches.
+/// This trait provides type-safe extraction of Rust primitives from VsfType values, with appropriate error handling for type mismatches.
 pub trait FromVsfType: Sized {
     fn from_vsf_type(vsf: &VsfType) -> ValidationResult<Self>;
 }
@@ -372,7 +370,7 @@ impl FromVsfType for String {
         match vsf {
             VsfType::x(s) => Ok(s.clone()),
             VsfType::d(s) => Ok(s.clone()),
-            VsfType::l(s) => Ok(s.clone()),
+            VsfType::a(s) => Ok(s.clone()),
             _ => Err(ValidationError::Custom(format!(
                 "Cannot convert {} to String",
                 vsf_type_name(vsf)
@@ -387,12 +385,9 @@ impl IntoVsfType for &str {
     }
 }
 
-/// Wrapper type for ASCII text (VsfType::l)
+/// Wrapper type for ASCII text (VsfType::a)
 ///
-/// Use this type when you want to explicitly create ASCII-only text
-/// instead of UTF-8 Unicode text. This is useful for applications
-/// that need ASCII-only mode or when interoperating with systems
-/// that only support ASCII.
+/// Use this type when you want to explicitly create ASCII-only text instead of UTF-8 Unicode text. This is useful for applications that need ASCII-only mode or when interoperating with systems that only support ASCII.
 ///
 /// # Example
 /// ```
@@ -401,7 +396,7 @@ impl IntoVsfType for &str {
 ///
 /// // Create ASCII text explicitly
 /// let ascii = AsciiText::new("hello");
-/// let vsf_value = ascii.into_vsf_type();  // VsfType::l("hello")
+/// let vsf_value = ascii.into_vsf_type();  // VsfType::a("hello")
 ///
 /// // Use in schema builder
 /// # use vsf::schema::{SectionSchema, FieldSchema, TypeConstraint};
@@ -419,7 +414,7 @@ impl IntoVsfType for &str {
 /// use vsf::VsfType;
 ///
 /// let utf8 = "hello".into_vsf_type();     // VsfType::x("hello")
-/// let ascii = vsf::schema::AsciiText::new("hello").into_vsf_type();  // VsfType::l("hello")
+/// let ascii = vsf::schema::AsciiText::new("hello").into_vsf_type();  // VsfType::a("hello")
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AsciiText(pub String);
@@ -443,16 +438,16 @@ impl AsciiText {
 
 impl IntoVsfType for AsciiText {
     fn into_vsf_type(self) -> VsfType {
-        VsfType::l(self.0)
+        VsfType::a(self.0)
     }
 }
 
 impl FromVsfType for AsciiText {
     fn from_vsf_type(vsf: &VsfType) -> ValidationResult<Self> {
         match vsf {
-            VsfType::l(s) => Ok(AsciiText(s.clone())),
+            VsfType::a(s) => Ok(AsciiText(s.clone())),
             _ => Err(ValidationError::Custom(format!(
-                "Cannot convert {} to AsciiText (expected l type)",
+                "Cannot convert {} to AsciiText (expected a type)",
                 vsf_type_name(vsf)
             ))),
         }

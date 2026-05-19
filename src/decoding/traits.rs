@@ -1,3 +1,5 @@
+use crate::prelude::*;
+
 /// Trait for decoding numbers from VSF variable-length format
 ///
 /// VSF uses a compact encoding where the size marker indicates the byte count:
@@ -23,8 +25,7 @@ pub trait DecodeNumber: Sized {
 
 /// Trait for decoding numbers in "inclusive" mode
 ///
-/// Inclusive mode is used for self-referential sizes (e.g., header length that includes itself).
-/// It subtracts the encoding overhead from the decoded value to get the original.
+/// Inclusive mode is used for self-referential sizes (e.g., header length that includes itself). It subtracts the encoding overhead from the decoded value to get the original.
 ///
 /// # How it works
 ///
@@ -72,10 +73,22 @@ pub enum DecodeError {
 
     /// Generic error with message
     Other(String),
+
+    /// Truncated input where more bytes were expected; carries a contextual message.
+    /// Absorbs former `std::io::Error::new(ErrorKind::UnexpectedEof, …)` sites.
+    UnexpectedEofMsg(String),
+
+    /// Malformed/corrupt input that does not match the expected structure; carries a contextual message.
+    /// Absorbs former `std::io::Error::new(ErrorKind::InvalidData, …)` sites.
+    InvalidDataMsg(String),
+
+    /// Operation not supported by the current build/configuration; carries a contextual message.
+    /// Absorbs former `std::io::Error::new(ErrorKind::Unsupported, …)` sites.
+    Unsupported(String),
 }
 
-impl std::fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             DecodeError::UnexpectedEof { expected, got } => {
                 write!(f, "Unexpected end of file: expected {} bytes, got {}", expected, got)
@@ -101,8 +114,11 @@ impl std::fmt::Display for DecodeError {
             DecodeError::Other(msg) => {
                 write!(f, "{}", msg)
             }
+            DecodeError::UnexpectedEofMsg(msg) => write!(f, "{}", msg),
+            DecodeError::InvalidDataMsg(msg) => write!(f, "{}", msg),
+            DecodeError::Unsupported(msg) => write!(f, "{}", msg),
         }
     }
 }
 
-impl std::error::Error for DecodeError {}
+impl core::error::Error for DecodeError {}

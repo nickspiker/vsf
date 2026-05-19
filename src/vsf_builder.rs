@@ -1,12 +1,10 @@
 //! High-level builder for VSF files
 //!
-//! Uses the Vec<Vec<u8>> pattern with stabilization loop
-//! to handle the chicken-and-egg problem of header size calculation.
+//! Uses the Vec<Vec<u8>> pattern with stabilization loop to handle the chicken-and-egg problem of header size calculation.
 //!
-//! **Note:** Every VSF file requires and automatically includes a BLAKE3 hash in the header
-//! for integrity verification. This is computed transparently during `build()`.
-//! No manual hashing required - just call `builder.build()` and you're done!
+//! **Note:** Every VSF file requires and automatically includes a BLAKE3 hash in the header for integrity verification. This is computed transparently during `build()`. No manual hashing required - just call `builder.build()` and you're done!
 
+use crate::prelude::*;
 use crate::encoding::hash_placeholder;
 use crate::file_format::VsfSection;
 use crate::types::VsfType;
@@ -14,8 +12,7 @@ use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
 
 /// Per-section cryptographic metadata for header fields
 ///
-/// This allows setting a key (k) field on individual sections.
-/// Used for sections where the header needs to indicate the cryptographic key.
+/// This allows setting a key (k) field on individual sections. Used for sections where the header needs to indicate the cryptographic key.
 #[derive(Clone, Default)]
 pub struct SectionMeta {
     /// Cryptographic key associated with this section (ke for Ed25519, kx for X25519)
@@ -53,13 +50,21 @@ impl VsfBuilder {
     /// - Creation timestamp (current time as eu6, 704ps precision)
     /// - BLAKE3 hash for integrity verification (computed during `build()`)
     pub fn new() -> Self {
-        // Get current time as Eagle Time (oscillations)
-        let et = crate::types::eagle_time::eagle_time_now();
+        // Get current time as Eagle Time (oscillations).
+        // Under `no_std`, current time is unavailable, so we default to oscillation count 0.
+        // Callers should overwrite via `creation_time_nanos()` (std) or `creation_time(VsfType::e(…))` (no_std).
+        #[cfg(feature = "std")]
+        let creation_time = {
+            let et = crate::types::eagle_time::eagle_time_now();
+            VsfType::e(et.et_type().clone())
+        };
+        #[cfg(not(feature = "std"))]
+        let creation_time = VsfType::e(crate::types::EtType::e6(0));
 
         Self {
             version: VSF_VERSION,
             backward_compat: VSF_BACKWARD_COMPAT,
-            creation_time: VsfType::e(et.et_type().clone()),
+            creation_time,
             sections: Vec::new(),
             unboxed: Vec::new(),
             inline_fields: Vec::new(),
@@ -71,29 +76,25 @@ impl VsfBuilder {
         }
     }
 
-    /// Set creation time with integer oscillations (eu)
-    /// Use this for protocols that need unique timestamps with integer precision.
-    /// 1,420,407,826 oscillations per second (21cm hydrogen line) = 704ps precision
+    /// Set creation time with integer oscillations (e6 wire format). 1,420,407,826 oscillations per second (21cm hydrogen line) = 704ps precision
     pub fn creation_time_oscillations(mut self, oscillations: i64) -> Self {
         use crate::types::EtType;
-        self.creation_time = VsfType::e(EtType::i(oscillations));
+        self.creation_time = VsfType::e(EtType::e6(oscillations));
         self
     }
 
-    /// Set creation time with nanosecond precision (ef6) - DEPRECATED
-    /// Use creation_time_oscillations() for integer timestamps instead
+    /// Set creation time with nanosecond precision (ef6) — DEPRECATED. Use creation_time_oscillations() for integer timestamps instead.
     #[deprecated(note = "Use creation_time_oscillations() for integer timestamps")]
     pub fn creation_time_nanos(mut self, eagle_time: f64) -> Self {
         use crate::types::EtType;
-        self.creation_time = VsfType::e(EtType::f6(eagle_time));
+        #[allow(deprecated)]
+        { self.creation_time = VsfType::e(EtType::f6(eagle_time)); }
         self
     }
 
     /// Set a custom provenance hash (immutable content identity)
     ///
-    /// Use this when the provenance hash has specific meaning in your protocol,
-    /// such as linking a response to a challenge. The provenance hash will NOT
-    /// be recomputed during build() - it stays exactly as you set it.
+    /// Use this when the provenance hash has specific meaning in your protocol, such as linking a response to a challenge. The provenance hash will NOT be recomputed during build() - it stays exactly as you set it.
     pub fn provenance_hash(mut self, hash: [u8; 32]) -> Self {
         self.custom_provenance = Some(hash);
         self
@@ -101,8 +102,7 @@ impl VsfBuilder {
 
     /// Add an Ed25519 signature to the header (replaces rolling hash)
     ///
-    /// The signature should sign the provenance hash. When a signature is present,
-    /// no rolling hash (hb) is included - the signature provides integrity verification.
+    /// The signature should sign the provenance hash. When a signature is present, no rolling hash (hb) is included - the signature provides integrity verification.
     ///
     /// Both pubkey (ke) and signature (ge) are included in the header for verification.
     pub fn signature_ed25519(mut self, pubkey: [u8; 32], signature: [u8; 64]) -> Self {
@@ -114,9 +114,7 @@ impl VsfBuilder {
 
     /// Add an avatar provenance hash as a header field (davatar_id:hp[hash])
     ///
-    /// This is the BLAKE3 provenance hash of the sender's avatar VSF file.
-    /// Used in ping/pong messages to sync avatar state between peers.
-    /// Stored as a metadata-only header field with name "avatar_id".
+    /// This is the BLAKE3 provenance hash of the sender's avatar VSF file. Used in ping/pong messages to sync avatar state between peers. Stored as a metadata-only header field with name "avatar_id".
     pub fn avatar_hash(mut self, hash: [u8; 32]) -> Self {
         self.avatar_hash = Some(hash);
         self
@@ -124,8 +122,7 @@ impl VsfBuilder {
 
     /// Disable rolling hash - use provenance hash only
     ///
-    /// Use this for files that don't need mutable state tracking or signatures.
-    /// The provenance hash (hp) will still be computed for content identity.
+    /// Use this for files that don't need mutable state tracking or signatures. The provenance hash (hp) will still be computed for content identity.
     pub fn provenance_only(mut self) -> Self {
         self.include_file_hash = false;
         self
@@ -133,9 +130,7 @@ impl VsfBuilder {
 
     /// Set signer pubkey and include signature placeholder
     ///
-    /// Creates a header with ke (signer pubkey) and ge (signature placeholder).
-    /// The signature must be filled in externally after computing provenance hash.
-    /// This mode is for protocols that need async signing (e.g., WebCrypto in Workers).
+    /// Creates a header with ke (signer pubkey) and ge (signature placeholder). The signature must be filled in externally after computing provenance hash. This mode is for protocols that need async signing (e.g., WebCrypto in Workers).
     ///
     /// # Arguments
     /// * `pubkey` - VsfType::ke with the Ed25519 public key bytes
@@ -160,11 +155,9 @@ impl VsfBuilder {
 
     /// Add an inline metadata field (header-only, no section body)
     ///
-    /// Creates a field like `(d#{name}:value1,value2,...)` in the header.
-    /// Unlike sections, inline fields have no offset/size/count - just name + values.
+    /// Creates a field like `(d#{name}:value1,value2,...)` in the header. Unlike sections, inline fields have no offset/size/count - just name + values.
     ///
-    /// Use for lightweight control packets (e.g., PT acks) where provenance hash
-    /// provides integrity and inline values carry the metadata.
+    /// Use for lightweight control packets (e.g., PT acks) where provenance hash provides integrity and inline values carry the metadata.
     ///
     /// # Example
     /// ```ignore
@@ -246,8 +239,7 @@ impl VsfBuilder {
 
     /// Add an unboxed data blob with cryptographic metadata
     ///
-    /// Use this for encrypted sections where the header field needs to indicate
-    /// the encryption key and wrapper type, but the section body is raw bytes.
+    /// Use this for encrypted sections where the header field needs to indicate the encryption key and wrapper type, but the section body is raw bytes.
     pub fn add_unboxed_with_meta(
         mut self,
         name: impl Into<String>,
@@ -289,7 +281,7 @@ impl VsfBuilder {
 
         // Placeholder for file length (for TCP streaming)
         let file_length_index = vsf.len();
-        vsf.push(VsfType::L(0, true).flatten()); // Will be updated in loop
+        vsf.push(VsfType::l(0, true).flatten()); // Will be updated in loop
 
         // Creation time
         header_index = vsf.len();
@@ -438,7 +430,7 @@ impl VsfBuilder {
             let file_length: usize = vsf.iter().map(|chunk| chunk.len()).sum();
 
             if file_length != prev_file_length {
-                vsf[file_length_index] = VsfType::L(file_length, true).flatten();
+                vsf[file_length_index] = VsfType::l(file_length, true).flatten();
                 prev_file_length = file_length;
                 changed = true;
             }

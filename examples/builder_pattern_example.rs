@@ -1,7 +1,6 @@
 //! Example demonstrating the builder pattern API for creating VSF files
 //!
-//! This shows the ergonomic dot notation for incrementally setting fields,
-//! which is especially useful when fields are conditional or optional.
+//! This shows the ergonomic dot notation for incrementally setting fields, which is especially useful when fields are conditional or optional.
 
 use vsf::builders::RawImageBuilder;
 use vsf::types::BitPackedTensor;

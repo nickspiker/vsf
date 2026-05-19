@@ -1,7 +1,6 @@
 //! Character frequency analyzer for Huffman encoding
 //!
-//! Usage:
-//!   cargo run -- input.txt output.bin
+//! Usage: cargo run -- input.txt output.bin
 //!
 //! Or use stdin:
 //!   cat corpus/*.txt | cargo run -- - output.bin

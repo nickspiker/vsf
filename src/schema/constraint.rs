@@ -1,19 +1,16 @@
 //! Type constraints for VSF schema validation
 //!
-//! TypeConstraint provides a flexible way to validate VsfType values without
-//! duplicating the VsfType enum. Instead of parallel type systems, we use
-//! pattern-based constraints that can match categories, specific types, or
-//! apply custom validation logic.
+//! TypeConstraint provides a flexible way to validate VsfType values without duplicating the VsfType enum. Instead of parallel type systems, we use pattern-based constraints that can match categories, specific types, or apply custom validation logic.
 
+use crate::prelude::*;
 use super::validate::{ValidationError, ValidationResult};
 use crate::types::{EtType, VsfType};
-use std::fmt;
-use std::sync::Arc;
+use alloc::sync::Arc;
+use core::fmt;
 
 /// Type constraint for VSF schema fields
 ///
-/// Constraints validate VsfType values using pattern matching rather than
-/// creating a parallel type system. This ensures complete coverage of all
+/// Constraints validate VsfType values using pattern matching rather than creating a parallel type system. This ensures complete coverage of all
 /// VsfType variants including future additions.
 #[derive(Clone)]
 pub enum TypeConstraint {
@@ -180,8 +177,11 @@ impl TypeConstraint {
 
             TypeConstraint::EagleTime(inner) => {
                 if let VsfType::e(et) = value {
+                    #[allow(deprecated)]
                     match et {
-                        EtType::i(_) => inner.matches(&VsfType::i6(0)),
+                        EtType::e5(_) => inner.matches(&VsfType::i5(0)),
+                        EtType::e6(_) => inner.matches(&VsfType::i6(0)),
+                        EtType::e7(_) => inner.matches(&VsfType::i6(0)),
                         EtType::f5(_) => inner.matches(&VsfType::f5(0.0)),
                         EtType::f6(_) => inner.matches(&VsfType::f6(0.0)),
                     }
@@ -191,12 +191,12 @@ impl TypeConstraint {
             }
 
             TypeConstraint::AnyString => {
-                matches!(value, VsfType::x(_) | VsfType::d(_) | VsfType::l(_))
+                matches!(value, VsfType::x(_) | VsfType::d(_) | VsfType::a(_))
             }
 
             TypeConstraint::Utf8Text => matches!(value, VsfType::x(_)),
             TypeConstraint::DictKey => matches!(value, VsfType::d(_)),
-            TypeConstraint::AsciiText => matches!(value, VsfType::l(_)),
+            TypeConstraint::AsciiText => matches!(value, VsfType::a(_)),
 
             TypeConstraint::AnyHash => {
                 matches!(
@@ -450,20 +450,26 @@ mod tests {
     #[test]
     fn test_eagle_time_matches() {
         let constraint = TypeConstraint::AnyEagleTime;
-        assert!(constraint.matches(&VsfType::e(EtType::f6(123.456))));
-        assert!(constraint.matches(&VsfType::e(EtType::f5(123.456))));
-        assert!(constraint.matches(&VsfType::e(EtType::i(123456))));
-        assert!(constraint.matches(&VsfType::e(EtType::i(123456))));
+        assert!(constraint.matches(&VsfType::e(EtType::e6(123456))));
+        assert!(constraint.matches(&VsfType::e(EtType::e5(123))));
+        assert!(constraint.matches(&VsfType::e(EtType::e7(123456789))));
+        #[allow(deprecated)]
+        {
+            assert!(constraint.matches(&VsfType::e(EtType::f6(123.456))));
+            assert!(constraint.matches(&VsfType::e(EtType::f5(123.456))));
+        }
         assert!(!constraint.matches(&VsfType::f6(123.456)));
     }
 
     #[test]
     fn test_eagle_time_with_float_backing() {
         let constraint = TypeConstraint::EagleTime(Box::new(TypeConstraint::AnyFloat));
-        assert!(constraint.matches(&VsfType::e(EtType::f6(123.456))));
-        assert!(constraint.matches(&VsfType::e(EtType::f5(123.456))));
-        assert!(!constraint.matches(&VsfType::e(EtType::i(123456))));
-        assert!(!constraint.matches(&VsfType::e(EtType::i(123456))));
+        #[allow(deprecated)]
+        {
+            assert!(constraint.matches(&VsfType::e(EtType::f6(123.456))));
+            assert!(constraint.matches(&VsfType::e(EtType::f5(123.456))));
+            assert!(!constraint.matches(&VsfType::e(EtType::e6(123456))));
+        }
     }
 
     #[test]

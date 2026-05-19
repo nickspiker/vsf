@@ -1,15 +1,16 @@
 //! Main VSF parse dispatcher
 
-use crate::types::VsfType;
-use std::io::{Error, ErrorKind};
+use crate::decoding::traits::DecodeError;
+use crate::prelude::*;
+use crate::types::{VsfType, WaAddress};
 
 // Import sub-parsers from sibling modules
 use super::metadata::{
-    parse_backward_version, parse_colour_array, parse_colour_constant, parse_count, parse_dtype,
-    parse_eagle_time, parse_file_length, parse_hash, parse_key, parse_label, parse_length,
-    parse_mac, parse_marker_def, parse_marker_ref, parse_offset, parse_signature, parse_string,
-    parse_version, parse_world_coord, parse_wrapped,
+    parse_ascii, parse_backward_version, parse_colour_array, parse_colour_constant, parse_count,
+    parse_dtype, parse_eagle_time, parse_hash, parse_key, parse_l_length, parse_length, parse_mac,
+    parse_offset, parse_signature, parse_string, parse_version, parse_world_coord, parse_wrapped,
 };
+#[cfg(feature = "spirix")]
 use super::helpers::decode_usize;
 use super::primitives::{parse_complex, parse_float, parse_signed, parse_unsigned};
 #[cfg(feature = "spirix")]
@@ -36,12 +37,9 @@ use crate::types::{Fill, GradientStop, GradientVariant, Stroke, StrokeCap, Strok
 /// let value = parse(&data, &mut pointer)?;
 /// // pointer is now 3, value is VsfType::u3(42)
 /// ```
-pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Pointer out of bounds",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Pointer out of bounds".into()));
     }
 
     let type_byte = data[*pointer];
@@ -50,43 +48,57 @@ pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
     match type_byte {
         b'u' => parse_unsigned(data, pointer),
         b'i' => parse_signed(data, pointer),
-        b'f' => parse_float(data, pointer),
         b'j' => parse_complex(data, pointer),
         #[cfg(feature = "spirix")]
         b's' => parse_spirix_scalar(data, pointer),
         #[cfg(not(feature = "spirix"))]
-        b's' => Err(Error::new(
-            ErrorKind::Unsupported,
-            "Spirix scalar types require 'spirix' feature",
-        )),
+        b's' => Err(DecodeError::Unsupported("Spirix scalar types require 'spirix' feature".into())),
         #[cfg(feature = "spirix")]
         b'c' => parse_spirix_circle(data, pointer),
         #[cfg(not(feature = "spirix"))]
-        b'c' => Err(Error::new(
-            ErrorKind::Unsupported,
-            "Spirix circle types require 'spirix' feature",
-        )),
+        b'c' => Err(DecodeError::Unsupported("Spirix circle types require 'spirix' feature".into())),
         b'p' => parse_bitpacked_tensor(data, pointer),
         b't' => parse_tensor(data, pointer),
         b'q' => parse_strided_tensor(data, pointer),
         b'x' => parse_string(data, pointer),
         b'e' => parse_eagle_time(data, pointer),
-        b'w' => parse_world_coord(data, pointer),
+        b'w' => {
+            // w3..w7 + bytes = WorldCoord (sized: 2^N bits, 1/2/4/8/16 bytes) w + lowercase = world address family (wa, wb, ...)
+            if *pointer >= data.len() {
+                return Err(DecodeError::UnexpectedEofMsg("Expected w subtype".into()));
+            }
+            let next = data[*pointer];
+            *pointer += 1;
+            match next {
+                b'3' | b'4' | b'5' | b'6' | b'7' => parse_world_coord(next, data, pointer),
+                b if b.is_ascii_lowercase() => parse_world_address(data, pointer),
+                _ => Err(DecodeError::InvalidDataMsg(
+                    format!("Unknown world subtype: w{}", next as char))),
+            }
+        }
         b'd' => parse_dtype(data, pointer),
-        b'l' => parse_label(data, pointer),
+        b'a' => parse_ascii(data, pointer),
         b'o' => parse_offset(data, pointer),
         b'b' => parse_length(data, pointer),
-        b'L' => parse_file_length(data, pointer),
-        b'n' => parse_count(data, pointer),
+        b'l' => parse_l_length(data, pointer), // length in bytes (wire or file)
+        b'h' => parse_hash(data, pointer),
+        b'f' => parse_float(data, pointer),
+        b'n' => {
+            // n + digit = count primitive n + lowercase letter = network family (na, nh, ni, ...)
+            if *pointer < data.len() && data[*pointer].is_ascii_lowercase() {
+                parse_network_address(data, pointer)
+            } else {
+                parse_count(data, pointer)
+            }
+        }
         b'z' => parse_version(data, pointer),
         b'y' => parse_backward_version(data, pointer),
-        b'm' => parse_marker_def(data, pointer),
+        b'm' => parse_mac(data, pointer),
         b'r' => {
             // Look ahead to distinguish:
             // - rc[a-z]: colour constants
             // - ra/rt/rp: colour arrays
             // - ro[a-z]: renderable objects
-            // - r + usize: marker refs
             if *pointer < data.len() {
                 match data[*pointer] {
                     b'c' => parse_colour_constant(data, pointer),
@@ -97,35 +109,27 @@ pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
                     }
                     #[cfg(feature = "spirix")]
                     b'o' => parse_renderable_object(data, pointer),
-                    _ => parse_marker_ref(data, pointer),
+                    _ => Err(DecodeError::InvalidDataMsg(format!("Unknown r-prefixed type: r{}", data[*pointer] as char))),
                 }
             } else {
-                parse_marker_ref(data, pointer)
+                Err(DecodeError::UnexpectedEofMsg("Expected r subtype".into()))
             }
         }
-        b'a' => parse_mac(data, pointer),
-        b'h' => parse_hash(data, pointer),
         b'g' => parse_signature(data, pointer),
         b'k' => parse_key(data, pointer),
         b'v' => parse_wrapped(data, pointer),
         b'{' => parse_opcode(data, pointer),
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid type marker: {}", type_byte as char),
-        )),
+        _ => Err(DecodeError::InvalidDataMsg(format!("Invalid type marker: {}", type_byte as char))),
     }
 }
 
 /// Parse a Toka opcode: `{` a b `}`
 ///
 /// Format: 4 bytes total - opening brace, two lowercase letters, closing brace
-fn parse_opcode(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+fn parse_opcode(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // Need 3 more bytes: a, b, }
     if *pointer + 3 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Incomplete opcode (need 3 more bytes after '{')",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Incomplete opcode (need 3 more bytes after '{'.into())".into()));
     }
 
     let a = data[*pointer];
@@ -135,25 +139,18 @@ fn parse_opcode(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
 
     // Validate closing brace
     if close != b'}' {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            format!(
+        return Err(DecodeError::InvalidDataMsg(format!(
                 "Invalid opcode: expected '}}' at position {}, got '{}'",
                 *pointer - 1,
-                close as char
-            ),
-        ));
+                close as char)));
     }
 
     // Validate opcode letters (must be lowercase a-z)
     if !a.is_ascii_lowercase() || !b.is_ascii_lowercase() {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            format!(
+        return Err(DecodeError::InvalidDataMsg(format!(
                 "Invalid opcode letters: '{}{}' (must be lowercase a-z)",
                 a as char, b as char
-            ),
-        ));
+            )));
     }
 
     Ok(VsfType::op(a, b))
@@ -163,13 +160,10 @@ fn parse_opcode(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
 ///
 /// Format: 3+ bytes - 'r', 'o', type letter, then type-specific data
 #[cfg(feature = "spirix")]
-fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // Already consumed 'r', now expect 'o' and type letter
     if *pointer + 2 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Incomplete renderable object (need 2 more bytes after 'r')",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Incomplete renderable object (need 2 more bytes after 'r'.into())".into()));
     }
 
     let second = data[*pointer];
@@ -178,13 +172,9 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
 
     // Validate 'o' marker
     if second != b'o' {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            format!(
+        return Err(DecodeError::InvalidDataMsg(format!(
                 "Invalid renderable object: expected 'o', got '{}'",
-                second as char
-            ),
-        ));
+                second as char)));
     }
 
     // Parse based on type letter
@@ -273,9 +263,7 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
             let text = Box::new(parse(data, pointer)?); // Can be l or x type
             let size = parse_s44(data, pointer)?;
             let colour = Box::new(parse(data, pointer)?);
-            // Parse TextStyle: tagged fields terminated by 0x00.
-            // Tags: b'l'=left, b'r'=right (no value), b'f'+32=font hash,
-            //       b'e'/b'k'/b'w'/b'i'/b'x' + s44 (4 bytes each).
+            // Parse TextStyle: tagged fields terminated by 0x00. Tags: b'l'=left, b'r'=right (no value), b'f'+32=font hash, b'e'/b'k'/b'w'/b'i'/b'x' + s44 (4 bytes each).
             let style = parse_text_style(data, pointer)?;
             Ok(VsfType::rot(pos, text, size, colour, style))
         }
@@ -285,12 +273,9 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
             let size = parse_c44(data, pointer)?;
             let label_vsf = parse(data, pointer)?;
             let label = match label_vsf {
-                VsfType::x(s) | VsfType::l(s) => s,
+                VsfType::x(s) | VsfType::a(s) => s,
                 _ => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        "Expected string for label",
-                    ))
+                    return Err(DecodeError::InvalidDataMsg("Expected string for label".into()))
                 }
             };
             let variant = parse_button_variant(data, pointer)?;
@@ -303,12 +288,9 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
             let size = parse_c44(data, pointer)?;
             let placeholder_vsf = parse(data, pointer)?;
             let placeholder = match placeholder_vsf {
-                VsfType::x(s) | VsfType::l(s) => s,
+                VsfType::x(s) | VsfType::a(s) => s,
                 _ => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        "Expected string for placeholder",
-                    ))
+                    return Err(DecodeError::InvalidDataMsg("Expected string for placeholder".into()))
                 }
             };
             let colour = Box::new(parse(data, pointer)?);
@@ -332,7 +314,7 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
             let handle_vsf = parse(data, pointer)?;
             let handle = match handle_vsf {
                 VsfType::u6(h) => h,
-                _ => return Err(Error::new(ErrorKind::InvalidData, "Expected u6 for handle")),
+                _ => return Err(DecodeError::InvalidDataMsg("Expected u6 for handle".into())),
             };
             let tint = Box::new(parse(data, pointer)?);
             Ok(VsfType::roi(pos, size, handle, tint))
@@ -344,7 +326,7 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
             let handle_vsf = parse(data, pointer)?;
             let handle = match handle_vsf {
                 VsfType::u6(h) => h,
-                _ => return Err(Error::new(ErrorKind::InvalidData, "Expected u6 for handle")),
+                _ => return Err(DecodeError::InvalidDataMsg("Expected u6 for handle".into())),
             };
             Ok(VsfType::rof(pos, size, handle))
         }
@@ -368,22 +350,16 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
             let cap = parse_stroke_cap(data, pointer)?;
             Ok(VsfType::rok(width, colour, join, cap))
         }
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Unknown renderable object type: ro{}", third as char),
-        )),
+        _ => Err(DecodeError::InvalidDataMsg(format!("Unknown renderable object type: ro{}", third as char))),
     }
 }
 
 // Helper functions for parsing renderable object components
 
 #[cfg(feature = "spirix")]
-fn parse_c44(data: &[u8], pointer: &mut usize) -> Result<spirix::CircleF4E4, Error> {
+fn parse_c44(data: &[u8], pointer: &mut usize) -> Result<spirix::CircleF4E4, DecodeError> {
     if *pointer + 6 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for c44",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for c44".into()));
     }
     let real = i16::from_be_bytes([data[*pointer], data[*pointer + 1]]);
     let imaginary = i16::from_be_bytes([data[*pointer + 2], data[*pointer + 3]]);
@@ -397,12 +373,9 @@ fn parse_c44(data: &[u8], pointer: &mut usize) -> Result<spirix::CircleF4E4, Err
 }
 
 #[cfg(feature = "spirix")]
-fn parse_s44(data: &[u8], pointer: &mut usize) -> Result<spirix::ScalarF4E4, Error> {
+fn parse_s44(data: &[u8], pointer: &mut usize) -> Result<spirix::ScalarF4E4, DecodeError> {
     if *pointer + 4 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for s44",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for s44".into()));
     }
     let fraction = i16::from_be_bytes([data[*pointer], data[*pointer + 1]]);
     let exponent = i16::from_be_bytes([data[*pointer + 2], data[*pointer + 3]]);
@@ -429,7 +402,7 @@ fn parse_text_style(
 
     loop {
         if *pointer >= data.len() {
-            return Err(Error::new(ErrorKind::UnexpectedEof, "Unexpected end in TextStyle"));
+            return Err(DecodeError::UnexpectedEofMsg("Unexpected end in TextStyle".into()));
         }
         let tag = data[*pointer];
         *pointer += 1;
@@ -441,7 +414,7 @@ fn parse_text_style(
             b'f' => {
                 // font hash: 32 bytes
                 if *pointer + 32 > data.len() {
-                    return Err(Error::new(ErrorKind::UnexpectedEof, "TextStyle: truncated font hash"));
+                    return Err(DecodeError::UnexpectedEofMsg("TextStyle: truncated font hash".into()));
                 }
                 let mut hash = [0u8; 32];
                 hash.copy_from_slice(&data[*pointer..*pointer + 32]);
@@ -454,10 +427,7 @@ fn parse_text_style(
             b'i' => { style.tilt    = Some(parse_s44(data, pointer)?); }
             b'x' => { style.wrap    = Some(parse_s44(data, pointer)?); }
             other => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("TextStyle: unknown tag {other:#04x}"),
-                ));
+                return Err(DecodeError::InvalidDataMsg(format!("TextStyle: unknown tag {other:#04x}")));
             }
         }
     }
@@ -466,12 +436,9 @@ fn parse_text_style(
 }
 
 #[cfg(feature = "spirix")]
-fn parse_fill(data: &[u8], pointer: &mut usize) -> Result<Fill, Error> {
+fn parse_fill(data: &[u8], pointer: &mut usize) -> Result<Fill, DecodeError> {
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for fill type",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for fill type".into()));
     }
     let fill_type = data[*pointer];
     *pointer += 1;
@@ -487,20 +454,14 @@ fn parse_fill(data: &[u8], pointer: &mut usize) -> Result<Fill, Error> {
             let gradient = parse(data, pointer)?;
             Ok(Fill::Gradient(Box::new(gradient)))
         }
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid fill type: {}", fill_type),
-        )),
+        _ => Err(DecodeError::InvalidDataMsg(format!("Invalid fill type: {}", fill_type))),
     }
 }
 
 #[cfg(feature = "spirix")]
 fn parse_option_stroke(data: &[u8], pointer: &mut usize) -> Result<Option<Stroke>, Error> {
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for stroke option",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for stroke option".into()));
     }
     let has_stroke = data[*pointer];
     *pointer += 1;
@@ -513,22 +474,19 @@ fn parse_option_stroke(data: &[u8], pointer: &mut usize) -> Result<Option<Stroke
             let colour = parse(data, pointer)?;
 
             if *pointer + 2 > data.len() {
-                return Err(Error::new(
-                    ErrorKind::UnexpectedEof,
-                    "Not enough data for stroke properties",
-                ));
+                return Err(DecodeError::UnexpectedEofMsg("Not enough data for stroke properties".into()));
             }
             let join = match data[*pointer] {
                 0 => StrokeJoin::Miter,
                 1 => StrokeJoin::Round,
                 2 => StrokeJoin::Bevel,
-                _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid stroke join")),
+                _ => return Err(DecodeError::InvalidDataMsg("Invalid stroke join".into())),
             };
             let cap = match data[*pointer + 1] {
                 0 => StrokeCap::Butt,
                 1 => StrokeCap::Round,
                 2 => StrokeCap::Square,
-                _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid stroke cap")),
+                _ => return Err(DecodeError::InvalidDataMsg("Invalid stroke cap".into())),
             };
             *pointer += 2;
 
@@ -539,20 +497,14 @@ fn parse_option_stroke(data: &[u8], pointer: &mut usize) -> Result<Option<Stroke
                 cap,
             }))
         }
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid stroke option: {}", has_stroke),
-        )),
+        _ => Err(DecodeError::InvalidDataMsg(format!("Invalid stroke option: {}", has_stroke))),
     }
 }
 
 #[cfg(feature = "spirix")]
-fn parse_gradient_variant(data: &[u8], pointer: &mut usize) -> Result<GradientVariant, Error> {
+fn parse_gradient_variant(data: &[u8], pointer: &mut usize) -> Result<GradientVariant, DecodeError> {
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for gradient variant",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for gradient variant".into()));
     }
     let variant_type = data[*pointer];
     *pointer += 1;
@@ -576,20 +528,14 @@ fn parse_gradient_variant(data: &[u8], pointer: &mut usize) -> Result<GradientVa
             let angle = parse_s44(data, pointer)?;
             Ok(GradientVariant::Conic { center, angle })
         }
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid gradient variant: {}", variant_type),
-        )),
+        _ => Err(DecodeError::InvalidDataMsg(format!("Invalid gradient variant: {}", variant_type))),
     }
 }
 
 #[cfg(feature = "spirix")]
 fn parse_gradient_stops(data: &[u8], pointer: &mut usize) -> Result<Vec<GradientStop>, Error> {
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for gradient stop count",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for gradient stop count".into()));
     }
     let count = data[*pointer] as usize;
     *pointer += 1;
@@ -610,15 +556,10 @@ fn parse_gradient_stops(data: &[u8], pointer: &mut usize) -> Result<Vec<Gradient
 fn parse_children(data: &[u8], pointer: &mut usize) -> Result<Vec<VsfType>, Error> {
     // Expect '(' to start children
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Expected '(' for children",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Expected '(' for children".into()));
     }
     if data[*pointer] != b'(' {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Expected '(' for children, got {:02x}", data[*pointer]),
+        return Err(DecodeError::InvalidDataMsg(format!("Expected '(' for children, got {:02x}", data[*pointer]),
         ));
     }
     *pointer += 1;
@@ -631,15 +572,11 @@ fn parse_children(data: &[u8], pointer: &mut usize) -> Result<Vec<VsfType>, Erro
 
     // Expect ')' to end children
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Expected ')' to close children",
+        return Err(DecodeError::UnexpectedEofMsg("Expected '.into())' to close children",
         ));
     }
     if data[*pointer] != b')' {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            "Expected ')' to close children",
+        return Err(DecodeError::InvalidDataMsg("Expected '.into())' to close children",
         ));
     }
     *pointer += 1;
@@ -655,10 +592,7 @@ fn parse_path_commands(
     use crate::types::PathCommand;
 
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for command count",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for command count".into()));
     }
     let count = data[*pointer] as usize;
     *pointer += 1;
@@ -666,10 +600,7 @@ fn parse_path_commands(
     let mut commands = Vec::with_capacity(count);
     for _ in 0..count {
         if *pointer >= data.len() {
-            return Err(Error::new(
-                ErrorKind::UnexpectedEof,
-                "Not enough data for command type",
-            ));
+            return Err(DecodeError::UnexpectedEofMsg("Not enough data for command type".into()));
         }
         let cmd_type = data[*pointer];
         *pointer += 1;
@@ -690,10 +621,7 @@ fn parse_path_commands(
             }
             4 => PathCommand::Close,
             _ => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Invalid path command type: {}", cmd_type),
-                ))
+                return Err(DecodeError::InvalidDataMsg(format!("Invalid path command type: {}", cmd_type)))
             }
         };
         commands.push(command);
@@ -704,10 +632,7 @@ fn parse_path_commands(
 #[cfg(feature = "spirix")]
 fn parse_points(data: &[u8], pointer: &mut usize) -> Result<Vec<spirix::CircleF4E4>, Error> {
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for point count",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for point count".into()));
     }
     let count = data[*pointer] as usize;
     *pointer += 1;
@@ -722,10 +647,7 @@ fn parse_points(data: &[u8], pointer: &mut usize) -> Result<Vec<spirix::CircleF4
 #[cfg(feature = "spirix")]
 fn parse_scalars(data: &[u8], pointer: &mut usize) -> Result<Vec<spirix::ScalarF4E4>, Error> {
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for scalar count",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for scalar count".into()));
     }
     let count = data[*pointer] as usize;
     *pointer += 1;
@@ -738,12 +660,9 @@ fn parse_scalars(data: &[u8], pointer: &mut usize) -> Result<Vec<spirix::ScalarF
 }
 
 #[cfg(feature = "spirix")]
-fn parse_bool(data: &[u8], pointer: &mut usize) -> Result<bool, Error> {
+fn parse_bool(data: &[u8], pointer: &mut usize) -> Result<bool, DecodeError> {
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for bool",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for bool".into()));
     }
     let value = data[*pointer];
     *pointer += 1;
@@ -751,12 +670,9 @@ fn parse_bool(data: &[u8], pointer: &mut usize) -> Result<bool, Error> {
 }
 
 #[cfg(feature = "spirix")]
-fn parse_u8(data: &[u8], pointer: &mut usize) -> Result<u8, Error> {
+fn parse_u8(data: &[u8], pointer: &mut usize) -> Result<u8, DecodeError> {
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u8",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u8".into()));
     }
     let value = data[*pointer];
     *pointer += 1;
@@ -764,14 +680,11 @@ fn parse_u8(data: &[u8], pointer: &mut usize) -> Result<u8, Error> {
 }
 
 #[cfg(feature = "spirix")]
-fn parse_spline_type(data: &[u8], pointer: &mut usize) -> Result<crate::types::SplineType, Error> {
+fn parse_spline_type(data: &[u8], pointer: &mut usize) -> Result<crate::types::SplineType, DecodeError> {
     use crate::types::SplineType;
 
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for spline type",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for spline type".into()));
     }
     let type_byte = data[*pointer];
     *pointer += 1;
@@ -780,10 +693,7 @@ fn parse_spline_type(data: &[u8], pointer: &mut usize) -> Result<crate::types::S
         0 => Ok(SplineType::Bezier),
         1 => Ok(SplineType::Cubic),
         2 => Ok(SplineType::CatmullRom),
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid spline type: {}", type_byte),
-        )),
+        _ => Err(DecodeError::InvalidDataMsg(format!("Invalid spline type: {}", type_byte))),
     }
 }
 
@@ -791,10 +701,7 @@ fn parse_spline_type(data: &[u8], pointer: &mut usize) -> Result<crate::types::S
 #[allow(dead_code)]
 fn parse_option_string(data: &[u8], pointer: &mut usize) -> Result<Option<String>, Error> {
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for option flag",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for option flag".into()));
     }
     let has_value = data[*pointer];
     *pointer += 1;
@@ -805,10 +712,7 @@ fn parse_option_string(data: &[u8], pointer: &mut usize) -> Result<Option<String
         let string_vsf = parse(data, pointer)?;
         match string_vsf {
             VsfType::x(s) => Ok(Some(s)),
-            _ => Err(Error::new(
-                ErrorKind::InvalidData,
-                "Expected string in Option<String>",
-            )),
+            _ => Err(DecodeError::InvalidDataMsg("Expected string in Option<String>".into())),
         }
     }
 }
@@ -817,14 +721,11 @@ fn parse_option_string(data: &[u8], pointer: &mut usize) -> Result<Option<String
 fn parse_button_variant(
     data: &[u8],
     pointer: &mut usize,
-) -> Result<crate::types::ButtonVariant, Error> {
+) -> Result<crate::types::ButtonVariant, DecodeError> {
     use crate::types::ButtonVariant;
 
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for button variant",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for button variant".into()));
     }
     let variant_byte = data[*pointer];
     *pointer += 1;
@@ -833,23 +734,17 @@ fn parse_button_variant(
         0 => Ok(ButtonVariant::Filled),
         1 => Ok(ButtonVariant::Outlined),
         2 => Ok(ButtonVariant::Text),
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid button variant: {}", variant_byte),
-        )),
+        _ => Err(DecodeError::InvalidDataMsg(format!("Invalid button variant: {}", variant_byte))),
     }
 }
 
 #[cfg(feature = "spirix")]
-fn parse_transform(data: &[u8], pointer: &mut usize) -> Result<crate::types::Transform, Error> {
+fn parse_transform(data: &[u8], pointer: &mut usize) -> Result<crate::types::Transform, DecodeError> {
     use crate::types::Transform;
 
     // Parse translate (Option<c44>)
     let translate = if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for translate option",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for translate option".into()));
     } else if data[*pointer] == 0 {
         *pointer += 1;
         None
@@ -860,10 +755,7 @@ fn parse_transform(data: &[u8], pointer: &mut usize) -> Result<crate::types::Tra
 
     // Parse rotate (Option<s44>)
     let rotate = if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for rotate option",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for rotate option".into()));
     } else if data[*pointer] == 0 {
         *pointer += 1;
         None
@@ -874,10 +766,7 @@ fn parse_transform(data: &[u8], pointer: &mut usize) -> Result<crate::types::Tra
 
     // Parse scale (Option<c44>)
     let scale = if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for scale option",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for scale option".into()));
     } else if data[*pointer] == 0 {
         *pointer += 1;
         None
@@ -888,10 +777,7 @@ fn parse_transform(data: &[u8], pointer: &mut usize) -> Result<crate::types::Tra
 
     // Parse origin (Option<c44>)
     let origin = if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for origin option",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for origin option".into()));
     } else if data[*pointer] == 0 {
         *pointer += 1;
         None
@@ -909,12 +795,9 @@ fn parse_transform(data: &[u8], pointer: &mut usize) -> Result<crate::types::Tra
 }
 
 #[cfg(feature = "spirix")]
-fn parse_stroke_join(data: &[u8], pointer: &mut usize) -> Result<StrokeJoin, Error> {
+fn parse_stroke_join(data: &[u8], pointer: &mut usize) -> Result<StrokeJoin, DecodeError> {
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for stroke join",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for stroke join".into()));
     }
     let join_byte = data[*pointer];
     *pointer += 1;
@@ -923,20 +806,14 @@ fn parse_stroke_join(data: &[u8], pointer: &mut usize) -> Result<StrokeJoin, Err
         0 => Ok(StrokeJoin::Miter),
         1 => Ok(StrokeJoin::Round),
         2 => Ok(StrokeJoin::Bevel),
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid stroke join: {}", join_byte),
-        )),
+        _ => Err(DecodeError::InvalidDataMsg(format!("Invalid stroke join: {}", join_byte))),
     }
 }
 
 #[cfg(feature = "spirix")]
-fn parse_stroke_cap(data: &[u8], pointer: &mut usize) -> Result<StrokeCap, Error> {
+fn parse_stroke_cap(data: &[u8], pointer: &mut usize) -> Result<StrokeCap, DecodeError> {
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for stroke cap",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for stroke cap".into()));
     }
     let cap_byte = data[*pointer];
     *pointer += 1;
@@ -945,9 +822,99 @@ fn parse_stroke_cap(data: &[u8], pointer: &mut usize) -> Result<StrokeCap, Error
         0 => Ok(StrokeCap::Butt),
         1 => Ok(StrokeCap::Round),
         2 => Ok(StrokeCap::Square),
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid stroke cap: {}", cap_byte),
-        )),
+        _ => Err(DecodeError::InvalidDataMsg(format!("Invalid stroke cap: {}", cap_byte))),
+    }
+}
+
+/// Parse network address family: na, nh, ni, nj, nc, nm, np, ns, nu, nn
+fn parse_network_address(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
+    if *pointer >= data.len() {
+        return Err(DecodeError::UnexpectedEofMsg("Expected network subtype".into()));
+    }
+    let sub = data[*pointer];
+    *pointer += 1;
+
+    // Helper: read null-terminated string
+    let read_str = |data: &[u8], pointer: &mut usize| -> Result<String, DecodeError> {
+        let start = *pointer;
+        while *pointer < data.len() && data[*pointer] != 0 { *pointer += 1; }
+        let s = core::str::from_utf8(&data[start..*pointer])
+            .map_err(|_| DecodeError::InvalidDataMsg("Invalid UTF-8 in network field".into()))?
+            .to_string();
+        if *pointer < data.len() { *pointer += 1; } // skip null
+        Ok(s)
+    };
+
+    match sub {
+        b'a' => {
+            if *pointer >= data.len() { return Err(DecodeError::UnexpectedEofMsg("na scheme".into())); }
+            let scheme = data[*pointer]; *pointer += 1;
+            let host = read_str(data, pointer)?;
+            let port = if *pointer + 2 <= data.len() {
+                let p = u16::from_be_bytes([data[*pointer], data[*pointer+1]]);
+                *pointer += 2;
+                if p == 0 { None } else { Some(p) }
+            } else { None };
+            Ok(VsfType::na(scheme, host, port))
+        }
+        b'h' => Ok(VsfType::nh(read_str(data, pointer)?)),
+        b'i' => {
+            if *pointer + 4 > data.len() { return Err(DecodeError::UnexpectedEofMsg("ni".into())); }
+            let a = [data[*pointer], data[*pointer+1], data[*pointer+2], data[*pointer+3]];
+            *pointer += 4;
+            Ok(VsfType::ni(a))
+        }
+        b'j' => {
+            if *pointer + 16 > data.len() { return Err(DecodeError::UnexpectedEofMsg("nj".into())); }
+            let mut a = [0u8; 16];
+            a.copy_from_slice(&data[*pointer..*pointer+16]);
+            *pointer += 16;
+            Ok(VsfType::nj(a))
+        }
+        b'c' => {
+            let addr = read_str(data, pointer)?;
+            if *pointer >= data.len() { return Err(DecodeError::UnexpectedEofMsg("nc prefix".into())); }
+            let prefix = data[*pointer]; *pointer += 1;
+            Ok(VsfType::nc(addr, prefix))
+        }
+        b'm' => {
+            if *pointer + 6 > data.len() { return Err(DecodeError::UnexpectedEofMsg("nm".into())); }
+            let mut a = [0u8; 6];
+            a.copy_from_slice(&data[*pointer..*pointer+6]);
+            *pointer += 6;
+            Ok(VsfType::nm(a))
+        }
+        b'p' => {
+            if *pointer + 2 > data.len() { return Err(DecodeError::UnexpectedEofMsg("np".into())); }
+            let p = u16::from_be_bytes([data[*pointer], data[*pointer+1]]);
+            *pointer += 2;
+            Ok(VsfType::np(p))
+        }
+        b's' => {
+            let host = read_str(data, pointer)?;
+            if *pointer + 2 > data.len() { return Err(DecodeError::UnexpectedEofMsg("ns port".into())); }
+            let port = u16::from_be_bytes([data[*pointer], data[*pointer+1]]);
+            *pointer += 2;
+            Ok(VsfType::ns(host, port))
+        }
+        b'u' => Ok(VsfType::nu(read_str(data, pointer)?)),
+        b'n' => Ok(VsfType::nn(read_str(data, pointer)?)),
+        _ => Err(DecodeError::InvalidDataMsg(format!("Unknown network subtype: n{}", sub as char))),
+    }
+}
+
+/// Parse world address family: wa, ...
+fn parse_world_address(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
+    if *pointer >= data.len() {
+        return Err(DecodeError::UnexpectedEofMsg("Expected world address subtype".into()));
+    }
+    let sub = data[*pointer];
+    *pointer += 1;
+    match sub {
+        b'a' => {
+            let addr = WaAddress::from_wire(data, pointer)?;
+            Ok(VsfType::wa(addr))
+        }
+        _ => Err(DecodeError::InvalidDataMsg(format!("Unknown world address subtype: w{}", sub as char))),
     }
 }

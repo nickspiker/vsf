@@ -1,5 +1,7 @@
 //! Tensor parsers
 
+use crate::decoding::traits::DecodeError;
+use crate::prelude::*;
 use super::helpers::{decode_usize, parse_shape};
 #[cfg(feature = "spirix")]
 use super::spirix::{
@@ -16,21 +18,17 @@ use super::spirix::{
 };
 use crate::types::{BitPackedTensor, StridedTensor, Tensor, Vector, VsfType};
 use num_complex::Complex;
-use std::io::{Error, ErrorKind};
 
 // ==================== BITPACKED TENSORS ====================
 
 /// Parse bitpacked tensor: [p][ndim][bit_depth][shape...][data...]
-pub fn parse_bitpacked_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_bitpacked_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // Parse dimension count
     let ndim = decode_usize(data, pointer)?;
 
     // Parse bit depth (0x01-0xFF, where 0x00 = 256-bit)
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for bit depth",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for bit depth".into()));
     }
     let bit_depth = data[*pointer];
     *pointer += 1;
@@ -50,14 +48,11 @@ pub fn parse_bitpacked_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfTyp
 
     // Read packed data
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            format!(
+        return Err(DecodeError::UnexpectedEofMsg(format!(
                 "Not enough data for bitpacked tensor: need {} bytes, have {}",
                 byte_count,
                 data.len() - *pointer
-            ),
-        ));
+            )));
     }
 
     let packed_data = data[*pointer..*pointer + byte_count].to_vec();
@@ -76,13 +71,10 @@ pub fn parse_bitpacked_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfTyp
 /// Supports two formats:
 /// - Multi-dim: [t][u:ndim][elem_type][elem_size][shape...][data...]
 /// - 1D vector: [t]['n'][u:count][elem_type][elem_size][data...]
-pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // Check if this is 1D vector format (starts with 'n') or multi-dim format
     if *pointer >= data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for tensor format marker",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for tensor format marker".into()));
     }
 
     // Parse ndim or count
@@ -99,10 +91,7 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
 
     // Parse element type markers (same position in both formats)
     if *pointer + 2 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for element type",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for element type".into()));
     }
     let elem_type = data[*pointer];
     *pointer += 1;
@@ -130,10 +119,7 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
                 b'5' => parse_vector_data_u32(data, pointer, count),
                 b'6' => parse_vector_data_u64(data, pointer, count),
                 b'7' => parse_vector_data_u128(data, pointer, count),
-                _ => Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Invalid unsigned size: {}", elem_size as char),
-                )),
+                _ => Err(DecodeError::InvalidDataMsg(format!("Invalid unsigned size: {}", elem_size as char))),
             },
             b'i' => match elem_size {
                 b'3' => parse_vector_data_i8(data, pointer, count),
@@ -141,31 +127,19 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
                 b'5' => parse_vector_data_i32(data, pointer, count),
                 b'6' => parse_vector_data_i64(data, pointer, count),
                 b'7' => parse_vector_data_i128(data, pointer, count),
-                _ => Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Invalid signed size: {}", elem_size as char),
-                )),
+                _ => Err(DecodeError::InvalidDataMsg(format!("Invalid signed size: {}", elem_size as char))),
             },
             b'f' => match elem_size {
                 b'5' => parse_vector_data_f32(data, pointer, count),
                 b'6' => parse_vector_data_f64(data, pointer, count),
-                _ => Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Invalid float size: {}", elem_size as char),
-                )),
+                _ => Err(DecodeError::InvalidDataMsg(format!("Invalid float size: {}", elem_size as char))),
             },
             b'j' => match elem_size {
                 b'5' => parse_vector_data_j32(data, pointer, count),
                 b'6' => parse_vector_data_j64(data, pointer, count),
-                _ => Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Invalid complex size: {}", elem_size as char),
-                )),
+                _ => Err(DecodeError::InvalidDataMsg(format!("Invalid complex size: {}", elem_size as char))),
             },
-            _ => Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Invalid vector element type: {}", elem_type as char),
-            )),
+            _ => Err(DecodeError::InvalidDataMsg(format!("Invalid vector element type: {}", elem_type as char))),
         };
     }
 
@@ -178,10 +152,7 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
             b'5' => parse_tensor_data_u32(data, pointer, shape, total_elements),
             b'6' => parse_tensor_data_u64(data, pointer, shape, total_elements),
             b'7' => parse_tensor_data_u128(data, pointer, shape, total_elements),
-            _ => Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Invalid unsigned size: {}", elem_size as char),
-            )),
+            _ => Err(DecodeError::InvalidDataMsg(format!("Invalid unsigned size: {}", elem_size as char))),
         },
         b'i' => match elem_size {
             b'3' => parse_tensor_data_i8(data, pointer, shape, total_elements),
@@ -189,26 +160,17 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
             b'5' => parse_tensor_data_i32(data, pointer, shape, total_elements),
             b'6' => parse_tensor_data_i64(data, pointer, shape, total_elements),
             b'7' => parse_tensor_data_i128(data, pointer, shape, total_elements),
-            _ => Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Invalid signed size: {}", elem_size as char),
-            )),
+            _ => Err(DecodeError::InvalidDataMsg(format!("Invalid signed size: {}", elem_size as char))),
         },
         b'f' => match elem_size {
             b'5' => parse_tensor_data_f32(data, pointer, shape, total_elements),
             b'6' => parse_tensor_data_f64(data, pointer, shape, total_elements),
-            _ => Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Invalid float size: {}", elem_size as char),
-            )),
+            _ => Err(DecodeError::InvalidDataMsg(format!("Invalid float size: {}", elem_size as char))),
         },
         b'j' => match elem_size {
             b'5' => parse_tensor_data_j32(data, pointer, shape, total_elements),
             b'6' => parse_tensor_data_j64(data, pointer, shape, total_elements),
-            _ => Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Invalid complex size: {}", elem_size as char),
-            )),
+            _ => Err(DecodeError::InvalidDataMsg(format!("Invalid complex size: {}", elem_size as char))),
         },
         #[cfg(feature = "spirix")]
         b's' => {
@@ -242,20 +204,13 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
                 (b'7', b'5') => parse_tensor_data_s75(data, pointer, shape, total_elements),
                 (b'7', b'6') => parse_tensor_data_s76(data, pointer, shape, total_elements),
                 (b'7', b'7') => parse_tensor_data_s77(data, pointer, shape, total_elements),
-                _ => Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!(
+                _ => Err(DecodeError::InvalidDataMsg(format!(
                         "Invalid Spirix Scalar F{}E{}",
-                        f_marker as char, e_marker as char
-                    ),
-                )),
+                        f_marker as char, e_marker as char))),
             }
         }
         #[cfg(not(feature = "spirix"))]
-        b's' => Err(Error::new(
-            ErrorKind::Unsupported,
-            "Spirix scalar tensor types require 'spirix' feature",
-        )),
+        b's' => Err(DecodeError::Unsupported("Spirix scalar tensor types require 'spirix' feature".into())),
         #[cfg(feature = "spirix")]
         b'c' => {
             // Spirix Circle: elem_size is F marker, need to read E marker
@@ -288,38 +243,25 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> 
                 (b'7', b'5') => parse_tensor_data_c75(data, pointer, shape, total_elements),
                 (b'7', b'6') => parse_tensor_data_c76(data, pointer, shape, total_elements),
                 (b'7', b'7') => parse_tensor_data_c77(data, pointer, shape, total_elements),
-                _ => Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!(
+                _ => Err(DecodeError::InvalidDataMsg(format!(
                         "Invalid Spirix Circle F{}E{}",
-                        f_marker as char, e_marker as char
-                    ),
-                )),
+                        f_marker as char, e_marker as char))),
             }
         }
         #[cfg(not(feature = "spirix"))]
-        b'c' => Err(Error::new(
-            ErrorKind::Unsupported,
-            "Spirix circle tensor types require 'spirix' feature",
-        )),
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid tensor element type: {}", elem_type as char),
-        )),
+        b'c' => Err(DecodeError::Unsupported("Spirix circle tensor types require 'spirix' feature".into())),
+        _ => Err(DecodeError::InvalidDataMsg(format!("Invalid tensor element type: {}", elem_type as char))),
     }
 }
 
 /// Parse strided tensor: [q][ndim][elem_type][elem_size][shape...][stride...][data...]
-pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // Parse dimension count
     let ndim = decode_usize(data, pointer)?;
 
     // Parse element type markers
     if *pointer + 2 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for element type",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for element type".into()));
     }
     let elem_type = data[*pointer];
     *pointer += 1;
@@ -343,10 +285,7 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
             b'5' => parse_strided_tensor_data_u32(data, pointer, shape, stride, total_elements),
             b'6' => parse_strided_tensor_data_u64(data, pointer, shape, stride, total_elements),
             b'7' => parse_strided_tensor_data_u128(data, pointer, shape, stride, total_elements),
-            _ => Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Invalid strided unsigned size: {}", elem_size as char),
-            )),
+            _ => Err(DecodeError::InvalidDataMsg(format!("Invalid strided unsigned size: {}", elem_size as char))),
         },
         b'i' => match elem_size {
             b'3' => parse_strided_tensor_data_i8(data, pointer, shape, stride, total_elements),
@@ -354,26 +293,17 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
             b'5' => parse_strided_tensor_data_i32(data, pointer, shape, stride, total_elements),
             b'6' => parse_strided_tensor_data_i64(data, pointer, shape, stride, total_elements),
             b'7' => parse_strided_tensor_data_i128(data, pointer, shape, stride, total_elements),
-            _ => Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Invalid strided signed size: {}", elem_size as char),
-            )),
+            _ => Err(DecodeError::InvalidDataMsg(format!("Invalid strided signed size: {}", elem_size as char))),
         },
         b'f' => match elem_size {
             b'5' => parse_strided_tensor_data_f32(data, pointer, shape, stride, total_elements),
             b'6' => parse_strided_tensor_data_f64(data, pointer, shape, stride, total_elements),
-            _ => Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Invalid strided float size: {}", elem_size as char),
-            )),
+            _ => Err(DecodeError::InvalidDataMsg(format!("Invalid strided float size: {}", elem_size as char))),
         },
         b'j' => match elem_size {
             b'5' => parse_strided_tensor_data_j32(data, pointer, shape, stride, total_elements),
             b'6' => parse_strided_tensor_data_j64(data, pointer, shape, stride, total_elements),
-            _ => Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Invalid strided complex size: {}", elem_size as char),
-            )),
+            _ => Err(DecodeError::InvalidDataMsg(format!("Invalid strided complex size: {}", elem_size as char))),
         },
         #[cfg(feature = "spirix")]
         b's' => {
@@ -457,20 +387,13 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
                 (b'7', b'7') => {
                     parse_strided_tensor_data_s77(data, pointer, shape, stride, total_elements)
                 }
-                _ => Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!(
+                _ => Err(DecodeError::InvalidDataMsg(format!(
                         "Invalid strided Spirix Scalar F{}E{}",
-                        f_marker as char, e_marker as char
-                    ),
-                )),
+                        f_marker as char, e_marker as char))),
             }
         }
         #[cfg(not(feature = "spirix"))]
-        b's' => Err(Error::new(
-            ErrorKind::Unsupported,
-            "Spirix scalar strided tensor types require 'spirix' feature",
-        )),
+        b's' => Err(DecodeError::Unsupported("Spirix scalar strided tensor types require 'spirix' feature".into())),
         #[cfg(feature = "spirix")]
         b'c' => {
             // Spirix Circle: elem_size is F marker, need to read E marker
@@ -553,24 +476,14 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
                 (b'7', b'7') => {
                     parse_strided_tensor_data_c77(data, pointer, shape, stride, total_elements)
                 }
-                _ => Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!(
+                _ => Err(DecodeError::InvalidDataMsg(format!(
                         "Invalid strided Spirix Circle F{}E{}",
-                        f_marker as char, e_marker as char
-                    ),
-                )),
+                        f_marker as char, e_marker as char))),
             }
         }
         #[cfg(not(feature = "spirix"))]
-        b'c' => Err(Error::new(
-            ErrorKind::Unsupported,
-            "Spirix circle strided tensor types require 'spirix' feature",
-        )),
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid strided tensor element type: {}", elem_type as char),
-        )),
+        b'c' => Err(DecodeError::Unsupported("Spirix circle strided tensor types require 'spirix' feature".into())),
+        _ => Err(DecodeError::InvalidDataMsg(format!("Invalid strided tensor element type: {}", elem_type as char))),
     }
 }
 
@@ -582,14 +495,11 @@ pub fn parse_tensor_data_u0(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     // Bitpacked: 8 bools per byte
     let byte_count = total_elements.div_ceil(8);
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u0 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u0 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -620,12 +530,9 @@ pub fn parse_tensor_data_u8(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     if *pointer + total_elements > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u8 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u8 tensor".into()));
     }
     let values = data[*pointer..*pointer + total_elements].to_vec();
     *pointer += total_elements;
@@ -637,13 +544,10 @@ pub fn parse_tensor_data_u16(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 2;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u16 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u16 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -660,13 +564,10 @@ pub fn parse_tensor_data_u32(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u32 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u32 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -688,13 +589,10 @@ pub fn parse_tensor_data_u64(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u64 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u64 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -720,13 +618,10 @@ pub fn parse_tensor_data_u128(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 16;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u128 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u128 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -761,12 +656,9 @@ pub fn parse_tensor_data_i8(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     if *pointer + total_elements > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for i8 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for i8 tensor".into()));
     }
     let values: Vec<i8> = data[*pointer..*pointer + total_elements]
         .iter()
@@ -781,13 +673,10 @@ pub fn parse_tensor_data_i16(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 2;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for i16 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for i16 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -804,13 +693,10 @@ pub fn parse_tensor_data_i32(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for i32 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for i32 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -832,13 +718,10 @@ pub fn parse_tensor_data_i64(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for i64 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for i64 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -864,13 +747,10 @@ pub fn parse_tensor_data_i128(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 16;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for i128 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for i128 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -905,13 +785,10 @@ pub fn parse_tensor_data_f32(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for f32 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for f32 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -933,13 +810,10 @@ pub fn parse_tensor_data_f64(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for f64 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for f64 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -966,13 +840,10 @@ pub fn parse_tensor_data_j32(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 8; // 2 f32s per complex
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for Complex<f32> tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for Complex<f32> tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1000,13 +871,10 @@ pub fn parse_tensor_data_j64(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 16; // 2 f64s per complex
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for Complex<f64> tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for Complex<f64> tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1043,14 +911,11 @@ pub fn parse_vector_data_u0(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     // Bitpacked: 8 bools per byte
     let byte_count = count.div_ceil(8);
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u0 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u0 vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1077,12 +942,9 @@ pub fn parse_vector_data_u8(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     if *pointer + count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u8 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u8 vector".into()));
     }
     let values = data[*pointer..*pointer + count].to_vec();
     *pointer += count;
@@ -1096,13 +958,10 @@ pub fn parse_vector_data_u16(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = count * 2;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u16 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u16 vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1118,13 +977,10 @@ pub fn parse_vector_data_u32(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = count * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u32 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u32 vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1145,13 +1001,10 @@ pub fn parse_vector_data_u64(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = count * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u64 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u64 vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1176,13 +1029,10 @@ pub fn parse_vector_data_u128(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = count * 16;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for u128 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for u128 vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1215,12 +1065,9 @@ pub fn parse_vector_data_i8(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     if *pointer + count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for i8 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for i8 vector".into()));
     }
     let values: Vec<i8> = data[*pointer..*pointer + count]
         .iter()
@@ -1234,13 +1081,10 @@ pub fn parse_vector_data_i16(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = count * 2;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for i16 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for i16 vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1256,13 +1100,10 @@ pub fn parse_vector_data_i32(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = count * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for i32 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for i32 vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1283,13 +1124,10 @@ pub fn parse_vector_data_i64(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = count * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for i64 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for i64 vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1314,13 +1152,10 @@ pub fn parse_vector_data_i128(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = count * 16;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for i128 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for i128 vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1353,13 +1188,10 @@ pub fn parse_vector_data_f32(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = count * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for f32 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for f32 vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1380,13 +1212,10 @@ pub fn parse_vector_data_f64(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = count * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for f64 vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for f64 vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1411,13 +1240,10 @@ pub fn parse_vector_data_j32(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = count * 8; // 2 f32s per complex
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for Complex<f32> vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for Complex<f32> vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1444,13 +1270,10 @@ pub fn parse_vector_data_j64(
     data: &[u8],
     pointer: &mut usize,
     count: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = count * 16; // 2 f64s per complex
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for Complex<f64> vector",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for Complex<f64> vector".into()));
     }
 
     let mut values = Vec::with_capacity(count);
@@ -1489,14 +1312,11 @@ pub fn parse_strided_tensor_data_u0(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     // Bitpacked: 8 bools per byte
     let byte_count = total_elements.div_ceil(8);
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided u0 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided u0 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1525,12 +1345,9 @@ pub fn parse_strided_tensor_data_u8(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     if *pointer + total_elements > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided u8 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided u8 tensor".into()));
     }
     let values = data[*pointer..*pointer + total_elements].to_vec();
     *pointer += total_elements;
@@ -1543,13 +1360,10 @@ pub fn parse_strided_tensor_data_u16(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 2;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided u16 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided u16 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1567,13 +1381,10 @@ pub fn parse_strided_tensor_data_u32(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided u32 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided u32 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1596,13 +1407,10 @@ pub fn parse_strided_tensor_data_u64(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided u64 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided u64 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1629,13 +1437,10 @@ pub fn parse_strided_tensor_data_u128(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 16;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided u128 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided u128 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1670,12 +1475,9 @@ pub fn parse_strided_tensor_data_i8(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     if *pointer + total_elements > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided i8 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided i8 tensor".into()));
     }
     let values: Vec<i8> = data[*pointer..*pointer + total_elements]
         .iter()
@@ -1691,13 +1493,10 @@ pub fn parse_strided_tensor_data_i16(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 2;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided i16 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided i16 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1715,13 +1514,10 @@ pub fn parse_strided_tensor_data_i32(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided i32 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided i32 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1744,13 +1540,10 @@ pub fn parse_strided_tensor_data_i64(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided i64 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided i64 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1777,13 +1570,10 @@ pub fn parse_strided_tensor_data_i128(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 16;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided i128 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided i128 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1818,13 +1608,10 @@ pub fn parse_strided_tensor_data_f32(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided f32 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided f32 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1847,13 +1634,10 @@ pub fn parse_strided_tensor_data_f64(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided f64 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided f64 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1880,13 +1664,10 @@ pub fn parse_strided_tensor_data_j32(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 8; // 2 floats per complex
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided Complex<f32> tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided Complex<f32> tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1915,13 +1696,10 @@ pub fn parse_strided_tensor_data_j64(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 16; // 2 floats per complex
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided Complex<f64> tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided Complex<f64> tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1959,13 +1737,10 @@ pub fn parse_tensor_data_s33(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 2;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF3E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF3E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -1974,7 +1749,7 @@ pub fn parse_tensor_data_s33(
         if let VsfType::s33(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF3E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF3E3".into()));
         }
     }
     Ok(VsfType::t_s33(Tensor::new(shape, values)))
@@ -1986,13 +1761,10 @@ pub fn parse_tensor_data_s34(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 3;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF3E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF3E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2001,7 +1773,7 @@ pub fn parse_tensor_data_s34(
         if let VsfType::s34(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF3E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF3E4".into()));
         }
     }
     Ok(VsfType::t_s34(Tensor::new(shape, values)))
@@ -2013,13 +1785,10 @@ pub fn parse_tensor_data_s35(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 5;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF3E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF3E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2028,7 +1797,7 @@ pub fn parse_tensor_data_s35(
         if let VsfType::s35(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF3E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF3E5".into()));
         }
     }
     Ok(VsfType::t_s35(Tensor::new(shape, values)))
@@ -2040,13 +1809,10 @@ pub fn parse_tensor_data_s36(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 9;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF3E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF3E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2055,7 +1821,7 @@ pub fn parse_tensor_data_s36(
         if let VsfType::s36(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF3E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF3E6".into()));
         }
     }
     Ok(VsfType::t_s36(Tensor::new(shape, values)))
@@ -2067,13 +1833,10 @@ pub fn parse_tensor_data_s37(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 17;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF3E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF3E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2082,7 +1845,7 @@ pub fn parse_tensor_data_s37(
         if let VsfType::s37(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF3E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF3E7".into()));
         }
     }
     Ok(VsfType::t_s37(Tensor::new(shape, values)))
@@ -2094,13 +1857,10 @@ pub fn parse_tensor_data_s43(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 3;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF4E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF4E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2109,7 +1869,7 @@ pub fn parse_tensor_data_s43(
         if let VsfType::s43(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF4E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF4E3".into()));
         }
     }
     Ok(VsfType::t_s43(Tensor::new(shape, values)))
@@ -2121,13 +1881,10 @@ pub fn parse_tensor_data_s44(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF4E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF4E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2136,7 +1893,7 @@ pub fn parse_tensor_data_s44(
         if let VsfType::s44(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF4E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF4E4".into()));
         }
     }
     Ok(VsfType::t_s44(Tensor::new(shape, values)))
@@ -2148,13 +1905,10 @@ pub fn parse_tensor_data_s45(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 6;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF4E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF4E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2163,7 +1917,7 @@ pub fn parse_tensor_data_s45(
         if let VsfType::s45(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF4E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF4E5".into()));
         }
     }
     Ok(VsfType::t_s45(Tensor::new(shape, values)))
@@ -2175,13 +1929,10 @@ pub fn parse_tensor_data_s46(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 10;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF4E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF4E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2190,7 +1941,7 @@ pub fn parse_tensor_data_s46(
         if let VsfType::s46(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF4E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF4E6".into()));
         }
     }
     Ok(VsfType::t_s46(Tensor::new(shape, values)))
@@ -2202,13 +1953,10 @@ pub fn parse_tensor_data_s47(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 18;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF4E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF4E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2217,7 +1965,7 @@ pub fn parse_tensor_data_s47(
         if let VsfType::s47(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF4E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF4E7".into()));
         }
     }
     Ok(VsfType::t_s47(Tensor::new(shape, values)))
@@ -2229,13 +1977,10 @@ pub fn parse_tensor_data_s53(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 5;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF5E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF5E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2244,7 +1989,7 @@ pub fn parse_tensor_data_s53(
         if let VsfType::s53(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF5E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF5E3".into()));
         }
     }
     Ok(VsfType::t_s53(Tensor::new(shape, values)))
@@ -2256,13 +2001,10 @@ pub fn parse_tensor_data_s54(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 6;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF5E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF5E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2271,7 +2013,7 @@ pub fn parse_tensor_data_s54(
         if let VsfType::s54(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF5E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF5E4".into()));
         }
     }
     Ok(VsfType::t_s54(Tensor::new(shape, values)))
@@ -2283,13 +2025,10 @@ pub fn parse_tensor_data_s55(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF5E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF5E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2298,7 +2037,7 @@ pub fn parse_tensor_data_s55(
         if let VsfType::s55(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF5E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF5E5".into()));
         }
     }
     Ok(VsfType::t_s55(Tensor::new(shape, values)))
@@ -2310,13 +2049,10 @@ pub fn parse_tensor_data_s56(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 12;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF5E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF5E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2325,7 +2061,7 @@ pub fn parse_tensor_data_s56(
         if let VsfType::s56(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF5E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF5E6".into()));
         }
     }
     Ok(VsfType::t_s56(Tensor::new(shape, values)))
@@ -2337,13 +2073,10 @@ pub fn parse_tensor_data_s57(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 20;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF5E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF5E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2352,7 +2085,7 @@ pub fn parse_tensor_data_s57(
         if let VsfType::s57(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF5E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF5E7".into()));
         }
     }
     Ok(VsfType::t_s57(Tensor::new(shape, values)))
@@ -2364,13 +2097,10 @@ pub fn parse_tensor_data_s63(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 9;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF6E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF6E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2379,7 +2109,7 @@ pub fn parse_tensor_data_s63(
         if let VsfType::s63(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF6E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF6E3".into()));
         }
     }
     Ok(VsfType::t_s63(Tensor::new(shape, values)))
@@ -2391,13 +2121,10 @@ pub fn parse_tensor_data_s64(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 10;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF6E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF6E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2406,7 +2133,7 @@ pub fn parse_tensor_data_s64(
         if let VsfType::s64(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF6E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF6E4".into()));
         }
     }
     Ok(VsfType::t_s64(Tensor::new(shape, values)))
@@ -2418,13 +2145,10 @@ pub fn parse_tensor_data_s65(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 12;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF6E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF6E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2433,7 +2157,7 @@ pub fn parse_tensor_data_s65(
         if let VsfType::s65(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF6E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF6E5".into()));
         }
     }
     Ok(VsfType::t_s65(Tensor::new(shape, values)))
@@ -2445,13 +2169,10 @@ pub fn parse_tensor_data_s66(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 16;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF6E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF6E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2460,7 +2181,7 @@ pub fn parse_tensor_data_s66(
         if let VsfType::s66(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF6E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF6E6".into()));
         }
     }
     Ok(VsfType::t_s66(Tensor::new(shape, values)))
@@ -2472,13 +2193,10 @@ pub fn parse_tensor_data_s67(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 24;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF6E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF6E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2487,7 +2205,7 @@ pub fn parse_tensor_data_s67(
         if let VsfType::s67(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF6E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF6E7".into()));
         }
     }
     Ok(VsfType::t_s67(Tensor::new(shape, values)))
@@ -2499,13 +2217,10 @@ pub fn parse_tensor_data_s73(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 17;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF7E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF7E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2514,7 +2229,7 @@ pub fn parse_tensor_data_s73(
         if let VsfType::s73(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF7E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF7E3".into()));
         }
     }
     Ok(VsfType::t_s73(Tensor::new(shape, values)))
@@ -2526,13 +2241,10 @@ pub fn parse_tensor_data_s74(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 18;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF7E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF7E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2541,7 +2253,7 @@ pub fn parse_tensor_data_s74(
         if let VsfType::s74(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF7E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF7E4".into()));
         }
     }
     Ok(VsfType::t_s74(Tensor::new(shape, values)))
@@ -2553,13 +2265,10 @@ pub fn parse_tensor_data_s75(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 20;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF7E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF7E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2568,7 +2277,7 @@ pub fn parse_tensor_data_s75(
         if let VsfType::s75(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF7E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF7E5".into()));
         }
     }
     Ok(VsfType::t_s75(Tensor::new(shape, values)))
@@ -2580,13 +2289,10 @@ pub fn parse_tensor_data_s76(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 24;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF7E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF7E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2595,7 +2301,7 @@ pub fn parse_tensor_data_s76(
         if let VsfType::s76(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF7E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF7E6".into()));
         }
     }
     Ok(VsfType::t_s76(Tensor::new(shape, values)))
@@ -2607,13 +2313,10 @@ pub fn parse_tensor_data_s77(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 32;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF7E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF7E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2622,7 +2325,7 @@ pub fn parse_tensor_data_s77(
         if let VsfType::s77(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF7E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF7E7".into()));
         }
     }
     Ok(VsfType::t_s77(Tensor::new(shape, values)))
@@ -2636,13 +2339,10 @@ pub fn parse_tensor_data_c33(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 3;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF3E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF3E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2651,7 +2351,7 @@ pub fn parse_tensor_data_c33(
         if let VsfType::c33(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF3E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF3E3".into()));
         }
     }
     Ok(VsfType::t_c33(Tensor::new(shape, values)))
@@ -2663,13 +2363,10 @@ pub fn parse_tensor_data_c34(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF3E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF3E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2678,7 +2375,7 @@ pub fn parse_tensor_data_c34(
         if let VsfType::c34(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF3E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF3E4".into()));
         }
     }
     Ok(VsfType::t_c34(Tensor::new(shape, values)))
@@ -2690,13 +2387,10 @@ pub fn parse_tensor_data_c35(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 6;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF3E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF3E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2705,7 +2399,7 @@ pub fn parse_tensor_data_c35(
         if let VsfType::c35(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF3E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF3E5".into()));
         }
     }
     Ok(VsfType::t_c35(Tensor::new(shape, values)))
@@ -2717,13 +2411,10 @@ pub fn parse_tensor_data_c36(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 10;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF3E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF3E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2732,7 +2423,7 @@ pub fn parse_tensor_data_c36(
         if let VsfType::c36(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF3E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF3E6".into()));
         }
     }
     Ok(VsfType::t_c36(Tensor::new(shape, values)))
@@ -2744,13 +2435,10 @@ pub fn parse_tensor_data_c37(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 18;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF3E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF3E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2759,7 +2447,7 @@ pub fn parse_tensor_data_c37(
         if let VsfType::c37(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF3E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF3E7".into()));
         }
     }
     Ok(VsfType::t_c37(Tensor::new(shape, values)))
@@ -2771,13 +2459,10 @@ pub fn parse_tensor_data_c43(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 5;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF4E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF4E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2786,7 +2471,7 @@ pub fn parse_tensor_data_c43(
         if let VsfType::c43(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF4E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF4E3".into()));
         }
     }
     Ok(VsfType::t_c43(Tensor::new(shape, values)))
@@ -2798,13 +2483,10 @@ pub fn parse_tensor_data_c44(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 6;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF4E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF4E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2813,7 +2495,7 @@ pub fn parse_tensor_data_c44(
         if let VsfType::c44(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF4E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF4E4".into()));
         }
     }
     Ok(VsfType::t_c44(Tensor::new(shape, values)))
@@ -2825,13 +2507,10 @@ pub fn parse_tensor_data_c45(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF4E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF4E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2840,7 +2519,7 @@ pub fn parse_tensor_data_c45(
         if let VsfType::c45(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF4E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF4E5".into()));
         }
     }
     Ok(VsfType::t_c45(Tensor::new(shape, values)))
@@ -2852,13 +2531,10 @@ pub fn parse_tensor_data_c46(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 12;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF4E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF4E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2867,7 +2543,7 @@ pub fn parse_tensor_data_c46(
         if let VsfType::c46(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF4E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF4E6".into()));
         }
     }
     Ok(VsfType::t_c46(Tensor::new(shape, values)))
@@ -2879,13 +2555,10 @@ pub fn parse_tensor_data_c47(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 20;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF4E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF4E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2894,7 +2567,7 @@ pub fn parse_tensor_data_c47(
         if let VsfType::c47(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF4E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF4E7".into()));
         }
     }
     Ok(VsfType::t_c47(Tensor::new(shape, values)))
@@ -2906,13 +2579,10 @@ pub fn parse_tensor_data_c53(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 9;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF5E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF5E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2921,7 +2591,7 @@ pub fn parse_tensor_data_c53(
         if let VsfType::c53(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF5E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF5E3".into()));
         }
     }
     Ok(VsfType::t_c53(Tensor::new(shape, values)))
@@ -2933,13 +2603,10 @@ pub fn parse_tensor_data_c54(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 10;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF5E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF5E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2948,7 +2615,7 @@ pub fn parse_tensor_data_c54(
         if let VsfType::c54(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF5E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF5E4".into()));
         }
     }
     Ok(VsfType::t_c54(Tensor::new(shape, values)))
@@ -2960,13 +2627,10 @@ pub fn parse_tensor_data_c55(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 12;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF5E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF5E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -2975,7 +2639,7 @@ pub fn parse_tensor_data_c55(
         if let VsfType::c55(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF5E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF5E5".into()));
         }
     }
     Ok(VsfType::t_c55(Tensor::new(shape, values)))
@@ -2987,13 +2651,10 @@ pub fn parse_tensor_data_c56(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 16;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF5E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF5E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3002,7 +2663,7 @@ pub fn parse_tensor_data_c56(
         if let VsfType::c56(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF5E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF5E6".into()));
         }
     }
     Ok(VsfType::t_c56(Tensor::new(shape, values)))
@@ -3014,13 +2675,10 @@ pub fn parse_tensor_data_c57(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 24;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF5E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF5E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3029,7 +2687,7 @@ pub fn parse_tensor_data_c57(
         if let VsfType::c57(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF5E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF5E7".into()));
         }
     }
     Ok(VsfType::t_c57(Tensor::new(shape, values)))
@@ -3041,13 +2699,10 @@ pub fn parse_tensor_data_c63(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 17;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF6E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF6E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3056,7 +2711,7 @@ pub fn parse_tensor_data_c63(
         if let VsfType::c63(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF6E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF6E3".into()));
         }
     }
     Ok(VsfType::t_c63(Tensor::new(shape, values)))
@@ -3068,13 +2723,10 @@ pub fn parse_tensor_data_c64(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 18;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF6E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF6E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3083,7 +2735,7 @@ pub fn parse_tensor_data_c64(
         if let VsfType::c64(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF6E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF6E4".into()));
         }
     }
     Ok(VsfType::t_c64(Tensor::new(shape, values)))
@@ -3095,13 +2747,10 @@ pub fn parse_tensor_data_c65(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 20;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF6E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF6E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3110,7 +2759,7 @@ pub fn parse_tensor_data_c65(
         if let VsfType::c65(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF6E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF6E5".into()));
         }
     }
     Ok(VsfType::t_c65(Tensor::new(shape, values)))
@@ -3122,13 +2771,10 @@ pub fn parse_tensor_data_c66(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 24;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF6E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF6E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3137,7 +2783,7 @@ pub fn parse_tensor_data_c66(
         if let VsfType::c66(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF6E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF6E6".into()));
         }
     }
     Ok(VsfType::t_c66(Tensor::new(shape, values)))
@@ -3149,13 +2795,10 @@ pub fn parse_tensor_data_c67(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 32;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF6E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF6E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3164,7 +2807,7 @@ pub fn parse_tensor_data_c67(
         if let VsfType::c67(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF6E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF6E7".into()));
         }
     }
     Ok(VsfType::t_c67(Tensor::new(shape, values)))
@@ -3176,13 +2819,10 @@ pub fn parse_tensor_data_c73(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 33;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF7E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF7E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3191,7 +2831,7 @@ pub fn parse_tensor_data_c73(
         if let VsfType::c73(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF7E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF7E3".into()));
         }
     }
     Ok(VsfType::t_c73(Tensor::new(shape, values)))
@@ -3203,13 +2843,10 @@ pub fn parse_tensor_data_c74(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 34;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF7E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF7E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3218,7 +2855,7 @@ pub fn parse_tensor_data_c74(
         if let VsfType::c74(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF7E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF7E4".into()));
         }
     }
     Ok(VsfType::t_c74(Tensor::new(shape, values)))
@@ -3230,13 +2867,10 @@ pub fn parse_tensor_data_c75(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 36;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF7E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF7E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3245,7 +2879,7 @@ pub fn parse_tensor_data_c75(
         if let VsfType::c75(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF7E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF7E5".into()));
         }
     }
     Ok(VsfType::t_c75(Tensor::new(shape, values)))
@@ -3257,13 +2891,10 @@ pub fn parse_tensor_data_c76(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 40;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF7E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF7E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3272,7 +2903,7 @@ pub fn parse_tensor_data_c76(
         if let VsfType::c76(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF7E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF7E6".into()));
         }
     }
     Ok(VsfType::t_c76(Tensor::new(shape, values)))
@@ -3284,13 +2915,10 @@ pub fn parse_tensor_data_c77(
     pointer: &mut usize,
     shape: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 48;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF7E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF7E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3299,7 +2927,7 @@ pub fn parse_tensor_data_c77(
         if let VsfType::c77(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF7E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF7E7".into()));
         }
     }
     Ok(VsfType::t_c77(Tensor::new(shape, values)))
@@ -3314,13 +2942,10 @@ pub fn parse_strided_tensor_data_s33(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 2;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF3E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF3E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3329,7 +2954,7 @@ pub fn parse_strided_tensor_data_s33(
         if let VsfType::s33(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF3E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF3E3".into()));
         }
     }
     Ok(VsfType::q_s33(StridedTensor::new(shape, stride, values)))
@@ -3342,13 +2967,10 @@ pub fn parse_strided_tensor_data_s34(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 3;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF3E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF3E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3357,7 +2979,7 @@ pub fn parse_strided_tensor_data_s34(
         if let VsfType::s34(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF3E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF3E4".into()));
         }
     }
     Ok(VsfType::q_s34(StridedTensor::new(shape, stride, values)))
@@ -3370,13 +2992,10 @@ pub fn parse_strided_tensor_data_s35(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 5;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF3E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF3E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3385,7 +3004,7 @@ pub fn parse_strided_tensor_data_s35(
         if let VsfType::s35(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF3E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF3E5".into()));
         }
     }
     Ok(VsfType::q_s35(StridedTensor::new(shape, stride, values)))
@@ -3398,13 +3017,10 @@ pub fn parse_strided_tensor_data_s36(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 9;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF3E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF3E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3413,7 +3029,7 @@ pub fn parse_strided_tensor_data_s36(
         if let VsfType::s36(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF3E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF3E6".into()));
         }
     }
     Ok(VsfType::q_s36(StridedTensor::new(shape, stride, values)))
@@ -3426,13 +3042,10 @@ pub fn parse_strided_tensor_data_s37(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 17;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF3E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF3E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3441,7 +3054,7 @@ pub fn parse_strided_tensor_data_s37(
         if let VsfType::s37(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF3E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF3E7".into()));
         }
     }
     Ok(VsfType::q_s37(StridedTensor::new(shape, stride, values)))
@@ -3454,13 +3067,10 @@ pub fn parse_strided_tensor_data_s43(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 3;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF4E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF4E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3469,7 +3079,7 @@ pub fn parse_strided_tensor_data_s43(
         if let VsfType::s43(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF4E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF4E3".into()));
         }
     }
     Ok(VsfType::q_s43(StridedTensor::new(shape, stride, values)))
@@ -3482,13 +3092,10 @@ pub fn parse_strided_tensor_data_s44(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF4E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF4E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3497,7 +3104,7 @@ pub fn parse_strided_tensor_data_s44(
         if let VsfType::s44(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF4E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF4E4".into()));
         }
     }
     Ok(VsfType::q_s44(StridedTensor::new(shape, stride, values)))
@@ -3510,13 +3117,10 @@ pub fn parse_strided_tensor_data_s45(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 6;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF4E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF4E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3525,7 +3129,7 @@ pub fn parse_strided_tensor_data_s45(
         if let VsfType::s45(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF4E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF4E5".into()));
         }
     }
     Ok(VsfType::q_s45(StridedTensor::new(shape, stride, values)))
@@ -3538,13 +3142,10 @@ pub fn parse_strided_tensor_data_s46(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 10;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF4E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF4E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3553,7 +3154,7 @@ pub fn parse_strided_tensor_data_s46(
         if let VsfType::s46(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF4E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF4E6".into()));
         }
     }
     Ok(VsfType::q_s46(StridedTensor::new(shape, stride, values)))
@@ -3566,13 +3167,10 @@ pub fn parse_strided_tensor_data_s47(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 18;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF4E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF4E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3581,7 +3179,7 @@ pub fn parse_strided_tensor_data_s47(
         if let VsfType::s47(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF4E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF4E7".into()));
         }
     }
     Ok(VsfType::q_s47(StridedTensor::new(shape, stride, values)))
@@ -3594,13 +3192,10 @@ pub fn parse_strided_tensor_data_s53(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 5;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF5E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF5E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3609,7 +3204,7 @@ pub fn parse_strided_tensor_data_s53(
         if let VsfType::s53(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF5E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF5E3".into()));
         }
     }
     Ok(VsfType::q_s53(StridedTensor::new(shape, stride, values)))
@@ -3622,13 +3217,10 @@ pub fn parse_strided_tensor_data_s54(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 6;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF5E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF5E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3637,7 +3229,7 @@ pub fn parse_strided_tensor_data_s54(
         if let VsfType::s54(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF5E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF5E4".into()));
         }
     }
     Ok(VsfType::q_s54(StridedTensor::new(shape, stride, values)))
@@ -3650,13 +3242,10 @@ pub fn parse_strided_tensor_data_s55(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF5E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF5E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3665,7 +3254,7 @@ pub fn parse_strided_tensor_data_s55(
         if let VsfType::s55(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF5E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF5E5".into()));
         }
     }
     Ok(VsfType::q_s55(StridedTensor::new(shape, stride, values)))
@@ -3678,13 +3267,10 @@ pub fn parse_strided_tensor_data_s56(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 12;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF5E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF5E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3693,7 +3279,7 @@ pub fn parse_strided_tensor_data_s56(
         if let VsfType::s56(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF5E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF5E6".into()));
         }
     }
     Ok(VsfType::q_s56(StridedTensor::new(shape, stride, values)))
@@ -3706,13 +3292,10 @@ pub fn parse_strided_tensor_data_s57(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 20;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF5E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF5E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3721,7 +3304,7 @@ pub fn parse_strided_tensor_data_s57(
         if let VsfType::s57(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF5E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF5E7".into()));
         }
     }
     Ok(VsfType::q_s57(StridedTensor::new(shape, stride, values)))
@@ -3734,13 +3317,10 @@ pub fn parse_strided_tensor_data_s63(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 9;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF6E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF6E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3749,7 +3329,7 @@ pub fn parse_strided_tensor_data_s63(
         if let VsfType::s63(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF6E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF6E3".into()));
         }
     }
     Ok(VsfType::q_s63(StridedTensor::new(shape, stride, values)))
@@ -3762,13 +3342,10 @@ pub fn parse_strided_tensor_data_s64(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 10;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF6E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF6E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3777,7 +3354,7 @@ pub fn parse_strided_tensor_data_s64(
         if let VsfType::s64(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF6E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF6E4".into()));
         }
     }
     Ok(VsfType::q_s64(StridedTensor::new(shape, stride, values)))
@@ -3790,13 +3367,10 @@ pub fn parse_strided_tensor_data_s65(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 12;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF6E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF6E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3805,7 +3379,7 @@ pub fn parse_strided_tensor_data_s65(
         if let VsfType::s65(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF6E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF6E5".into()));
         }
     }
     Ok(VsfType::q_s65(StridedTensor::new(shape, stride, values)))
@@ -3818,13 +3392,10 @@ pub fn parse_strided_tensor_data_s66(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 16;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF6E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF6E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3833,7 +3404,7 @@ pub fn parse_strided_tensor_data_s66(
         if let VsfType::s66(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF6E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF6E6".into()));
         }
     }
     Ok(VsfType::q_s66(StridedTensor::new(shape, stride, values)))
@@ -3846,13 +3417,10 @@ pub fn parse_strided_tensor_data_s67(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 24;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF6E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF6E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3861,7 +3429,7 @@ pub fn parse_strided_tensor_data_s67(
         if let VsfType::s67(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF6E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF6E7".into()));
         }
     }
     Ok(VsfType::q_s67(StridedTensor::new(shape, stride, values)))
@@ -3874,13 +3442,10 @@ pub fn parse_strided_tensor_data_s73(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 17;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF7E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF7E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3889,7 +3454,7 @@ pub fn parse_strided_tensor_data_s73(
         if let VsfType::s73(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF7E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF7E3".into()));
         }
     }
     Ok(VsfType::q_s73(StridedTensor::new(shape, stride, values)))
@@ -3902,13 +3467,10 @@ pub fn parse_strided_tensor_data_s74(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 18;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF7E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF7E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3917,7 +3479,7 @@ pub fn parse_strided_tensor_data_s74(
         if let VsfType::s74(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF7E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF7E4".into()));
         }
     }
     Ok(VsfType::q_s74(StridedTensor::new(shape, stride, values)))
@@ -3930,13 +3492,10 @@ pub fn parse_strided_tensor_data_s75(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 20;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF7E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF7E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3945,7 +3504,7 @@ pub fn parse_strided_tensor_data_s75(
         if let VsfType::s75(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF7E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF7E5".into()));
         }
     }
     Ok(VsfType::q_s75(StridedTensor::new(shape, stride, values)))
@@ -3958,13 +3517,10 @@ pub fn parse_strided_tensor_data_s76(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 24;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF7E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF7E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -3973,7 +3529,7 @@ pub fn parse_strided_tensor_data_s76(
         if let VsfType::s76(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF7E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF7E6".into()));
         }
     }
     Ok(VsfType::q_s76(StridedTensor::new(shape, stride, values)))
@@ -3986,13 +3542,10 @@ pub fn parse_strided_tensor_data_s77(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 32;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided ScalarF7E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided ScalarF7E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4001,7 +3554,7 @@ pub fn parse_strided_tensor_data_s77(
         if let VsfType::s77(scalar) = val {
             values.push(scalar);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected ScalarF7E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected ScalarF7E7".into()));
         }
     }
     Ok(VsfType::q_s77(StridedTensor::new(shape, stride, values)))
@@ -4016,13 +3569,10 @@ pub fn parse_strided_tensor_data_c33(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 3;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF3E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF3E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4031,7 +3581,7 @@ pub fn parse_strided_tensor_data_c33(
         if let VsfType::c33(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF3E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF3E3".into()));
         }
     }
     Ok(VsfType::q_c33(StridedTensor::new(shape, stride, values)))
@@ -4044,13 +3594,10 @@ pub fn parse_strided_tensor_data_c34(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 4;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF3E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF3E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4059,7 +3606,7 @@ pub fn parse_strided_tensor_data_c34(
         if let VsfType::c34(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF3E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF3E4".into()));
         }
     }
     Ok(VsfType::q_c34(StridedTensor::new(shape, stride, values)))
@@ -4072,13 +3619,10 @@ pub fn parse_strided_tensor_data_c35(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 6;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF3E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF3E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4087,7 +3631,7 @@ pub fn parse_strided_tensor_data_c35(
         if let VsfType::c35(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF3E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF3E5".into()));
         }
     }
     Ok(VsfType::q_c35(StridedTensor::new(shape, stride, values)))
@@ -4100,13 +3644,10 @@ pub fn parse_strided_tensor_data_c36(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 10;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF3E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF3E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4115,7 +3656,7 @@ pub fn parse_strided_tensor_data_c36(
         if let VsfType::c36(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF3E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF3E6".into()));
         }
     }
     Ok(VsfType::q_c36(StridedTensor::new(shape, stride, values)))
@@ -4128,13 +3669,10 @@ pub fn parse_strided_tensor_data_c37(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 18;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF3E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF3E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4143,7 +3681,7 @@ pub fn parse_strided_tensor_data_c37(
         if let VsfType::c37(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF3E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF3E7".into()));
         }
     }
     Ok(VsfType::q_c37(StridedTensor::new(shape, stride, values)))
@@ -4156,13 +3694,10 @@ pub fn parse_strided_tensor_data_c43(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 5;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF4E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF4E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4171,7 +3706,7 @@ pub fn parse_strided_tensor_data_c43(
         if let VsfType::c43(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF4E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF4E3".into()));
         }
     }
     Ok(VsfType::q_c43(StridedTensor::new(shape, stride, values)))
@@ -4184,13 +3719,10 @@ pub fn parse_strided_tensor_data_c44(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 6;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF4E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF4E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4199,7 +3731,7 @@ pub fn parse_strided_tensor_data_c44(
         if let VsfType::c44(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF4E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF4E4".into()));
         }
     }
     Ok(VsfType::q_c44(StridedTensor::new(shape, stride, values)))
@@ -4212,13 +3744,10 @@ pub fn parse_strided_tensor_data_c45(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 8;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF4E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF4E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4227,7 +3756,7 @@ pub fn parse_strided_tensor_data_c45(
         if let VsfType::c45(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF4E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF4E5".into()));
         }
     }
     Ok(VsfType::q_c45(StridedTensor::new(shape, stride, values)))
@@ -4240,13 +3769,10 @@ pub fn parse_strided_tensor_data_c46(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 12;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF4E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF4E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4255,7 +3781,7 @@ pub fn parse_strided_tensor_data_c46(
         if let VsfType::c46(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF4E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF4E6".into()));
         }
     }
     Ok(VsfType::q_c46(StridedTensor::new(shape, stride, values)))
@@ -4268,13 +3794,10 @@ pub fn parse_strided_tensor_data_c47(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 20;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF4E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF4E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4283,7 +3806,7 @@ pub fn parse_strided_tensor_data_c47(
         if let VsfType::c47(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF4E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF4E7".into()));
         }
     }
     Ok(VsfType::q_c47(StridedTensor::new(shape, stride, values)))
@@ -4296,13 +3819,10 @@ pub fn parse_strided_tensor_data_c53(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 9;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF5E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF5E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4311,7 +3831,7 @@ pub fn parse_strided_tensor_data_c53(
         if let VsfType::c53(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF5E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF5E3".into()));
         }
     }
     Ok(VsfType::q_c53(StridedTensor::new(shape, stride, values)))
@@ -4324,13 +3844,10 @@ pub fn parse_strided_tensor_data_c54(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 10;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF5E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF5E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4339,7 +3856,7 @@ pub fn parse_strided_tensor_data_c54(
         if let VsfType::c54(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF5E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF5E4".into()));
         }
     }
     Ok(VsfType::q_c54(StridedTensor::new(shape, stride, values)))
@@ -4352,13 +3869,10 @@ pub fn parse_strided_tensor_data_c55(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 12;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF5E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF5E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4367,7 +3881,7 @@ pub fn parse_strided_tensor_data_c55(
         if let VsfType::c55(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF5E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF5E5".into()));
         }
     }
     Ok(VsfType::q_c55(StridedTensor::new(shape, stride, values)))
@@ -4380,13 +3894,10 @@ pub fn parse_strided_tensor_data_c56(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 16;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF5E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF5E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4395,7 +3906,7 @@ pub fn parse_strided_tensor_data_c56(
         if let VsfType::c56(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF5E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF5E6".into()));
         }
     }
     Ok(VsfType::q_c56(StridedTensor::new(shape, stride, values)))
@@ -4408,13 +3919,10 @@ pub fn parse_strided_tensor_data_c57(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 24;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF5E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF5E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4423,7 +3931,7 @@ pub fn parse_strided_tensor_data_c57(
         if let VsfType::c57(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF5E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF5E7".into()));
         }
     }
     Ok(VsfType::q_c57(StridedTensor::new(shape, stride, values)))
@@ -4436,13 +3944,10 @@ pub fn parse_strided_tensor_data_c63(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 17;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF6E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF6E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4451,7 +3956,7 @@ pub fn parse_strided_tensor_data_c63(
         if let VsfType::c63(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF6E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF6E3".into()));
         }
     }
     Ok(VsfType::q_c63(StridedTensor::new(shape, stride, values)))
@@ -4464,13 +3969,10 @@ pub fn parse_strided_tensor_data_c64(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 18;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF6E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF6E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4479,7 +3981,7 @@ pub fn parse_strided_tensor_data_c64(
         if let VsfType::c64(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF6E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF6E4".into()));
         }
     }
     Ok(VsfType::q_c64(StridedTensor::new(shape, stride, values)))
@@ -4492,13 +3994,10 @@ pub fn parse_strided_tensor_data_c65(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 20;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF6E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF6E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4507,7 +4006,7 @@ pub fn parse_strided_tensor_data_c65(
         if let VsfType::c65(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF6E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF6E5".into()));
         }
     }
     Ok(VsfType::q_c65(StridedTensor::new(shape, stride, values)))
@@ -4520,13 +4019,10 @@ pub fn parse_strided_tensor_data_c66(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 24;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF6E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF6E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4535,7 +4031,7 @@ pub fn parse_strided_tensor_data_c66(
         if let VsfType::c66(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF6E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF6E6".into()));
         }
     }
     Ok(VsfType::q_c66(StridedTensor::new(shape, stride, values)))
@@ -4548,13 +4044,10 @@ pub fn parse_strided_tensor_data_c67(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 32;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF6E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF6E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4563,7 +4056,7 @@ pub fn parse_strided_tensor_data_c67(
         if let VsfType::c67(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF6E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF6E7".into()));
         }
     }
     Ok(VsfType::q_c67(StridedTensor::new(shape, stride, values)))
@@ -4576,13 +4069,10 @@ pub fn parse_strided_tensor_data_c73(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 33;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF7E3 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF7E3 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4591,7 +4081,7 @@ pub fn parse_strided_tensor_data_c73(
         if let VsfType::c73(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF7E3"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF7E3".into()));
         }
     }
     Ok(VsfType::q_c73(StridedTensor::new(shape, stride, values)))
@@ -4604,13 +4094,10 @@ pub fn parse_strided_tensor_data_c74(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 34;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF7E4 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF7E4 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4619,7 +4106,7 @@ pub fn parse_strided_tensor_data_c74(
         if let VsfType::c74(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF7E4"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF7E4".into()));
         }
     }
     Ok(VsfType::q_c74(StridedTensor::new(shape, stride, values)))
@@ -4632,13 +4119,10 @@ pub fn parse_strided_tensor_data_c75(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 36;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF7E5 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF7E5 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4647,7 +4131,7 @@ pub fn parse_strided_tensor_data_c75(
         if let VsfType::c75(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF7E5"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF7E5".into()));
         }
     }
     Ok(VsfType::q_c75(StridedTensor::new(shape, stride, values)))
@@ -4660,13 +4144,10 @@ pub fn parse_strided_tensor_data_c76(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 40;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF7E6 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF7E6 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4675,7 +4156,7 @@ pub fn parse_strided_tensor_data_c76(
         if let VsfType::c76(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF7E6"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF7E6".into()));
         }
     }
     Ok(VsfType::q_c76(StridedTensor::new(shape, stride, values)))
@@ -4688,13 +4169,10 @@ pub fn parse_strided_tensor_data_c77(
     shape: Vec<usize>,
     stride: Vec<usize>,
     total_elements: usize,
-) -> Result<VsfType, Error> {
+) -> Result<VsfType, DecodeError> {
     let byte_count = total_elements * 48;
     if *pointer + byte_count > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for strided CircleF7E7 tensor",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for strided CircleF7E7 tensor".into()));
     }
 
     let mut values = Vec::with_capacity(total_elements);
@@ -4703,7 +4181,7 @@ pub fn parse_strided_tensor_data_c77(
         if let VsfType::c77(circle) = val {
             values.push(circle);
         } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Expected CircleF7E7"));
+            return Err(DecodeError::InvalidDataMsg("Expected CircleF7E7".into()));
         }
     }
     Ok(VsfType::q_c77(StridedTensor::new(shape, stride, values)))

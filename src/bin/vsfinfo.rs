@@ -1,7 +1,6 @@
 //! VSF File Inspector - A tool for viewing, verifying, and extracting VSF file contents
 //!
-//! Similar to exiftool for images, vsfinfo provides detailed inspection of VSF files
-//! including metadata, structure verification, and field extraction.
+//! Similar to exiftool for images, vsfinfo provides detailed inspection of VSF files including metadata, structure verification, and field extraction.
 
 use clap::{Parser, Subcommand};
 use colored::*;

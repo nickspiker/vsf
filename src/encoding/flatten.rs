@@ -1,3 +1,4 @@
+use crate::prelude::*;
 use super::traits::{EncodeNumber, EncodeNumberInclusive};
 #[cfg(feature = "text")]
 use crate::text_encoding::encode_text;
@@ -5,8 +6,7 @@ use crate::types::{EtType, VsfType};
 
 /// Create a hash placeholder with zeros (for provenance hash computation, etc.)
 ///
-/// This function creates a properly formatted hash field filled with zeros,
-/// used when the actual hash will be computed and written later.
+/// This function creates a properly formatted hash field filled with zeros, used when the actual hash will be computed and written later.
 ///
 /// # Arguments
 /// * `hash_type` - The hash subtype: `b'b'` (BLAKE3), `b's'` (SHA2), or `b'p'` (provenance)
@@ -162,45 +162,62 @@ impl VsfType {
                 }
                 #[cfg(not(feature = "text"))]
                 {
-                    // SECURITY: VsfType::x MUST only be used with the 'text' feature enabled.
-                    // Without it, this would send naked type bytes (no signature verification),
-                    // creating a security vulnerability where responses can be spoofed.
-                    // Use VsfType::l for ASCII text or build proper signed VSF files instead.
+                    // SECURITY: VsfType::x MUST only be used with the 'text' feature enabled. Without it, this would send naked type bytes (no signature verification), creating a security vulnerability where responses can be spoofed. Use VsfType::a for ASCII text or build proper signed VSF files instead.
                     panic!(
                         "VsfType::x requires 'text' feature for Huffman compression. \
-                         Use VsfType::l for ASCII text instead. Message: '{}'",
+                         Use VsfType::a for ASCII text instead. Message: '{}'",
                         value
                     );
                 }
             }
 
             VsfType::e(value) => {
-                let mut flat = Vec::new();
-                match value {
-                    EtType::i(value) => {
-                        flat.push(b'e');
-                        flat.push(b'i');
-                        flat.extend_from_slice(&value.encode_number());
+                #[allow(deprecated)]
+                let flat = match value {
+                    EtType::e5(v) => {
+                        // e5 = 32-bit oscillation count: 2 tag bytes + 4 data bytes
+                        let mut f = vec![b'e', b'5'];
+                        f.extend_from_slice(&v.to_be_bytes());
+                        f
                     }
-                    EtType::f5(value) => {
-                        flat.push(b'e');
-                        flat.push(b'f');
-                        flat.push(b'5');
-                        flat.extend_from_slice(&value.to_be_bytes());
+                    EtType::e6(v) => {
+                        // e6 = 64-bit oscillation count: 2 tag bytes + 8 data bytes
+                        let mut f = vec![b'e', b'6'];
+                        f.extend_from_slice(&v.to_be_bytes());
+                        f
                     }
-                    EtType::f6(value) => {
-                        flat.push(b'e');
-                        flat.push(b'f');
-                        flat.push(b'6');
-                        flat.extend_from_slice(&value.to_be_bytes());
+                    EtType::e7(v) => {
+                        // e7 = 128-bit oscillation count: 2 tag bytes + 16 data bytes
+                        let mut f = vec![b'e', b'7'];
+                        f.extend_from_slice(&v.to_be_bytes());
+                        f
                     }
-                }
+                    EtType::f5(v) => {
+                        // deprecated ef5: still encodeable for round-trip compat
+                        let mut f = vec![b'e', b'f', b'5'];
+                        f.extend_from_slice(&v.to_be_bytes());
+                        f
+                    }
+                    EtType::f6(v) => {
+                        // deprecated ef6: still encodeable for round-trip compat
+                        let mut f = vec![b'e', b'f', b'6'];
+                        f.extend_from_slice(&v.to_be_bytes());
+                        f
+                    }
+                };
                 flat
             }
 
             VsfType::w(coord) => {
-                let mut flat = vec![b'w'];
+                // Wire: "w6" + 8 bytes big-endian u64. Sized-variant convention: 2^6 = 64 bits. w5 = u32 coarse, w6 = u64 standard, w7 = u128 fine.
+                let mut flat = vec![b'w', b'6'];
                 flat.extend_from_slice(&coord.raw().to_be_bytes());
+                flat
+            }
+
+            VsfType::wa(addr) => {
+                let mut flat = vec![b'w', b'a'];
+                flat.extend_from_slice(&addr.to_wire());
                 flat
             }
 
@@ -793,10 +810,7 @@ impl VsfType {
                 flat.extend_from_slice(&size.exponent.to_be_bytes());
                 // Encode colour
                 flat.extend_from_slice(&colour.flatten());
-                // Encode optional TextStyle — tagged fields, terminated by 0x00.
-                // Tags: b'l'=left, b'r'=right (no value), b'f'+32=font hash,
-                //       b'e'/b'k'/b'w'/b'i'/b'x' + s44 (4 bytes each).
-                // Absence of l/r tag = center (default).
+                // Encode optional TextStyle — tagged fields, terminated by 0x00. Tags: b'l'=left, b'r'=right (no value), b'f'+32=font hash, b'e'/b'k'/b'w'/b'i'/b'x' + s44 (4 bytes each). Absence of l/r tag = center (default).
                 match style {
                     None => flat.push(0x00),
                     Some(s) => {
@@ -851,8 +865,8 @@ impl VsfType {
                 flat.extend_from_slice(&size.real.to_be_bytes());
                 flat.extend_from_slice(&size.imaginary.to_be_bytes());
                 flat.extend_from_slice(&size.exponent.to_be_bytes());
-                // Encode label (string as x type)
-                let label_vsf = VsfType::l(label.clone());
+                // Encode label (ASCII string)
+                let label_vsf = VsfType::a(label.clone());
                 flat.extend_from_slice(&label_vsf.flatten());
                 // Encode variant
                 flat.push(match variant {
@@ -876,8 +890,8 @@ impl VsfType {
                 flat.extend_from_slice(&size.real.to_be_bytes());
                 flat.extend_from_slice(&size.imaginary.to_be_bytes());
                 flat.extend_from_slice(&size.exponent.to_be_bytes());
-                // Encode placeholder (string as l type — ASCII, no Huffman dependency)
-                let placeholder_vsf = VsfType::l(placeholder.clone());
+                // Encode placeholder (ASCII, no Huffman dependency)
+                let placeholder_vsf = VsfType::a(placeholder.clone());
                 flat.extend_from_slice(&placeholder_vsf.flatten());
                 // Encode colour
                 flat.extend_from_slice(&colour.flatten());
@@ -949,8 +963,7 @@ impl VsfType {
             #[cfg(feature = "spirix")]
             VsfType::row(transform, children) => {
                 let mut flat = vec![b'r', b'o', b'w'];
-                // Encode transform
-                // translate (Option<c44>)
+                // Encode transform translate (Option<c44>)
                 match &transform.translate {
                     None => flat.push(0x00),
                     Some(t) => {
@@ -1030,9 +1043,9 @@ impl VsfType {
                 flat
             }
 
-            VsfType::l(value) => {
+            VsfType::a(value) => {
                 let mut flat = Vec::new();
-                flat.push(b'l');
+                flat.push(b'a');
                 flat.extend_from_slice(&value.len().encode_number());
                 flat.extend_from_slice(value.as_bytes());
                 flat
@@ -1054,11 +1067,56 @@ impl VsfType {
                 flat
             }
 
-            VsfType::L(value, _inclusive) => {
-                // File length - same encoding as b (inclusive mode handled by stabilization loop)
+            VsfType::l(value, _inclusive) => {
+                // Length in bytes (wire or file). Inclusive mode handled by stabilization.
                 let mut flat = Vec::new();
-                flat.push(b'L');
+                flat.push(b'l');
                 flat.extend_from_slice(&value.encode_number());
+                flat
+            }
+
+            VsfType::na(scheme, host, port) => {
+                let mut flat = vec![b'n', b'a'];
+                flat.push(*scheme);
+                flat.extend_from_slice(host.as_bytes());
+                flat.push(0); // null-terminate host
+                if let Some(p) = port { flat.extend_from_slice(&p.to_be_bytes()); }
+                flat
+            }
+            VsfType::nh(host) => {
+                let mut flat = vec![b'n', b'h'];
+                flat.extend_from_slice(host.as_bytes());
+                flat.push(0);
+                flat
+            }
+            VsfType::ni(addr) => { let mut f = vec![b'n', b'i']; f.extend_from_slice(addr); f }
+            VsfType::nj(addr) => { let mut f = vec![b'n', b'j']; f.extend_from_slice(addr); f }
+            VsfType::nc(addr, prefix) => {
+                let mut flat = vec![b'n', b'c'];
+                flat.extend_from_slice(addr.as_bytes());
+                flat.push(0);
+                flat.push(*prefix);
+                flat
+            }
+            VsfType::nm(mac) => { let mut f = vec![b'n', b'm']; f.extend_from_slice(mac); f }
+            VsfType::np(port) => { let mut f = vec![b'n', b'p']; f.extend_from_slice(&port.to_be_bytes()); f }
+            VsfType::ns(host, port) => {
+                let mut flat = vec![b'n', b's'];
+                flat.extend_from_slice(host.as_bytes());
+                flat.push(0);
+                flat.extend_from_slice(&port.to_be_bytes());
+                flat
+            }
+            VsfType::nu(url) => {
+                let mut flat = vec![b'n', b'u'];
+                flat.extend_from_slice(url.as_bytes());
+                flat.push(0);
+                flat
+            }
+            VsfType::nn(name) => {
+                let mut flat = vec![b'n', b'n'];
+                flat.extend_from_slice(name.as_bytes());
+                flat.push(0);
                 flat
             }
 
@@ -1079,13 +1137,6 @@ impl VsfType {
             VsfType::y(value) => {
                 let mut flat = Vec::new();
                 flat.push(b'y');
-                flat.extend_from_slice(&value.encode_number());
-                flat
-            }
-
-            VsfType::m(value) => {
-                let mut flat = Vec::new();
-                flat.push(b'm');
                 flat.extend_from_slice(&value.encode_number());
                 flat
             }
@@ -1347,29 +1398,29 @@ impl VsfType {
             }
 
             // ==================== MAC (MESSAGE AUTHENTICATION CODE) ====================
-            VsfType::ah(value) => {
-                let mut flat = vec![b'a', b'h'];
+            VsfType::mh(value) => {
+                let mut flat = vec![b'm', b'h'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::ap(value) => {
-                let mut flat = vec![b'a', b'p'];
+            VsfType::mp(value) => {
+                let mut flat = vec![b'm', b'p'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::ab(value) => {
-                let mut flat = vec![b'a', b'b'];
+            VsfType::mb(value) => {
+                let mut flat = vec![b'm', b'b'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
             }
 
-            VsfType::ac(value) => {
-                let mut flat = vec![b'a', b'c'];
+            VsfType::mc(value) => {
+                let mut flat = vec![b'm', b'c'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
                 flat.extend_from_slice(value);
                 flat
@@ -4857,8 +4908,8 @@ impl VsfType {
                 1 + encoded_usize_len(encoded_len) + encoded_len
             }
 
-            VsfType::l(s) => {
-                // 'l' + encoded_string
+            VsfType::a(s) => {
+                // 'a' + encoded_string (ASCII text)
                 #[cfg(feature = "text")]
                 let encoded_len = encode_text(s).len();
                 #[cfg(not(feature = "text"))]
@@ -4877,11 +4928,21 @@ impl VsfType {
                 1 + encoded_usize_len(*size)
             }
 
-            VsfType::L(size, _inclusive) => {
-                // 'L' + encoded file length (as usize)
-                // Note: inclusive mode is handled by stabilization, encoding is same
+            VsfType::l(size, _inclusive) => {
+                // 'l' + encoded size (length in bytes, wire or file)
                 1 + encoded_usize_len(*size)
             }
+
+            VsfType::na(_, host, port) => { 2 + 1 + host.len() + 1 + if port.is_some() { 2 } else { 0 } }
+            VsfType::nh(host) => { 2 + host.len() + 1 }
+            VsfType::ni(_) => { 2 + 4 }
+            VsfType::nj(_) => { 2 + 16 }
+            VsfType::nc(addr, _) => { 2 + addr.len() + 1 + 1 }
+            VsfType::nm(_) => { 2 + 6 }
+            VsfType::np(_) => { 2 + 2 }
+            VsfType::ns(host, _) => { 2 + host.len() + 1 + 2 }
+            VsfType::nu(url) => { 2 + url.len() + 1 }
+            VsfType::nn(name) => { 2 + name.len() + 1 }
 
             VsfType::n(count) => {
                 // 'n' + encoded count (as usize)
@@ -4933,8 +4994,8 @@ impl VsfType {
                 3 + encoded_usize_len(bytes.len()) + bytes.len()
             }
 
-            VsfType::ah(bytes) | VsfType::ap(bytes) | VsfType::ab(bytes) | VsfType::ac(bytes) => {
-                // prefix + encoded_length + data
+            VsfType::mh(bytes) | VsfType::mp(bytes) | VsfType::mb(bytes) | VsfType::mc(bytes) => {
+                // prefix + encoded_length + data (MAC family)
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
             }
 

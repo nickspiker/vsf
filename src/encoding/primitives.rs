@@ -1,3 +1,4 @@
+use crate::prelude::*;
 use super::traits::{EncodeNumber, EncodeNumberInclusive};
 
 // ==================== UNSIGNED INTEGER ENCODING ====================
@@ -250,9 +251,7 @@ mod tests {
 
     #[test]
     fn test_encode_inclusive() {
-        // Value 256 in inclusive mode
-        // overhead for u4 = 24 bits = 3 bytes
-        // 256 + 24 = 280 = 0x0118
+        // Value 256 in inclusive mode overhead for u4 = 24 bits = 3 bytes 256 + 24 = 280 = 0x0118
         let result = 256usize.encode_usize_inclusive();
         assert_eq!(result[0], b'u');
         assert_eq!(result[1], b'4');

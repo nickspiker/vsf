@@ -1,13 +1,13 @@
 //! Handle identity system
 //!
-//! Handles are plaintext names that map to deterministic public IDs via
-//! memory-hard proof-of-work. The same handle always produces the same ID.
+//! Handles are plaintext names that map to deterministic public IDs via memory-hard proof-of-work. The same handle always produces the same ID.
 //!
 //! Flow: plaintext → VsfType::x(handle).flatten() → blake3 → handle_proof → public ID
 //!
 //! The public ID becomes the capsule's provenance hash, and the base64url-encoded
 //! ID becomes the filename for storage/retrieval.
 
+use crate::prelude::*;
 use blake3;
 use i256::U256;
 
@@ -20,8 +20,7 @@ const ROUNDS: usize = 17;
 
 /// Compute the deterministic public ID for a handle hash.
 ///
-/// Takes the BLAKE3 hash of a VSF-encoded handle string and produces a
-/// public ID through 17 rounds of memory-hard sequential processing.
+/// Takes the BLAKE3 hash of a VSF-encoded handle string and produces a public ID through 17 rounds of memory-hard sequential processing.
 ///
 /// # Algorithm
 ///
@@ -40,8 +39,7 @@ const ROUNDS: usize = 17;
 /// - Verifiable: anyone can recompute
 pub fn handle_proof(hash: &blake3::Hash) -> blake3::Hash {
     let mut scratch = Vec::with_capacity(SIZE);
-    // SAFETY: Buffer is completely filled by Phase 1 and Phase 2 before the final hash.
-    // SIZE is exactly divisible by CHUNK_SIZE (24_873_856 / 32 = 777_308).
+    // SAFETY: Buffer is completely filled by Phase 1 and Phase 2 before the final hash. SIZE is exactly divisible by CHUNK_SIZE (24_873_856 / 32 = 777_308).
     unsafe {
         scratch.set_len(SIZE);
     }
@@ -108,12 +106,11 @@ pub fn handle_proof(hash: &blake3::Hash) -> blake3::Hash {
 
 /// Compute the public ID for a plaintext handle string.
 ///
-/// VSF-encodes the handle as `VsfType::l` (ASCII label), hashes it, runs the proof.
-/// Uses `l` not `x` to avoid the Huffman/text feature dependency — handles are ASCII.
+/// VSF-encodes the handle as `VsfType::a` (ASCII text), hashes it, runs the proof. Uses `a` not `x` to avoid the Huffman/text feature dependency — handles are ASCII.
 ///
-/// NOTE: photon's derive_identity_seed uses VsfType::x — update it to VsfType::l.
+/// NOTE: photon's derive_identity_seed uses VsfType::x — update it to VsfType::a.
 pub fn handle_to_public_id(handle: &str) -> blake3::Hash {
-    let vsf_bytes = crate::types::VsfType::l(handle.to_string()).flatten();
+    let vsf_bytes = crate::types::VsfType::a(handle.to_string()).flatten();
     let handle_hash = blake3::hash(&vsf_bytes);
     handle_proof(&handle_hash)
 }

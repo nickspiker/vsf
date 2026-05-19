@@ -1,7 +1,6 @@
 //! Cryptographic algorithm identifiers for VSF hash, signature, and key types
 //!
-//! Each type (h, g, k) uses a single lowercase ASCII letter (a-z) to identify
-//! the algorithm. This gives 26 slots per type, with most reserved for future use.
+//! Each type (h, g, k) uses a single lowercase ASCII letter (a-z) to identify the algorithm. This gives 26 slots per type, with most reserved for future use.
 //!
 //! ## Important: Algorithm vs Output Size
 //!
@@ -16,54 +15,33 @@
 //! - **BLAKE2b**: Can output 1-64 bytes
 //! - **SHA-3**: Supports "XOF" (extendable output) variants
 //!
-//! When storing a hash, the actual output length is encoded in the VSF `h` type's length field.
-//! The algorithm ID just tells you which hash function was used.
+//! When storing a hash, the actual output length is encoded in the VSF `h` type's length field. The algorithm ID just tells you which hash function was used.
 
 // ==================== MAC ALGORITHMS (a type) ====================
 
 /// HMAC-SHA256 - RECOMMENDED DEFAULT
 ///
-/// **Algorithm:** Hash-based Message Authentication Code using SHA-256
-/// **Fixed output:** 32 bytes (256 bits)
-/// **Performance:** Fast, widely supported
-/// **Security:** 128-bit security level
-/// **Use case:** General-purpose authenticated encryption
+/// **Algorithm:** Hash-based Message Authentication Code using SHA-256 **Fixed output:** 32 bytes (256 bits) **Performance:** Fast, widely supported **Security:** 128-bit security level **Use case:** General-purpose authenticated encryption
 pub const MAC_HMAC_SHA256: u8 = b'h';
 
 /// HMAC-SHA512
 ///
-/// **Algorithm:** Hash-based Message Authentication Code using SHA-512
-/// **Fixed output:** 64 bytes (512 bits)
-/// **Performance:** Fast on 64-bit systems
-/// **Security:** 256-bit security level
+/// **Algorithm:** Hash-based Message Authentication Code using SHA-512 **Fixed output:** 64 bytes (512 bits) **Performance:** Fast on 64-bit systems **Security:** 256-bit security level
 pub const MAC_HMAC_SHA512: u8 = b't'; // 't' for "twelve-eight" (512 bits)
 
 /// Poly1305
 ///
-/// **Algorithm:** One-time authenticator (Poly1305-AES or standalone)
-/// **Fixed output:** 16 bytes (128 bits)
-/// **Performance:** Extremely fast
-/// **Security:** 128-bit security level
-/// **Use case:** Commonly paired with ChaCha20 for authenticated encryption
-/// **Note:** Requires unique nonce per message with same key
+/// **Algorithm:** One-time authenticator (Poly1305-AES or standalone) **Fixed output:** 16 bytes (128 bits) **Performance:** Extremely fast **Security:** 128-bit security level **Use case:** Commonly paired with ChaCha20 for authenticated encryption **Note:** Requires unique nonce per message with same key
 pub const MAC_POLY1305: u8 = b'p';
 
 /// BLAKE3 keyed mode
 ///
-/// **Algorithm:** BLAKE3 with keying material (MAC mode)
-/// **Default output:** 32 bytes (variable length supported)
-/// **Performance:** Extremely fast, modern design
-/// **Security:** 128-bit security level at 256-bit output
-/// **Note:** BLAKE3's keyed mode is a true MAC, not just HMAC-BLAKE3
+/// **Algorithm:** BLAKE3 with keying material (MAC mode) **Default output:** 32 bytes (variable length supported) **Performance:** Extremely fast, modern design **Security:** 128-bit security level at 256-bit output **Note:** BLAKE3's keyed mode is a true MAC, not just HMAC-BLAKE3
 pub const MAC_BLAKE3: u8 = b'b';
 
 /// CMAC (AES-based)
 ///
-/// **Algorithm:** Cipher-based Message Authentication Code using AES
-/// **Fixed output:** 16 bytes (128 bits)
-/// **Security:** 128-bit security level
-/// **Use case:** AES-based systems, hardware acceleration available
-/// **Note:** Slower than HMAC/Poly1305 but useful when AES is already in use
+/// **Algorithm:** Cipher-based Message Authentication Code using AES **Fixed output:** 16 bytes (128 bits) **Security:** 128-bit security level **Use case:** AES-based systems, hardware acceleration available **Note:** Slower than HMAC/Poly1305 but useful when AES is already in use
 pub const MAC_CMAC: u8 = b'c';
 
 // Reserved MAC slots: a, d, e, f, g, i, j, k, l, m, n, o, q, r, t, u, v, w, x, y, z
@@ -96,26 +74,17 @@ pub fn mac_length(id: u8) -> Option<usize> {
 
 /// BLAKE3 hash - RECOMMENDED DEFAULT
 ///
-/// **Default output:** 32 bytes
-/// **Variable output:** Supports any length from 1 byte to 2^64 bytes
-/// **Performance:** Extremely fast, modern design
-/// **Security:** Full 128-bit collision resistance at 256-bit output
+/// **Default output:** 32 bytes **Variable output:** Supports any length from 1 byte to 2^64 bytes **Performance:** Extremely fast, modern design **Security:** Full 128-bit collision resistance at 256-bit output
 pub const HASH_BLAKE3: u8 = b'b';
 
 /// SHA-256 hash
 ///
-/// **Algorithm:** SHA-2 family with 32-bit words, 64 rounds
-/// **Fixed output:** 32 bytes (256 bits)
-/// **Security:** 128-bit collision resistance
-/// **Note:** This is NOT just SHA-512 with shorter output - it's a different algorithm
+/// **Algorithm:** SHA-2 family with 32-bit words, 64 rounds **Fixed output:** 32 bytes (256 bits) **Security:** 128-bit collision resistance **Note:** This is NOT just SHA-512 with shorter output - it's a different algorithm
 pub const HASH_SHA256: u8 = b's';
 
 /// SHA-512 hash
 ///
-/// **Algorithm:** SHA-2 family with 64-bit words, 80 rounds
-/// **Fixed output:** 64 bytes (512 bits)
-/// **Security:** 256-bit collision resistance
-/// **Note:** On 64-bit processors, can be faster than SHA-256 despite longer output
+/// **Algorithm:** SHA-2 family with 64-bit words, 80 rounds **Fixed output:** 64 bytes (512 bits) **Security:** 256-bit collision resistance **Note:** On 64-bit processors, can be faster than SHA-256 despite longer output
 pub const HASH_SHA512: u8 = b't';
 
 // Reserved hash slots: a, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, u, v, w, x, y, z
@@ -144,30 +113,17 @@ pub fn hash_length(id: u8) -> Option<usize> {
 
 /// Ed25519 signature - RECOMMENDED DEFAULT
 ///
-/// **Algorithm:** Edwards-curve Digital Signature Algorithm using Curve25519
-/// **Fixed output:** 64 bytes (512 bits)
-/// **Performance:** Very fast signing and verification
-/// **Security:** ~128-bit security level
-/// **Note:** This is a completely different algorithm from ECDSA, not just a different curve
+/// **Algorithm:** Edwards-curve Digital Signature Algorithm using Curve25519 **Fixed output:** 64 bytes (512 bits) **Performance:** Very fast signing and verification **Security:** ~128-bit security level **Note:** This is a completely different algorithm from ECDSA, not just a different curve
 pub const SIG_ED25519: u8 = b'e';
 
 /// ECDSA P-256 signature
 ///
-/// **Algorithm:** Elliptic Curve Digital Signature Algorithm on NIST P-256 curve
-/// **Fixed output:** 64 bytes (two 32-byte integers: r and s)
-/// **Security:** ~128-bit security level
-/// **Use case:** Required for compliance with certain standards
-/// **Note:** Different algorithm family than Ed25519 (ECDSA vs EdDSA)
+/// **Algorithm:** Elliptic Curve Digital Signature Algorithm on NIST P-256 curve **Fixed output:** 64 bytes (two 32-byte integers: r and s) **Security:** ~128-bit security level **Use case:** Required for compliance with certain standards **Note:** Different algorithm family than Ed25519 (ECDSA vs EdDSA)
 pub const SIG_ECDSA_P256: u8 = b'p';
 
 /// RSA-2048 signature
 ///
-/// **Algorithm:** RSA with 2048-bit modulus
-/// **Fixed output:** 256 bytes (2048 bits)
-/// **Security:** ~112-bit security level (2048-bit RSA ≈ 112-bit symmetric)
-/// **Performance:** Slower than elliptic curve algorithms
-/// **Note:** RSA-2048 and RSA-4096 are the same algorithm with different key sizes,
-///          but we give them different IDs because the signature size differs
+/// **Algorithm:** RSA with 2048-bit modulus **Fixed output:** 256 bytes (2048 bits) **Security:** ~112-bit security level (2048-bit RSA ≈ 112-bit symmetric) **Performance:** Slower than elliptic curve algorithms **Note:** RSA-2048 and RSA-4096 are the same algorithm with different key sizes, but we give them different IDs because the signature size differs
 pub const SIG_RSA_2048: u8 = b'r';
 
 // Reserved signature slots: a, b, c, d, f, g, h, i, j, k, l, m, n, o, q, s, t, u, v, w, x, y, z
@@ -196,37 +152,22 @@ pub fn signature_length(id: u8) -> Option<usize> {
 
 /// Ed25519 public key - RECOMMENDED DEFAULT
 ///
-/// **Algorithm:** Edwards-curve public key for signature verification
-/// **Fixed size:** 32 bytes
-/// **Use with:** Ed25519 signatures (SIG_ED25519)
-/// **Performance:** Very fast signature verification
-/// **Note:** Ed25519 keys are NOT compatible with X25519 (different curve operations)
+/// **Algorithm:** Edwards-curve public key for signature verification **Fixed size:** 32 bytes **Use with:** Ed25519 signatures (SIG_ED25519) **Performance:** Very fast signature verification **Note:** Ed25519 keys are NOT compatible with X25519 (different curve operations)
 pub const KEY_ED25519: u8 = b'e';
 
 /// X25519 public key
 ///
-/// **Algorithm:** Montgomery curve (Curve25519) public key for Diffie-Hellman key exchange
-/// **Fixed size:** 32 bytes
-/// **Use case:** ECDH key agreement (deriving shared secrets)
-/// **Performance:** Very fast key exchange
-/// **Note:** X25519 is NOT for signatures - it's for key agreement only
-///          (Even though it uses the same underlying curve as Ed25519)
+/// **Algorithm:** Montgomery curve (Curve25519) public key for Diffie-Hellman key exchange **Fixed size:** 32 bytes **Use case:** ECDH key agreement (deriving shared secrets) **Performance:** Very fast key exchange **Note:** X25519 is NOT for signatures - it's for key agreement only (Even though it uses the same underlying curve as Ed25519)
 pub const KEY_X25519: u8 = b'x';
 
 /// P-curve ECDSA/ECDH public key (P-256, P-384)
 ///
-/// **Algorithm:** NIST P-curve elliptic curve public key
-/// **Variable size:** 33/65 bytes (P-256), 49/97 bytes (P-384) - size disambiguates
-/// **Use with:** ECDSA signatures or ECDH key agreement
-/// **Security:** ~128-bit (P-256) or ~192-bit (P-384) security level
+/// **Algorithm:** NIST P-curve elliptic curve public key **Variable size:** 33/65 bytes (P-256), 49/97 bytes (P-384) - size disambiguates **Use with:** ECDSA signatures or ECDH key agreement **Security:** ~128-bit (P-256) or ~192-bit (P-384) security level
 pub const KEY_P_CURVE: u8 = b'p';
 
 /// secp256k1 public key (Bitcoin curve)
 ///
-/// **Algorithm:** Koblitz curve used in Bitcoin/Ethereum
-/// **Fixed size:** 33 bytes (compressed)
-/// **Use case:** ECDH key agreement
-/// **Origin:** Certicom (2000)
+/// **Algorithm:** Koblitz curve used in Bitcoin/Ethereum **Fixed size:** 33 bytes (compressed) **Use case:** ECDH key agreement **Origin:** Certicom (2000)
 pub const KEY_SECP256K1: u8 = b'k';
 
 /// ChaCha20-Poly1305 symmetric key
@@ -237,40 +178,27 @@ pub const KEY_AES256_GCM: u8 = b'a';
 
 /// ML-KEM public key (FIPS 203 - formerly Kyber)
 ///
-/// **Algorithm:** Module-Learning with Errors Key Encapsulation Mechanism
-/// **Variable size:** 800B (ML-KEM-512), 1184B (ML-KEM-768), 1568B (ML-KEM-1024)
-/// **Security:** Post-quantum lattice-based
-/// **Origin:** IBM/European consortium (2017), NIST standardized 2024
+/// **Algorithm:** Module-Learning with Errors Key Encapsulation Mechanism **Variable size:** 800B (ML-KEM-512), 1184B (ML-KEM-768), 1568B (ML-KEM-1024) **Security:** Post-quantum lattice-based **Origin:** IBM/European consortium (2017), NIST standardized 2024
 pub const KEY_ML_KEM: u8 = b'm';
 
 /// FrodoKEM public key
 ///
-/// **Algorithm:** Unstructured LWE-based key encapsulation
-/// **Variable size:** 9616B (640), 15632B (976), 21520B (1344) - size disambiguates
-/// **Security:** Post-quantum, conservative (no ring structure to exploit)
-/// **Origin:** Microsoft Research (2016)
+/// **Algorithm:** Unstructured LWE-based key encapsulation **Variable size:** 9616B (640), 15632B (976), 21520B (1344) - size disambiguates **Security:** Post-quantum, conservative (no ring structure to exploit) **Origin:** Microsoft Research (2016)
 pub const KEY_FRODO: u8 = b'f';
 
 /// Classic McEliece public key
 ///
-/// **Algorithm:** Code-based key encapsulation (Goppa codes)
-/// **Variable size:** 261KB to 1MB depending on variant
-/// **Security:** Post-quantum, 47+ years of cryptanalysis
-/// **Origin:** McEliece (1978), modern variants by Bernstein/Lange
-/// **Note:** Extremely large public keys, small ciphertexts
+/// **Algorithm:** Code-based key encapsulation (Goppa codes) **Variable size:** 261KB to 1MB depending on variant **Security:** Post-quantum, 47+ years of cryptanalysis **Origin:** McEliece (1978), modern variants by Bernstein/Lange **Note:** Extremely large public keys, small ciphertexts
 pub const KEY_MCELIECE: u8 = b'l';
 
 /// Shared secret / derived key material
 ///
-/// **Usage:** Output of key agreement (ECDH, KEM decapsulation)
-/// **Typical size:** 32 bytes
-/// **Note:** Algorithm-agnostic - just raw key material
+/// **Usage:** Output of key agreement (ECDH, KEM decapsulation) **Typical size:** 32 bytes **Note:** Algorithm-agnostic - just raw key material
 pub const KEY_SHARED_SECRET: u8 = b's';
 
 /// Get key algorithm name from ID
 ///
-/// Note: This handles both asymmetric keys (Ed25519, X25519, etc.) and
-/// symmetric encryption keys (ChaCha20-Poly1305, AES-256-GCM, etc.)
+/// Note: This handles both asymmetric keys (Ed25519, X25519, etc.) and symmetric encryption keys (ChaCha20-Poly1305, AES-256-GCM, etc.)
 pub fn key_algorithm_name(id: u8) -> Option<&'static str> {
     match id {
         KEY_ED25519 => Some("Ed25519"),
@@ -308,23 +236,12 @@ pub fn key_length(id: u8) -> Option<usize> {
 
 /// ChaCha20-Poly1305 AEAD encryption - RECOMMENDED DEFAULT
 ///
-/// **Algorithm:** ChaCha20 stream cipher + Poly1305 MAC
-/// **Key size:** 32 bytes
-/// **Nonce size:** 12 bytes
-/// **Tag size:** 16 bytes (Poly1305 authentication tag)
-/// **Performance:** Extremely fast, constant-time
-/// **Security:** 256-bit key strength
-/// **Use case:** General-purpose authenticated encryption
+/// **Algorithm:** ChaCha20 stream cipher + Poly1305 MAC **Key size:** 32 bytes **Nonce size:** 12 bytes **Tag size:** 16 bytes (Poly1305 authentication tag) **Performance:** Extremely fast, constant-time **Security:** 256-bit key strength **Use case:** General-purpose authenticated encryption
 pub const WRAP_CHACHA20POLY1305: u8 = b'c';
 
 /// AES-256-GCM encryption
 ///
-/// **Algorithm:** AES-256 in Galois/Counter Mode
-/// **Key size:** 32 bytes
-/// **Nonce size:** 12 bytes
-/// **Tag size:** 16 bytes (GCM authentication tag)
-/// **Security:** 256-bit key strength
-/// **Use case:** Hardware-accelerated encryption (AES-NI)
+/// **Algorithm:** AES-256 in Galois/Counter Mode **Key size:** 32 bytes **Nonce size:** 12 bytes **Tag size:** 16 bytes (GCM authentication tag) **Security:** 256-bit key strength **Use case:** Hardware-accelerated encryption (AES-NI)
 pub const WRAP_AES256_GCM: u8 = b'a';
 
 // Reserved wrapping slots: b, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z
