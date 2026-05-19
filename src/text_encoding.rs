@@ -5,8 +5,7 @@
 //! - Less common characters use medium codes (8-12 bits)
 //! - Rare Unicode characters use longer codes (16-24 bits)
 //!
-//! The Huffman tree is pre-computed at build time from global language frequency analysis.
-//! All ~1.1 million valid Unicode codepoints are covered with pre-computed codes.
+//! The Huffman tree is pre-computed at build time from global language frequency analysis. All ~1.1 million valid Unicode codepoints are covered with pre-computed codes.
 
 use std::collections::HashMap;
 
@@ -136,23 +135,19 @@ fn get_ascii_lut() -> &'static [BitPattern; 128] {
 
 /// Encode Unicode text to Huffman-compressed bytes
 ///
-/// Returns ONLY the Huffman bitstream padded to byte boundary.
-/// No internal headers - VSF x marker handles character count.
+/// Returns ONLY the Huffman bitstream padded to byte boundary. No internal headers - VSF x marker handles character count.
 ///
-/// All characters use variable-length Huffman codes (3-24 bits).
-/// The global frequency table covers all ~1.1 million Unicode codepoints.
+/// All characters use variable-length Huffman codes (3-24 bits). The global frequency table covers all ~1.1 million Unicode codepoints.
 ///
 /// # Performance
-/// Uses optimized ASCII fast path (direct array access) for characters 0-127,
-/// falling back to HashMap lookup for full Unicode.
+/// Uses optimized ASCII fast path (direct array access) for characters 0-127, falling back to HashMap lookup for full Unicode.
 ///
 /// # VSF Integration
 /// The VSF x marker format is:
 /// ```text
 /// x [char_count] [huffman_bytes]
 /// ```
-/// Character count uses encode_number() (3-6+ bytes depending on size).
-/// No arbitrary limits - supports billions of characters.
+/// Character count uses encode_number() (3-6+ bytes depending on size). No arbitrary limits - supports billions of characters.
 ///
 /// # Example
 /// ```ignore

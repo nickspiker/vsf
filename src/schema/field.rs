@@ -1,9 +1,8 @@
 //! Field schema definitions using TypeConstraint
 //!
-//! Defines how fields within VSF sections are validated using type constraints
-//! rather than parallel type enums. This ensures complete coverage of all VsfType
-//! variants without duplication.
+//! Defines how fields within VSF sections are validated using type constraints rather than parallel type enums. This ensures complete coverage of all VsfType variants without duplication.
 
+use crate::prelude::*;
 use super::constraint::{vsf_type_name, TypeConstraint};
 use super::validate::ValidationResult;
 use crate::VsfType;
@@ -58,8 +57,8 @@ impl FieldSchema {
     }
 }
 
-impl std::fmt::Debug for FieldSchema {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for FieldSchema {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("FieldSchema")
             .field("name", &self.name)
             .field("constraint", &self.constraint)

@@ -1,11 +1,8 @@
 //! # Legacy Colourspaces (DEPRECATED)
 //!
-//! **DEPRECATED**: Colourspaces in this module are defined by xy chromaticity coordinates
-//! using the CIE 1931 Standard Observer. These specifications are permanently bound to 1931
-//! observer data and cannot be updated without changing the colourspace itself.
+//! **DEPRECATED**: Colourspaces in this module are defined by xy chromaticity coordinates using the CIE 1931 Standard Observer. These specifications are permanently bound to 1931 observer data and cannot be updated without changing the colourspace itself.
 //!
-//! **Use spectral colourspaces instead**: VSF RGB and Rec.2020 define primaries by wavelengths,
-//! making them observer-independent and physically reproducible.
+//! **Use spectral colourspaces instead**: VSF RGB and Rec.2020 define primaries by wavelengths, making them observer-independent and physically reproducible.
 //!
 //! ## sRGB
 //!
@@ -16,8 +13,7 @@
 //!
 //! ## XYZ
 //!
-//! CIE XYZ tristimulus values represent colours in terms of the 1931 Standard Observer response.
-//! This is the foundation space for most xy-coordinate-based colour standards.
+//! CIE XYZ tristimulus values represent colours in terms of the 1931 Standard Observer response. This is the foundation space for most xy-coordinate-based colour standards.
 //!
 //! ## Conversions
 //!

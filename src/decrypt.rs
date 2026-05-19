@@ -3,6 +3,7 @@
 //! Provides functions for decrypting VSF v'e' (ephemeral X25519 + AES-256-GCM) encrypted content.
 
 #[cfg(feature = "crypto")]
+use crate::prelude::*;
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
@@ -14,9 +15,9 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 #[cfg(feature = "crypto")]
 use crate::{parse, VsfType};
-#[cfg(feature = "crypto")]
+#[cfg(all(feature = "crypto", feature = "std"))]
 use std::fs;
-#[cfg(feature = "crypto")]
+#[cfg(all(feature = "crypto", feature = "std"))]
 use std::path::Path;
 
 /// Keypair with both Ed25519 and derived X25519 keys
@@ -33,6 +34,7 @@ pub struct Keypair {
 impl Keypair {
     /// Load keypair from VSF file (expects fgtw_device_key or similar format)
     /// Format: [d"fgtw_device_key" (d"secret":ke{32}{bytes}) (d"public":ke{32}{bytes})]
+    #[cfg(feature = "std")]
     pub fn load_from_vsf(path: impl AsRef<Path>) -> Result<Self, String> {
         let bytes =
             fs::read(path.as_ref()).map_err(|e| format!("Failed to read key file: {}", e))?;
@@ -65,8 +67,8 @@ impl Keypair {
             parse(&bytes, &mut ptr).map_err(|e| format!("Parse section name: {}", e))?;
 
         // Parse fields until ']'
-        use std::collections::HashMap;
-        let mut fields: HashMap<String, VsfType> = HashMap::new();
+        use alloc::collections::BTreeMap;
+        let mut fields: BTreeMap<String, VsfType> = BTreeMap::new();
 
         while ptr < bytes.len() && bytes[ptr] != b']' {
             if bytes[ptr] == b'(' {

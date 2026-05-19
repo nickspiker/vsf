@@ -1,6 +1,6 @@
 [package]
 name = "vsf"
-version = "0.3.4"
+version = "0.3.5"
 edition = "2021"
 authors = ["Nick Spiker <nick@verichrome.cc>"]
 description = "Versatile Storage Format"
@@ -24,28 +24,39 @@ path = "src/bin/vsfinfo.rs"
 required-features = ["text"]
 
 [dependencies]
-bitvec = "1.0.1"
-chrono = "0.4.38"
-num-complex = "0.4.5"
-spirix = { version = "0.0.7", path = "../spirix", optional = true }
+bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
+chrono = { version = "0.4.38", default-features = false, features = ["alloc"] }
+num-complex = { version = "0.4.5", default-features = false }
+spirix = { version = "0.0.12", path = "../spirix", optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
-blake3 = "1"
-ed25519-dalek = { version = "2", features = ["rand_core"], optional = true }
-x25519-dalek = { version = "2", features = ["static_secrets"], optional = true }
-rand = { version = "0.8", optional = true }
-chacha20poly1305 = { version = "0.10", optional = true }
-aes-gcm = { version = "0.10", optional = true }
-hex = "0.4"
-i256 = "0.2.3"
+blake3 = { version = "1", default-features = false }
+ed25519-dalek = { version = "2", default-features = false, features = ["rand_core", "alloc", "zeroize"], optional = true }
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets", "alloc", "zeroize"], optional = true }
+rand = { version = "0.8", default-features = false, features = ["alloc"], optional = true }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"], optional = true }
+aes-gcm = { version = "0.10", default-features = false, features = ["alloc", "aes"], optional = true }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+i256 = { version = "0.2.3", default-features = false }
 colored = { version = "2", optional = true }
-num-traits = "0.2.19"
+num-traits = { version = "0.2.19", default-features = false, features = ["libm"] }
+libm = { version = "0.2" }
+spin = { version = "0.9", default-features = false, features = ["once", "rwlock"] }
 
 [features]
-default = []
+default = ["std"]
+std = [
+    "chrono/std",
+    "chrono/clock",
+    "bitvec/std",
+    "blake3/std",
+    "hex/std",
+    "num-traits/std",
+    "num-complex/std",
+]
 crypto = ["ed25519-dalek", "x25519-dalek", "rand", "chacha20poly1305", "aes-gcm"]
 spirix = ["dep:spirix"]
-inspect = ["dep:colored"]
-text = ["dep:clap", "inspect"]
+inspect = ["std", "dep:colored"]
+text = ["std", "dep:clap", "inspect"]
 
 [build-dependencies]
 ureq = "2"

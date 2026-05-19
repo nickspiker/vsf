@@ -1,6 +1,7 @@
 //! Validation error types and results
 
-use std::fmt;
+use crate::prelude::*;
+use core::fmt;
 
 /// Validation error for schema enforcement
 #[derive(Debug, Clone)]
@@ -95,7 +96,7 @@ impl fmt::Display for ValidationError {
     }
 }
 
-impl std::error::Error for ValidationError {}
+impl core::error::Error for ValidationError {}
 
 impl From<String> for ValidationError {
     fn from(msg: String) -> Self {

@@ -1,12 +1,12 @@
 //! Legacy transfer functions for CIE 1931 xy-based colourspaces
 //!
-//! **DEPRECATED**: These colourspaces are based on CIE 1931 xy chromaticity coordinates
-//! and are permanently tied to the 1931 Standard Observer. Use spectral colourspaces
-//! (VSF RGB, Rec.2020) instead for future-proof colour workflows.
+//! **DEPRECATED**: These colourspaces are based on CIE 1931 xy chromaticity coordinates and are permanently tied to the 1931 Standard Observer. Use spectral colourspaces (VSF RGB, Rec.2020) instead for future-proof colour workflows.
 //!
 //! Transfer functions (OETF/EOTF) convert between linear light and gamma-corrected values.
 //! - **OETF** (Opto-Electronic Transfer Function): linear → gamma-corrected (encoding)
 //! - **EOTF** (Electro-Optical Transfer Function): gamma-corrected → linear (decoding)
+
+use num_traits::Float;
 
 // ==================== sRGB TRANSFER FUNCTIONS ====================
 
@@ -66,8 +66,7 @@ pub fn srgb_eotf_rgb(rgb: &[f32; 3]) -> [f32; 3] {
 
 /// Rec.709 OETF: Convert linear RGB to gamma-corrected Rec.709/Rec.2020
 ///
-/// **DEPRECATED**: Rec.709 primaries are based on CIE 1931 xy chromaticity (legacy).
-/// Note: Rec.2020 uses the same transfer function as Rec.709.
+/// **DEPRECATED**: Rec.709 primaries are based on CIE 1931 xy chromaticity (legacy). Note: Rec.2020 uses the same transfer function as Rec.709.
 ///
 /// Piecewise function with parameters:
 /// - α = 1.099

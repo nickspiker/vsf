@@ -10,8 +10,7 @@
 //! - **Green (G)**: 523nm - Peak of Gamma ratio (M/(L+S))
 //! - **Blue (B)**: 462nm - Peak of Beta ratio (S/(S+M))
 //!
-//! **White Point**: Illuminant E (equal energy spectrum)
-//! **Gamma**: 2.0 (pure square/square root operations)
+//! **White Point**: Illuminant E (equal energy spectrum) **Gamma**: 2.0 (pure square/square root operations)
 //!
 //! ## Rec.2020
 //!

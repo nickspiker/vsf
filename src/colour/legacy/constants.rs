@@ -22,9 +22,7 @@ use crate::colour::spectrum::ConstSpectrum;
 
 /// Raw spectral data for CIE 1931 2° Standard Observer XYZ colour matching functions at 1nm spacing
 ///
-/// Linear interpolation from 5nm data.
-/// Data spans 380nm to 780nm (401 samples × 3 channels = 1203 values).
-/// Format: [X380, Y380, Z380, X381, Y381, Z381, ..., X780, Y780, Z780]
+/// Linear interpolation from 5nm data. Data spans 380nm to 780nm (401 samples × 3 channels = 1203 values). Format: [X380, Y380, Z380, X381, Y381, Z381, ..., X780, Y780, Z780]
 const XYZ_1931_2DEG_1NM_DATA: [f32; 1203] = [
     0.0014f32,
     0f32,
@@ -1233,9 +1231,7 @@ const XYZ_1931_2DEG_1NM_DATA: [f32; 1203] = [
 
 /// CIE 1931 2° Standard Observer XYZ colour matching functions at 1nm spacing
 ///
-/// Linear interpolation from 5nm data.
-/// Data spans 380nm to 780nm with 1nm spacing (401 wavelength samples).
-/// 3-channel interleaved format: [X, Y, Z] at each wavelength.
+/// Linear interpolation from 5nm data. Data spans 380nm to 780nm with 1nm spacing (401 wavelength samples). 3-channel interleaved format: [X, Y, Z] at each wavelength.
 pub const XYZ_1931_2DEG_1NM: ConstSpectrum = ConstSpectrum {
     start_nm: 380.0,
     stop_nm: 780.0,
@@ -1266,8 +1262,7 @@ pub const VSF_RGB2XYZ: [f32; 9] = [
 
 /// XYZ → VSF RGB transformation matrix
 ///
-/// Converts CIE 1931 XYZ colourspace to linear VSF RGB.
-/// Inverse of VSF_RGB2XYZ.
+/// Converts CIE 1931 XYZ colourspace to linear VSF RGB. Inverse of VSF_RGB2XYZ.
 pub const XYZ2VSF_RGB: [f32; 9] = [
     1.373_010_4_f32,
     -0.542_253_85_f32,
@@ -1302,8 +1297,7 @@ pub const VSF_RGB2SRGB: [f32; 9] = [
 
 /// sRGB → VSF RGB transformation matrix
 ///
-/// Converts linear sRGB to linear VSF RGB.
-/// Inverse of VSF_RGB2SRGB.
+/// Converts linear sRGB to linear VSF RGB. Inverse of VSF_RGB2SRGB.
 pub const SRGB2VSF_RGB: [f32; 9] = [
     0.531_090_56_f32,
     0.098_345_54_f32,
@@ -1338,8 +1332,7 @@ pub const VSF_RGB2ADOBE_RGB: [f32; 9] = [
 
 /// Adobe RGB (1998) → VSF RGB transformation matrix
 ///
-/// Converts linear Adobe RGB (1998) to linear VSF RGB.
-/// Inverse of VSF_RGB2ADOBE_RGB.
+/// Converts linear Adobe RGB (1998) to linear VSF RGB. Inverse of VSF_RGB2ADOBE_RGB.
 pub const ADOBE_RGB2VSF_RGB: [f32; 9] = [
     0.742_615_f32,
     0.137_514_9_f32,

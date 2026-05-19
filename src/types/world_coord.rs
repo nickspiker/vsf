@@ -3,8 +3,7 @@
 //! Encodes any point on Earth's surface as a single u64 using Fuller's
 //! Dymaxion icosahedral projection with barycentric coordinates.
 //!
-//! **Precision**: Average error 2.14mm, max error 5.06mm
-//! **Better than**: IEEE-754 lat/lon (f64), Geohash-64, S2 geometry
+//! **Precision**: Average error 2.14mm, max error 5.06mm **Better than**: IEEE-754 lat/lon (f64), Geohash-64, S2 geometry
 //!
 //! # Representations
 //!
@@ -33,7 +32,9 @@
 //! let restored = WorldCoord::from_raw(raw);
 //! ```
 
-use std::f64::consts::PI;
+use num_traits::Float;
+use crate::prelude::*;
+use core::f64::consts::PI;
 
 /// Base for icosahedral coordinate system
 const BASE: u64 = 960_383_883; // floor(sqrt(2^64 / 20))
@@ -131,6 +132,51 @@ impl WorldCoord {
     /// Decode from 7-word mnemonic string (with error correction)
     pub fn from_words(words: &str) -> Option<Self> {
         decode_to_u64(words).map(WorldCoord)
+    }
+
+    /// Encode at a specific wire resolution (w3..w7).
+    ///
+    /// `size_byte` is the ASCII digit after `w` on the wire: `'3'`=8-bit (1B, ~5000km), `'4'`=16-bit (2B, ~600km), `'5'`=32-bit (4B, ~10km), `'6'`=64-bit (8B, ~2mm), `'7'`=128-bit (16B, sub-mm headroom).
+    ///
+    /// Coarser resolutions truncate low bits; w7 zero-extends — values remain a strict prefix subset of the full u64 ordering.
+    pub fn flatten_at(&self, size_byte: u8) -> Vec<u8> {
+        let mut out = vec![b'w', size_byte];
+        let raw = self.0;
+        match size_byte {
+            b'3' => out.push((raw >> 56) as u8),
+            b'4' => out.extend_from_slice(&((raw >> 48) as u16).to_be_bytes()),
+            b'5' => out.extend_from_slice(&((raw >> 32) as u32).to_be_bytes()),
+            b'6' => out.extend_from_slice(&raw.to_be_bytes()),
+            b'7' => {
+                out.extend_from_slice(&raw.to_be_bytes());
+                out.extend_from_slice(&[0u8; 8]); // low 64 bits reserved for future precision
+            }
+            _ => panic!("WorldCoord::flatten_at: invalid size byte '{}'", size_byte as char),
+        }
+        out
+    }
+
+    /// Decode from wire bytes at a specific resolution.
+    ///
+    /// Returns `None` if `bytes` is too short for the indicated `size_byte`.
+    pub fn from_wire(size_byte: u8, bytes: &[u8]) -> Option<Self> {
+        let raw = match size_byte {
+            b'3' if bytes.len() >= 1 => (bytes[0] as u64) << 56,
+            b'4' if bytes.len() >= 2 => (u16::from_be_bytes([bytes[0], bytes[1]]) as u64) << 48,
+            b'5' if bytes.len() >= 4 => {
+                (u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64) << 32
+            }
+            b'6' if bytes.len() >= 8 => u64::from_be_bytes([
+                bytes[0], bytes[1], bytes[2], bytes[3],
+                bytes[4], bytes[5], bytes[6], bytes[7],
+            ]),
+            b'7' if bytes.len() >= 16 => u64::from_be_bytes([
+                bytes[0], bytes[1], bytes[2], bytes[3],
+                bytes[4], bytes[5], bytes[6], bytes[7],
+            ]), // low 64 bits ignored for now
+            _ => return None,
+        };
+        Some(WorldCoord(raw))
     }
 }
 

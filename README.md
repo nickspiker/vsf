@@ -2,7 +2,7 @@
   <img src="vsf.png" alt="VSF Logo" width="400"/>
 </p>
 
-# VSF (Versatile Storage Format)
+# VSF (Versatile Serial Format)
 
 A self-describing binary format designed for optimal integer encoding and type safety.
 
@@ -186,6 +186,108 @@ Every other format either:
 
 ---
 
+## Type Tag Overloading Specification
+
+Every VSF value on the wire is: `⦉letter(s)⦊⦉size⦊⦉data⦊` — always, no exceptions.
+
+The letter(s) identify the type. How many letters, and which kind, determines what you're looking at:
+
+```
+⦉single char⦊              → primitive
+  n  b  z  y  m  e  x  l  o  d  ...
+
+⦉char⦊⦉size digit⦊         → sized variant of that primitive
+  u3  u6  f5  f6  i4  s44  c55  ...
+
+⦉char⦊⦉lowercase letter⦊   → named family member
+  hp  hb  ge  ke  na  nh  wa  ...
+```
+
+### Why these three classes never collide
+
+The second character always falls into exactly one of three non-overlapping ASCII ranges:
+
+| Class | Characters | ASCII range | Meaning |
+|-------|-----------|-------------|---------|
+| Digit | `0`–`9` | 0x30–0x39 | size exponent (base36 low) |
+| Uppercase | `A`–`Z` | 0x41–0x5A | size exponent (base36 high) |
+| Lowercase | `a`–`z` | 0x61–0x7A | named family member |
+
+A parser reads the second byte and immediately knows which case it's in. No lookahead, no ambiguity.
+
+### Size digits mean 2^N bits
+
+The size digit is a **base36 number** — digits `0`–`9` have values 0–9, letters `A`–`Z` have values 10–35. The value of that digit is N, and the type holds **2^N bits**:
+
+```
+u0 = 2^0 =   1 bit   (bool)
+u3 = 2^3 =   8 bits  (u8)
+u4 = 2^4 =  16 bits  (u16)
+u5 = 2^5 =  32 bits  (u32)
+u6 = 2^6 =  64 bits  (u64)
+u7 = 2^7 = 128 bits  (u128)
+u8 = 2^8 = 256 bits
+u9 = 2^9 = 512 bits
+uA = 2^10 = 1024 bits   (A = 10 in base36)
+uZ = 2^35 bits          (Z = 35 in base36 — larger than you will ever need)
+```
+
+Same rule applies to every primitive: `f5` = 2^5 = 32-bit float, `f6` = 2^6 = 64-bit float, `s44` = Spirix scalar with 2^4=16-bit fraction and 2^4=16-bit exponent, and so on.
+
+The second-character class is unambiguous at the byte level — `0x30`–`0x5A` is size, `0x61`–`0x7A` is family. These ranges do not overlap.
+
+### Type Families
+
+| Prefix | Family | Members |
+|--------|--------|---------|
+| `h`    | Hash | `hp` `hb` `hs` `hm` `hg` `hc` `hk` |
+| `g`    | Signature | `ge` `gp` `gd` `gs` `gf` |
+| `k`    | Key    | `ke` `kx` `kp` `kc` `ka` ... |
+| `ks`   | Shared secret | `ksx` `ksp` `ksk` ... |
+| `m`    | MAC    | `mh` `mp` `mb` `mc` |
+| `l`    | Length in bytes (wire or file) — replaces uppercase `L` |  |
+| `a`    | ASCII text | `a"hello"` (replaces `l` for ASCII strings) |
+| `u`    | Unit quantity | `u[group][unit][type]` — e.g. `ulmf6`=meters f64, `ufnf5`=newtons f32 |
+| `r`    | Colour/raster | `re` `ru` `ra` `rf` ... |
+| `rc`   | Named colour | `rcr` `rcg` `rcb` `rcw` ... |
+| `ro`   | Drawable object | `rob` `roc` `rol` `rop` ... |
+| `na`   | Network address | scheme + host + optional port |
+| `nh`   | Network host | bare hostname or IP string |
+| `ni`   | Network IPv4 | 4 bytes |
+| `nj`   | Network IPv6 | 16 bytes |
+| `nc`   | Network CIDR | address + prefix length |
+| `nm`   | Network MAC  | 6 bytes |
+| `np`   | Network port | standalone port number |
+| `ns`   | Network socket | host + port, no scheme |
+| `nu`   | Network URL  | full URL including path/query |
+| `nn`   | Network name | DNS name, validated format |
+
+### `na` Scheme Enum
+
+| Value | Scheme |
+|-------|--------|
+| 0 | https |
+| 1 | http |
+| 2 | ftp |
+| 3 | sftp |
+| 4 | ssh |
+| 5 | ntp |
+| 6 | smtp |
+| 7 | ws |
+| 8 | wss |
+
+### Length, ASCII, and MAC reorganisation (v0.3.5)
+
+Three letters were re-aligned to give every spec primitive an obvious mnemonic:
+
+- **`l`** is now **length** (wire or file). Replaces uppercase `L`, which broke the lowercase-only rule.
+- **`a`** is now **ASCII text**. Old wire tag `l` for ASCII is gone — `a` reads naturally.
+- **`m*`** is now the **MAC family** (`mh` `mp` `mb` `mc`). Old `a*` MACs (`ah` `ap` `ab` `ac`) are gone.
+
+Toka marker types (`m(usize)` definition + `r + usize` reference) are removed; use `hp` provenance hashes for stable references instead.
+
+---
+
 ## Type Safety Thru Exhaustive Pattern Matching
 
 VSF is written entirely in Rust with zero wildcards in all match statements:
@@ -360,7 +462,7 @@ VsfType::x(text)  // Automatically compressed
 - 36% compression typical, not just English
 - Low overhead
 - Enable with: `cargo build --features text`
-- Without feature: use `VsfType::l` for ASCII labels instead of `VsfType::x`
+- Without feature: use `VsfType::a` for ASCII text instead of `VsfType::x`
 
 ✅ **Cryptographic support** (requires `crypto` feature)
 - Hash algorithms: BLAKE3 (default), SHA-256, SHA-512
@@ -469,7 +571,7 @@ vsf = { version = "0.2", features = ["spirix"] }  # + Spirix arithmetic
 | `crypto` | Ed25519 signatures, X25519 key exchange, AES-GCM | Signed/encrypted data |
 | `spirix` | Spirix two's-complement floats (`s33`-`s77`, `c33`-`c77`) | Two's complement floating-point |
 
-**Note:** Without `text`, use `VsfType::l` for ASCII labels. Without `crypto`, hash types (`h`) still work (BLAKE3 is always available), but signatures (`g`) and encryption require the feature.
+**Note:** Without `text`, use `VsfType::a` for ASCII text. Without `crypto`, hash types (`h`) still work (BLAKE3 is always available), but signatures (`g`) and encryption require the feature.
 
 ### Parsing APIs: Two Tiers
 

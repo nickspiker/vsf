@@ -1,3 +1,5 @@
+use crate::prelude::*;
+
 /// Trait for encoding numbers into VSF variable-length format
 ///
 /// VSF uses a compact encoding where the size marker indicates the byte count:
@@ -22,9 +24,7 @@ pub trait EncodeNumber {
 
 /// Trait for encoding numbers in "inclusive" mode
 ///
-/// Inclusive mode is used for self-referential sizes (e.g., header length that includes itself).
-/// It adds the encoding overhead to the value before encoding, ensuring that when decoded
-/// and the size of the encoding itself is added back, you get the original value.
+/// Inclusive mode is used for self-referential sizes (e.g., header length that includes itself). It adds the encoding overhead to the value before encoding, ensuring that when decoded and the size of the encoding itself is added back, you get the original value.
 ///
 /// # How it works
 ///
@@ -41,8 +41,7 @@ pub trait EncodeNumber {
 /// // When decoded: 280 - 24 = 256 ✓
 /// ```
 ///
-/// This ensures values like 256 can be encoded even when they cause size overflow,
-/// and self-referential sizes (like "this header is N bytes including this field") work correctly.
+/// This ensures values like 256 can be encoded even when they cause size overflow, and self-referential sizes (like "this header is N bytes including this field") work correctly.
 pub trait EncodeNumberInclusive {
     /// Encode this number in inclusive mode (adds encoding overhead to value)
     fn encode_usize_inclusive(&self) -> Vec<u8>;

@@ -1,7 +1,6 @@
 //! VSF inspection and formatting utilities
 //!
-//! Provides human-readable coloured formatting for VSF types, headers, and sections.
-//! Used by vsfinfo CLI and can be embedded in other applications (photon, fgtw, etc.).
+//! Provides human-readable coloured formatting for VSF types, headers, and sections. Used by vsfinfo CLI and can be embedded in other applications (photon, fgtw, etc.).
 //!
 //! Supports multiple output formats via `OutputFormat`:
 //! - `Terminal` - ANSI escape codes for terminal display
@@ -9,13 +8,12 @@
 //! - `Plain` - No colour codes, just text
 
 use crate::decoding::parse::parse;
-// vt hack support removed - use ro* types instead
-// use crate::decoding::toka_tree::parse_vt_node;
+// vt hack support removed - use ro* types instead use crate::decoding::toka_tree::parse_vt_node;
 use crate::file_format::{VsfField, VsfHeader};
 use crate::themes::Theme;
 #[cfg(feature = "spirix")]
 use crate::types::Fill;
-use crate::types::{EagleTime, EtType, VsfType};
+use crate::types::{EagleTime, EtType, NaScheme, VsfType};
 use chrono::{Datelike, Local, Timelike};
 use colored::*;
 
@@ -286,8 +284,7 @@ fn parse_sgr_to_css(params: &str) -> String {
 pub fn inspect_vsf_html(data: &[u8]) -> Result<String, String> {
     // Force colour output even when not connected to a TTY (e.g., WASM)
     colored::control::set_override(true);
-    // Force truecolor mode - colored crate checks COLORTERM env var
-    // std::env::set_var panics in WASM, so use a fallback check
+    // Force truecolor mode - colored crate checks COLORTERM env var std::env::set_var panics in WASM, so use a fallback check
     #[cfg(not(target_arch = "wasm32"))]
     std::env::set_var("COLORTERM", "truecolor");
     let terminal_output = inspect_vsf(data)?;
@@ -342,9 +339,7 @@ const BOX_TEE: &str = "├"; // U+251C Light vertical and right
 const BOX_HORIZ: &str = "─"; // U+2500 Light horizontal
 
 // ==================== SEMANTIC COLOUR PALETTE ====================
-// All colours are sourced from the active theme (THEME static above).
-// To add theme support: replace `std::sync::LazyLock::new(Theme::dark)` with
-// a runtime loader, e.g. from ~/.vsf/theme.toml or a --theme CLI flag.
+// All colours are sourced from the active theme (THEME static above). To add theme support: replace `std::sync::LazyLock::new(Theme::dark)` with a runtime loader, e.g. from ~/.vsf/theme.toml or a --theme CLI flag.
 
 fn col_uint() -> (u8, u8, u8) {
     THEME.uint
@@ -628,7 +623,7 @@ fn crypto_type_colour(type_name: &str) -> (u8, u8, u8) {
         Some('h') => col_hash(), // Hashes: hp, hb, hs, hm, hg, hc, hk
         Some('g') => col_sig(),  // Signatures: ge, gp, gd, gs, gf, gr
         Some('k') => col_key(),  // Keys: ke, kx, kp, kk, kc, ka, km, kf, kl, kn, kh, kd, kb, ks
-        Some('a') => col_hash(), // MACs: ah, ap, ab, ac (same as hashes)
+        Some('m') => col_hash(), // MACs: mh, mp, mb, mc (same colour as hashes)
         Some('v') => col_wrap(), // Wrapped: ve, vz, vr, etc.
         _ => col_hint(),         // Fallback
     }
@@ -840,10 +835,10 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
                 s.white().bold()
             )
         }
-        VsfType::l(s) => {
+        VsfType::a(s) => {
             format!(
                 "{}{}{}{}{}{}",
-                trc("l", col_text()),
+                trc("a", col_text()),
                 tc(&size_marker(s.len()).to_string(), col_punct()),
                 tc("⦉", col_punct()),
                 s.len().to_string().white(),
@@ -1030,9 +1025,9 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             v.to_string().white(),
             tc("⦊", col_punct())
         ),
-        VsfType::L(v, _) => format!(
+        VsfType::l(v, _) => format!(
             "{}{}{}{}{}",
-            trc("L", col_uint()),
+            trc("l", col_uint()),
             tc(&size_marker(*v).to_string(), col_punct()),
             tc("⦉", col_punct()),
             v.to_string().white(),
@@ -1081,10 +1076,10 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         #[allow(deprecated)]
         VsfType::gr(s) => format_crypto_hex("gr", s), // RSA (deprecated)
         // MACs (teal, like hashes)
-        VsfType::ah(m) => format_crypto_hex("ah", m), // HMAC-SHA256
-        VsfType::ap(m) => format_crypto_hex("ap", m), // Poly1305
-        VsfType::ab(m) => format_crypto_hex("ab", m), // BLAKE3-keyed
-        VsfType::ac(m) => format_crypto_hex("ac", m), // CMAC-AES
+        VsfType::mh(m) => format_crypto_hex("mh", m), // HMAC-SHA256
+        VsfType::mp(m) => format_crypto_hex("mp", m), // Poly1305
+        VsfType::mb(m) => format_crypto_hex("mb", m), // BLAKE3-keyed
+        VsfType::mc(m) => format_crypto_hex("mc", m), // CMAC-AES
         // Wrapped/encoded (muted purple)
         VsfType::v(algo, data) => {
             // Check if this is a Toka Tree type (algo == b't')
@@ -1104,8 +1099,7 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         }
 
         // Tensors: light blue
-        // Wire format: t3{dims}u3 + shape values + data
-        // e.g., t3{1}u3 3{16} [38,0,16,15,...] for a 16-element 1D u8 tensor
+        // Wire format: t3{dims}u3 + shape values + data e.g., t3{1}u3 3{16} [38,0,16,15,...] for a 16-element 1D u8 tensor
         VsfType::t_u3(tensor) => {
             let dims = tensor.shape.len();
             // Build shape encoding: 3{dim0}3{dim1}...
@@ -1157,11 +1151,14 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             )
         }
 
-        // Eagle Time: pink-magenta - show underlying type (eu/ei/ef5/ef6)
+        // Eagle Time: pink-magenta - show underlying type (e5/e6/e7/ef5/ef6)
         VsfType::e(et) => {
             let formatted = format_eagle_time(et);
+            #[allow(deprecated)]
             let type_marker = match et {
-                EtType::i(_) => "ei",
+                EtType::e5(_) => "e5",
+                EtType::e6(_) => "e6",
+                EtType::e7(_) => "e7",
                 EtType::f5(_) => "ef5",
                 EtType::f6(_) => "ef6",
             };
@@ -1686,6 +1683,43 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             result
         }
 
+        // ==================== NETWORK FAMILY ====================
+        VsfType::ni(b) => {
+            let ip = std::net::Ipv4Addr::from(*b);
+            format!("{}{}{}{}", trc("ni", col_uint()), tc("⦉", col_punct()), ip, tc("⦊", col_punct()))
+        }
+        VsfType::nj(b) => {
+            let ip = std::net::Ipv6Addr::from(*b);
+            format!("{}{}{}{}", trc("nj", col_uint()), tc("⦉", col_punct()), ip, tc("⦊", col_punct()))
+        }
+        VsfType::nh(h) => format!("{}{}{}{}", trc("nh", col_uint()), tc("⦉", col_punct()), h, tc("⦊", col_punct())),
+        VsfType::na(scheme, host, port) => {
+            let scheme_str = NaScheme::from_byte(*scheme).map_or_else(|| scheme.to_string(), |s| s.to_string());
+            let addr = match port {
+                Some(p) => format!("{}://{}:{}", scheme_str, host, p),
+                None    => format!("{}://{}", scheme_str, host),
+            };
+            format!("{}{}{}{}", trc("na", col_uint()), tc("⦉", col_punct()), addr, tc("⦊", col_punct()))
+        }
+        VsfType::nc(addr, prefix) => {
+            format!("{}{}{}/{}{}", trc("nc", col_uint()), tc("⦉", col_punct()), addr, prefix, tc("⦊", col_punct()))
+        }
+        VsfType::nm(mac) => {
+            let s = mac.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(":");
+            format!("{}{}{}{}", trc("nm", col_uint()), tc("⦉", col_punct()), s, tc("⦊", col_punct()))
+        }
+        VsfType::np(port) => format!("{}{}{}{}", trc("np", col_uint()), tc("⦉", col_punct()), port, tc("⦊", col_punct())),
+        VsfType::ns(host, port) => {
+            format!("{}{}{}:{}{}", trc("ns", col_uint()), tc("⦉", col_punct()), host, port, tc("⦊", col_punct()))
+        }
+        VsfType::nu(url) => format!("{}{}{}{}", trc("nu", col_uint()), tc("⦉", col_punct()), url, tc("⦊", col_punct())),
+        VsfType::nn(name) => format!("{}{}{}{}", trc("nn", col_uint()), tc("⦉", col_punct()), name, tc("⦊", col_punct())),
+
+        // ==================== WORLD ADDRESS ====================
+        VsfType::wa(addr) => {
+            format!("{}{}{}{}", trc("wa", col_uint()), tc("⦉", col_punct()), addr, tc("⦊", col_punct()))
+        }
+
         // Fall back to debug for unhandled types
         _ => format!("{:?}", vsf),
     }
@@ -1791,8 +1825,11 @@ pub fn format_eagle_time(et: &EtType) -> String {
         Some(dt) => dt,
         None => {
             // Fallback: show the raw wire encoding
+            #[allow(deprecated)]
             return match et {
-                EtType::i(v) => format!("ei{{{}}}", v),
+                EtType::e5(v) => format!("e5{{{}}}", v),
+                EtType::e6(v) => format!("e6{{{}}}", v),
+                EtType::e7(v) => format!("e7{{{}}}", v),
                 EtType::f5(v) => format!("ef5{{{}}}", v),
                 EtType::f6(v) => format!("ef6{{{}}}", v),
             };
@@ -1933,9 +1970,12 @@ pub fn format_value(vsf: &VsfType) -> String {
             format!("({:.4}°N, {:.4}°W)", lat, lon)
         }
         VsfType::e(et) => {
-            // Wire literal format: eu{value}, ei{value}, ef5{value}, or ef6{value}
+            // Wire literal format: e5{value}, e6{value}, e7{value}, ef5{value}, ef6{value}
+            #[allow(deprecated)]
             match et {
-                EtType::i(v) => format!("ei{{{}}}", v),
+                EtType::e5(v) => format!("e5{{{}}}", v),
+                EtType::e6(v) => format!("e6{{{}}}", v),
+                EtType::e7(v) => format!("e7{{{}}}", v),
                 EtType::f5(v) => format!("ef5{{{:.2}}}", v),
                 EtType::f6(v) => format!("ef6{{{:.2}}}", v),
             }
@@ -1961,17 +2001,36 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::kn(key) => format_crypto_literal("kn", key), // NTRU
         VsfType::kl(key) => format_crypto_literal("kl", key), // McEliece
         VsfType::kh(key) => format_crypto_literal("kh", key), // HQC
-        VsfType::ah(mac) => format_crypto_literal("ah", mac),
-        VsfType::ap(mac) => format_crypto_literal("ap", mac),
-        VsfType::ab(mac) => format_crypto_literal("ab", mac),
-        VsfType::ac(mac) => format_crypto_literal("ac", mac),
+        VsfType::mh(mac) => format_crypto_literal("mh", mac),
+        VsfType::mp(mac) => format_crypto_literal("mp", mac),
+        VsfType::mb(mac) => format_crypto_literal("mb", mac),
+        VsfType::mc(mac) => format_crypto_literal("mc", mac),
 
         VsfType::v(algo, data) => format_crypto_literal(&format!("v{}", *algo as char), data),
         VsfType::d(name) => format!("d\"{}\"", name),
-        VsfType::l(s) => s.clone(),
+        VsfType::a(s) => s.clone(),
         VsfType::o(offset) => format!("o[{}]", offset),
         VsfType::n(count) => format!("n[{}]", count),
         VsfType::b(size, _) => format!("b[{}]", size),
+        VsfType::l(size, _) => format!("l[{}]", size),
+
+        // Network family
+        VsfType::ni(b) => std::net::Ipv4Addr::from(*b).to_string(),
+        VsfType::nj(b) => std::net::Ipv6Addr::from(*b).to_string(),
+        VsfType::nh(h) => h.clone(),
+        VsfType::na(scheme, host, port) => {
+            let s = NaScheme::from_byte(*scheme).map_or_else(|| scheme.to_string(), |s| s.to_string());
+            match port { Some(p) => format!("{}://{}:{}", s, host, p), None => format!("{}://{}", s, host) }
+        }
+        VsfType::nc(addr, prefix) => format!("{}/{}", addr, prefix),
+        VsfType::nm(mac) => mac.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(":"),
+        VsfType::np(port) => format!(":{}", port),
+        VsfType::ns(host, port) => format!("{}:{}", host, port),
+        VsfType::nu(url) => url.clone(),
+        VsfType::nn(name) => name.clone(),
+
+        // World address
+        VsfType::wa(addr) => addr.to_string(),
 
         // Opcodes
         VsfType::op(a, b) => format!("{{{}{}}}", char::from(*a), char::from(*b)),
@@ -2103,8 +2162,7 @@ pub fn format_value_short(vsf: &VsfType) -> String {
             )
         }
         VsfType::x(s) if s.len() > 30 => format!("\"{}\"...", s[..27].escape_default()),
-        // Show literal VSF notation for crypto fields with colour coding
-        // type{size}0xHEX - type=cyan, size=yellow, 0x=gray, hex=white
+        // Show literal VSF notation for crypto fields with colour coding type{size}0xHEX - type=cyan, size=yellow, 0x=gray, hex=white
         VsfType::hp(hash) => format_crypto_hex("hp", hash),
         VsfType::hb(hash) => format_crypto_hex("hb", hash),
         VsfType::hs(hash) => format_crypto_hex("hs", hash),
@@ -2290,16 +2348,16 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         VsfType::b(bytes, _) => bytes,
         _ => 0,
     };
-    // Parse optional file length (L field) - only present in newer files
-    let file_length_bytes = if pointer < data.len() && data[pointer] == b'L' {
+    // Parse optional file length (l field) - only present in newer files
+    let file_length_bytes = if pointer < data.len() && data[pointer] == b'l' {
         let file_length_type =
             parse(data, &mut pointer).map_err(|e| format!("Failed to parse file length: {}", e))?;
         match file_length_type {
-            VsfType::L(bytes, _) => Some(bytes),
+            VsfType::l(bytes, _) => Some(bytes),
             _ => None,
         }
     } else {
-        None // No L field present
+        None // No l field present
     };
 
     let mut out = String::new();
@@ -2335,8 +2393,11 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
 
     // Creation time: et{timestamp} - time (pink-magenta)
     if let VsfType::e(ref et) = header.creation_time {
+        #[allow(deprecated)]
         let type_suffix = match et {
-            crate::types::EtType::i(_) => "i".to_string(),
+            crate::types::EtType::e5(_) => "5".to_string(),
+            crate::types::EtType::e6(_) => "6".to_string(),
+            crate::types::EtType::e7(_) => "7".to_string(),
             crate::types::EtType::f5(_) => "f5".to_string(),
             crate::types::EtType::f6(_) => "f6".to_string(),
         };

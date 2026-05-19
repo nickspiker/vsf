@@ -23,6 +23,7 @@
 //! [raw_bytes...]                         Unboxed data (if n = 0)
 //! ```
 
+use crate::prelude::*;
 use crate::types::VsfType;
 
 /// Validate VSF section or field name
@@ -142,17 +143,19 @@ pub struct HeaderField {
 }
 
 impl VsfHeader {
-    /// Create new header with current timestamp
+    /// Create new header with current timestamp.
+    /// Under `no_std`, current time is unavailable, so creation_time defaults to oscillation count 0;
+    /// callers should overwrite `creation_time` with their own Eagle Time source (QTIMER ticks, nunc-time, etc).
     pub fn new(version: usize, backward_compat: usize) -> Self {
-        use chrono::Utc;
-
-        // Get current time and convert to Eagle Time with full precision
-        let now = Utc::now();
-        let et = crate::datetime_to_eagle_time(now);
-
-        // Preserve the original precision from datetime_to_eagle_time
-        // This uses f6 (f64) for subsecond precision
-        let creation_time = VsfType::e(et.et_type().clone());
+        #[cfg(feature = "std")]
+        let creation_time = {
+            use chrono::Utc;
+            let now = Utc::now();
+            let et = crate::datetime_to_eagle_time(now);
+            VsfType::e(et.et_type().clone())
+        };
+        #[cfg(not(feature = "std"))]
+        let creation_time = VsfType::e(crate::types::EtType::e6(0));
 
         Self {
             version,
@@ -193,7 +196,7 @@ impl VsfHeader {
         header.extend_from_slice(&header_length_placeholder);
 
         // File length placeholder (for TCP streaming)
-        let file_length_placeholder = VsfType::L(0, true).flatten();
+        let file_length_placeholder = VsfType::l(0, true).flatten();
         header.extend_from_slice(&file_length_placeholder);
 
         // Creation time (always present)
@@ -266,8 +269,7 @@ impl VsfHeader {
 
     /// Decode a VSF header from bytes
     ///
-    /// Parses the binary header structure and returns a VsfHeader instance.
-    /// Returns the parsed header and the number of bytes consumed.
+    /// Parses the binary header structure and returns a VsfHeader instance. Returns the parsed header and the number of bytes consumed.
     ///
     /// # Format
     /// ```text
@@ -332,20 +334,20 @@ impl VsfHeader {
             }
         };
 
-        // Parse optional file length (L) - for TCP streaming (default on, but optional for compat)
-        let file_length = if ptr < data.len() && data[ptr] == b'L' {
+        // Parse optional file length (l) - for TCP streaming (default on, but optional for compat)
+        let file_length = if ptr < data.len() && data[ptr] == b'l' {
             match parse(data, &mut ptr) {
-                Ok(VsfType::L(len, _)) => len,
+                Ok(VsfType::l(len, _)) => len,
                 Ok(other) => {
                     return Err(format!(
-                        "Expected L value after 'L' marker, got {:?}",
+                        "Expected l value after 'l' marker, got {:?}",
                         other
                     ))
                 }
                 Err(e) => return Err(format!("Failed to parse file_length: {}", e)),
             }
         } else {
-            0 // No L field present - use 0 to indicate unknown
+            0 // No l field present - use 0 to indicate unknown
         };
 
         // Parse creation time (e)
@@ -592,21 +594,21 @@ impl VsfHeader {
         }
         ptr += 1;
         while ptr < header_bytes.len()
-            && header_bytes[ptr] != b'L'
+            && header_bytes[ptr] != b'l'
             && header_bytes[ptr] != b'e'
             && header_bytes[ptr] != b'h'
         {
             ptr += 1;
         }
 
-        // Check if L field exists
-        if ptr >= header_bytes.len() || header_bytes[ptr] != b'L' {
-            return Ok(()); // No L field, nothing to do
+        // Check if l field exists
+        if ptr >= header_bytes.len() || header_bytes[ptr] != b'l' {
+            return Ok(()); // No l field, nothing to do
         }
 
-        ptr += 1; // Skip 'L'
+        ptr += 1; // Skip 'l'
 
-        // Find end of L field value
+        // Find end of l field value
         let value_start = ptr;
         while ptr < header_bytes.len() && header_bytes[ptr] != b'e' && header_bytes[ptr] != b'h' {
             ptr += 1;
@@ -615,7 +617,7 @@ impl VsfHeader {
 
         // Calculate file length with stabilization loop
         let mut file_length = header_bytes.len();
-        let mut length_encoded = VsfType::L(file_length, true).flatten();
+        let mut length_encoded = VsfType::l(file_length, true).flatten();
 
         loop {
             let new_total = header_bytes.len() - placeholder_len + (length_encoded.len() - 1);
@@ -623,13 +625,13 @@ impl VsfHeader {
                 break;
             }
             file_length = new_total;
-            length_encoded = VsfType::L(file_length, true).flatten();
+            length_encoded = VsfType::l(file_length, true).flatten();
         }
 
-        // Remove old L field value (keep 'L' marker)
+        // Remove old l field value (keep 'l' marker)
         header_bytes.drain(value_start..value_start + placeholder_len);
 
-        // Insert new length encoding (skip 'L' marker)
+        // Insert new length encoding (skip 'l' marker)
         for (i, byte) in length_encoded.iter().skip(1).enumerate() {
             header_bytes.insert(value_start + i, *byte);
         }
@@ -916,8 +918,7 @@ impl VsfSection {
 
     /// Encode section for encryption (always includes n{count}b{length})
     ///
-    /// Use this when encoding a section that will be encrypted and sent without
-    /// a VSF header. The `n` and `b` fields allow validation after decryption.
+    /// Use this when encoding a section that will be encrypted and sent without a VSF header. The `n` and `b` fields allow validation after decryption.
     ///
     /// Format: [d{name}n{count}b{length}(field:value)...]
     /// Empty sections produce: [d{name}n{0}b{X}]
@@ -961,8 +962,7 @@ impl VsfSection {
 
     /// Encode section with optional `n{count}b{length}` suffix for large files.
     ///
-    /// When `file_offset > 1MB`, appends metadata AFTER the section name for fast
-    /// seeking and forensic validation. Small files/packets get no suffix (zero overhead).
+    /// When `file_offset > 1MB`, appends metadata AFTER the section name for fast seeking and forensic validation. Small files/packets get no suffix (zero overhead).
     ///
     /// # Format
     ///
@@ -976,9 +976,7 @@ impl VsfSection {
     ///
     /// # Inclusive Length Encoding
     ///
-    /// The `b{}` value uses **inclusive encoding** - it includes its own size in the
-    /// total. This avoids the "255 + overhead = 256 BOINK" problem where adding the
-    /// length field's size pushes you into a larger encoding:
+    /// The `b{}` value uses **inclusive encoding** - it includes its own size in the total. This avoids the "255 + overhead = 256 BOINK" problem where adding the length field's size pushes you into a larger encoding:
     ///
     /// ```text
     /// Content = 252 bytes, need to add b{} (3 bytes for values < 256)
@@ -992,9 +990,7 @@ impl VsfSection {
     ///
     /// # Why name-first?
     ///
-    /// Putting metadata after the name means you know WHAT you're looking at before
-    /// you see HOW BIG it is. Reading `[d"attachments"n{12}b{1847}` tells you
-    /// "this is attachments, 12 fields, 1847 bytes" in natural order.
+    /// Putting metadata after the name means you know WHAT you're looking at before you see HOW BIG it is. Reading `[d"attachments"n{12}b{1847}` tells you "this is attachments, 12 fields, 1847 bytes" in natural order.
     pub fn encode_at_offset(&self, file_offset: usize) -> Vec<u8> {
         // Empty sections have no body - the header already declares them
         if self.fields.is_empty() {
@@ -1019,8 +1015,7 @@ impl VsfSection {
                 fields_bytes.extend_from_slice(&field.flatten());
             }
 
-            // Use inclusive encoding for b{} - iterate until stable
-            // (adding b{} size might push us into a larger encoding class)
+            // Use inclusive encoding for b{} - iterate until stable (adding b{} size might push us into a larger encoding class)
             // Total = '[' + name + n{} + b{} + fields + ']'
             let name_bytes = VsfType::d(self.name.clone()).flatten();
             let n_encoded = VsfType::n(field_count).flatten();
@@ -1058,12 +1053,9 @@ impl VsfSection {
     /// Expects format: `[d"section_name"(d"field":value)...]`
     /// Updates ptr to point after the closing `]`
     ///
-    /// This is the **low-level** parsing API that extracts raw data without validation.
-    /// Each field is stored as a single `VsfField` with one value.
+    /// This is the **low-level** parsing API that extracts raw data without validation. Each field is stored as a single `VsfField` with one value.
     ///
-    /// For **schema-validated** parsing with type constraints and multi-value field support,
-    /// use [`crate::schema::SectionBuilder::parse()`] instead. That API validates against
-    /// a schema and returns a builder for the parse→modify→encode workflow.
+    /// For **schema-validated** parsing with type constraints and multi-value field support, use [`crate::schema::SectionBuilder::parse()`] instead. That API validates against a schema and returns a builder for the parse→modify→encode workflow.
     ///
     /// # Use Cases
     /// - Reading unknown/arbitrary VSF data
@@ -1156,8 +1148,7 @@ impl VsfSection {
         let actual_length = *ptr - section_start;
         if let Some(expected) = length_hint {
             if actual_length != expected {
-                // Don't fail - just log for forensics. The hints are informational.
-                // In debug builds this could warn, but we want to parse corrupted files.
+                // Don't fail - just log for forensics. The hints are informational. In debug builds this could warn, but we want to parse corrupted files.
             }
         }
 
@@ -1501,7 +1492,7 @@ mod tests {
         let mut section = VsfSection::new("data");
         section.add_field("field1", VsfType::u(100, false));
         section.add_field("field2", VsfType::u(200, false));
-        section.add_field("field3", VsfType::l("hello".to_string()));
+        section.add_field("field3", VsfType::a("hello".to_string()));
 
         let offset_5mb = 5 * 1024 * 1024;
         let encoded = section.encode_at_offset(offset_5mb);

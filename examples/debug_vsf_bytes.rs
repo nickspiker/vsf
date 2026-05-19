@@ -17,15 +17,11 @@ fn main() {
     vsf.push(VsfType::z(2).flatten());
     vsf[header_index].extend_from_slice(&VsfType::y(2).flatten());
 
-    // Creation time (ef5)
+    // Creation time (e6 — 64-bit oscillation count)
     let now = Utc::now();
     let et = vsf::datetime_to_eagle_time(now);
-    let et_f32 = match et.et_type() {
-        EtType::f6(v) => *v as f32,
-        EtType::f5(v) => *v,
-        EtType::i(v) => *v as f32,
-    };
-    let creation_time = VsfType::e(EtType::f5(et_f32));
+    let oscillations = et.oscillations().unwrap_or(0);
+    let creation_time = VsfType::e(EtType::e6(oscillations));
     vsf[header_index].extend_from_slice(&creation_time.flatten());
 
     // Hash placeholder

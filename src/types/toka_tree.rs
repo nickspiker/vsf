@@ -1,7 +1,6 @@
 //! Scene Graph Supporting Types for VSF ro* Renderable Objects
 //!
-//! These types support the ro* VSF type family (rob, roc, roe, etc.)
-//! for building hierarchical scene graphs with transforms, fills, and strokes.
+//! These types support the ro* VSF type family (rob, roc, roe, etc.) for building hierarchical scene graphs with transforms, fills, and strokes.
 
 #[cfg(feature = "spirix")]
 use spirix::{CircleF4E4, ScalarF4E4};
@@ -121,18 +120,10 @@ impl Transform {
 
 /// Text styling options for rot (text rendering).
 ///
-/// Binary encoding: tagged fields, loop until 0x00 terminator.
-/// Tags (all lowercase ASCII; no caps to avoid collision with 2^N length-prefix scheme):
+/// Binary encoding: tagged fields, loop until 0x00 terminator. Tags (all lowercase ASCII; no caps to avoid collision with 2^N length-prefix scheme):
 ///   0x00      — end of style
 ///   b'l'      — align left  (no value bytes; absence = center default)
-///   b'r'      — align right (no value bytes)
-///   b'f' + 32 — font BLAKE3 hash
-///   b'e' + s44 — leading (line height multiplier)
-///   b'k' + s44 — kerning (letter spacing in RU)
-///   b'w' + s44 — weight (100–900)
-///   b'i' + s44 — tilt (italic angle in degrees)
-///   b'x' + s44 — wrap width (box width in RU; enables word wrap)
-/// s44 = i16 BE fraction + i16 BE exponent (4 bytes total)
+/// b'r'      — align right (no value bytes) b'f' + 32 — font BLAKE3 hash b'e' + s44 — leading (line height multiplier) b'k' + s44 — kerning (letter spacing in RU) b'w' + s44 — weight (100–900) b'i' + s44 — tilt (italic angle in degrees) b'x' + s44 — wrap width (box width in RU; enables word wrap) s44 = i16 BE fraction + i16 BE exponent (4 bytes total)
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextStyle {
     pub font:    Option<[u8; 32]>,   // BLAKE3 hash of font bytes  (tag b'f' + 32 bytes)
@@ -171,8 +162,7 @@ impl TextStyle {
 }
 
 // DEPRECATED - Old vt hack types (will be removed)
-// These types are kept temporarily for backward compatibility but should not be used in new code.
-// Use the ro* VsfType variants instead (rob, roc, roe, etc.)
+// These types are kept temporarily for backward compatibility but should not be used in new code. Use the ro* VsfType variants instead (rob, roc, roe, etc.)
 
 /// Box container primitive (DEPRECATED - use VsfType::rob)
 #[derive(Debug, Clone, PartialEq)]

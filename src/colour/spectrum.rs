@@ -1,9 +1,11 @@
 //! Spectral data structures for representing wavelength-based colour information
 
+use num_traits::Float;
+use crate::prelude::*;
+
 /// A spectrum represents spectral data at regular wavelength intervals
 ///
-/// This structure encapsulates spectral power distributions, colour matching functions,
-/// or other wavelength-dependent data with a defined range and spacing.
+/// This structure encapsulates spectral power distributions, colour matching functions, or other wavelength-dependent data with a defined range and spacing.
 #[derive(Debug, Clone)]
 pub struct Spectrum {
     /// Starting wavelength in nanometers
@@ -50,9 +52,7 @@ impl Spectrum {
 
 /// A const-compatible spectrum for reference spectral data
 ///
-/// This structure is designed for const declarations of reference spectral data
-/// (like CIE colour matching functions) that live in the binary's .rodata section.
-/// Uses a static slice instead of Vec for const compatibility.
+/// This structure is designed for const declarations of reference spectral data (like CIE colour matching functions) that live in the binary's .rodata section. Uses a static slice instead of Vec for const compatibility.
 #[derive(Debug, Clone, Copy)]
 pub struct ConstSpectrum {
     /// Starting wavelength in nanometers
@@ -92,8 +92,7 @@ impl ConstSpectrum {
 
 /// Convert a ConstSpectrum reference to an owned Spectrum
 ///
-/// Note: This converts multi-channel ConstSpectrum to single-channel Spectrum.
-/// Use the appropriate conversion method if you need to preserve channel information.
+/// Note: This converts multi-channel ConstSpectrum to single-channel Spectrum. Use the appropriate conversion method if you need to preserve channel information.
 impl From<&ConstSpectrum> for Spectrum {
     fn from(const_spectrum: &ConstSpectrum) -> Self {
         Self {

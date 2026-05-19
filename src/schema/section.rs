@@ -56,6 +56,7 @@
 //! let updated_bytes = builder.encode()?;
 //! ```
 
+use crate::prelude::*;
 use super::constraint::TypeConstraint;
 use super::conversions::{FromVsfType, IntoVsfType};
 use super::field::FieldSchema;
@@ -132,8 +133,7 @@ impl FieldValue {
 
 /// Schema definition for a VSF section
 ///
-/// Defines the structure, field types, and validation rules for a VSF section.
-/// Sections are encoded with positional field values (no field names in wire format).
+/// Defines the structure, field types, and validation rules for a VSF section. Sections are encoded with positional field values (no field names in wire format).
 ///
 /// # Example
 /// ```rust
@@ -201,8 +201,7 @@ impl SectionSchema {
 
 /// Builder for creating section instances with validation
 ///
-/// Uses Vec<FieldValue> internally to support multi-valued fields.
-/// Field names are looked up via linear search (fast for typical 3-10 field schemas).
+/// Uses Vec<FieldValue> internally to support multi-valued fields. Field names are looked up via linear search (fast for typical 3-10 field schemas).
 ///
 /// # Example
 /// ```rust
@@ -403,8 +402,7 @@ impl SectionBuilder {
         // Section start marker
         bytes.push(b'[');
 
-        // NOTE: Section name is NOT included here for sections within 1MB of header.
-        // For sections >1MB away, the name would be required with metadata (not yet implemented).
+        // NOTE: Section name is NOT included here for sections within 1MB of header. For sections >1MB away, the name would be required with metadata (not yet implemented).
 
         // Encode each field using FieldValue.flatten()
         for field in &self.fields {
@@ -419,12 +417,9 @@ impl SectionBuilder {
 
     /// Parse a section from VSF bytes into this builder (high-level, schema-validated)
     ///
-    /// This is the **high-level** parsing API that validates against a schema.
-    /// Enables the parse → modify → encode workflow with type safety.
+    /// This is the **high-level** parsing API that validates against a schema. Enables the parse → modify → encode workflow with type safety.
     ///
-    /// For **low-level** schema-agnostic parsing without validation,
-    /// use [`crate::VsfSection::parse()`] instead. That API extracts raw data
-    /// and gives the caller control over the read pointer.
+    /// For **low-level** schema-agnostic parsing without validation, use [`crate::VsfSection::parse()`] instead. That API extracts raw data and gives the caller control over the read pointer.
     ///
     /// # Format
     /// Fields can have:
@@ -663,7 +658,7 @@ mod tests {
 
         let builder = schema
             .build()
-            .set("timestamp", VsfType::e(EtType::f6(1234567.89)))
+            .set("timestamp", VsfType::e(EtType::e6(1_234_567_890_000_000)))
             .unwrap()
             .set("count", 42u32)
             .unwrap();

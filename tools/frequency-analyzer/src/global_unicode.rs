@@ -1,7 +1,6 @@
 //! Build global Unicode frequency table from published language data
 //!
-//! Combines published character frequency data for ~20 major languages,
-//! then fills remaining Unicode codepoints with minimal frequency.
+//! Combines published character frequency data for ~20 major languages, then fills remaining Unicode codepoints with minimal frequency.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -597,8 +596,7 @@ fn add_common_symbols(freqs: &mut HashMap<u32, f32>, weight: f32) {
 fn fill_remaining_unicode(freqs: &mut HashMap<u32, f32>) {
     println!("Filling remaining Unicode codepoints...");
 
-    // Unicode ranges to include:
-    // U+0000 - U+D7FF (BMP before surrogates)
+    // Unicode ranges to include: U+0000 - U+D7FF (BMP before surrogates)
     // U+E000 - U+10FFFF (After surrogates through all supplementary planes)
 
     let minimal_freq = 0.0000001; // Very small frequency for unused characters

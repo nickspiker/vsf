@@ -1,7 +1,6 @@
 //! VSF verification functions for hashing and signing
 //!
-//! This module provides standalone functions for adding cryptographic verification
-//! to VSF files after they've been built. Two independent strategies are supported:
+//! This module provides standalone functions for adding cryptographic verification to VSF files after they've been built. Two independent strategies are supported:
 //!
 //! - Single hash in header covering entire file
 //! - Simple integrity check for archives
@@ -22,6 +21,7 @@
 //! // Add verification as needed
 //! ```
 
+use crate::prelude::*;
 use crate::decoding::parse;
 use crate::file_format::HeaderField;
 use crate::types::VsfType;
@@ -30,7 +30,7 @@ use crate::types::VsfType;
 pub struct ParsedHeader {
     pub version: usize,
     pub backward_compat: usize,
-    pub file_length: usize, // Total file size from L field
+    pub file_length: usize, // Total file size from l field
     pub rolling_hash: Option<VsfType>,
     pub fields: Vec<HeaderField>,
     pub header_end: usize, // Byte position where header ends (after '>')
@@ -75,15 +75,15 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     // Parse header length (now we know how to decode it!)
     let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse header length: {}", e))?;
 
-    // Parse optional file length (L field for TCP streaming)
-    let file_length = if ptr < data.len() && data[ptr] == b'L' {
+    // Parse optional file length (l field for TCP streaming)
+    let file_length = if ptr < data.len() && data[ptr] == b'l' {
         match parse(data, &mut ptr) {
-            Ok(VsfType::L(len, _)) => len,
-            Ok(other) => return Err(format!("Expected L value, got: {:?}", other)),
+            Ok(VsfType::l(len, _)) => len,
+            Ok(other) => return Err(format!("Expected l value, got: {:?}", other)),
             Err(e) => return Err(format!("Failed to parse file length: {}", e)),
         }
     } else {
-        0 // No L field - use 0 to indicate unknown
+        0 // No l field - use 0 to indicate unknown
     };
 
     // Skip creation time (required in v4+)
@@ -321,15 +321,12 @@ fn rebuild_with_header(
 
 /// Compute BLAKE3 provenance hash (hp) of VSF file
 ///
-/// This computes the provenance hash with hp field as zeros.
-/// The provenance hash is computed BEFORE any optional signature (ge),
-/// so it represents the immutable content identity.
+/// This computes the provenance hash with hp field as zeros. The provenance hash is computed BEFORE any optional signature (ge), so it represents the immutable content identity.
 ///
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file bytes with hp placeholder
 ///
-/// # Returns
-/// 32-byte BLAKE3 hash
+/// # Returns 32-byte BLAKE3 hash
 ///
 pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     // Verify magic number
@@ -352,8 +349,8 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     let _header_length_type = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse header length: {}", e))?;
 
-    // Skip optional file length (L field) if present
-    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'L' {
+    // Skip optional file length (l field) if present
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'l' {
         let _ = parse(vsf_bytes, &mut pointer)
             .map_err(|e| format!("Failed to parse file length: {}", e))?;
     }
@@ -511,8 +508,8 @@ pub fn write_provenance_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<
     let _header_length_type = parse(&vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse header length: {}", e))?;
 
-    // Skip optional file length (L field) if present
-    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'L' {
+    // Skip optional file length (l field) if present
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'l' {
         let _ = parse(&vsf_bytes, &mut pointer)
             .map_err(|e| format!("Failed to parse file length: {}", e))?;
     }
@@ -589,7 +586,7 @@ pub fn fill_provenance_hash(vsf_bytes: &mut [u8], hash: &[u8; 32]) -> Result<(),
     let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("header_len: {}", e))?;
 
     // Skip optional file length (L)
-    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'L' {
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'l' {
         let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("file_len: {}", e))?;
     }
 
@@ -633,7 +630,7 @@ pub fn fill_signature(vsf_bytes: &mut [u8], signature: &[u8]) -> Result<(), Stri
     let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("header_len: {}", e))?;
 
     // Skip optional file length (L)
-    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'L' {
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'l' {
         let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("file_len: {}", e))?;
     }
 
@@ -672,15 +669,12 @@ pub fn fill_signature(vsf_bytes: &mut [u8], signature: &[u8]) -> Result<(), Stri
 
 /// Compute BLAKE3 rolling hash (hb) of VSF file
 ///
-/// This function computes the rolling hash with hb field as zeros.
-/// It expects the file to already have a hash placeholder (hb[32][zeros]).
-/// This is computed AFTER hp and optional ge, so it can catch changes.
+/// This function computes the rolling hash with hb field as zeros. It expects the file to already have a hash placeholder (hb[32][zeros]). This is computed AFTER hp and optional ge, so it can catch changes.
 ///
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file bytes with hb placeholder
 ///
-/// # Returns
-/// 32-byte BLAKE3 hash
+/// # Returns 32-byte BLAKE3 hash
 ///
 pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     // Verify magic number
@@ -703,8 +697,8 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     let _header_length_type = parse(vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse header length: {}", e))?;
 
-    // Skip optional file length (L field) if present
-    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'L' {
+    // Skip optional file length (l field) if present
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'l' {
         let _ = parse(vsf_bytes, &mut pointer)
             .map_err(|e| format!("Failed to parse file length: {}", e))?;
     }
@@ -794,8 +788,8 @@ pub fn write_file_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<Vec<u8
     let _header_length_type = parse(&vsf_bytes, &mut pointer)
         .map_err(|e| format!("Failed to parse header length: {}", e))?;
 
-    // Skip optional file length (L field) if present
-    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'L' {
+    // Skip optional file length (l field) if present
+    if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b'l' {
         let _ = parse(&vsf_bytes, &mut pointer)
             .map_err(|e| format!("Failed to parse file length: {}", e))?;
     }
@@ -841,8 +835,7 @@ pub fn write_file_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<Vec<u8
 
 /// Legacy function for backward compatibility
 ///
-/// This function combines compute_file_hash and write_file_hash.
-/// New code should use the separate functions instead.
+/// This function combines compute_file_hash and write_file_hash. New code should use the separate functions instead.
 ///
 #[deprecated(note = "Use compute_file_hash() and write_file_hash() separately")]
 pub fn add_file_hash(vsf_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
@@ -876,8 +869,7 @@ fn find_hash_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize
 
 /// Write all header field signatures from the parsed header into their placeholders
 ///
-/// This function scans the header for all signature placeholders (ge/gp/gr with zeros)
-/// and writes the actual signature bytes from the parsed header fields.
+/// This function scans the header for all signature placeholders (ge/gp/gr with zeros) and writes the actual signature bytes from the parsed header fields.
 ///
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file bytes with signature placeholders (zeros)
@@ -979,11 +971,9 @@ fn write_header_field_signatures_from_list(
 ///
 /// VSF uses a two-stage hash scheme for signatures:
 ///
-/// 1. **Provenance hash (hp)**: Computed over the entire file with all crypto
-///    fields zeroed (hp=0, sig=0). This is the immutable content identity.
+/// 1. **Provenance hash (hp)**: Computed over the entire file with all crypto fields zeroed (hp=0, sig=0). This is the immutable content identity.
 ///
-/// 2. **Signature**: Signs the hash of the entire file WITH provenance filled
-///    in but signature still zeroed. This binds the signer to both the content
+/// 2. **Signature**: Signs the hash of the entire file WITH provenance filled in but signature still zeroed. This binds the signer to both the content
 ///    AND its provenance.
 ///
 /// ```text
@@ -1002,8 +992,7 @@ fn write_header_field_signatures_from_list(
 /// - **hb (rolling hash)**: Anonymous integrity - just verifies content hasn't changed
 /// - **ge (signature)**: Authenticated integrity - proves WHO created/signed it
 ///
-/// When signing, we use signature (ge) instead of rolling hash (hb).
-/// Both cover file integrity; signature additionally proves authorship.
+/// When signing, we use signature (ge) instead of rolling hash (hb). Both cover file integrity; signature additionally proves authorship.
 ///
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file with hp already computed
@@ -1076,8 +1065,7 @@ pub fn sign_section(
 /// - Provenance hash (hp) filled in (binds signature to content identity)
 /// - Signature field zeroed (the thing we're computing)
 ///
-/// The result is what the signer signs, proving they attest to this
-/// specific content with this specific provenance.
+/// The result is what the signer signs, proving they attest to this specific content with this specific provenance.
 #[cfg(feature = "crypto")]
 fn compute_signature_hash(vsf_bytes: &[u8], section_name: &str) -> Result<[u8; 32], String> {
     // Find and zero the signature bytes for this section
@@ -1276,20 +1264,14 @@ pub fn add_encryption_metadata(
 
 /// Check if a VSF file is an unmodified original by verifying the provenance hash (hp).
 ///
-/// The provenance hash identifies the original content. This function verifies that
-/// the file content matches its claimed identity - i.e., it hasn't been modified
-/// since creation.
+/// The provenance hash identifies the original content. This function verifies that the file content matches its claimed identity - i.e., it hasn't been modified since creation.
 ///
-/// Note: This does NOT verify integrity of signed/updated files. For files that have
-/// been signed or updated, use signature verification instead. The provenance hash
-/// is computed with crypto fields zeroed, so it represents the original content
-/// identity regardless of later signatures.
+/// Note: This does NOT verify integrity of signed/updated files. For files that have been signed or updated, use signature verification instead. The provenance hash is computed with crypto fields zeroed, so it represents the original content identity regardless of later signatures.
 ///
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file bytes
 ///
-/// # Returns
-/// `Ok(())` if file is an unmodified original, `Err` if modified or invalid
+/// # Returns `Ok(())` if file is an unmodified original, `Err` if modified or invalid
 pub fn is_original(vsf_bytes: &[u8]) -> Result<(), String> {
     use crate::file_format::VsfHeader;
 
@@ -1317,14 +1299,12 @@ pub fn is_original(vsf_bytes: &[u8]) -> Result<(), String> {
 
 /// Verify the rolling hash (hb) in a VSF header.
 ///
-/// The rolling hash covers the entire file including any modifications/signatures,
-/// providing integrity verification for the current file state.
+/// The rolling hash covers the entire file including any modifications/signatures, providing integrity verification for the current file state.
 ///
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file bytes
 ///
-/// # Returns
-/// `Ok(())` if hash is valid, `Err` with description if invalid or missing
+/// # Returns `Ok(())` if hash is valid, `Err` with description if invalid or missing
 pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
     use crate::file_format::VsfHeader;
 
@@ -1352,8 +1332,7 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
 
 /// Sign entire VSF file with Ed25519 (header-level signature)
 ///
-/// This function signs the FILE HASH (not the provenance hash directly).
-/// The file must already be built with:
+/// This function signs the FILE HASH (not the provenance hash directly). The file must already be built with:
 /// - `ke` (Ed25519 pubkey) in header
 /// - `ge` placeholder (64 zeros) in header
 /// - `hp` either as placeholder (auto-computed) or explicit value
@@ -1372,8 +1351,7 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
 /// VSF file bytes with hp and ge filled in
 ///
 /// # Security
-/// Signs the FILE HASH, not the provenance hash directly. This prevents
-/// extension attacks where content could be added after the signed portion.
+/// Signs the FILE HASH, not the provenance hash directly. This prevents extension attacks where content could be added after the signed portion.
 #[cfg(feature = "crypto")]
 pub fn sign_file(mut vsf_bytes: Vec<u8>, signing_key: &[u8; 32]) -> Result<Vec<u8>, String> {
     use ed25519_dalek::{Signer, SigningKey};
@@ -1420,10 +1398,7 @@ pub fn sign_file(mut vsf_bytes: Vec<u8>, signing_key: &[u8; 32]) -> Result<Vec<u
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file with ke and ge in header
 ///
-/// # Returns
-/// `Ok(true)` if signature is valid
-/// `Ok(false)` if signature is invalid
-/// `Err` if file format is wrong or missing ke/ge
+/// # Returns `Ok(true)` if signature is valid `Ok(false)` if signature is invalid `Err` if file format is wrong or missing ke/ge
 #[cfg(feature = "crypto")]
 pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -1482,8 +1457,7 @@ pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
 /// # Arguments
 /// * `vsf_bytes` - Complete VSF file with ke in header
 ///
-/// # Returns
-/// 32-byte Ed25519 public key
+/// # Returns 32-byte Ed25519 public key
 #[cfg(feature = "crypto")]
 pub fn extract_signer_pubkey(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     let ke_info = find_header_ke(vsf_bytes)?;
@@ -1523,7 +1497,7 @@ fn find_header_hp(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     let _ = parse(data, &mut ptr).map_err(|e| format!("header_len: {}", e))?;
 
     // Skip optional file length (L) if present
-    if ptr < data.len() && data[ptr] == b'L' {
+    if ptr < data.len() && data[ptr] == b'l' {
         let _ = parse(data, &mut ptr).map_err(|e| format!("file_len: {}", e))?;
     }
 
@@ -1567,7 +1541,7 @@ fn find_header_ke(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     let _ = parse(data, &mut ptr).map_err(|e| format!("header_len: {}", e))?;
 
     // Skip optional file length (L) if present
-    if ptr < data.len() && data[ptr] == b'L' {
+    if ptr < data.len() && data[ptr] == b'l' {
         let _ = parse(data, &mut ptr).map_err(|e| format!("file_len: {}", e))?;
     }
 
@@ -1614,7 +1588,7 @@ fn find_header_ge(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     let _ = parse(data, &mut ptr).map_err(|e| format!("header_len: {}", e))?;
 
     // Skip optional file length (L) if present
-    if ptr < data.len() && data[ptr] == b'L' {
+    if ptr < data.len() && data[ptr] == b'l' {
         let _ = parse(data, &mut ptr).map_err(|e| format!("file_len: {}", e))?;
     }
 

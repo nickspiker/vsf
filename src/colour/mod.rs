@@ -21,8 +21,7 @@ pub mod spectrum;
 pub mod transfer;
 
 // Re-export constants from spectral, legacy, and rec2020 modules
-// Note: All three modules have a `constants` submodule, which creates ambiguity.
-// Users should access them via `colour::legacy::constants`, `colour::spectral::constants`, etc.
+// Note: All three modules have a `constants` submodule, which creates ambiguity. Users should access them via `colour::legacy::constants`, `colour::spectral::constants`, etc.
 #[allow(ambiguous_glob_reexports)]
 pub use legacy::*;
 #[allow(ambiguous_glob_reexports)]

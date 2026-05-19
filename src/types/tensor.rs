@@ -1,5 +1,7 @@
 //! Tensor types for VSF: contiguous, strided, and bitpacked
 
+use crate::prelude::*;
+
 /// Layout order for tensor data
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutOrder {
@@ -203,8 +205,7 @@ pub struct BitPackedTensor {
 
 /// Trait for types that can be packed into a BitPackedTensor
 ///
-/// This exists solely to enable the generic pack() convenience method.
-/// For explicit type handling, use pack_u8(), pack_u16(), etc. directly.
+/// This exists solely to enable the generic pack() convenience method. For explicit type handling, use pack_u8(), pack_u16(), etc. directly.
 pub trait PackableUnsigned: Copy {
     fn pack_samples(bit_depth: u8, shape: Vec<usize>, samples: &[Self]) -> BitPackedTensor;
 }
@@ -250,7 +251,7 @@ macro_rules! impl_bitpack {
                         "Cannot pack {}-bit values into {}-bit type {}",
                         bits_per_sample,
                         <$t>::BITS,
-                        std::any::type_name::<$t>()
+                        core::any::type_name::<$t>()
                     );
                 }
 
@@ -332,8 +333,7 @@ impl PackableUnsigned for usize {
 
 /// Unpacked samples from a BitPackedTensor
 ///
-/// The enum variant matches the minimal type needed for the bit depth.
-/// For explicit type control, use unpack_u8(), unpack_u16(), etc. directly.
+/// The enum variant matches the minimal type needed for the bit depth. For explicit type control, use unpack_u8(), unpack_u16(), etc. directly.
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnpackedSamples {
     U8(Vec<u8>),     // 1-8 bit depths
@@ -388,8 +388,7 @@ impl UnpackedSamples {
 impl BitPackedTensor {
     /// Pack samples with automatic type dispatch (convenience wrapper)
     ///
-    /// Calls the appropriate pack_u* method based on the input type.
-    /// Use explicit pack_u8(), pack_u16() etc. methods if you need compile-time guarantees.
+    /// Calls the appropriate pack_u* method based on the input type. Use explicit pack_u8(), pack_u16() etc. methods if you need compile-time guarantees.
     ///
     /// # Examples
     /// ```ignore

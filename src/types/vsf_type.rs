@@ -1,3 +1,4 @@
+use crate::prelude::*;
 use num_complex::Complex;
 
 #[cfg(feature = "spirix")]
@@ -57,6 +58,7 @@ use spirix::{
 };
 
 use super::eagle_time::EtType;
+use super::network::WaAddress;
 use super::tensor::{BitPackedTensor, StridedTensor, Tensor, Vector};
 use super::world_coord::WorldCoord;
 
@@ -68,7 +70,7 @@ use super::toka_tree::{
 
 /// Main VSF type enum representing all supported data types
 ///
-/// # Type System (V2)
+/// # Type System
 ///
 /// ## Primitives
 /// - `u0`, `u`, `u3`-`u7`: Unsigned integers (bool, auto, u8, u16, u32, u64, u128)
@@ -97,7 +99,7 @@ use super::toka_tree::{
 ///
 /// Example usage in named fields:
 /// ```text
-/// (d"name":l"nick")      // Field name uses 'd', ASCII value uses 'l'
+/// (d"name":a"nick")      // Field name uses 'd', ASCII value uses 'a'
 /// (d"greeting":x"Hello 世界")  // Field name uses 'd', Unicode value uses 'x'
 /// ```
 ///
@@ -105,12 +107,12 @@ use super::toka_tree::{
 /// - `e`: Eagle Time
 /// - `o`: Offset in bits
 /// - `b`: Length in bits
+/// - `l`: Length in bytes (wire or file)
 /// - `n`: Number/count
 /// - `z`: Version
 /// - `y`: Backward version
-/// - `m`: Marker definition
-/// - `r`: Marker reference
-/// - `a`: Message Authentication Code (MAC)
+/// - `a`: ASCII text
+/// - `m`: Message Authentication Code (MAC)
 /// - `h`: Hash
 /// - `g`: Signature
 /// - `k`: Cryptographic key
@@ -123,11 +125,23 @@ pub enum VsfType {
     d(String), // VSF internal dictionary key (internal naming: section names, field names, keys)
     o(usize),  // Offset in Bytes
     b(usize, bool), // Length in Bytes (value, inclusive_mode)
-    L(usize, bool), // File length in Bytes (value, inclusive_mode)
+    l(usize, bool), // Length in bytes (wire or file)
     n(usize),  // Number/count
     z(usize),  // Version
     y(usize),  // Backward version
-    m(usize),  // Marker
+
+    // ==================== NETWORK FAMILY (n + lowercase) ==================== n + digit = count/number — no conflict, different second-char class
+    na(u8, String, Option<u16>), // Network address: scheme(u8) + host + optional port
+                                 // scheme: 0=https 1=http 2=ftp 3=sftp 4=ssh 5=ntp 6=smtp 7=ws 8=wss
+    nh(String),                  // Network host: bare hostname or IP string
+    ni([u8; 4]),                 // Network IPv4: 4 bytes
+    nj([u8; 16]),                // Network IPv6: 16 bytes
+    nc(String, u8),              // Network CIDR: address string + prefix length
+    nm([u8; 6]),                 // Network MAC: 6 bytes
+    np(u16),                     // Network port: standalone port number
+    ns(String, u16),             // Network socket: host + port (no scheme)
+    nu(String),                  // Network URL: full URL including path/query
+    nn(String),                  // Network name: DNS name (validated format)
 
     // ==================== CRYPTOGRAPHIC TYPES ====================
     // Hash algorithms
@@ -170,7 +184,7 @@ pub enum VsfType {
     kd(Vec<u8>), // Dilithium/ML-DSA public key
     kb(Vec<u8>), // BIKE public key
 
-    // Shared secrets (outpNope. if you compute a provinence hash of only the content you WILL get collissiooonnnssss. Do lookut of key agreement/decapsulation) - typed by algorithm
+    // Shared secrets
     ksx(Vec<u8>), // X25519 shared secret (32B)
     ksp(Vec<u8>), // P-curve ECDH shared secret (32B P-256, 48B P-384 - size disambiguates)
     ksk(Vec<u8>), // secp256k1 shared secret (32B)
@@ -180,11 +194,11 @@ pub enum VsfType {
     ksh(Vec<u8>), // HQC shared secret (64B)
     ksm(Vec<u8>), // ML-KEM shared secret (32B)
 
-    // MAC (Message Authentication Code)
-    ah(Vec<u8>), // HMAC-SHA256 (32B or 64B)
-    ap(Vec<u8>), // Poly1305 (16B)
-    ab(Vec<u8>), // BLAKE3-keyed (variable, default 32B)
-    ac(Vec<u8>), // CMAC-AES (16B)
+    // MAC (Message Authentication Code) — m + lowercase
+    mh(Vec<u8>), // HMAC-SHA256 (32B or 64B)
+    mp(Vec<u8>), // Poly1305 (16B)
+    mb(Vec<u8>), // BLAKE3-keyed (variable, default 32B)
+    mc(Vec<u8>), // CMAC-AES (16B)
 
     // ==================== UNSIGNED INTEGERS ====================
     u0(bool),       // Boolean
@@ -213,9 +227,13 @@ pub enum VsfType {
 
     // ==================== METADATA & SPECIAL TYPES ====================
     x(String),     // UTF-8 text (Unicode, user-facing, Huffman compressed)
-    l(String),     // ASCII text (user-facing, ASCII-only alternative to x)
+    a(String),     // ASCII text (user-facing, ASCII-only alternative to x)
     e(EtType),     // Eagle Time
-    w(WorldCoord), // World coordinate (Dymaxion icosahedral)
+    w(WorldCoord), // World coordinate (Dymaxion icosahedral) — wire: w[3-7] + 2^N bytes
+
+    // ==================== WORLD ADDRESS FAMILY (w + lowercase) ==================== w + digit (w3..w7) = WorldCoord at 2^N-bit resolution w + lowercase letter = other world types (wa = postal address)
+    wa(WaAddress), // World address: structured postal address (all fields optional)
+    // wb reserved: world bounds (geographic bounding box) wc..wz reserved for future world/physical types
 
     // ==================== VECTORS (1D CONTIGUOUS) ====================
     /// 1D contiguous vectors - compact encoding with count marker
@@ -294,8 +312,7 @@ pub enum VsfType {
     /// let ciphertext = VsfType::v(b'f', frodo_ciphertext_bytes);
     /// ```
     ///
-    /// **For file storage:** Use `v(b'b', ...)` (standard binary blob).
-    /// **For app-specific:** Use uppercase encodings only for internal formats.
+    /// **For file storage:** Use `v(b'b', ...)` (standard binary blob). **For app-specific:** Use uppercase encodings only for internal formats.
     v(u8, Vec<u8>), // Wrapped data (encoding byte, raw bytes)
 
     // ==================== COLOUR TYPES ====================
@@ -408,17 +425,12 @@ pub enum VsfType {
 
     // Magic matrix colour transform
     rm(usize, usize, Vec<f32>, f32), // rm(input_channels, output_channels, matrix_NxM, gamma)
-    // Where:
-    // input_channels - Number of input colour channels (N)
-    // output_channels - Number of output colour channels (M, usually 3 for LMS)
-    // matrix_NxM - Flattened N×M matrix as Vec<f32>
-    // gamma - Gamma correction value as f32
+    // Where: input_channels - Number of input colour channels (N) output_channels - Number of output colour channels (M, usually 3 for LMS) matrix_NxM - Flattened N×M matrix as Vec<f32> gamma - Gamma correction value as f32
 
     // ==================== RENDERABLE OBJECT TYPES ====================
     // Scene graph primitives - everything you can draw (ro* prefix - 3 letters)
     //
-    // These types expand the 'r' (renderable) family to include drawing primitives
-    // alongside colours. They form the foundation of the Toka scene graph system.
+    // These types expand the 'r' (renderable) family to include drawing primitives alongside colours. They form the foundation of the Toka scene graph system.
     //
     // Coordinate system: All positions/sizes use Spirix CircleF4E4 (window coords: -1 to +1)
     // Fill/Stroke: Use Fill/Stroke types from toka_tree module
@@ -882,8 +894,8 @@ pub enum VsfType {
     op(u8, u8), // Opcode (first_letter, second_letter)
 }
 
-impl std::fmt::Display for VsfType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for VsfType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             // Opcodes - descriptive names without brackets
             VsfType::op(a, b) => {
@@ -1012,7 +1024,7 @@ impl std::fmt::Display for VsfType {
 
             // Text types
             VsfType::d(s) => write!(f, "⦉{}⦊", s),
-            VsfType::l(s) => write!(f, "⦉{}⦊", s),
+            VsfType::a(s) => write!(f, "⦉{}⦊", s),
             VsfType::x(s) => write!(f, "⦉{}⦊", s.escape_default()),
 
             // For all other types, use Debug for now
@@ -1094,10 +1106,10 @@ impl VsfType {
 
     /// Extract as string reference
     ///
-    /// Supports: x (text), l (label), d (descriptor)
+    /// Supports: x (UTF-8 text), a (ASCII text), d (dictionary key)
     pub fn as_string(&self) -> Option<&str> {
         match self {
-            VsfType::x(s) | VsfType::l(s) | VsfType::d(s) => Some(s),
+            VsfType::x(s) | VsfType::a(s) | VsfType::d(s) => Some(s),
             _ => None,
         }
     }
@@ -1123,8 +1135,7 @@ impl VsfType {
 
     /// Check if value is truthy (non-zero)
     ///
-    /// Returns true for any non-zero numeric value.
-    /// Returns error for non-numeric types.
+    /// Returns true for any non-zero numeric value. Returns error for non-numeric types.
     ///
     /// Supported types: s44, c44, u/u3-u7, i/i3-i7, u0 (bool)
     pub fn is_truthy(&self) -> Result<bool, String> {
@@ -1163,8 +1174,7 @@ impl VsfType {
 
     /// Check if this is a numeric type
     ///
-    /// Returns true for all integer, boolean, and scalar types.
-    /// Does not require the value to be truthy.
+    /// Returns true for all integer, boolean, and scalar types. Does not require the value to be truthy.
     pub fn is_numeric(&self) -> bool {
         match self {
             #[cfg(feature = "spirix")]

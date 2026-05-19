@@ -1,7 +1,6 @@
 //! High-level builders for common VSF use cases
 //!
-//! This module provides constructors for complex data types that require
-//! packaging multiple VSF primitives together:
+//! This module provides constructors for complex data types that require packaging multiple VSF primitives together:
 //! - GPS coordinate conversions (lat/lon → WorldCoord)
 //! - RAW camera images with metadata
 //!
@@ -10,8 +9,7 @@
 //! - Images: `VsfType::p(BitPackedTensor::pack(12, vec![w, h], &samples))`
 //! - Tensors: `VsfType::t_u3(Tensor::new(vec![w, h], data))`
 //!
-//! # Examples
-//! ∞
+//! # Examples ∞
 //! ```ignore
 //! use vsf::builders::*;
 //! use vsf::types::*;
@@ -19,6 +17,7 @@
 //! // RAW camera image (12-bit sensor)
 //! let raw = raw_image(12, 4096, 3072, pixel_data);
 
+use crate::prelude::*;
 use crate::types::{BitPackedTensor, Tensor, VsfType, WorldCoord};
 use crate::vsf_builder::VsfBuilder;
 
@@ -795,8 +794,7 @@ pub fn geotagged_photo(
 
 /// Build a complete RAW image file with full metadata and calibration
 ///
-/// **IMPORTANT:** The `image` parameter is a `BitPackedTensor` which is SELF-DESCRIBING.
-/// It already contains:
+/// **IMPORTANT:** The `image` parameter is a `BitPackedTensor` which is SELF-DESCRIBING. It already contains:
 /// - `bit_depth` (8, 10, 12, 14, 16, etc.)
 /// - `shape` ([width, height] like [4096, 3072])
 /// - `data` (the actual bitpacked pixels)
@@ -974,8 +972,7 @@ pub fn build_raw_image(
 /// - White level: 4095
 ///
 /// **What this function does:**
-/// 1. Creates a `BitPackedTensor::pack(12, [4096, 3072], samples)` - this packs your
-///    12-bit samples into the minimal bitpacked representation
+/// 1. Creates a `BitPackedTensor::pack(12, [4096, 3072], samples)` - this packs your 12-bit samples into the minimal bitpacked representation
 /// 2. Adds sensor metadata (CFA pattern, black/white levels)
 /// 3. Adds camera settings (ISO, shutter speed)
 ///
@@ -1033,8 +1030,7 @@ pub const ENCODING_AV1: u8 = b'a';
 /// - Provenance hash only (no rolling hash, no signature)
 /// - AV1-compressed pixel data wrapped in v type (`va`)
 ///
-/// The `va` encoding tells us it's AV1, and AV1 bitstream contains dimensions.
-/// Provenance hash ensures integrity. No redundant metadata needed.
+/// The `va` encoding tells us it's AV1, and AV1 bitstream contains dimensions. Provenance hash ensures integrity. No redundant metadata needed.
 ///
 /// Assumes VSF RGB colourspace (gamma 2, Rec.2020 primaries).
 ///
@@ -1061,8 +1057,7 @@ pub struct ParsedCompressedImage {
 
 /// Parse a compressed image VSF file
 ///
-/// Extracts encoding type and compressed pixel data.
-/// Dimensions come from decoding the AV1 bitstream.
+/// Extracts encoding type and compressed pixel data. Dimensions come from decoding the AV1 bitstream.
 ///
 /// # Arguments
 /// * `data` - Complete VSF file bytes
@@ -1619,8 +1614,7 @@ mod tests {
         // Verify magic number (RÅ is 3 bytes in UTF-8)
         assert_eq!(&bytes[0..3], "RÅ".as_bytes());
 
-        // File should be large (header + metadata + ~18.9MB bitpacked pixels)
-        // 12-bit × 12.6M pixels = 18.9MB
+        // File should be large (header + metadata + ~18.9MB bitpacked pixels) 12-bit × 12.6M pixels = 18.9MB
         assert!(
             bytes.len() > 18_000_000,
             "File should be > 18MB with bitpacked pixels"

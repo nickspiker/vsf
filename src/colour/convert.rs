@@ -54,6 +54,7 @@
 //!   - Transfer function: Rec.709 OETF for encoding
 
 #[allow(deprecated)] // Need legacy functions for backward compatibility conversions
+use num_traits::Float;
 use crate::colour::legacy::{
     delinearize_srgb, encode_bt709, linearize_bt709, linearize_srgb_u16, linearize_srgb_u8,
 };
@@ -70,8 +71,7 @@ use spirix::sf;
 /// - Floats (f32, S44) are ALWAYS linear (no gamma encoding)
 /// - Integers (u8, u16) are ALWAYS gamma-encoded (various EOTF applied)
 ///
-/// The `Linear` type parameter determines the target float type (f32 or S44).
-/// Integers convert directly to either float type without roundtripping.
+/// The `Linear` type parameter determines the target float type (f32 or S44). Integers convert directly to either float type without roundtripping.
 pub trait ColourValue<Linear: Copy>: Copy {
     /// Convert from gamma-encoded value to linear (0-1 range)
     /// For integers: apply EOTF and normalize to 0-1
@@ -88,14 +88,12 @@ pub trait ColourValue<Linear: Copy>: Copy {
     /// Convert from linear to gamma-encoded using Rec.709 OETF
     fn from_linear_rec709(linear: Linear) -> Self;
 
-    /// Convert from gamma-encoded value to linear using Rec.2020 EOTF
-    /// (Rec.2020 uses Rec.709 transfer function)
+    /// Convert from gamma-encoded value to linear using Rec.2020 EOTF (Rec.2020 uses Rec.709 transfer function)
     fn to_linear_rec2020(self) -> Linear {
         self.to_linear_rec709()
     }
 
-    /// Convert from linear to gamma-encoded using Rec.2020 OETF
-    /// (Rec.2020 uses Rec.709 transfer function)
+    /// Convert from linear to gamma-encoded using Rec.2020 OETF (Rec.2020 uses Rec.709 transfer function)
     fn from_linear_rec2020(linear: Linear) -> Self {
         Self::from_linear_rec709(linear)
     }
@@ -596,23 +594,9 @@ pub fn convert_matrix_3x3_s44(a: &[S44], b: &[S44]) -> [S44; 9] {
 ///
 /// This preserves the bright hues, whites especially while ensuring displayable colours.
 pub fn scale_to_gamut_f32(mut r: f32, mut g: f32, mut b: f32) -> (f32, f32, f32) {
-    // let min = r.min(g).min(b);
-    // if min < 0. {
-    //     r = 1. - r;
-    //     g = 1. - g;
-    //     b = 1. - b;
-    //     let scale = 1. / (1. - min);
-    //     r *= scale;
-    //     g *= scale;
-    //     b *= scale;
-    //     r = 1. - r;
-    //     g = 1. - g;
-    //     b = 1. - b;
-    // }
+    // let min = r.min(g).min(b); if min < 0. { r = 1. - r; g = 1. - g; b = 1. - b; let scale = 1. / (1. - min); r *= scale; g *= scale; b *= scale; r = 1. - r; g = 1. - g; b = 1. - b; }
 
-    // r = r.max(0.);
-    // g = g.max(0.);
-    // b = b.max(0.);
+    // r = r.max(0.); g = g.max(0.); b = b.max(0.);
 
     let max = r.max(g).max(b);
     if max > 1. {
@@ -1079,8 +1063,7 @@ impl VsfType {
 
     /// Convert VSF RGB to native 8-bit gamma-encoded values (0-255 range, f32 pipeline)
     ///
-    /// Uses VSF RGB gamma 2 and ×256 truncation quantization (fast).
-    /// Automatically scales out-of-gamut colours to fit [0,1] range.
+    /// Uses VSF RGB gamma 2 and ×256 truncation quantization (fast). Automatically scales out-of-gamut colours to fit [0,1] range.
     pub fn to_rgb_u8_f32(&self) -> Option<(u8, u8, u8)> {
         let rgb = self.to_rgb_linear_f32()?;
         let (r, g, b) = scale_to_gamut_f32(rgb.r, rgb.g, rgb.b);
@@ -1093,8 +1076,7 @@ impl VsfType {
 
     /// Convert VSF RGB to native 8-bit gamma-encoded values (0-255 range, S44 pipeline)
     ///
-    /// Uses VSF RGB gamma 2 and ×256 truncation quantization (fast).
-    /// Automatically scales out-of-gamut colours to fit [0,1] range.
+    /// Uses VSF RGB gamma 2 and ×256 truncation quantization (fast). Automatically scales out-of-gamut colours to fit [0,1] range.
     #[cfg(feature = "spirix")]
     pub fn to_rgb_u8_s44(&self) -> Option<(u8, u8, u8)> {
         let rgb = self.to_rgb_linear_s44()?;
@@ -1108,8 +1090,7 @@ impl VsfType {
 
     /// Convert VSF RGB to LMS cone space (linear, f32)
     ///
-    /// LMS represents Long, Medium, and Short wavelength cone responses.
-    /// Used as a perceptually-uniform intermediate space for chromatic adaptation.
+    /// LMS represents Long, Medium, and Short wavelength cone responses. Used as a perceptually-uniform intermediate space for chromatic adaptation.
     ///
     /// Based on CIE 2006 2° Standard Observer.
     pub fn to_lms_linear_f32(&self) -> Option<(f32, f32, f32)> {
@@ -1123,9 +1104,7 @@ impl VsfType {
     ///
     /// **DEPRECATED**: XYZ is based on CIE 1931 Standard Observer (legacy).
     ///
-    /// XYZ tristimulus values are the foundation of most xy-coordinate-based
-    /// colour standards. Useful for colourimetric calculations and converting
-    /// between legacy colourspaces.
+    /// XYZ tristimulus values are the foundation of most xy-coordinate-based colour standards. Useful for colourimetric calculations and converting between legacy colourspaces.
     pub fn to_xyz_linear_f32(&self) -> Option<(f32, f32, f32)> {
         let rgb = self.to_rgb_linear_f32()?;
         use crate::colour::VSF_RGB2XYZ;
@@ -1165,12 +1144,9 @@ impl VsfType {
     /// Returns (r, g, b) as 8-bit sRGB values
     /// Convert VSF RGB to sRGB/Rec.709 linear (f32, 0-1 nominal range)
     ///
-    /// Returns linear light values. May be out of gamut (negative or >1).
-    /// Use this for HDR or when you need the raw linear values.
-    /// Convert VSF RGB to sRGB linear (f32, 0-1 nominal range)
+    /// Returns linear light values. May be out of gamut (negative or >1). Use this for HDR or when you need the raw linear values. Convert VSF RGB to sRGB linear (f32, 0-1 nominal range)
     ///
-    /// Returns linear light values. May be out of gamut (negative or >1).
-    /// Use `scale_to_gamut_f32()` to bring into displayable range, prioritizing hue
+    /// Returns linear light values. May be out of gamut (negative or >1). Use `scale_to_gamut_f32()` to bring into displayable range, prioritizing hue
     pub fn to_srgb_linear_f32(&self) -> Option<(f32, f32, f32)> {
         let rgb = self.to_rgb_linear_f32()?;
         use crate::colour::VSF_RGB2SRGB;
@@ -1180,8 +1156,7 @@ impl VsfType {
 
     /// Convert VSF RGB to BT.2020/Rec.2020 linear (f32, 0-1 nominal range)
     ///
-    /// Returns linear light values. May be out of gamut (negative or >1).
-    /// Use this for HDR or when you need the raw linear values.
+    /// Returns linear light values. May be out of gamut (negative or >1). Use this for HDR or when you need the raw linear values.
     pub fn to_rec2020_linear_f32(&self) -> Option<(f32, f32, f32)> {
         let rgb = self.to_rgb_linear_f32()?;
         use crate::colour::VSF_RGB2REC2020;
@@ -1218,8 +1193,7 @@ impl VsfType {
 
     /// Convert VSF RGB to sRGB (u8, gamma-encoded, 0-255 range, f32 pipeline)
     ///
-    /// Uses sRGB OETF and ×255 + round quantization.
-    /// Automatically scales out-of-gamut colours to fit [0,1] range.
+    /// Uses sRGB OETF and ×255 + round quantization. Automatically scales out-of-gamut colours to fit [0,1] range.
     pub fn to_srgb_u8_f32(&self) -> Option<(u8, u8, u8)> {
         use crate::colour::legacy::transfer::srgb_oetf;
         let (r, g, b) = self.to_srgb_linear_f32()?;
@@ -1233,8 +1207,7 @@ impl VsfType {
 
     /// Convert VSF RGB to sRGB (u8, gamma-encoded, 0-255 range, S44 pipeline)
     ///
-    /// Uses sRGB OETF and ×255 + round quantization.
-    /// Automatically scales out-of-gamut colours to fit [0,1] range.
+    /// Uses sRGB OETF and ×255 + round quantization. Automatically scales out-of-gamut colours to fit [0,1] range.
     #[cfg(feature = "spirix")]
     pub fn to_srgb_u8_s44(&self) -> Option<(u8, u8, u8)> {
         let (r, g, b) = self.to_srgb_linear_s44()?;
@@ -1248,8 +1221,7 @@ impl VsfType {
 
     /// Convert VSF RGB to sRGB (u16, gamma-encoded, 0-65535 range, f32 pipeline)
     ///
-    /// Uses sRGB OETF and ×65535 + round quantization (sRGB spec).
-    /// Automatically scales out-of-gamut colours to fit [0,1] range.
+    /// Uses sRGB OETF and ×65535 + round quantization (sRGB spec). Automatically scales out-of-gamut colours to fit [0,1] range.
     pub fn to_srgb_u16_f32(&self) -> Option<(u16, u16, u16)> {
         let (r, g, b) = self.to_srgb_linear_f32()?;
         let (r, g, b) = scale_to_gamut_f32(r, g, b);
@@ -1262,8 +1234,7 @@ impl VsfType {
 
     /// Convert VSF RGB to sRGB (u16, gamma-encoded, 0-65535 range, S44 pipeline)
     ///
-    /// Uses sRGB OETF and ×65535 + round quantization (sRGB spec).
-    /// Automatically scales out-of-gamut colours to fit [0,1] range.
+    /// Uses sRGB OETF and ×65535 + round quantization (sRGB spec). Automatically scales out-of-gamut colours to fit [0,1] range.
     #[cfg(feature = "spirix")]
     pub fn to_srgb_u16_s44(&self) -> Option<(u16, u16, u16)> {
         let (r, g, b) = self.to_srgb_linear_s44()?;
@@ -1383,8 +1354,7 @@ impl VsfType {
     ///
     /// **DEPRECATED**: Adobe RGB primaries are based on CIE 1931 xy chromaticity (legacy).
     ///
-    /// Uses Adobe RGB gamma 2.2 and ×255 + round quantization.
-    /// Automatically scales out-of-gamut colours to fit [0,1] range.
+    /// Uses Adobe RGB gamma 2.2 and ×255 + round quantization. Automatically scales out-of-gamut colours to fit [0,1] range.
     pub fn to_adobe_rgb_u8_f32(&self) -> Option<(u8, u8, u8)> {
         use crate::colour::legacy::transfer::adobe_rgb_oetf;
         let (r, g, b) = self.to_adobe_rgb_linear_f32()?;
@@ -1400,8 +1370,7 @@ impl VsfType {
     ///
     /// **DEPRECATED**: Adobe RGB primaries are based on CIE 1931 xy chromaticity (legacy).
     ///
-    /// Uses Adobe RGB gamma 2.2 and ×255 + round quantization.
-    /// Automatically scales out-of-gamut colours to fit [0,1] range.
+    /// Uses Adobe RGB gamma 2.2 and ×255 + round quantization. Automatically scales out-of-gamut colours to fit [0,1] range.
     #[cfg(feature = "spirix")]
     pub fn to_adobe_rgb_u8_s44(&self) -> Option<(u8, u8, u8)> {
         let (r, g, b) = self.to_adobe_rgb_linear_s44()?;
@@ -1417,8 +1386,7 @@ impl VsfType {
     ///
     /// **DEPRECATED**: Adobe RGB primaries are based on CIE 1931 xy chromaticity (legacy).
     ///
-    /// Uses Adobe RGB gamma 2.2 and ×65535 + round quantization.
-    /// Automatically scales out-of-gamut colours to fit [0,1] range.
+    /// Uses Adobe RGB gamma 2.2 and ×65535 + round quantization. Automatically scales out-of-gamut colours to fit [0,1] range.
     pub fn to_adobe_rgb_u16_f32(&self) -> Option<(u16, u16, u16)> {
         use crate::colour::legacy::transfer::adobe_rgb_oetf;
         let (r, g, b) = self.to_adobe_rgb_linear_f32()?;
@@ -1434,8 +1402,7 @@ impl VsfType {
     ///
     /// **DEPRECATED**: Adobe RGB primaries are based on CIE 1931 xy chromaticity (legacy).
     ///
-    /// Uses Adobe RGB gamma 2.2 and ×65535 + round quantization.
-    /// Automatically scales out-of-gamut colours to fit [0,1] range.
+    /// Uses Adobe RGB gamma 2.2 and ×65535 + round quantization. Automatically scales out-of-gamut colours to fit [0,1] range.
     #[cfg(feature = "spirix")]
     pub fn to_adobe_rgb_u16_s44(&self) -> Option<(u16, u16, u16)> {
         let (r, g, b) = self.to_adobe_rgb_linear_s44()?;
@@ -1449,8 +1416,7 @@ impl VsfType {
 
     /// Convert from sRGB to VSF RGB
     ///
-    /// Accepts f32 (linear), u8 (gamma-encoded full range [0,255]), or u16 (gamma-encoded full range [0,65535]).
-    /// **Convention**: Floats are always linear, integers are always gamma-encoded.
+    /// Accepts f32 (linear), u8 (gamma-encoded full range [0,255]), or u16 (gamma-encoded full range [0,65535]). **Convention**: Floats are always linear, integers are always gamma-encoded.
     ///
     /// Uses sRGB piecewise transfer function (EOTF) for integers, direct pass-thru for floats.
     ///
@@ -1492,11 +1458,9 @@ impl VsfType {
 
     /// Convert from Rec.709 to VSF RGB
     ///
-    /// Accepts f32 (linear), u8 (gamma-encoded studio range [16,235]), or u16 (gamma-encoded studio range [4096,60160]).
-    /// **Convention**: Floats are always linear, integers use studio range.
+    /// Accepts f32 (linear), u8 (gamma-encoded studio range [16,235]), or u16 (gamma-encoded studio range [4096,60160]). **Convention**: Floats are always linear, integers use studio range.
     ///
-    /// Uses Rec.709 OETF/EOTF transfer function. Note: Rec.709 and sRGB have the same primaries,
-    /// only the transfer function and quantization range differ.
+    /// Uses Rec.709 OETF/EOTF transfer function. Note: Rec.709 and sRGB have the same primaries, only the transfer function and quantization range differ.
     ///
     /// # Examples
     /// ```ignore
@@ -1536,8 +1500,7 @@ impl VsfType {
 
     /// Convert from BT.2020/Rec.2020 to VSF RGB
     ///
-    /// Accepts f32 (linear), u8 (gamma-encoded studio range [16,235]), or u16 (gamma-encoded studio range [4096,60160]).
-    /// **Convention**: Floats are always linear, integers use studio range.
+    /// Accepts f32 (linear), u8 (gamma-encoded studio range [16,235]), or u16 (gamma-encoded studio range [4096,60160]). **Convention**: Floats are always linear, integers use studio range.
     ///
     /// Uses Rec.709 OETF/EOTF transfer function (BT.2020 uses Rec.709 transfer, but BT.1886 for display).
     ///
@@ -1577,8 +1540,7 @@ impl VsfType {
 
     /// Convert from LMS cone space to VSF RGB
     ///
-    /// LMS represents Long, Medium, and Short wavelength cone responses.
-    /// Based on CIE 2006 2° Standard Observer.
+    /// LMS represents Long, Medium, and Short wavelength cone responses. Based on CIE 2006 2° Standard Observer.
     ///
     /// # Arguments
     /// * `l` - Long wavelength cone response (linear, 0-1 nominal range)
@@ -1601,8 +1563,7 @@ impl VsfType {
     ///
     /// **DEPRECATED**: XYZ is based on CIE 1931 Standard Observer (legacy).
     ///
-    /// XYZ tristimulus values are the foundation of most xy-coordinate-based
-    /// colour standards.
+    /// XYZ tristimulus values are the foundation of most xy-coordinate-based colour standards.
     ///
     /// # Arguments
     /// * `x` - X tristimulus value (linear, 0-1 nominal range)
@@ -2230,16 +2191,14 @@ pub fn vsf_rgb_to_photopic_s44(r: S44, g: S44, b: S44) -> S44 {
 
 /// Linearize a gamma 2 encoded value (0-1 range)
 ///
-/// Converts from gamma-encoded to linear light. For VSF RGB gamma 2,
-/// this is simply squaring the value.
+/// Converts from gamma-encoded to linear light. For VSF RGB gamma 2, this is simply squaring the value.
 pub fn linearize_gamma2_f32(encoded: f32) -> f32 {
     encoded * encoded
 }
 
 /// Delinearize a linear value to gamma 2 (0-1 range)
 ///
-/// Converts from linear light to gamma-encoded. For VSF RGB gamma 2,
-/// this is simply the square root operation.
+/// Converts from linear light to gamma-encoded. For VSF RGB gamma 2, this is simply the square root operation.
 pub fn delinearize_gamma2_f32(linear: f32) -> f32 {
     linear.sqrt()
 }
@@ -2394,8 +2353,7 @@ pub fn delinearize_gamma2_rgb_s44(r: S44, g: S44, b: S44) -> (u8, u8, u8) {
 
 /// Apply sRGB OETF (gamma encoding) using S44 arithmetic
 ///
-/// Converts linear sRGB values to gamma-encoded sRGB using the piecewise sRGB transfer function.
-/// This is the S44 version for use in pure S44 pipelines without IEEE-754 floats.
+/// Converts linear sRGB values to gamma-encoded sRGB using the piecewise sRGB transfer function. This is the S44 version for use in pure S44 pipelines without IEEE-754 floats.
 ///
 /// # Arguments
 /// * `linear` - Linear sRGB value in range [0.0, 1.0]
@@ -2419,8 +2377,7 @@ pub fn srgb_oetf_s44(linear: S44) -> S44 {
 
 /// Apply BT.709/Rec.709 OETF (gamma encoding) using S44 arithmetic
 ///
-/// Converts linear BT.709 values to gamma-encoded using the piecewise BT.709 transfer function.
-/// This is the S44 version for use in pure S44 pipelines without IEEE-754 floats.
+/// Converts linear BT.709 values to gamma-encoded using the piecewise BT.709 transfer function. This is the S44 version for use in pure S44 pipelines without IEEE-754 floats.
 ///
 /// # Arguments
 /// * `linear` - Linear BT.709 value in range [0.0, 1.0]
@@ -2446,8 +2403,7 @@ pub fn encode_bt709_s44(linear: S44) -> S44 {
 ///
 /// **DEPRECATED**: Adobe RGB primaries are based on CIE 1931 xy chromaticity (legacy).
 ///
-/// Converts linear Adobe RGB values to gamma-encoded using simple gamma 2.2.
-/// This is the S44 version for use in pure S44 pipelines without IEEE-754 floats.
+/// Converts linear Adobe RGB values to gamma-encoded using simple gamma 2.2. This is the S44 version for use in pure S44 pipelines without IEEE-754 floats.
 ///
 /// # Arguments
 /// * `linear` - Linear Adobe RGB value in range [0.0, 1.0]
