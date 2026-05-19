@@ -55,7 +55,7 @@ pub mod validate;
 pub use constraint::TypeConstraint;
 pub use conversions::{AsciiText, FromVsfType, IntoVsfType};
 pub use field::FieldSchema;
-pub use official::{bridge_cmd_schema, bridge_resp_schema};
+pub use official::pipe_message_schema;
 #[cfg(feature = "registry")]
 pub use official::register_official_schemas;
 #[cfg(feature = "registry")]

@@ -75,32 +75,26 @@ pub fn announce_schema() -> SectionSchema {
 }
 
 // ============================================================================
-// PIPE bridge protocol — single-cable USB-CDC commands and responses
+// PIPE protocol — host CLI ↔ PIPE bridge (and eventually PIPE silicon) over USB-CDC
 // ============================================================================
 
-/// `cmd` section: request from host CLI to bridge firmware (RP2040).
+/// `PIPE message` — every wire packet on a PIPE link is a complete VSF document with this single section.
 ///
-/// Top-level VSF document carries `(d"cmd": …)` with header `hp` (BLAKE3 provenance) covering the whole packet.
-/// `op` is the verb (`ping`, `info`, `uptime`, `random`, `bootsel`, `reset`).
-/// `id` is a per-cmd identifier echoed in the response so the host can correlate requests in flight.
-/// `n` is an optional numeric argument (e.g., byte count for `random`).
-pub fn bridge_cmd_schema() -> SectionSchema {
-    SectionSchema::new("cmd")
+/// One registry entry covers both directions of the protocol — USB transfer direction (IN vs OUT) already tells you who sent it, and the `op` field carries the verb (`ping`/`pong`/`info`/`uptime`/`random`/`bootsel`/`reset`/`err`).
+/// Section body is the standard small-section shape `[(field)(field)…]`; section name lives in the TOC entry only (bridge packets are <200 B so we are well under the 1 MB threshold that would require the body to repeat name+count+length).
+///
+/// Field roles by direction:
+///
+/// * host → device (cmd): `op` ∈ {`ping`, `info`, `uptime`, `random`, `bootsel`, `reset`}, `id` (correlation id echoed back), optionally `n` (numeric arg, e.g. byte count for `random`).
+/// * device → host (resp): always `id` (echoes cmd's id). On success: `op` = `pong` for ping; info-fields {`name`, `ver`, `did`, `clk`, `up`} for info; `ms` for uptime; `data` for random. On unknown op: `err` carries the error code string.
+///
+/// All fields are optional; the schema accepts any subset and protocol semantics are field-driven.
+/// Vendors define what fields make sense for their device inside the standard "PIPE message" envelope.
+pub fn pipe_message_schema() -> SectionSchema {
+    SectionSchema::new("PIPE message")
         .field("op", TypeConstraint::AsciiText)
         .field("id", TypeConstraint::AnyUnsigned)
         .field("n", TypeConstraint::AnyUnsigned)
-}
-
-/// `resp` section: response from bridge firmware to host CLI.
-///
-/// Only the fields relevant to the matched `op` are populated; the schema is intentionally permissive so a single section type covers ping/info/uptime/random/error responses.
-/// `op` carries the response verb on success (e.g., `pong`); `err` carries an error code string instead when `op` would fail.
-/// `did` is the bridge's BLAKE3-derived device id (32 bytes) — populated only by `info`.
-/// `data` carries the random bytes payload for `random` as a wrapped binary blob (`v(b'b', bytes)`).
-pub fn bridge_resp_schema() -> SectionSchema {
-    SectionSchema::new("resp")
-        .field("id", TypeConstraint::AnyUnsigned)
-        .field("op", TypeConstraint::AsciiText)
         .field("err", TypeConstraint::AsciiText)
         .field("name", TypeConstraint::AsciiText)
         .field("ver", TypeConstraint::AnyUnsigned)
@@ -120,8 +114,7 @@ pub fn register_official_schemas(registry: &super::registry::SchemaRegistry) {
     registry.register(audio_schema());
     registry.register(network_peer_schema());
     registry.register(announce_schema());
-    registry.register(bridge_cmd_schema());
-    registry.register(bridge_resp_schema());
+    registry.register(pipe_message_schema());
 }
 
 #[cfg(test)]

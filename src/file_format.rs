@@ -83,26 +83,36 @@ pub fn validate_name(name: &str) -> Result<(), String> {
         ));
     }
 
-    // Split by dots and validate each segment
+    // Reject leading/trailing whitespace.
+    if name.starts_with(' ') || name.ends_with(' ') {
+        return Err(format!(
+            "Invalid name '{}' - cannot start or end with space",
+            name
+        ));
+    }
+
+    // Split by dots and validate each segment.
     for segment in name.split('.') {
         if segment.is_empty() {
             return Err(format!("Invalid name '{}' - empty segment", name));
         }
 
-        // First character must be lowercase letter
+        // First character must be a letter (either case), so "PIPE message" and "RGB image" are valid while ".foo", "_foo", "123" are not.
         let first = segment.chars().next().unwrap();
-        if !first.is_ascii_lowercase() {
+        if !first.is_ascii_alphabetic() {
             return Err(format!(
-                "Invalid name '{}' - segment '{}' must start with lowercase letter (found '{}')",
+                "Invalid name '{}' - segment '{}' must start with a letter (found '{}')",
                 name, segment, first
             ));
         }
 
-        // Rest can be lowercase, digits, underscores
+        // Rest can be ASCII letters (any case), digits, underscores, or single spaces.
+        // Structural VSF delimiters ( ) [ ] : , and control bytes < 0x20 are rejected so a name can never accidentally derail the parser, even though the parser itself reads exactly `len` bytes regardless of content.
         for ch in segment.chars() {
-            if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() && ch != '_' {
+            let ok = ch.is_ascii_alphabetic() || ch.is_ascii_digit() || ch == '_' || ch == ' ';
+            if !ok {
                 return Err(format!(
-                    "Invalid name '{}' - use lowercase letters, digits, and underscores only (found '{}')",
+                    "Invalid name '{}' - use ASCII letters, digits, underscores, or spaces only (found '{}')",
                     name, ch
                 ));
             }
