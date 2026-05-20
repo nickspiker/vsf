@@ -83,36 +83,26 @@ pub fn validate_name(name: &str) -> Result<(), String> {
         ));
     }
 
-    // Reject leading/trailing whitespace.
-    if name.starts_with(' ') || name.ends_with(' ') {
-        return Err(format!(
-            "Invalid name '{}' - cannot start or end with space",
-            name
-        ));
-    }
-
-    // Split by dots and validate each segment.
+    // Split by dots and validate each segment
     for segment in name.split('.') {
         if segment.is_empty() {
             return Err(format!("Invalid name '{}' - empty segment", name));
         }
 
-        // First character must be a letter (either case), so "PIPE message" and "RGB image" are valid while ".foo", "_foo", "123" are not.
+        // First character must be lowercase letter
         let first = segment.chars().next().unwrap();
-        if !first.is_ascii_alphabetic() {
+        if !first.is_ascii_lowercase() {
             return Err(format!(
-                "Invalid name '{}' - segment '{}' must start with a letter (found '{}')",
+                "Invalid name '{}' - segment '{}' must start with lowercase letter (found '{}')",
                 name, segment, first
             ));
         }
 
-        // Rest can be ASCII letters (any case), digits, underscores, or single spaces.
-        // Structural VSF delimiters ( ) [ ] : , and control bytes < 0x20 are rejected so a name can never accidentally derail the parser, even though the parser itself reads exactly `len` bytes regardless of content.
+        // Rest can be lowercase, digits, underscores
         for ch in segment.chars() {
-            let ok = ch.is_ascii_alphabetic() || ch.is_ascii_digit() || ch == '_' || ch == ' ';
-            if !ok {
+            if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() && ch != '_' {
                 return Err(format!(
-                    "Invalid name '{}' - use ASCII letters, digits, underscores, or spaces only (found '{}')",
+                    "Invalid name '{}' - use lowercase letters, digits, and underscores only (found '{}')",
                     name, ch
                 ));
             }
@@ -128,7 +118,10 @@ pub struct VsfHeader {
     pub version: usize,
     pub backward_compat: usize,
     pub file_length: usize, // Total file length in bytes (for TCP streaming)
-    pub creation_time: VsfType, // Creation timestamp (eu6 for 704ps precision, default)
+    /// Creation timestamp.
+    /// `None` when the device cannot know what time it is (no RTC, no network, etc) — in that case the wire-format header omits the `e` field entirely.
+    /// `Some(VsfType::e(…))` carries the standard `eu6`/`ef5`/`ef6` value.
+    pub creation_time: Option<VsfType>,
     pub provenance_hash: VsfType, // Required: BLAKE3 hash of immutable content (hp)
     pub rolling_hash: Option<VsfType>, // Optional: BLAKE3 hash of current state (hb) - OR signature
     pub signer_pubkey: Option<VsfType>, // Optional: Ed25519 public key (ke) - for signed files
@@ -153,25 +146,15 @@ pub struct HeaderField {
 }
 
 impl VsfHeader {
-    /// Create new header with current timestamp.
-    /// Under `no_std`, current time is unavailable, so creation_time defaults to oscillation count 0;
-    /// callers should overwrite `creation_time` with their own Eagle Time source (QTIMER ticks, nunc-time, etc).
+    /// Create a new header with no creation_time set.
+    /// Callers that know what time it is should set `header.creation_time = Some(VsfType::e(EtType::e6(...)))` before encoding.
+    /// Devices without a clock leave it as `None` and the encoded header omits the `e` field entirely.
     pub fn new(version: usize, backward_compat: usize) -> Self {
-        #[cfg(feature = "std")]
-        let creation_time = {
-            use chrono::Utc;
-            let now = Utc::now();
-            let et = crate::datetime_to_eagle_time(now);
-            VsfType::e(et.et_type().clone())
-        };
-        #[cfg(not(feature = "std"))]
-        let creation_time = VsfType::e(crate::types::EtType::e6(0));
-
         Self {
             version,
             backward_compat,
             file_length: 0, // Placeholder, filled during build
-            creation_time,
+            creation_time: None,
             provenance_hash: VsfType::hp(vec![0u8; 32]), // Placeholder, filled during build
             rolling_hash: None,
             signer_pubkey: None,
@@ -209,8 +192,10 @@ impl VsfHeader {
         let file_length_placeholder = VsfType::l(0, true).flatten();
         header.extend_from_slice(&file_length_placeholder);
 
-        // Creation time (always present)
-        header.extend_from_slice(&self.creation_time.flatten());
+        // Creation time — emitted only if the caller set it. Devices without a clock omit the field entirely.
+        if let Some(ref et) = self.creation_time {
+            header.extend_from_slice(&et.flatten());
+        }
 
         // Provenance hash (always present)
         header.extend_from_slice(&self.provenance_hash.flatten());
@@ -360,15 +345,17 @@ impl VsfHeader {
             0 // No l field present - use 0 to indicate unknown
         };
 
-        // Parse creation time (e)
-        let creation_time =
-            parse(data, &mut ptr).map_err(|e| format!("Failed to parse creation_time: {}", e))?;
-        if !matches!(creation_time, VsfType::e(_)) {
-            return Err(format!(
-                "Expected creation_time (e), got {:?}",
-                creation_time
-            ));
-        }
+        // Parse optional creation time (e). Devices without a clock omit the field entirely; peek the marker byte and only parse if it is `e`.
+        let creation_time = if ptr < data.len() && data[ptr] == b'e' {
+            let v = parse(data, &mut ptr)
+                .map_err(|e| format!("Failed to parse creation_time: {}", e))?;
+            if !matches!(v, VsfType::e(_)) {
+                return Err(format!("Expected creation_time (e), got {:?}", v));
+            }
+            Some(v)
+        } else {
+            None
+        };
 
         // Parse provenance hash (hp)
         let provenance_hash =

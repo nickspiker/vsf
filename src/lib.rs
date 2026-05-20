@@ -55,7 +55,7 @@
 //!   y3{5}               Backward compatibility version
 //!   b#{header length}                  Header size (now we know how to encode it!)
 //!   L#{file length}                    Total file size in bytes (optional, for TCP streaming without parse-as-you-go)
-//!   eu6{current time as u64}                  Eagle Time current timestamp when last edited (u64 oscillations, 704ps precision)
+//!   eu6{current time as u64}           Eagle Time when emitted (u64 oscillations, 704ps precision). OPTIONAL — devices without a clock (no RTC, no network, pre-handshake) omit the `e` field entirely rather than lie with a placeholder. Readers detect absence by the next byte being `h` (provenance hash) instead of `e`.
 //!   hp3{31}{provenance hash}            Provenance: BLAKE3 hash of content (required, always 32 bytes)
 //!   ge{64}{signature}                  Ed25519 signature over entire file AFTER provinence hash is patched in (optional, rolling or provinence, must have one or the other)
 //!   hb{31}{rolling_hash}               Rolling: BLAKE3 of current state with History (optional)
@@ -178,6 +178,14 @@
 //! - **ef6**: 64-bit float (`f64`) - ~200ns precision, legacy high-accuracy format
 //!
 //! The format version doesn't change the epoch or oscillation frequency - 1,420,407,826 Hz (21cm hydrogen line).
+//!
+//! ### Optional in the header
+//!
+//! Eagle Time is OPTIONAL in the file header.
+//! Devices that genuinely cannot know what time it is — embedded sensors without an RTC, freshly-booted SoCs before any network sync, single-purpose ASICs — omit the `e` field rather than emit a placeholder.
+//! A reader that finds the next byte after `l` (file length) is `h` (provenance hash) rather than `e` knows the producer was clockless and skips the field.
+//! Devices that DO know the time (host CLIs via `nunc-time`, kernels via QTIMER, anything network-synced) include it normally.
+//! Lying about the time is worse than admitting you don't know it.
 //!
 //! ## Parsing and Encoding
 //!

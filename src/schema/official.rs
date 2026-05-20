@@ -78,7 +78,7 @@ pub fn announce_schema() -> SectionSchema {
 // PIPE protocol — host CLI ↔ PIPE bridge (and eventually PIPE silicon) over USB-CDC
 // ============================================================================
 
-/// `PIPE message` — every wire packet on a PIPE link is a complete VSF document with this single section.
+/// `pipe_message` — every wire packet on a PIPE link is a complete VSF document with this single section.
 ///
 /// One registry entry covers both directions of the protocol — USB transfer direction (IN vs OUT) already tells you who sent it, and the `op` field carries the verb (`ping`/`pong`/`info`/`uptime`/`random`/`bootsel`/`reset`/`err`).
 /// Section body is the standard small-section shape `[(field)(field)…]`; section name lives in the TOC entry only (bridge packets are <200 B so we are well under the 1 MB threshold that would require the body to repeat name+count+length).
@@ -89,9 +89,9 @@ pub fn announce_schema() -> SectionSchema {
 /// * device → host (resp): always `id` (echoes cmd's id). On success: `op` = `pong` for ping; info-fields {`name`, `ver`, `did`, `clk`, `up`} for info; `ms` for uptime; `data` for random. On unknown op: `err` carries the error code string.
 ///
 /// All fields are optional; the schema accepts any subset and protocol semantics are field-driven.
-/// Vendors define what fields make sense for their device inside the standard "PIPE message" envelope.
+/// Vendors define what fields make sense for their device inside the standard "pipe_message" envelope.
 pub fn pipe_message_schema() -> SectionSchema {
-    SectionSchema::new("PIPE message")
+    SectionSchema::new("pipe_message")
         .field("op", TypeConstraint::AsciiText)
         .field("id", TypeConstraint::AnyUnsigned)
         .field("n", TypeConstraint::AnyUnsigned)

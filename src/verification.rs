@@ -23,6 +23,15 @@
 
 use crate::prelude::*;
 use crate::decoding::parse;
+
+/// Skip the optional creation_time field in a VSF header at `pointer`.
+/// The field is identified by the `e` marker byte; if not present, the header simply omits it (callers without a clock).
+fn skip_optional_creation_time(bytes: &[u8], pointer: &mut usize) -> Result<(), String> {
+    if *pointer < bytes.len() && bytes[*pointer] == b'e' {
+        let _ = parse(bytes, pointer).map_err(|e| format!("creation_time: {}", e))?;
+    }
+    Ok(())
+}
 use crate::file_format::HeaderField;
 use crate::types::VsfType;
 
@@ -356,8 +365,7 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     }
 
     // Skip creation time (eu6 default, ef5/ef6 legacy - always present in version 3+)
-    let _creation_time = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse creation time: {}", e))?;
+    skip_optional_creation_time(vsf_bytes, &mut pointer)?;
 
     // Find hp hash placeholder
     let hash_position = pointer;
@@ -515,8 +523,7 @@ pub fn write_provenance_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<
     }
 
     // Skip creation time (ef5 - always present in version 3+)
-    let _creation_time = parse(&vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse creation time: {}", e))?;
+    skip_optional_creation_time(&vsf_bytes, &mut pointer)?;
 
     // Find hash placeholder position
     let hash_position = pointer;
@@ -591,7 +598,7 @@ pub fn fill_provenance_hash(vsf_bytes: &mut [u8], hash: &[u8; 32]) -> Result<(),
     }
 
     // Skip creation time
-    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("creation_time: {}", e))?;
+    skip_optional_creation_time(vsf_bytes, &mut pointer)?;
 
     // Should be at hp now
     if pointer >= vsf_bytes.len() || vsf_bytes[pointer] != b'h' {
@@ -635,7 +642,7 @@ pub fn fill_signature(vsf_bytes: &mut [u8], signature: &[u8]) -> Result<(), Stri
     }
 
     // Skip creation time
-    let _ = parse(vsf_bytes, &mut pointer).map_err(|e| format!("creation_time: {}", e))?;
+    skip_optional_creation_time(vsf_bytes, &mut pointer)?;
 
     // Skip hp (provenance hash)
     if pointer >= vsf_bytes.len() || vsf_bytes[pointer] != b'h' {
@@ -704,8 +711,7 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     }
 
     // Skip creation time (eu6 default, ef5/ef6 legacy - always present in version 3+)
-    let _creation_time = parse(vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse creation time: {}", e))?;
+    skip_optional_creation_time(vsf_bytes, &mut pointer)?;
 
     // Skip hp (always present in version 3+)
     let _hp = parse(vsf_bytes, &mut pointer)
@@ -795,8 +801,7 @@ pub fn write_file_hash(mut vsf_bytes: Vec<u8>, hash: &[u8; 32]) -> Result<Vec<u8
     }
 
     // Skip creation time (ef5 - always present in version 3+)
-    let _creation_time = parse(&vsf_bytes, &mut pointer)
-        .map_err(|e| format!("Failed to parse creation time: {}", e))?;
+    skip_optional_creation_time(&vsf_bytes, &mut pointer)?;
 
     // Skip hp (always present in version 3+)
     let _hp = parse(&vsf_bytes, &mut pointer)
@@ -1502,7 +1507,7 @@ fn find_header_hp(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     }
 
     // Skip creation time
-    let _ = parse(data, &mut ptr).map_err(|e| format!("creation_time: {}", e))?;
+    skip_optional_creation_time(data, &mut ptr)?;
 
     // Now should be at hp
     let marker_pos = ptr;
@@ -1546,7 +1551,7 @@ fn find_header_ke(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     }
 
     // Skip creation time
-    let _ = parse(data, &mut ptr).map_err(|e| format!("creation_time: {}", e))?;
+    skip_optional_creation_time(data, &mut ptr)?;
 
     // Skip hp
     let _ = parse(data, &mut ptr).map_err(|e| format!("hp: {}", e))?;
@@ -1593,7 +1598,7 @@ fn find_header_ge(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     }
 
     // Skip creation time
-    let _ = parse(data, &mut ptr).map_err(|e| format!("creation_time: {}", e))?;
+    skip_optional_creation_time(data, &mut ptr)?;
 
     // Skip hp
     let _ = parse(data, &mut ptr).map_err(|e| format!("hp: {}", e))?;
