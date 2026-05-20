@@ -988,7 +988,7 @@ VSF is part of a broader computational foundation:
 - **Spirix** - Better floating point arithmetic
 - **TOKEN** - Unfakeable cryptographic identity
 - **VSF** - Optimal serialization
-- **Eagle Time** - Physics-bounded consensus timestamps
+- **Eagle Time** - Physics-bounded consensus timestamps (optional in the header — clockless devices omit the `e` field rather than emit a placeholder; see "Optional in the header" in the crate docs)
 - **Dymaxion Encoding** - Global precision of 2.14mm avg, 5.07mm max in 64 bits.
 
 Each component addresses fundamental problems that irritated me for a minute now.

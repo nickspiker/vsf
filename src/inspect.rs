@@ -2391,8 +2391,9 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         tc("backward compat", col_tree())
     ));
 
-    // Creation time: et{timestamp} - time (pink-magenta)
-    if let VsfType::e(ref et) = header.creation_time {
+    // Creation time: et{timestamp} - time (pink-magenta).
+    // creation_time is Option<VsfType>; absent when the producing device had no clock.
+    if let Some(VsfType::e(ref et)) = header.creation_time {
         #[allow(deprecated)]
         let type_suffix = match et {
             crate::types::EtType::e5(_) => "5".to_string(),

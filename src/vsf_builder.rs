@@ -32,7 +32,10 @@ impl SectionMeta {
 pub struct VsfBuilder {
     version: usize,
     backward_compat: usize,
-    creation_time: VsfType, // Creation timestamp (eu6 for 704ps precision, default)
+    /// Creation timestamp.
+    /// `None` means the device cannot know the current time (no clock, no network) and the header omits the `e` field entirely rather than emitting a fake/zero value — see the README and `pipe_message` schema docs.
+    /// `Some(VsfType::e(…))` writes a standard `eu6` / `ef5` / `ef6` field.
+    creation_time: Option<VsfType>,
     sections: Vec<(VsfSection, SectionMeta)>, // Section with optional crypto metadata
     unboxed: Vec<(String, Vec<u8>, SectionMeta)>, // Name, data, and optional crypto metadata
     inline_fields: Vec<(String, Vec<VsfType>)>, // Metadata-only fields: (name, inline values)
@@ -44,27 +47,16 @@ pub struct VsfBuilder {
 }
 
 impl VsfBuilder {
-    /// Create a new VSF file builder
+    /// Create a new VSF file builder.
     ///
-    /// **Note:** Every VSF file automatically includes:
-    /// - Creation timestamp (current time as eu6, 704ps precision)
-    /// - BLAKE3 hash for integrity verification (computed during `build()`)
+    /// Creation time defaults to **absent** — callers should set it explicitly with `creation_time_oscillations(...)` (or `creation_time_nanos(...)` for the legacy float form) before `build()` if they know what time it is.
+    /// Devices without a clock (no RTC, no network, pre-handshake) simply leave it unset; the resulting VSF document omits the `e` field rather than emitting a fake timestamp.
+    /// Every VSF file always includes a BLAKE3 hash for integrity verification (computed during `build()`).
     pub fn new() -> Self {
-        // Get current time as Eagle Time (oscillations).
-        // Under `no_std`, current time is unavailable, so we default to oscillation count 0.
-        // Callers should overwrite via `creation_time_nanos()` (std) or `creation_time(VsfType::e(…))` (no_std).
-        #[cfg(feature = "std")]
-        let creation_time = {
-            let et = crate::types::eagle_time::eagle_time_now();
-            VsfType::e(et.et_type().clone())
-        };
-        #[cfg(not(feature = "std"))]
-        let creation_time = VsfType::e(crate::types::EtType::e6(0));
-
         Self {
             version: VSF_VERSION,
             backward_compat: VSF_BACKWARD_COMPAT,
-            creation_time,
+            creation_time: None,
             sections: Vec::new(),
             unboxed: Vec::new(),
             inline_fields: Vec::new(),
@@ -76,19 +68,19 @@ impl VsfBuilder {
         }
     }
 
-    /// Set creation time with integer oscillations (e6 wire format). 1,420,407,826 oscillations per second (21cm hydrogen line) = 704ps precision
+    /// Set creation time with integer oscillations (e6 wire format). 1,420,407,826 oscillations per second (21cm hydrogen line) = 704ps precision.
     pub fn creation_time_oscillations(mut self, oscillations: i64) -> Self {
         use crate::types::EtType;
-        self.creation_time = VsfType::e(EtType::e6(oscillations));
+        self.creation_time = Some(VsfType::e(EtType::e6(oscillations)));
         self
     }
 
-    /// Set creation time with nanosecond precision (ef6) — DEPRECATED. Use creation_time_oscillations() for integer timestamps instead.
+    /// Set creation time with nanosecond precision (ef6) — DEPRECATED. Use `creation_time_oscillations()` for integer timestamps instead.
     #[deprecated(note = "Use creation_time_oscillations() for integer timestamps")]
     pub fn creation_time_nanos(mut self, eagle_time: f64) -> Self {
         use crate::types::EtType;
         #[allow(deprecated)]
-        { self.creation_time = VsfType::e(EtType::f6(eagle_time)); }
+        { self.creation_time = Some(VsfType::e(EtType::f6(eagle_time))); }
         self
     }
 
@@ -283,9 +275,13 @@ impl VsfBuilder {
         let file_length_index = vsf.len();
         vsf.push(VsfType::l(0, true).flatten()); // Will be updated in loop
 
-        // Creation time
+        // Creation time — only emit the `e` field if the caller set one. Devices without a clock leave it absent.
         header_index = vsf.len();
-        vsf.push(self.creation_time.flatten());
+        if let Some(et) = &self.creation_time {
+            vsf.push(et.flatten());
+        } else {
+            vsf.push(Vec::new());
+        }
 
         // Provenance hash - use custom if set, otherwise placeholder for auto-compute
         if let Some(custom_hp) = &self.custom_provenance {
