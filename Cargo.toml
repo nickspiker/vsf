@@ -23,6 +23,16 @@ name = "vsfinfo"
 path = "src/bin/vsfinfo.rs"
 required-features = ["text"]
 
+# vsfimg: convert any image (PNG/JPEG/WebP/TIFF) → canonical VSF image.
+# Up to 256×256 → uncompressed `Tensor<u8>` shape [h, w, 3] in VSF RGB gamma2.
+# Larger → rav1e AV1 encode (matches photon's avatar encoding for >256 sources).
+# ICC profile honored when present; sRGB fallback when absent.
+# Provenance hash (hp) = BLAKE3 of source bytes; rolling hash (hb) = auto via VsfBuilder.
+[[bin]]
+name = "vsfimg"
+path = "src/bin/vsfimg.rs"
+required-features = ["image-tools"]
+
 [dependencies]
 bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 chrono = { version = "0.4.38", default-features = false, features = ["alloc"] }
@@ -42,6 +52,15 @@ num-traits = { version = "0.2.19", default-features = false, features = ["libm"]
 libm = { version = "0.2" }
 spin = { version = "0.9", default-features = false, features = ["once", "rwlock"], optional = true }
 
+# image-tools deps: gated behind the `image-tools` feature, only pulled in for the `vsfimg` binary.
+# Versions pinned to match photon/Cargo.toml so cross-codebase pixel pipelines stay byte-identical.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "tiff"], optional = true }
+img-parts = { version = "0.4", optional = true }
+icc-profile = { version = "0.0.2", optional = true }
+rav1e = { version = "0.7", default-features = false, optional = true }
+resize = { version = "0.8.8", optional = true }
+rgb = { version = "0.8.52", optional = true }
+
 [features]
 default = ["std", "registry"]
 std = [
@@ -60,6 +79,17 @@ crypto = ["ed25519-dalek", "x25519-dalek", "rand", "chacha20poly1305", "aes-gcm"
 spirix = ["dep:spirix"]
 inspect = ["std", "registry", "dep:colored"]
 text = ["std", "registry", "dep:clap", "inspect"]
+# image-tools: enable the vsfimg binary (image format decode + ICC + rav1e AV1 encode). Heavy deps — only pulled in when building image conversion tooling.
+image-tools = [
+    "std",
+    "dep:clap",
+    "dep:image",
+    "dep:img-parts",
+    "dep:icc-profile",
+    "dep:rav1e",
+    "dep:resize",
+    "dep:rgb",
+]
 
 [build-dependencies]
 ureq = "2"
