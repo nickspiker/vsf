@@ -103,6 +103,10 @@ pub fn pipe_message_schema() -> SectionSchema {
         .field("up", TypeConstraint::AnyUnsigned)
         .field("ms", TypeConstraint::AnyUnsigned)
         .field("data", TypeConstraint::Wrapped(b'b'))
+        // pipe-bridge: PIPE comms state from the most recent fast_sync/wire_mirror.
+        // 0 = unlocked / never synced, 1 = lock held (256+ consecutive in-threshold
+        // edges per polarity, well within the proven 2^12-slot stability margin).
+        .field("pipe", TypeConstraint::AnyUnsigned)
 }
 
 /// Register all official schemas.
