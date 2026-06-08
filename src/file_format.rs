@@ -300,7 +300,7 @@ impl VsfHeader {
             parse(data, &mut ptr).map_err(|e| format!("Failed to parse version: {}", e))?;
         let version = match version_type {
             VsfType::z(v) => v,
-            _ => return Err(format!("Expected version (z), got {:?}", version_type)),
+            _ => return Err(crate::type_mismatch_err!("Expected version (z)", version_type)),
         };
 
         // Parse backward compatibility (y)
@@ -309,10 +309,7 @@ impl VsfHeader {
         let backward_compat = match backward_compat_type {
             VsfType::y(v) => v,
             _ => {
-                return Err(format!(
-                    "Expected backward_compat (y), got {:?}",
-                    backward_compat_type
-                ))
+                return Err(crate::type_mismatch_err!("Expected backward_compat (y)", backward_compat_type))
             }
         };
 
@@ -322,10 +319,7 @@ impl VsfHeader {
         let _header_length = match header_length_type {
             VsfType::b(len, _) => len,
             _ => {
-                return Err(format!(
-                    "Expected header_length (b), got {:?}",
-                    header_length_type
-                ))
+                return Err(crate::type_mismatch_err!("Expected header_length (b)", header_length_type))
             }
         };
 
@@ -334,10 +328,7 @@ impl VsfHeader {
             match parse(data, &mut ptr) {
                 Ok(VsfType::l(len, _)) => len,
                 Ok(other) => {
-                    return Err(format!(
-                        "Expected l value after 'l' marker, got {:?}",
-                        other
-                    ))
+                    return Err(crate::type_mismatch_err!("Expected l value after l marker", other))
                 }
                 Err(e) => return Err(format!("Failed to parse file_length: {}", e)),
             }
@@ -350,7 +341,7 @@ impl VsfHeader {
             let v = parse(data, &mut ptr)
                 .map_err(|e| format!("Failed to parse creation_time: {}", e))?;
             if !matches!(v, VsfType::e(_)) {
-                return Err(format!("Expected creation_time (e), got {:?}", v));
+                return Err(crate::type_mismatch_err!("Expected creation_time (e)", v));
             }
             Some(v)
         } else {
@@ -361,10 +352,7 @@ impl VsfHeader {
         let provenance_hash =
             parse(data, &mut ptr).map_err(|e| format!("Failed to parse provenance_hash: {}", e))?;
         if !matches!(provenance_hash, VsfType::hp(_)) {
-            return Err(format!(
-                "Expected provenance_hash (hp), got {:?}",
-                provenance_hash
-            ));
+            return Err(crate::type_mismatch_err!("Expected provenance_hash (hp)", provenance_hash));
         }
 
         // Parse remaining header until '>' using VSF dispatch pattern
@@ -736,10 +724,7 @@ impl VsfField {
         {
             VsfType::d(s) => s,
             other => {
-                return Err(format!(
-                    "VsfField: Expected field name (d type), found {:?}",
-                    other
-                ))
+                return Err(crate::type_mismatch_err!("VsfField: Expected field name (d type)", other))
             }
         };
 
@@ -1083,10 +1068,7 @@ impl VsfSection {
             {
                 VsfType::d(s) => s,
                 other => {
-                    return Err(format!(
-                        "VsfSection: Expected section name (d type), found {:?}",
-                        other
-                    ))
+                    return Err(crate::type_mismatch_err!("VsfSection: Expected section name (d type)", other))
                 }
             };
 
@@ -1095,10 +1077,7 @@ impl VsfSection {
             let count = match crate::parse(data, ptr) {
                 Ok(VsfType::n(c)) => c,
                 Ok(other) => {
-                    return Err(format!(
-                        "VsfSection: Expected n{{count}} after section name, found {:?}",
-                        other
-                    ))
+                    return Err(crate::type_mismatch_err!("VsfSection: Expected n{{count}} after section name", other))
                 }
                 Err(e) => return Err(format!("VsfSection: Failed to parse n{{count}}: {}", e)),
             };
@@ -1107,10 +1086,7 @@ impl VsfSection {
             let length = match crate::parse(data, ptr) {
                 Ok(VsfType::b(len, _)) => len,
                 Ok(other) => {
-                    return Err(format!(
-                        "VsfSection: Expected b{{length}} after n{{count}}, found {:?}",
-                        other
-                    ))
+                    return Err(crate::type_mismatch_err!("VsfSection: Expected b{{length}} after n{{count}}", other))
                 }
                 Err(e) => return Err(format!("VsfSection: Failed to parse b{{length}}: {}", e)),
             };

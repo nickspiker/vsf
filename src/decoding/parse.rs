@@ -387,7 +387,7 @@ fn parse_s44(data: &[u8], pointer: &mut usize) -> Result<spirix::ScalarF4E4, Dec
 fn parse_text_style(
     data: &[u8],
     pointer: &mut usize,
-) -> Result<Option<crate::types::TextStyle>, Error> {
+) -> Result<Option<crate::types::TextStyle>, DecodeError> {
     use crate::types::TextStyle;
 
     if *pointer >= data.len() || data[*pointer] == 0x00 {
@@ -459,7 +459,7 @@ fn parse_fill(data: &[u8], pointer: &mut usize) -> Result<Fill, DecodeError> {
 }
 
 #[cfg(feature = "spirix")]
-fn parse_option_stroke(data: &[u8], pointer: &mut usize) -> Result<Option<Stroke>, Error> {
+fn parse_option_stroke(data: &[u8], pointer: &mut usize) -> Result<Option<Stroke>, DecodeError> {
     if *pointer >= data.len() {
         return Err(DecodeError::UnexpectedEofMsg("Not enough data for stroke option".into()));
     }
@@ -533,7 +533,7 @@ fn parse_gradient_variant(data: &[u8], pointer: &mut usize) -> Result<GradientVa
 }
 
 #[cfg(feature = "spirix")]
-fn parse_gradient_stops(data: &[u8], pointer: &mut usize) -> Result<Vec<GradientStop>, Error> {
+fn parse_gradient_stops(data: &[u8], pointer: &mut usize) -> Result<Vec<GradientStop>, DecodeError> {
     if *pointer >= data.len() {
         return Err(DecodeError::UnexpectedEofMsg("Not enough data for gradient stop count".into()));
     }
@@ -553,7 +553,7 @@ fn parse_gradient_stops(data: &[u8], pointer: &mut usize) -> Result<Vec<Gradient
 }
 
 #[cfg(feature = "spirix")]
-fn parse_children(data: &[u8], pointer: &mut usize) -> Result<Vec<VsfType>, Error> {
+fn parse_children(data: &[u8], pointer: &mut usize) -> Result<Vec<VsfType>, DecodeError> {
     // Expect '(' to start children
     if *pointer >= data.len() {
         return Err(DecodeError::UnexpectedEofMsg("Expected '(' for children".into()));
@@ -572,11 +572,13 @@ fn parse_children(data: &[u8], pointer: &mut usize) -> Result<Vec<VsfType>, Erro
 
     // Expect ')' to end children
     if *pointer >= data.len() {
-        return Err(DecodeError::UnexpectedEofMsg("Expected '.into())' to close children",
+        return Err(DecodeError::UnexpectedEofMsg(
+            "Expected ')' to close children".into(),
         ));
     }
     if data[*pointer] != b')' {
-        return Err(DecodeError::InvalidDataMsg("Expected '.into())' to close children",
+        return Err(DecodeError::InvalidDataMsg(
+            "Expected ')' to close children".into(),
         ));
     }
     *pointer += 1;
@@ -588,7 +590,7 @@ fn parse_children(data: &[u8], pointer: &mut usize) -> Result<Vec<VsfType>, Erro
 fn parse_path_commands(
     data: &[u8],
     pointer: &mut usize,
-) -> Result<Vec<crate::types::PathCommand>, Error> {
+) -> Result<Vec<crate::types::PathCommand>, DecodeError> {
     use crate::types::PathCommand;
 
     if *pointer >= data.len() {
@@ -630,7 +632,7 @@ fn parse_path_commands(
 }
 
 #[cfg(feature = "spirix")]
-fn parse_points(data: &[u8], pointer: &mut usize) -> Result<Vec<spirix::CircleF4E4>, Error> {
+fn parse_points(data: &[u8], pointer: &mut usize) -> Result<Vec<spirix::CircleF4E4>, DecodeError> {
     if *pointer >= data.len() {
         return Err(DecodeError::UnexpectedEofMsg("Not enough data for point count".into()));
     }
@@ -645,7 +647,7 @@ fn parse_points(data: &[u8], pointer: &mut usize) -> Result<Vec<spirix::CircleF4
 }
 
 #[cfg(feature = "spirix")]
-fn parse_scalars(data: &[u8], pointer: &mut usize) -> Result<Vec<spirix::ScalarF4E4>, Error> {
+fn parse_scalars(data: &[u8], pointer: &mut usize) -> Result<Vec<spirix::ScalarF4E4>, DecodeError> {
     if *pointer >= data.len() {
         return Err(DecodeError::UnexpectedEofMsg("Not enough data for scalar count".into()));
     }
@@ -699,7 +701,7 @@ fn parse_spline_type(data: &[u8], pointer: &mut usize) -> Result<crate::types::S
 
 #[cfg(feature = "spirix")]
 #[allow(dead_code)]
-fn parse_option_string(data: &[u8], pointer: &mut usize) -> Result<Option<String>, Error> {
+fn parse_option_string(data: &[u8], pointer: &mut usize) -> Result<Option<String>, DecodeError> {
     if *pointer >= data.len() {
         return Err(DecodeError::UnexpectedEofMsg("Not enough data for option flag".into()));
     }

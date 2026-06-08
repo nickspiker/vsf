@@ -1027,8 +1027,14 @@ impl core::fmt::Display for VsfType {
             VsfType::a(s) => write!(f, "⦉{}⦊", s),
             VsfType::x(s) => write!(f, "⦉{}⦊", s.escape_default()),
 
-            // For all other types, use Debug for now
+            // For all other types, fall back to Debug — but only when the
+            // errors-verbose feature is on. Without it, write a placeholder
+            // so the linker can drop the <VsfType as Debug>::fmt impl (and
+            // with it the IEEE-754 float-to-string code).
+            #[cfg(feature = "errors-verbose")]
             _ => write!(f, "{:?}", self),
+            #[cfg(not(feature = "errors-verbose"))]
+            _ => write!(f, "⦉?⦊"),
         }
     }
 }
@@ -1165,8 +1171,8 @@ impl VsfType {
             VsfType::i6(v) => Ok(*v != 0),
             VsfType::i7(v) => Ok(*v != 0),
 
-            _ => Err(format!(
-                "Cannot check truthiness of non-numeric type: {:?}",
+            _ => Err(crate::type_mismatch_err!(
+                "Cannot check truthiness of non-numeric type",
                 self
             )),
         }

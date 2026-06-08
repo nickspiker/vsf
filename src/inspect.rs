@@ -2325,6 +2325,21 @@ pub fn labels_from_header(header: &VsfHeader) -> Vec<LabelInfo> {
 /// Format complete VSF stream for inspection (coloured output with tree structure)
 /// Returns multi-line string with header info, labels, and section tree
 /// Shows literal VSF encoding first (white), then descriptive hints (dark grey)
+/// Wire-format size suffix for an unsigned value, matching `EncodeNumber for usize` in encoding/primitives.rs. `3`=u8, `4`=u16, `5`=u32, `6`=u64, `7`=u128. Used by the inspector so the displayed marker (e.g. `l5⦉65636⦊`) matches the actual bytes on disk rather than a hardcoded `3`.
+fn usize_size_suffix(n: usize) -> &'static str {
+    if n <= u8::MAX as usize {
+        "3"
+    } else if n <= u16::MAX as usize {
+        "4"
+    } else if n <= u32::MAX as usize {
+        "5"
+    } else if n <= u64::MAX as usize {
+        "6"
+    } else {
+        "7"
+    }
+}
+
 pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     // Check magic number
     if data.len() < 4 {
@@ -2412,13 +2427,14 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         ));
     }
 
-    // Header size: b3{N} Bytes - metadata/unsigned (soft green)
+    // Header size: b{suffix}{N} Bytes - metadata/unsigned (soft green). Suffix tracks the actual wire encoding width.
     let header_size_valid = header_length_bytes == actual_header_size;
+    let header_size_suffix = usize_size_suffix(header_length_bytes);
     if header_size_valid {
         out.push_str(&format!(
             "  {}{}{}{}{} {} {} {}\n",
             trc("b", col_uint()),
-            tc("3", col_punct()),
+            tc(header_size_suffix, col_punct()),
             tc("⦉", col_punct()),
             header_length_bytes.to_string().white(),
             tc("⦊", col_punct()),
@@ -2430,7 +2446,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         out.push_str(&format!(
             "  {}{}{}{}{} {} {} {} {}\n",
             trc("b", col_uint()),
-            tc("3", col_punct()),
+            tc(header_size_suffix, col_punct()),
             tc("⦉", col_punct()),
             trc(header_length_bytes.to_string(), col_fail()),
             tc("⦊", col_punct()),
@@ -2441,15 +2457,16 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         ));
     }
 
-    // File length: L3{N} Bytes - metadata/unsigned (soft green)
+    // File length: l{suffix}{N} Bytes - metadata/unsigned (soft green). Lowercase `l` matches the on-disk byte (`b'l'`); suffix tracks the actual wire encoding width.
     if let Some(file_len) = file_length_bytes {
         let actual_len = data.len();
         let length_valid = file_len == actual_len;
+        let file_len_suffix = usize_size_suffix(file_len);
         if length_valid {
             out.push_str(&format!(
                 "  {}{}{}{}{} {} {} {}\n",
-                trc("L", col_uint()),
-                tc("3", col_punct()),
+                trc("l", col_uint()),
+                tc(file_len_suffix, col_punct()),
                 tc("⦉", col_punct()),
                 file_len.to_string().white(),
                 tc("⦊", col_punct()),
@@ -2460,8 +2477,8 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         } else {
             out.push_str(&format!(
                 "  {}{}{}{}{} {} {} {} {}\n",
-                trc("L", col_uint()),
-                tc("3", col_punct()),
+                trc("l", col_uint()),
+                tc(file_len_suffix, col_punct()),
                 tc("⦉", col_punct()),
                 trc(file_len.to_string(), col_fail()),
                 tc("⦊", col_punct()),
@@ -2601,11 +2618,11 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                 out.push_str("\n");
             }
         } else {
-            // Section pointer: o3{offset} b3{size} n3{count} - metadata/unsigned (soft green) - each on own line
+            // Section pointer: o{suffix}{offset} b{suffix}{size} n{suffix}{count} - metadata/unsigned (soft green) - each on own line. Suffix tracks actual wire encoding width.
             out.push_str(&format!(
                 "    {}{}{}{}{}\n",
                 trc("o", col_uint()),
-                tc("3", col_punct()),
+                tc(usize_size_suffix(label.offset), col_punct()),
                 tc("⦉", col_punct()),
                 label.offset.to_string().white(),
                 tc("⦊", col_punct())
@@ -2613,7 +2630,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             out.push_str(&format!(
                 "    {}{}{}{}{}\n",
                 trc("b", col_uint()),
-                tc("3", col_punct()),
+                tc(usize_size_suffix(label.size), col_punct()),
                 tc("⦉", col_punct()),
                 label.size.to_string().white(),
                 tc("⦊", col_punct())
@@ -2621,7 +2638,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             out.push_str(&format!(
                 "    {}{}{}{}{}\n",
                 trc("n", col_uint()),
-                tc("3", col_punct()),
+                tc(usize_size_suffix(label.child_count), col_punct()),
                 tc("⦉", col_punct()),
                 label.child_count.to_string().white(),
                 tc("⦊", col_punct())

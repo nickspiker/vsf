@@ -40,6 +40,8 @@ pub struct ParsedHeader {
     pub version: usize,
     pub backward_compat: usize,
     pub file_length: usize, // Total file size from l field
+    /// Creation time field if the source file emitted one. Clockless devices omit the `e` field entirely; this stays `None` in that case so a rebuild can preserve the omission.
+    pub creation_time: Option<VsfType>,
     pub rolling_hash: Option<VsfType>,
     pub fields: Vec<HeaderField>,
     pub header_end: usize, // Byte position where header ends (after '>')
@@ -88,15 +90,19 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     let file_length = if ptr < data.len() && data[ptr] == b'l' {
         match parse(data, &mut ptr) {
             Ok(VsfType::l(len, _)) => len,
-            Ok(other) => return Err(format!("Expected l value, got: {:?}", other)),
+            Ok(other) => return Err(crate::type_mismatch_err!("Expected l value", other)),
             Err(e) => return Err(format!("Failed to parse file length: {}", e)),
         }
     } else {
         0 // No l field - use 0 to indicate unknown
     };
 
-    // Skip creation time (required in v4+)
-    let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse creation time: {}", e))?;
+    // Optional creation time — devices without a clock omit the `e` field. Preserve the value so callers (e.g. rebuild_with_header) can re-emit it.
+    let creation_time = if ptr < data.len() && data[ptr] == b'e' {
+        Some(parse(data, &mut ptr).map_err(|e| format!("Failed to parse creation time: {}", e))?)
+    } else {
+        None
+    };
 
     // Parse provenance primitives in FIXED order (version determines format)
     // Required: hp (provenance hash)
@@ -108,8 +114,8 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     match prov_type {
         VsfType::hp(_) => {} // Provenance hash
         _ => {
-            return Err(format!(
-                "Expected hp after creation time, got: {:?}",
+            return Err(crate::type_mismatch_err!(
+                "Expected hp after creation time",
                 prov_type
             ))
         }
@@ -159,6 +165,7 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
         version,
         backward_compat,
         file_length,
+        creation_time,
         rolling_hash,
         fields,
         header_end: ptr,
@@ -250,6 +257,9 @@ fn rebuild_with_header(
 
     let old_header_size = old_header_end;
 
+    // Preserve creation_time from the source so the rebuilt header keeps its timestamp. Clockless files (no `e` field) round-trip as `None`.
+    let preserved_creation_time = parse_full_header(old_data)?.creation_time;
+
     // Stabilization loop - iterate until header size and offsets converge
     const MAX_ITERATIONS: usize = 10;
     let mut prev_header_size = old_header_size;
@@ -257,6 +267,7 @@ fn rebuild_with_header(
     for _iteration in 0..MAX_ITERATIONS {
         // Calculate what the new header size will be
         let mut test_header = VsfHeader::new(version, backward_compat);
+        test_header.creation_time = preserved_creation_time.clone();
         test_header.provenance_hash = VsfType::hp(vec![0u8; 32]);
         test_header.rolling_hash = if include_rolling_hash {
             Some(VsfType::hb(vec![0u8; 32]))
@@ -278,6 +289,7 @@ fn rebuild_with_header(
 
             // Build final header with these offsets
             let mut final_header = VsfHeader::new(version, backward_compat);
+            final_header.creation_time = preserved_creation_time.clone();
             final_header.provenance_hash = VsfType::hp(vec![0u8; 32]);
             final_header.rolling_hash = if include_rolling_hash {
                 Some(VsfType::hb(vec![0u8; 32]))
@@ -1574,7 +1586,7 @@ fn find_header_ke(data: &[u8]) -> Result<HeaderFieldInfo, String> {
                 is_placeholder,
             })
         }
-        _ => Err(format!("Expected ke type, got {:?}", ke_type)),
+        _ => Err(crate::type_mismatch_err!("Expected ke type", ke_type)),
     }
 }
 
@@ -1627,7 +1639,7 @@ fn find_header_ge(data: &[u8]) -> Result<HeaderFieldInfo, String> {
                 is_placeholder,
             })
         }
-        _ => Err(format!("Expected ge type, got {:?}", ge_type)),
+        _ => Err(crate::type_mismatch_err!("Expected ge type", ge_type)),
     }
 }
 

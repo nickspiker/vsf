@@ -1,16 +1,14 @@
 //! Spirix type parsers
 
+use crate::decoding::traits::DecodeError;
+use crate::prelude::*;
 use crate::types::VsfType;
 use spirix::*;
-use std::io::{Error, ErrorKind};
 
-pub fn parse_spirix_scalar(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_spirix_scalar(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // Parse F and E markers
     if *pointer + 2 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for Spirix scalar markers",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for Spirix scalar markers".into()));
     }
 
     let f_marker = data[*pointer];
@@ -44,23 +42,17 @@ pub fn parse_spirix_scalar(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
         (b'7', b'5') => parse_scalar_f7e5(data, pointer),
         (b'7', b'6') => parse_scalar_f7e6(data, pointer),
         (b'7', b'7') => parse_scalar_f7e7(data, pointer),
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!(
+        _ => Err(DecodeError::InvalidDataMsg(format!(
                 "Unsupported Spirix Scalar type: F{}E{}",
                 f_marker as char, e_marker as char
-            ),
-        )),
+            ).into())),
     }
 }
 
-pub fn parse_spirix_circle(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_spirix_circle(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // Parse F and E markers
     if *pointer + 2 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for Spirix circle markers",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for Spirix circle markers".into()));
     }
 
     let f_marker = data[*pointer];
@@ -94,26 +86,20 @@ pub fn parse_spirix_circle(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
         (b'7', b'5') => parse_circle_f7e5(data, pointer),
         (b'7', b'6') => parse_circle_f7e6(data, pointer),
         (b'7', b'7') => parse_circle_f7e7(data, pointer),
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!(
+        _ => Err(DecodeError::InvalidDataMsg(format!(
                 "Unsupported Spirix Circle type: F{}E{}",
                 f_marker as char, e_marker as char
-            ),
-        )),
+            ).into())),
     }
 }
 
 // ==================== SCALAR PARSERS ====================
 
 /// Parse ScalarF3E3: [s][3][3][fraction:i8][exponent:i8]
-pub fn parse_scalar_f3e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f3e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F3 = i8 (1 bytes), E3 = i8 (1 byte)
     if *pointer + 2 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF3E3",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF3E3".into()));
     }
 
     let fraction = i8::from_be_bytes([data[*pointer]]);
@@ -126,13 +112,10 @@ pub fn parse_scalar_f3e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF3E4: [s][3][4][fraction:i8][exponent:i16]
-pub fn parse_scalar_f3e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f3e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F3 = i8 (1 bytes), E4 = i16 (2 bytes)
     if *pointer + 3 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF3E4",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF3E4".into()));
     }
 
     let fraction = i8::from_be_bytes([data[*pointer]]);
@@ -145,13 +128,10 @@ pub fn parse_scalar_f3e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF3E5: [s][3][5][fraction:i8][exponent:i32]
-pub fn parse_scalar_f3e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f3e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F3 = i8 (1 bytes), E5 = i32 (4 bytes)
     if *pointer + 5 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF3E5",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF3E5".into()));
     }
 
     let fraction = i8::from_be_bytes([data[*pointer]]);
@@ -169,13 +149,10 @@ pub fn parse_scalar_f3e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF3E6: [s][3][6][fraction:i8][exponent:i64]
-pub fn parse_scalar_f3e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f3e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F3 = i8 (1 bytes), E6 = i64 (8 bytes)
     if *pointer + 9 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF3E6",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF3E6".into()));
     }
 
     let fraction = i8::from_be_bytes([data[*pointer]]);
@@ -197,13 +174,10 @@ pub fn parse_scalar_f3e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF3E7: [s][3][7][fraction:i8][exponent:i128]
-pub fn parse_scalar_f3e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f3e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F3 = i8 (1 bytes), E7 = i128 (16 bytes)
     if *pointer + 17 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF3E7",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF3E7".into()));
     }
 
     let fraction = i8::from_be_bytes([data[*pointer]]);
@@ -233,13 +207,10 @@ pub fn parse_scalar_f3e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF4E3: [s][4][3][fraction:i16][exponent:i8]
-pub fn parse_scalar_f4e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f4e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F4 = i16 (2 bytes), E3 = i8 (1 byte)
     if *pointer + 3 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF4E3",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF4E3".into()));
     }
 
     let fraction = i16::from_be_bytes([data[*pointer + 0], data[*pointer + 1]]);
@@ -252,13 +223,10 @@ pub fn parse_scalar_f4e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF4E4: [s][4][4][fraction:i16][exponent:i16]
-pub fn parse_scalar_f4e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f4e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F4 = i16 (2 bytes), E4 = i16 (2 bytes)
     if *pointer + 4 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF4E4",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF4E4".into()));
     }
 
     let fraction = i16::from_be_bytes([data[*pointer + 0], data[*pointer + 1]]);
@@ -271,13 +239,10 @@ pub fn parse_scalar_f4e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF4E5: [s][4][5][fraction:i16][exponent:i32]
-pub fn parse_scalar_f4e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f4e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F4 = i16 (2 bytes), E5 = i32 (4 bytes)
     if *pointer + 6 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF4E5",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF4E5".into()));
     }
 
     let fraction = i16::from_be_bytes([data[*pointer + 0], data[*pointer + 1]]);
@@ -295,13 +260,10 @@ pub fn parse_scalar_f4e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF4E6: [s][4][6][fraction:i16][exponent:i64]
-pub fn parse_scalar_f4e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f4e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F4 = i16 (2 bytes), E6 = i64 (8 bytes)
     if *pointer + 10 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF4E6",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF4E6".into()));
     }
 
     let fraction = i16::from_be_bytes([data[*pointer + 0], data[*pointer + 1]]);
@@ -323,13 +285,10 @@ pub fn parse_scalar_f4e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF4E7: [s][4][7][fraction:i16][exponent:i128]
-pub fn parse_scalar_f4e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f4e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F4 = i16 (2 bytes), E7 = i128 (16 bytes)
     if *pointer + 18 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF4E7",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF4E7".into()));
     }
 
     let fraction = i16::from_be_bytes([data[*pointer + 0], data[*pointer + 1]]);
@@ -359,13 +318,10 @@ pub fn parse_scalar_f4e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF5E3: [s][5][3][fraction:i32][exponent:i8]
-pub fn parse_scalar_f5e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f5e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F5 = i32 (4 bytes), E3 = i8 (1 byte)
     if *pointer + 5 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF5E3",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF5E3".into()));
     }
 
     let fraction = i32::from_be_bytes([
@@ -383,13 +339,10 @@ pub fn parse_scalar_f5e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF5E4: [s][5][4][fraction:i32][exponent:i16]
-pub fn parse_scalar_f5e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f5e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F5 = i32 (4 bytes), E4 = i16 (2 bytes)
     if *pointer + 6 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF5E4",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF5E4".into()));
     }
 
     let fraction = i32::from_be_bytes([
@@ -407,13 +360,10 @@ pub fn parse_scalar_f5e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF5E5: [s][5][5][fraction:i32][exponent:i32]
-pub fn parse_scalar_f5e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f5e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F5 = i32 (4 bytes), E5 = i32 (4 bytes)
     if *pointer + 8 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF5E5",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF5E5".into()));
     }
 
     let fraction = i32::from_be_bytes([
@@ -436,13 +386,10 @@ pub fn parse_scalar_f5e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF5E6: [s][5][6][fraction:i32][exponent:i64]
-pub fn parse_scalar_f5e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f5e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F5 = i32 (4 bytes), E6 = i64 (8 bytes)
     if *pointer + 12 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF5E6",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF5E6".into()));
     }
 
     let fraction = i32::from_be_bytes([
@@ -469,13 +416,10 @@ pub fn parse_scalar_f5e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF5E7: [s][5][7][fraction:i32][exponent:i128]
-pub fn parse_scalar_f5e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f5e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F5 = i32 (4 bytes), E7 = i128 (16 bytes)
     if *pointer + 20 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF5E7",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF5E7".into()));
     }
 
     let fraction = i32::from_be_bytes([
@@ -510,13 +454,10 @@ pub fn parse_scalar_f5e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF6E3: [s][6][3][fraction:i64][exponent:i8]
-pub fn parse_scalar_f6e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f6e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F6 = i64 (8 bytes), E3 = i8 (1 byte)
     if *pointer + 9 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF6E3",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF6E3".into()));
     }
 
     let fraction = i64::from_be_bytes([
@@ -538,13 +479,10 @@ pub fn parse_scalar_f6e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF6E4: [s][6][4][fraction:i64][exponent:i16]
-pub fn parse_scalar_f6e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f6e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F6 = i64 (8 bytes), E4 = i16 (2 bytes)
     if *pointer + 10 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF6E4",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF6E4".into()));
     }
 
     let fraction = i64::from_be_bytes([
@@ -566,13 +504,10 @@ pub fn parse_scalar_f6e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF6E5: [s][6][5][fraction:i64][exponent:i32]
-pub fn parse_scalar_f6e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f6e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F6 = i64 (8 bytes), E5 = i32 (4 bytes)
     if *pointer + 12 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF6E5",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF6E5".into()));
     }
 
     let fraction = i64::from_be_bytes([
@@ -599,13 +534,10 @@ pub fn parse_scalar_f6e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF6E6: [s][6][6][fraction:i64][exponent:i64]
-pub fn parse_scalar_f6e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f6e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F6 = i64 (8 bytes), E6 = i64 (8 bytes)
     if *pointer + 16 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF6E6",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF6E6".into()));
     }
 
     let fraction = i64::from_be_bytes([
@@ -636,13 +568,10 @@ pub fn parse_scalar_f6e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF6E7: [s][6][7][fraction:i64][exponent:i128]
-pub fn parse_scalar_f6e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f6e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F6 = i64 (8 bytes), E7 = i128 (16 bytes)
     if *pointer + 24 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF6E7",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF6E7".into()));
     }
 
     let fraction = i64::from_be_bytes([
@@ -681,13 +610,10 @@ pub fn parse_scalar_f6e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF7E3: [s][7][3][fraction:i128][exponent:i8]
-pub fn parse_scalar_f7e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f7e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F7 = i128 (16 bytes), E3 = i8 (1 byte)
     if *pointer + 17 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF7E3",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF7E3".into()));
     }
 
     let fraction = i128::from_be_bytes([
@@ -717,13 +643,10 @@ pub fn parse_scalar_f7e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF7E4: [s][7][4][fraction:i128][exponent:i16]
-pub fn parse_scalar_f7e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f7e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F7 = i128 (16 bytes), E4 = i16 (2 bytes)
     if *pointer + 18 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF7E4",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF7E4".into()));
     }
 
     let fraction = i128::from_be_bytes([
@@ -753,13 +676,10 @@ pub fn parse_scalar_f7e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF7E5: [s][7][5][fraction:i128][exponent:i32]
-pub fn parse_scalar_f7e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f7e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F7 = i128 (16 bytes), E5 = i32 (4 bytes)
     if *pointer + 20 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF7E5",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF7E5".into()));
     }
 
     let fraction = i128::from_be_bytes([
@@ -794,13 +714,10 @@ pub fn parse_scalar_f7e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF7E6: [s][7][6][fraction:i128][exponent:i64]
-pub fn parse_scalar_f7e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f7e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F7 = i128 (16 bytes), E6 = i64 (8 bytes)
     if *pointer + 24 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF7E6",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF7E6".into()));
     }
 
     let fraction = i128::from_be_bytes([
@@ -839,13 +756,10 @@ pub fn parse_scalar_f7e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse ScalarF7E7: [s][7][7][fraction:i128][exponent:i128]
-pub fn parse_scalar_f7e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_scalar_f7e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F7 = i128 (16 bytes), E7 = i128 (16 bytes)
     if *pointer + 32 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for ScalarF7E7",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for ScalarF7E7".into()));
     }
 
     let fraction = i128::from_be_bytes([
@@ -894,13 +808,10 @@ pub fn parse_scalar_f7e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 // ==================== CIRCLE PARSERS ====================
 
 /// Parse CircleF3E3: [c][3][3][real:i8][imaginary:i8][exponent:i8]
-pub fn parse_circle_f3e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f3e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F3 = i8 (1 bytes each for real/imag), E3 = i8 (1 byte)
     if *pointer + 3 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF3E3",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF3E3".into()));
     }
 
     let real = i8::from_be_bytes([data[*pointer]]);
@@ -920,13 +831,10 @@ pub fn parse_circle_f3e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF3E4: [c][3][4][real:i8][imaginary:i8][exponent:i16]
-pub fn parse_circle_f3e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f3e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F3 = i8 (1 bytes each for real/imag), E4 = i16 (2 bytes)
     if *pointer + 4 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF3E4",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF3E4".into()));
     }
 
     let real = i8::from_be_bytes([data[*pointer]]);
@@ -946,13 +854,10 @@ pub fn parse_circle_f3e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF3E5: [c][3][5][real:i8][imaginary:i8][exponent:i32]
-pub fn parse_circle_f3e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f3e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F3 = i8 (1 bytes each for real/imag), E5 = i32 (4 bytes)
     if *pointer + 6 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF3E5",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF3E5".into()));
     }
 
     let real = i8::from_be_bytes([data[*pointer]]);
@@ -977,13 +882,10 @@ pub fn parse_circle_f3e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF3E6: [c][3][6][real:i8][imaginary:i8][exponent:i64]
-pub fn parse_circle_f3e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f3e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F3 = i8 (1 bytes each for real/imag), E6 = i64 (8 bytes)
     if *pointer + 10 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF3E6",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF3E6".into()));
     }
 
     let real = i8::from_be_bytes([data[*pointer]]);
@@ -1012,13 +914,10 @@ pub fn parse_circle_f3e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF3E7: [c][3][7][real:i8][imaginary:i8][exponent:i128]
-pub fn parse_circle_f3e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f3e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F3 = i8 (1 bytes each for real/imag), E7 = i128 (16 bytes)
     if *pointer + 18 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF3E7",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF3E7".into()));
     }
 
     let real = i8::from_be_bytes([data[*pointer]]);
@@ -1055,13 +954,10 @@ pub fn parse_circle_f3e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF4E3: [c][4][3][real:i16][imaginary:i16][exponent:i8]
-pub fn parse_circle_f4e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f4e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F4 = i16 (2 bytes each for real/imag), E3 = i8 (1 byte)
     if *pointer + 5 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF4E3",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF4E3".into()));
     }
 
     let real = i16::from_be_bytes([data[*pointer + 0], data[*pointer + 1]]);
@@ -1081,13 +977,10 @@ pub fn parse_circle_f4e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF4E4: [c][4][4][real:i16][imaginary:i16][exponent:i16]
-pub fn parse_circle_f4e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f4e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F4 = i16 (2 bytes each for real/imag), E4 = i16 (2 bytes)
     if *pointer + 6 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF4E4",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF4E4".into()));
     }
 
     let real = i16::from_be_bytes([data[*pointer + 0], data[*pointer + 1]]);
@@ -1107,13 +1000,10 @@ pub fn parse_circle_f4e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF4E5: [c][4][5][real:i16][imaginary:i16][exponent:i32]
-pub fn parse_circle_f4e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f4e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F4 = i16 (2 bytes each for real/imag), E5 = i32 (4 bytes)
     if *pointer + 8 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF4E5",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF4E5".into()));
     }
 
     let real = i16::from_be_bytes([data[*pointer + 0], data[*pointer + 1]]);
@@ -1138,13 +1028,10 @@ pub fn parse_circle_f4e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF4E6: [c][4][6][real:i16][imaginary:i16][exponent:i64]
-pub fn parse_circle_f4e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f4e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F4 = i16 (2 bytes each for real/imag), E6 = i64 (8 bytes)
     if *pointer + 12 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF4E6",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF4E6".into()));
     }
 
     let real = i16::from_be_bytes([data[*pointer + 0], data[*pointer + 1]]);
@@ -1173,13 +1060,10 @@ pub fn parse_circle_f4e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF4E7: [c][4][7][real:i16][imaginary:i16][exponent:i128]
-pub fn parse_circle_f4e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f4e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F4 = i16 (2 bytes each for real/imag), E7 = i128 (16 bytes)
     if *pointer + 20 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF4E7",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF4E7".into()));
     }
 
     let real = i16::from_be_bytes([data[*pointer + 0], data[*pointer + 1]]);
@@ -1216,13 +1100,10 @@ pub fn parse_circle_f4e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF5E3: [c][5][3][real:i32][imaginary:i32][exponent:i8]
-pub fn parse_circle_f5e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f5e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F5 = i32 (4 bytes each for real/imag), E3 = i8 (1 byte)
     if *pointer + 9 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF5E3",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF5E3".into()));
     }
 
     let real = i32::from_be_bytes([
@@ -1252,13 +1133,10 @@ pub fn parse_circle_f5e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF5E4: [c][5][4][real:i32][imaginary:i32][exponent:i16]
-pub fn parse_circle_f5e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f5e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F5 = i32 (4 bytes each for real/imag), E4 = i16 (2 bytes)
     if *pointer + 10 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF5E4",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF5E4".into()));
     }
 
     let real = i32::from_be_bytes([
@@ -1288,13 +1166,10 @@ pub fn parse_circle_f5e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF5E5: [c][5][5][real:i32][imaginary:i32][exponent:i32]
-pub fn parse_circle_f5e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f5e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F5 = i32 (4 bytes each for real/imag), E5 = i32 (4 bytes)
     if *pointer + 12 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF5E5",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF5E5".into()));
     }
 
     let real = i32::from_be_bytes([
@@ -1329,13 +1204,10 @@ pub fn parse_circle_f5e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF5E6: [c][5][6][real:i32][imaginary:i32][exponent:i64]
-pub fn parse_circle_f5e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f5e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F5 = i32 (4 bytes each for real/imag), E6 = i64 (8 bytes)
     if *pointer + 16 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF5E6",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF5E6".into()));
     }
 
     let real = i32::from_be_bytes([
@@ -1374,13 +1246,10 @@ pub fn parse_circle_f5e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF5E7: [c][5][7][real:i32][imaginary:i32][exponent:i128]
-pub fn parse_circle_f5e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f5e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F5 = i32 (4 bytes each for real/imag), E7 = i128 (16 bytes)
     if *pointer + 24 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF5E7",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF5E7".into()));
     }
 
     let real = i32::from_be_bytes([
@@ -1427,13 +1296,10 @@ pub fn parse_circle_f5e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF6E3: [c][6][3][real:i64][imaginary:i64][exponent:i8]
-pub fn parse_circle_f6e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f6e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F6 = i64 (8 bytes each for real/imag), E3 = i8 (1 byte)
     if *pointer + 17 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF6E3",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF6E3".into()));
     }
 
     let real = i64::from_be_bytes([
@@ -1471,13 +1337,10 @@ pub fn parse_circle_f6e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF6E4: [c][6][4][real:i64][imaginary:i64][exponent:i16]
-pub fn parse_circle_f6e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f6e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F6 = i64 (8 bytes each for real/imag), E4 = i16 (2 bytes)
     if *pointer + 18 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF6E4",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF6E4".into()));
     }
 
     let real = i64::from_be_bytes([
@@ -1515,13 +1378,10 @@ pub fn parse_circle_f6e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF6E5: [c][6][5][real:i64][imaginary:i64][exponent:i32]
-pub fn parse_circle_f6e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f6e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F6 = i64 (8 bytes each for real/imag), E5 = i32 (4 bytes)
     if *pointer + 20 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF6E5",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF6E5".into()));
     }
 
     let real = i64::from_be_bytes([
@@ -1564,13 +1424,10 @@ pub fn parse_circle_f6e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF6E6: [c][6][6][real:i64][imaginary:i64][exponent:i64]
-pub fn parse_circle_f6e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f6e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F6 = i64 (8 bytes each for real/imag), E6 = i64 (8 bytes)
     if *pointer + 24 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF6E6",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF6E6".into()));
     }
 
     let real = i64::from_be_bytes([
@@ -1617,13 +1474,10 @@ pub fn parse_circle_f6e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF6E7: [c][6][7][real:i64][imaginary:i64][exponent:i128]
-pub fn parse_circle_f6e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f6e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F6 = i64 (8 bytes each for real/imag), E7 = i128 (16 bytes)
     if *pointer + 32 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF6E7",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF6E7".into()));
     }
 
     let real = i64::from_be_bytes([
@@ -1678,13 +1532,10 @@ pub fn parse_circle_f6e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF7E3: [c][7][3][real:i128][imaginary:i128][exponent:i8]
-pub fn parse_circle_f7e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f7e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F7 = i128 (16 bytes each for real/imag), E3 = i8 (1 byte)
     if *pointer + 33 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF7E3",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF7E3".into()));
     }
 
     let real = i128::from_be_bytes([
@@ -1738,13 +1589,10 @@ pub fn parse_circle_f7e3(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF7E4: [c][7][4][real:i128][imaginary:i128][exponent:i16]
-pub fn parse_circle_f7e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f7e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F7 = i128 (16 bytes each for real/imag), E4 = i16 (2 bytes)
     if *pointer + 34 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF7E4",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF7E4".into()));
     }
 
     let real = i128::from_be_bytes([
@@ -1798,13 +1646,10 @@ pub fn parse_circle_f7e4(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF7E5: [c][7][5][real:i128][imaginary:i128][exponent:i32]
-pub fn parse_circle_f7e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f7e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F7 = i128 (16 bytes each for real/imag), E5 = i32 (4 bytes)
     if *pointer + 36 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF7E5",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF7E5".into()));
     }
 
     let real = i128::from_be_bytes([
@@ -1863,13 +1708,10 @@ pub fn parse_circle_f7e5(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF7E6: [c][7][6][real:i128][imaginary:i128][exponent:i64]
-pub fn parse_circle_f7e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f7e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F7 = i128 (16 bytes each for real/imag), E6 = i64 (8 bytes)
     if *pointer + 40 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF7E6",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF7E6".into()));
     }
 
     let real = i128::from_be_bytes([
@@ -1932,13 +1774,10 @@ pub fn parse_circle_f7e6(data: &[u8], pointer: &mut usize) -> Result<VsfType, Er
 }
 
 /// Parse CircleF7E7: [c][7][7][real:i128][imaginary:i128][exponent:i128]
-pub fn parse_circle_f7e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, Error> {
+pub fn parse_circle_f7e7(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // F7 = i128 (16 bytes each for real/imag), E7 = i128 (16 bytes)
     if *pointer + 48 > data.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Not enough data for CircleF7E7",
-        ));
+        return Err(DecodeError::UnexpectedEofMsg("Not enough data for CircleF7E7".into()));
     }
 
     let real = i128::from_be_bytes([

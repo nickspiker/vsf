@@ -38,6 +38,7 @@ bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 chrono = { version = "0.4.38", default-features = false, features = ["alloc"] }
 num-complex = { version = "0.4.5", default-features = false }
 spirix = { version = "0.0.12", path = "../spirix", optional = true }
+ihi = { path = "../ihi", default-features = false, features = ["handle"] }
 clap = { version = "4", features = ["derive"], optional = true }
 blake3 = { version = "1", default-features = false }
 ed25519-dalek = { version = "2", default-features = false, features = ["rand_core", "alloc", "zeroize"], optional = true }
@@ -62,7 +63,13 @@ resize = { version = "0.8.8", optional = true }
 rgb = { version = "0.8.52", optional = true }
 
 [features]
-default = ["std", "registry"]
+# `errors-verbose` enables `{:?}` formatting of unexpected VsfType values inside
+# decode/parse error messages. Disabling drops the `core::fmt::Debug` impl for
+# VsfType from the binary, which transitively drops the float-to-string code
+# (~10 KB on cortex-m). Embedded callers (e.g. pipe-bridge-rp2040) build with
+# `default-features = false` and don't enable it, getting static-string errors.
+default = ["std", "registry", "errors-verbose"]
+errors-verbose = []
 std = [
     "chrono/std",
     "chrono/clock",
