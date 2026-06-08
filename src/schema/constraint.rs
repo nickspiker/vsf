@@ -519,14 +519,25 @@ mod tests {
 }
 
 /// Helper function to get human-readable type name for VsfType
-/// Used in error messages and debugging
+/// Used in error messages and debugging.
+///
+/// With `errors-verbose` (default-on), uses Debug formatting and extracts the
+/// variant name prefix. Without it (embedded builds), returns `"?"` — this
+/// kills the `<VsfType as Debug>::fmt` chain (and its ~10 KB of IEEE-754
+/// float-to-string code) from being linked. Callers that depend on the
+/// returned string for runtime classification (e.g. `AnyColour`'s
+/// `starts_with('r')` check) only work correctly under `errors-verbose`.
+#[cfg(feature = "errors-verbose")]
 pub fn vsf_type_name(vsf: &VsfType) -> String {
-    // Use Debug formatting and extract variant name
     let debug_str = format!("{:?}", vsf);
-    // Extract variant name (everything before '(' or end of string)
     debug_str
         .split('(')
         .next()
         .unwrap_or(&debug_str)
         .to_string()
+}
+
+#[cfg(not(feature = "errors-verbose"))]
+pub fn vsf_type_name(_vsf: &VsfType) -> alloc::string::String {
+    alloc::string::String::from("?")
 }

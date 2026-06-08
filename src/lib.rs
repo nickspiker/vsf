@@ -266,6 +266,31 @@
 #[macro_use]
 extern crate alloc;
 
+/// Build an error string for an unexpected VsfType variant at decode time.
+///
+/// With the `errors-verbose` feature (default-on), expands to `format!` of the
+/// expected-label plus a `{:?}` of the value. Without it, expands to a static
+/// string with just the expected label and drops the value via `let _ = &v;`.
+///
+/// Disabling `errors-verbose` lets the linker remove `<VsfType as Debug>::fmt`
+/// — which transitively removes the IEEE-754 grisu/dragon float formatters
+/// (~10 KB on cortex-m) since they're only kept alive by the float variants'
+/// Debug arms.
+#[macro_export]
+macro_rules! type_mismatch_err {
+    ($expected:literal, $got:expr) => {{
+        #[cfg(feature = "errors-verbose")]
+        {
+            ::alloc::format!(concat!($expected, ", got {:?}"), $got)
+        }
+        #[cfg(not(feature = "errors-verbose"))]
+        {
+            let _ = &$got;
+            <::alloc::string::String as ::core::convert::From<&str>>::from($expected)
+        }
+    }};
+}
+
 /// no_std-friendly prelude: re-exports of the `alloc` types that std's prelude provides automatically.
 /// Individual files import via `use crate::prelude::*;` to stay compatible across `std` and `no_std + alloc` builds.
 pub mod prelude {

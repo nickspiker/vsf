@@ -461,8 +461,8 @@ impl SectionBuilder {
             let section_name_str = match section_name {
                 crate::VsfType::d(name) => name,
                 _ => {
-                    return Err(ValidationError::Custom(format!(
-                        "Expected section name (d), got {:?}",
+                    return Err(ValidationError::Custom(crate::type_mismatch_err!(
+                        "Expected section name (d)",
                         section_name
                     )))
                 }
@@ -506,8 +506,8 @@ impl SectionBuilder {
             let field_name = match field_name_vsf {
                 crate::VsfType::d(name) => name,
                 _ => {
-                    return Err(ValidationError::Custom(format!(
-                        "Expected field name (d), got {:?}",
+                    return Err(ValidationError::Custom(crate::type_mismatch_err!(
+                        "Expected field name (d)",
                         field_name_vsf
                     )))
                 }
