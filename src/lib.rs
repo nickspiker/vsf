@@ -322,7 +322,7 @@ pub mod decoding;
 pub mod builders;
 
 // Huffman text encoding for `x` marker
-#[cfg(feature = "text")]
+#[cfg(any(feature = "text", feature = "text-encode"))]
 pub mod text_encoding;
 
 // VSF file format with headers and labels

@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use super::traits::{EncodeNumber, EncodeNumberInclusive};
-#[cfg(feature = "text")]
+#[cfg(any(feature = "text", feature = "text-encode"))]
 use crate::text_encoding::encode_text;
 use crate::types::{EtType, VsfType};
 
@@ -142,7 +142,7 @@ impl VsfType {
 
             // ==================== METADATA & SPECIAL ====================
             VsfType::x(value) => {
-                #[cfg(feature = "text")]
+                #[cfg(any(feature = "text", feature = "text-encode"))]
                 {
                     let mut flat = Vec::new();
                     flat.push(b'x');
@@ -160,11 +160,10 @@ impl VsfType {
 
                     flat
                 }
-                #[cfg(not(feature = "text"))]
+                #[cfg(not(any(feature = "text", feature = "text-encode")))]
                 {
-                    // SECURITY: VsfType::x MUST only be used with the 'text' feature enabled. Without it, this would send naked type bytes (no signature verification), creating a security vulnerability where responses can be spoofed. Use VsfType::a for ASCII text or build proper signed VSF files instead.
                     panic!(
-                        "VsfType::x requires 'text' feature for Huffman compression. \
+                        "VsfType::x requires 'text' or 'text-encode' feature for Huffman compression. \
                          Use VsfType::a for ASCII text instead. Message: '{}'",
                         value
                     );
