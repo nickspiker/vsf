@@ -9,8 +9,7 @@ use crate::VsfType;
 
 /// Schema definition for a field within a section
 ///
-/// Fields are validated using TypeConstraint which pattern-matches against
-/// VsfType variants rather than duplicating the type system.
+/// Fields are validated using TypeConstraint which pattern-matches against VsfType variants rather than duplicating the type system.
 #[derive(Clone)]
 pub struct FieldSchema {
     pub name: String,

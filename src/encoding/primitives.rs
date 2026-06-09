@@ -177,9 +177,7 @@ impl EncodeNumber for i128 {
 
 impl EncodeNumber for isize {
     fn encode_number(&self) -> Vec<u8> {
-        // Auto-select smallest size that fits
-        // For positive values, use unsigned limits
-        // For negative values, use signed limits
+        // Auto-select smallest size that fits For positive values, use unsigned limits For negative values, use signed limits
         if *self >= 0 {
             if *self <= u8::MAX as isize {
                 vec![b'3', *self as u8]

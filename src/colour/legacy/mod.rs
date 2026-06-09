@@ -17,9 +17,7 @@
 //!
 //! ## Conversions
 //!
-//! Conversions between legacy colourspaces use published transformation matrices and go thru
-//! XYZ tristimulus space when necessary. Conversions to/from spectrally-defined spaces go thru
-//! LMS cone space using the CIE 2006 2° Standard Observer to maintain perceptual equivalence.
+//! Conversions between legacy colourspaces use published transformation matrices and go thru XYZ tristimulus space when necessary. Conversions to/from spectrally-defined spaces go thru LMS cone space using the CIE 2006 2° Standard Observer to maintain perceptual equivalence.
 
 pub mod constants;
 

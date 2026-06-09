@@ -189,8 +189,7 @@ pub fn adobe_rgb_eotf_rgb(rgb: &[f32; 3]) -> [f32; 3] {
     ]
 }
 
-// Note: Rec.2020 transfer function aliases have been moved to src/colour/transfer.rs
-// Rec.2020 is a spectral colourspace (NOT legacy), but it reuses Rec.709 transfer functions
+// Note: Rec.2020 transfer function aliases have been moved to src/colour/transfer.rs Rec.2020 is a spectral colourspace (NOT legacy), but it reuses Rec.709 transfer functions
 
 // ==================== TESTS ====================
 

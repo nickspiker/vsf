@@ -12,11 +12,9 @@
 //!
 //! # Example
 //! ```ignore
-//! use vsf::builders::RawImageBuilder;
-//! use vsf::verification::sign_section;
+//! use vsf::builders::RawImageBuilder; use vsf::verification::sign_section;
 //!
-//! // Build the VSF
-//! let bytes = raw.build()?;
+//! // Build the VSF let bytes = raw.build()?;
 //!
 //! // Add verification as needed
 //! ```
@@ -24,8 +22,7 @@
 use crate::prelude::*;
 use crate::decoding::parse;
 
-/// Skip the optional creation_time field in a VSF header at `pointer`.
-/// The field is identified by the `e` marker byte; if not present, the header simply omits it (callers without a clock).
+/// Skip the optional creation_time field in a VSF header at `pointer`. The field is identified by the `e` marker byte; if not present, the header simply omits it (callers without a clock).
 fn skip_optional_creation_time(bytes: &[u8], pointer: &mut usize) -> Result<(), String> {
     if *pointer < bytes.len() && bytes[*pointer] == b'e' {
         let _ = parse(bytes, pointer).map_err(|e| format!("creation_time: {}", e))?;
@@ -47,8 +44,7 @@ pub struct ParsedHeader {
     pub header_end: usize, // Byte position where header ends (after '>')
 }
 
-/// Parse complete VSF header including all header field crypto metadata
-/// Robust, order-independent parser using existing VSF tools
+/// Parse complete VSF header including all header field crypto metadata Robust, order-independent parser using existing VSF tools
 pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     if data.len() < 4 {
         return Err("File too small".to_string());
@@ -104,9 +100,7 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
         None
     };
 
-    // Parse provenance primitives in FIXED order (version determines format)
-    // Required: hp (provenance hash)
-    // Optional: ke (signer pubkey) + ge (signature) OR hb (rolling hash)
+    // Parse provenance primitives in FIXED order (version determines format) Required: hp (provenance hash) Optional: ke (signer pubkey) + ge (signature) OR hb (rolling hash)
 
     // Parse hp (required)
     let prov_type =
@@ -172,8 +166,7 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
     })
 }
 
-/// Parse a single header field with validation
-/// Uses VsfField::parse() for generic parsing, then extracts and validates values
+/// Parse a single header field with validation Uses VsfField::parse() for generic parsing, then extracts and validates values
 fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, String> {
     use crate::file_format::{validate_name, VsfField};
 
@@ -209,8 +202,7 @@ fn parse_header_field(data: &[u8], ptr: &mut usize) -> Result<HeaderField, Strin
         }
     }
 
-    // Metadata-only fields have no positional data (no o/b/n)
-    // This is valid for empty sections or header metadata like avatar_id, ping, etc.
+    // Metadata-only fields have no positional data (no o/b/n) This is valid for empty sections or header metadata like avatar_id, ping, etc.
     let is_metadata_only = offset_bytes.is_none() && size_bytes.is_none();
 
     if is_metadata_only {
@@ -309,13 +301,10 @@ fn rebuild_with_header(
             let hp_hash = compute_provenance_hash(&new_file)?;
             new_file = write_provenance_hash(new_file, &hp_hash)?;
 
-            // Write all header field signatures (ge/gp/gr) into placeholders
-            // This must come AFTER hp computation since hp is computed with signatures zeroed
-            // But BEFORE hb computation since hb should include the actual signature bytes
+            // Write all header field signatures (ge/gp/gr) into placeholders This must come AFTER hp computation since hp is computed with signatures zeroed But BEFORE hb computation since hb should include the actual signature bytes
             new_file = write_header_field_signatures_from_list(new_file, field_signatures)?;
 
-            // Compute and write rolling hash (hb) AFTER signatures are written (if requested)
-            // Rolling hash is redundant when using signatures, so only include if explicitly requested
+            // Compute and write rolling hash (hb) AFTER signatures are written (if requested) Rolling hash is redundant when using signatures, so only include if explicitly requested
             if include_rolling_hash {
                 let hb_hash = compute_file_hash(&new_file)?;
                 new_file = write_file_hash(new_file, &hb_hash)?;
@@ -434,9 +423,7 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
                 }
             }
 
-            // Now we need to find and zero out any ge/gp/gr signatures in header fields
-            // This requires parsing the header fields which come after the field count
-            // For now, we'll scan for signature fields and zero them
+            // Now we need to find and zero out any ge/gp/gr signatures in header fields This requires parsing the header fields which come after the field count For now, we'll scan for signature fields and zero them
             zero_all_signatures(&mut temp_bytes)?;
 
             // Compute BLAKE3 hash of entire file
@@ -493,8 +480,7 @@ fn find_signature_value_position(data: &[u8], sig_marker_pos: usize) -> Result<u
 
     match sig_type {
         VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) => {
-            // pos now points AFTER the signature
-            // Calculate where the signature bytes started
+            // pos now points AFTER the signature Calculate where the signature bytes started
             let sig_start = pos - bytes.len();
             Ok(sig_start)
         }
@@ -577,8 +563,7 @@ fn find_hp_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize, 
 
     match hash_type {
         VsfType::hp(hash_bytes) => {
-            // pos now points AFTER the hash
-            // Calculate where the hash bytes started
+            // pos now points AFTER the hash Calculate where the hash bytes started
             let hash_start = pos - hash_bytes.len();
             Ok(hash_start)
         }
@@ -875,8 +860,7 @@ fn find_hash_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize
 
     match hash_type {
         VsfType::hb(hash_bytes) => {
-            // pos now points AFTER the hash
-            // Calculate where the hash bytes started
+            // pos now points AFTER the hash Calculate where the hash bytes started
             let hash_start = pos - hash_bytes.len();
             Ok(hash_start)
         }
@@ -892,9 +876,7 @@ fn find_hash_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize
 /// * `vsf_bytes` - Complete VSF file bytes with signature placeholders (zeros)
 ///
 /// # Returns
-/// Modified VSF bytes with actual signature values written
-/// Write header field signatures from a provided list (instead of parsing)
-/// This is used when we already have the signature bytes extracted before flattening
+/// Modified VSF bytes with actual signature values written Write header field signatures from a provided list (instead of parsing) This is used when we already have the signature bytes extracted before flattening
 fn write_header_field_signatures_from_list(
     mut vsf_bytes: Vec<u8>,
     field_signatures: Vec<Option<VsfType>>,
@@ -914,8 +896,7 @@ fn write_header_field_signatures_from_list(
         signatures.push(sig_bytes);
     }
 
-    // Now scan header for signature placeholders and write them
-    // We scan only up to header_end
+    // Now scan header for signature placeholders and write them We scan only up to header_end
     let header_end = header.header_end;
     let mut sig_index = 0;
 
@@ -976,11 +957,9 @@ fn write_header_field_signatures_from_list(
 ///
 /// # Example
 /// ```ignore
-/// use ed25519_dalek::SigningKey;
-/// use rand::rngs::OsRng;
+/// use ed25519_dalek::SigningKey; use rand::rngs::OsRng;
 ///
-/// let signing_key = SigningKey::generate(&mut OsRng);
-/// let bytes = sign_section(bytes, "raw", signing_key.as_bytes())?;
+/// let signing_key = SigningKey::generate(&mut OsRng); let bytes = sign_section(bytes, "raw", signing_key.as_bytes())?;
 /// ```
 /// Sign a VSF file and add the signature to the header.
 ///
@@ -994,13 +973,9 @@ fn write_header_field_signatures_from_list(
 ///    AND its provenance.
 ///
 /// ```text
-/// Creation:
-///   file[hp=0, sig=0] → BLAKE3 → hp
-///   file[hp=✓, sig=0] → BLAKE3 → sign() → sig
+/// Creation: file[hp=0, sig=0] → BLAKE3 → hp file[hp=✓, sig=0] → BLAKE3 → sign() → sig
 ///
-/// Update (re-signing):
-///   file[hp=✓, sig=0] → BLAKE3 → sign() → new_sig
-///   (hp stays the same - it's the original content identity)
+/// Update (re-signing): file[hp=✓, sig=0] → BLAKE3 → sign() → new_sig (hp stays the same - it's the original content identity)
 /// ```
 ///
 /// # Signature vs Rolling Hash
@@ -1043,8 +1018,7 @@ pub fn sign_section(
         .find(|f| f.name == section_name)
         .ok_or_else(|| format!("Section '{}' not found", section_name))?;
 
-    // Add signature placeholder to header, then compute hash of file-with-provenance
-    // The signature placeholder ensures header size is stable before we hash
+    // Add signature placeholder to header, then compute hash of file-with-provenance The signature placeholder ensures header size is stable before we hash
     let mut new_fields = header.fields.clone();
     for field in &mut new_fields {
         if field.name == section_name {
@@ -1064,8 +1038,7 @@ pub fn sign_section(
         false, // No rolling hash - signature provides integrity + authentication
     )?;
 
-    // Compute hash of file with provenance filled, signature zeroed
-    // This is what we sign - binding signer to content AND its provenance
+    // Compute hash of file with provenance filled, signature zeroed This is what we sign - binding signer to content AND its provenance
     let hash_to_sign = compute_signature_hash(&file_with_placeholder, section_name)?;
 
     // Sign the hash
@@ -1119,8 +1092,7 @@ fn find_section_signature_position(vsf_bytes: &[u8], section_name: &str) -> Resu
     // Parse through header to find the section's signature field
     let mut pointer = 4; // Skip magic "RÅ<"
 
-    // VSF design: dispatch on byte until we hit '>'
-    // See byte → parse it → repeat
+    // VSF design: dispatch on byte until we hit '>' See byte → parse it → repeat
     while pointer < vsf_bytes.len() && vsf_bytes[pointer] != b'>' {
         let byte = vsf_bytes[pointer];
 
@@ -1218,16 +1190,11 @@ fn write_section_signature(
 ///
 /// # Example
 /// ```ignore
-/// // 1. Encrypt data first
-/// let encrypted_data = encrypt_with_chacha20(&plaintext, &key);
+/// // 1. Encrypt data first let encrypted_data = encrypt_with_chacha20(&plaintext, &key);
 ///
-/// // 2. Build VSF with encrypted data
-/// let vsf = VsfBuilder::new()
-///     .add_section("sensitive", vec![("data", encrypted_data)])
-///     .build()?;
+/// // 2. Build VSF with encrypted data let vsf = VsfBuilder::new() .add_section("sensitive", vec![("data", encrypted_data)]) .build()?;
 ///
-/// // 3. Add encryption metadata to header
-/// let vsf = add_encryption_metadata(vsf, "sensitive", b'c', &key)?;
+/// // 3. Add encryption metadata to header let vsf = add_encryption_metadata(vsf, "sensitive", b'c', &key)?;
 /// ```
 pub fn add_encryption_metadata(
     vsf_bytes: Vec<u8>,
@@ -1267,8 +1234,7 @@ pub fn add_encryption_metadata(
         return Err(format!("Section '{}' not found", section_name));
     }
 
-    // Rebuild file with modified header
-    // Preserve original rolling hash setting
+    // Rebuild file with modified header Preserve original rolling hash setting
     rebuild_with_header(
         &vsf_bytes,
         new_fields,
@@ -1390,8 +1356,7 @@ pub fn sign_file(mut vsf_bytes: Vec<u8>, signing_key: &[u8; 32]) -> Result<Vec<u
         return Err("ge is already filled - file may already be signed".to_string());
     }
 
-    // Compute file hash with hp filled, ge still zeros
-    // This is what we sign
+    // Compute file hash with hp filled, ge still zeros This is what we sign
     let file_hash = blake3::hash(&vsf_bytes);
 
     // Sign the file hash

@@ -17,9 +17,7 @@ pub struct Spectrum {
     /// Spacing between samples in nanometers
     pub spacing_nm: f32,
 
-    /// Spectral data values
-    /// For single-channel data (like SPD), this is one value per wavelength
-    /// For multi-channel data (like LMS), this is N values per wavelength (interleaved)
+    /// Spectral data values For single-channel data (like SPD), this is one value per wavelength For multi-channel data (like LMS), this is N values per wavelength (interleaved)
     pub data: Vec<f32>,
 }
 
@@ -67,9 +65,7 @@ pub struct ConstSpectrum {
     /// Number of channels (e.g., 1 for SPD, 3 for LMS)
     pub num_channels: usize,
 
-    /// Spectral data values (static slice for const compatibility)
-    /// For single-channel data (like SPD), this is one value per wavelength
-    /// For multi-channel data (like LMS), this is N values per wavelength (interleaved)
+    /// Spectral data values (static slice for const compatibility) For single-channel data (like SPD), this is one value per wavelength For multi-channel data (like LMS), this is N values per wavelength (interleaved)
     pub data: &'static [f32],
 }
 
@@ -116,8 +112,7 @@ pub struct Spectrum3 {
     /// Spacing between samples in nanometers
     pub spacing_nm: f32,
 
-    /// Spectral data values as [L, M, S] triplets
-    /// Format: [l0, m0, s0, l1, m1, s1, ..., ln, mn, sn]
+    /// Spectral data values as [L, M, S] triplets Format: [l0, m0, s0, l1, m1, s1, ..., ln, mn, sn]
     pub data: Vec<f32>,
 }
 

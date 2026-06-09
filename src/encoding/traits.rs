@@ -15,9 +15,7 @@ pub trait EncodeNumber {
     ///
     /// # Examples
     /// ```ignore
-    /// 42u8.encode_number()    → [b'3', 0x2A]
-    /// 300u16.encode_number()  → [b'4', 0x01, 0x2C]
-    /// 100000u32.encode_number() → [b'5', 0x00, 0x01, 0x86, 0xA0]
+    /// 42u8.encode_number()    → [b'3', 0x2A] 300u16.encode_number()  → [b'4', 0x01, 0x2C] 100000u32.encode_number() → [b'5', 0x00, 0x01, 0x86, 0xA0]
     /// ```
     fn encode_number(&self) -> Vec<u8>;
 }
@@ -36,9 +34,7 @@ pub trait EncodeNumber {
 ///
 /// The encoding adds this overhead to the value, so:
 /// ```ignore
-/// // Normal: 256 → [u][4][0x01, 0x00] (3 bytes)
-/// // Inclusive: 256 → 256 + 24 = 280 → [u][4][0x01, 0x18] (3 bytes)
-/// // When decoded: 280 - 24 = 256 ✓
+/// // Normal: 256 → [u][4][0x01, 0x00] (3 bytes) // Inclusive: 256 → 256 + 24 = 280 → [u][4][0x01, 0x18] (3 bytes) // When decoded: 280 - 24 = 256 ✓
 /// ```
 ///
 /// This ensures values like 256 can be encoded even when they cause size overflow, and self-referential sizes (like "this header is N bytes including this field") work correctly.

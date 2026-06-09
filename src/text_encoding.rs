@@ -68,8 +68,7 @@ impl BitVec {
 ///
 /// Returns empty HashMap if huffman_codes.bin is not available (e.g., docs.rs builds)
 fn load_huffman_codes() -> HashMap<char, BitPattern> {
-    // Only include the file if it exists at build time
-    // This allows docs.rs builds to succeed even when Huffman tables aren't generated
+    // Only include the file if it exists at build time This allows docs.rs builds to succeed even when Huffman tables aren't generated
     #[cfg(huffman_available)]
     {
         const DATA: &[u8] = include_bytes!("../huffman_codes.bin");
@@ -151,8 +150,7 @@ fn get_ascii_lut() -> &'static [BitPattern; 128] {
 ///
 /// # Example
 /// ```ignore
-/// let encoded = encode_text("Hello");
-/// // Returns: ~3 bytes of Huffman bits (no internal header)
+/// let encoded = encode_text("Hello"); // Returns: ~3 bytes of Huffman bits (no internal header)
 /// ```
 pub fn encode_text(text: &str) -> Vec<u8> {
     let codes = get_encode_table();
@@ -172,25 +170,19 @@ pub fn encode_text(text: &str) -> Vec<u8> {
         bits.extend_bits(pattern.bits, pattern.length);
     }
 
-    // Return ONLY the bitstream padded to bytes
-    // NO internal length header - VSF x marker handles this
+    // Return ONLY the bitstream padded to bytes NO internal length header - VSF x marker handles this
     bits.to_bytes()
 }
 
 /// Fast two-tier decoder with ASCII + prefix caches
 struct FastDecoder {
-    // Tier 1: ASCII fast path (256 entries, 512 bytes)
-    // Covers: space, a-z, A-Z, 0-9, punctuation
-    // Expected hit rate: ~99.4% for English text
+    // Tier 1: ASCII fast path (256 entries, 512 bytes) Covers: space, a-z, A-Z, 0-9, punctuation Expected hit rate: ~99.4% for English text
     ascii_cache: [Option<(u8, u8)>; 256],
 
-    // Tier 2: Common Unicode prefix table (4096 entries, ~20 KB)
-    // Covers: extended Latin (é,ñ,ü), common emoji, some CJK
-    // Expected hit rate: ~0.5% additional
+    // Tier 2: Common Unicode prefix table (4096 entries, ~20 KB) Covers: extended Latin (é,ñ,ü), common emoji, some CJK Expected hit rate: ~0.5% additional
     prefix_cache: [Option<(char, u8)>; 4096],
 
-    // Tier 3: Tree walk for rare/long codes (>12 bits)
-    // Expected hit rate: <0.1%
+    // Tier 3: Tree walk for rare/long codes (>12 bits) Expected hit rate: <0.1%
     tree: DecodeNode,
 }
 
@@ -264,8 +256,7 @@ impl FastDecoder {
             }
         }
 
-        // SLOW PATH: Tree walk for rare Unicode (>12 bit codes)
-        // Only <0.1% of typical text hits this path
+        // SLOW PATH: Tree walk for rare Unicode (>12 bit codes) Only <0.1% of typical text hits this path
         self.tree.decode(bytes, bit_idx)
     }
 
@@ -325,11 +316,9 @@ fn get_fast_decoder() -> &'static FastDecoder {
 ///
 /// # Example
 /// ```ignore
-/// let (decoded, bytes_used) = decode_text(&encoded_bytes, 5)?;
-/// assert_eq!(decoded, "Hello");
+/// let (decoded, bytes_used) = decode_text(&encoded_bytes, 5)?; assert_eq!(decoded, "Hello");
 ///
-/// // Or ignore bytes_consumed:
-/// let (decoded, _) = decode_text(&encoded_bytes, 5)?;
+/// // Or ignore bytes_consumed: let (decoded, _) = decode_text(&encoded_bytes, 5)?;
 /// ```
 pub fn decode_text(bytes: &[u8], char_count: usize) -> Result<(String, usize), &'static str> {
     decode_text_with_size(bytes, char_count)
@@ -657,8 +646,7 @@ mod tests {
             throughput / 0.23
         );
 
-        // Should be at least 10× faster than tree-only (2.3+ MB/s)
-        // In practice, achieves 30-130 MB/s depending on build optimization
+        // Should be at least 10× faster than tree-only (2.3+ MB/s) In practice, achieves 30-130 MB/s depending on build optimization
         assert!(throughput > 2.3, "Decode too slow: {:.2} MB/s", throughput);
     }
 }

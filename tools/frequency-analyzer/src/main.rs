@@ -2,8 +2,7 @@
 //!
 //! Usage: cargo run -- input.txt output.bin
 //!
-//! Or use stdin:
-//!   cat corpus/*.txt | cargo run -- - output.bin
+//! Or use stdin: cat corpus/*.txt | cargo run -- - output.bin
 
 mod word_to_char;
 mod composite;
@@ -43,8 +42,7 @@ fn main() -> io::Result<()> {
             eprintln!("Usage: {} --from-words <word-freq.csv> <output.bin>", args[0]);
             std::process::exit(1);
         }
-        // CSV format: word,frequency,pronunciation,rank
-        // Columns: 0=word, 1=frequency
+        // CSV format: word,frequency,pronunciation,rank Columns: 0=word, 1=frequency
         process_word_frequencies(&args[2], &args[3], 0, 1, true)?;
         return Ok(());
     }

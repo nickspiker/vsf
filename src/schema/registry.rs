@@ -8,8 +8,7 @@ use super::validate::{ValidationError, ValidationResult};
 use alloc::collections::BTreeMap;
 use spin::{Once, RwLock};
 
-/// Registry of official VSF section schemas.
-/// Backed by `spin::RwLock<BTreeMap>` so this works under `no_std + alloc`; the global singleton is a `spin::Once` and exposes a `&'static SchemaRegistry`.
+/// Registry of official VSF section schemas. Backed by `spin::RwLock<BTreeMap>` so this works under `no_std + alloc`; the global singleton is a `spin::Once` and exposes a `&'static SchemaRegistry`.
 #[derive(Debug)]
 pub struct SchemaRegistry {
     schemas: RwLock<BTreeMap<String, SectionSchema>>,

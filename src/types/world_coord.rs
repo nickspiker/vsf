@@ -1,7 +1,6 @@
 //! WorldCoord: Dymaxion icosahedral geographic coordinate encoding
 //!
-//! Encodes any point on Earth's surface as a single u64 using Fuller's
-//! Dymaxion icosahedral projection with barycentric coordinates.
+//! Encodes any point on Earth's surface as a single u64 using Fuller's Dymaxion icosahedral projection with barycentric coordinates.
 //!
 //! **Precision**: Average error 2.14mm, max error 5.06mm **Better than**: IEEE-754 lat/lon (f64), Geohash-64, S2 geometry
 //!
@@ -19,17 +18,11 @@
 //! ```
 //! use vsf::WorldCoord;
 //!
-//! // From latitude/longitude
-//! let nyc = WorldCoord::from_lat_lon(40.7128, -74.0060);
-//! println!("{}", nyc.to_words()); // "work kid long..."
+//! // From latitude/longitude let nyc = WorldCoord::from_lat_lon(40.7128, -74.0060); println!("{}", nyc.to_words()); // "work kid long..."
 //!
-//! // From 7-word encoding (with error correction)
-//! let coord = WorldCoord::from_words("work kid long time place great world").unwrap();
-//! let (lat, lon) = coord.to_lat_lon();
+//! // From 7-word encoding (with error correction) let coord = WorldCoord::from_words("work kid long time place great world").unwrap(); let (lat, lon) = coord.to_lat_lon();
 //!
-//! // Raw u64 for serialization
-//! let raw = coord.raw();
-//! let restored = WorldCoord::from_raw(raw);
+//! // Raw u64 for serialization let raw = coord.raw(); let restored = WorldCoord::from_raw(raw);
 //! ```
 
 use num_traits::Float;

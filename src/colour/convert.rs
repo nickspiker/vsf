@@ -73,13 +73,10 @@ use spirix::sf;
 ///
 /// The `Linear` type parameter determines the target float type (f32 or S44). Integers convert directly to either float type without roundtripping.
 pub trait ColourValue<Linear: Copy>: Copy {
-    /// Convert from gamma-encoded value to linear (0-1 range)
-    /// For integers: apply EOTF and normalize to 0-1
+    /// Convert from gamma-encoded value to linear (0-1 range) For integers: apply EOTF and normalize to 0-1
     fn to_linear_srgb(self) -> Linear;
 
-    /// Convert from linear (0-1 range) to gamma-encoded value
-    /// For floats: pass thru (stay linear)
-    /// For integers: apply OETF and quantize
+    /// Convert from linear (0-1 range) to gamma-encoded value For floats: pass thru (stay linear) For integers: apply OETF and quantize
     fn from_linear_srgb(linear: Linear) -> Self;
 
     /// Convert from gamma-encoded value to linear using Rec.709 EOTF
@@ -209,8 +206,7 @@ impl ColourValue<f32> for u8 {
 
     #[inline]
     fn to_linear_rec709(self) -> f32 {
-        // Rec.709 integers use studio range: [16, 235]
-        // Denormalize to [0, 1] then apply EOTF
+        // Rec.709 integers use studio range: [16, 235] Denormalize to [0, 1] then apply EOTF
         let normalized = (self as f32 - 16.) / 219.; // 235-16=219
         linearize_bt709(normalized.clamp(0., 1.))
     }
@@ -361,8 +357,7 @@ impl ColourValue<f32> for u16 {
 
     #[inline]
     fn to_linear_rec709(self) -> f32 {
-        // Rec.709 integers use studio range: [4096, 60160]
-        // Denormalize to [0, 1] then apply EOTF
+        // Rec.709 integers use studio range: [4096, 60160] Denormalize to [0, 1] then apply EOTF
         let normalized = (self as f32 - 4096.) / 56064.; // 60160-4096=56064
         linearize_bt709(normalized.clamp(0., 1.))
     }
@@ -627,8 +622,7 @@ pub fn scale_to_gamut_s44(mut r: S44, mut g: S44, mut b: S44) -> (S44, S44, S44)
     (r, g, b)
 }
 
-/// Linear VSF RGB colour (f32 per channel, 0-1 range)
-/// Primaries are VSF RGB (703nm, 523nm, 462nm)
+/// Linear VSF RGB colour (f32 per channel, 0-1 range) Primaries are VSF RGB (703nm, 523nm, 462nm)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RgbLinearF32 {
     pub r: f32,
@@ -645,8 +639,7 @@ pub struct RgbaLinearF32 {
     pub a: f32,
 }
 
-/// Linear VSF RGB colour (S44 per channel, 0-1 range)
-/// Primaries are VSF RGB (703nm, 523nm, 462nm)
+/// Linear VSF RGB colour (S44 per channel, 0-1 range) Primaries are VSF RGB (703nm, 523nm, 462nm)
 #[cfg(feature = "spirix")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RgbLinearS44 {
@@ -666,8 +659,7 @@ pub struct RgbaLinearS44 {
 }
 
 impl VsfType {
-    /// Convert any colour type to linear RGB (f32, 0-1 range)
-    /// All VSF integers are gamma 2 encoded wheras floats are linear
+    /// Convert any colour type to linear RGB (f32, 0-1 range) All VSF integers are gamma 2 encoded wheras floats are linear
     pub fn to_rgb_linear_f32(&self) -> Option<RgbLinearF32> {
         match self {
             // Named shortcuts (gamma 2 encoded)
@@ -845,8 +837,7 @@ impl VsfType {
         }
     }
 
-    /// Convert any colour type to linear RGB (S44, 0-1 range)
-    /// All VSF integers are gamma 2 encoded whereas floats are linear
+    /// Convert any colour type to linear RGB (S44, 0-1 range) All VSF integers are gamma 2 encoded whereas floats are linear
     #[cfg(feature = "spirix")]
     pub fn to_rgb_linear_s44(&self) -> Option<RgbLinearS44> {
         const QUARTER: S44 = sf!(0.25);
@@ -1132,17 +1123,11 @@ impl VsfType {
 
     /// Create colour from sRGB with piecewise transfer function
     ///
-    /// Converts from sRGB/Rec.709 colourspace (D65 white) to VSF RGB (E white)
-    /// Uses the sRGB piecewise transfer function (linear + gamma 2.4)
-    /// Conversion path: sRGB → LMS → VSF RGB (precomputed)
-    /// Convert VSF RGB colour to sRGB with piecewise transfer function
+    /// Converts from sRGB/Rec.709 colourspace (D65 white) to VSF RGB (E white) Uses the sRGB piecewise transfer function (linear + gamma 2.4) Conversion path: sRGB → LMS → VSF RGB (precomputed) Convert VSF RGB colour to sRGB with piecewise transfer function
     ///
-    /// Converts from VSF RGB (E white) to sRGB/Rec.709 (D65 white)
-    /// Uses the sRGB piecewise transfer function (linear + gamma 2.4)
-    /// Conversion path: VSF RGB → Rec.709 → sRGB encoding (precomputed)
+    /// Converts from VSF RGB (E white) to sRGB/Rec.709 (D65 white) Uses the sRGB piecewise transfer function (linear + gamma 2.4) Conversion path: VSF RGB → Rec.709 → sRGB encoding (precomputed)
     ///
-    /// Returns (r, g, b) as 8-bit sRGB values
-    /// Convert VSF RGB to sRGB/Rec.709 linear (f32, 0-1 nominal range)
+    /// Returns (r, g, b) as 8-bit sRGB values Convert VSF RGB to sRGB/Rec.709 linear (f32, 0-1 nominal range)
     ///
     /// Returns linear light values. May be out of gamut (negative or >1). Use this for HDR or when you need the raw linear values. Convert VSF RGB to sRGB linear (f32, 0-1 nominal range)
     ///
@@ -1422,11 +1407,9 @@ impl VsfType {
     ///
     /// # Examples
     /// ```ignore
-    /// // From 8-bit gamma-encoded sRGB (full range)
-    /// let colour = VsfType::from_srgb(255u8, 128u8, 64u8, ColourFormat::Rf);
+    /// // From 8-bit gamma-encoded sRGB (full range) let colour = VsfType::from_srgb(255u8, 128u8, 64u8, ColourFormat::Rf);
     ///
-    /// // From linear float sRGB
-    /// let colour = VsfType::from_srgb(1.0f32, 0.5f32, 0.25f32, ColourFormat::Rf);
+    /// // From linear float sRGB let colour = VsfType::from_srgb(1.0f32, 0.5f32, 0.25f32, ColourFormat::Rf);
     /// ```
     pub fn from_srgb_f32<T: ColourValue<f32>>(r: T, g: T, b: T, format: ColourFormat) -> Self {
         // Apply sRGB EOTF (for integers) or pass-thru (floats already linear)
@@ -1464,11 +1447,9 @@ impl VsfType {
     ///
     /// # Examples
     /// ```ignore
-    /// // From 8-bit gamma-encoded Rec.709 (studio range [16,235])
-    /// let colour = VsfType::from_rec709(235u8, 128u8, 64u8, ColourFormat::Rf);
+    /// // From 8-bit gamma-encoded Rec.709 (studio range [16,235]) let colour = VsfType::from_rec709(235u8, 128u8, 64u8, ColourFormat::Rf);
     ///
-    /// // From linear float Rec.709
-    /// let colour = VsfType::from_rec709(1f32, 0.5f32, 0.25f32, ColourFormat::Rf);
+    /// // From linear float Rec.709 let colour = VsfType::from_rec709(1f32, 0.5f32, 0.25f32, ColourFormat::Rf);
     /// ```
     pub fn from_rec709_f32<T: ColourValue<f32>>(r: T, g: T, b: T, format: ColourFormat) -> Self {
         // Apply Rec.709 EOTF (for integers in studio range) or pass-thru (floats are linear)
@@ -1506,11 +1487,9 @@ impl VsfType {
     ///
     /// # Examples
     /// ```ignore
-    /// // From 8-bit gamma-encoded Rec.2020 (studio range [16,235])
-    /// let colour = VsfType::from_rec2020(235u8, 128u8, 64u8, ColourFormat::Rf);
+    /// // From 8-bit gamma-encoded Rec.2020 (studio range [16,235]) let colour = VsfType::from_rec2020(235u8, 128u8, 64u8, ColourFormat::Rf);
     ///
-    /// // From linear float Rec.2020
-    /// let colour = VsfType::from_rec2020(1f32, 0.5f32, 0.25f32, ColourFormat::Rf);
+    /// // From linear float Rec.2020 let colour = VsfType::from_rec2020(1f32, 0.5f32, 0.25f32, ColourFormat::Rf);
     /// ```
     pub fn from_rec2020_f32<T: ColourValue<f32>>(r: T, g: T, b: T, format: ColourFormat) -> Self {
         let r_lin = r.to_linear_rec709(); // BT.2020 uses Rec.709 OETF
@@ -1600,9 +1579,7 @@ impl VsfType {
         Self::from_rgb_linear_s44(vsf_r, vsf_g, vsf_b, format)
     }
 
-    /// Helper: Create VsfType from linear RGB floats
-    /// For integer formats: scale to gamut (preserves hue/saturation, prevents white clipping)
-    /// For float formats: preserve full range (no clamping)
+    /// Helper: Create VsfType from linear RGB floats For integer formats: scale to gamut (preserves hue/saturation, prevents white clipping) For float formats: preserve full range (no clamping)
     fn from_rgb_linear_f32(r: f32, g: f32, b: f32, format: ColourFormat) -> Self {
         match format {
             ColourFormat::Rf => VsfType::rf([r, g, b]),
@@ -1677,9 +1654,7 @@ impl VsfType {
         }
     }
 
-    /// Helper: Create VsfType from linear RGB S44
-    /// For integer formats: scale to gamut (preserves hue/saturation, prevents white clipping)
-    /// For float formats: preserve full range (no clamping)
+    /// Helper: Create VsfType from linear RGB S44 For integer formats: scale to gamut (preserves hue/saturation, prevents white clipping) For float formats: preserve full range (no clamping)
     #[cfg(feature = "spirix")]
     fn from_rgb_linear_s44(r: S44, g: S44, b: S44, format: ColourFormat) -> Self {
         match format {
@@ -2126,9 +2101,7 @@ fn pack_rgb_565_linear_s44(r: S44, g: S44, b: S44) -> u16 {
     (r5 << 11) | (g6 << 5) | b5
 }
 
-// ==================== VSF RGB PHOTOPIC LUMINANCE ====================
-// Convert VSF RGB to photopic luminance (perceptual brightness)
-// Uses VSF RGB → LMS → Photopic transformation
+// ==================== VSF RGB PHOTOPIC LUMINANCE ==================== Convert VSF RGB to photopic luminance (perceptual brightness) Uses VSF RGB → LMS → Photopic transformation
 
 /// Precomputed photopic white point normalization constant
 ///
@@ -2186,8 +2159,7 @@ pub fn vsf_rgb_to_photopic_s44(r: S44, g: S44, b: S44) -> S44 {
     photopic_raw / PHOTOPIC_WHITE_NORM_S44
 }
 
-// ==================== GAMMA 2 FUNCTIONS ====================
-// VSF RGB uses gamma 2 by default (simple sqrt/square operations)
+// ==================== GAMMA 2 FUNCTIONS ==================== VSF RGB uses gamma 2 by default (simple sqrt/square operations)
 
 /// Linearize a gamma 2 encoded value (0-1 range)
 ///
@@ -2453,9 +2425,7 @@ mod tests {
 
     #[test]
     fn test_srgb_piecewise_correctness() {
-        // Test the piecewise function at the threshold
-        // Linear segment: C_srgb <= 0.04045 → C_linear = C_srgb / 12.92
-        // Gamma segment: C_srgb > 0.04045 → C_linear = ((C_srgb + 0.055) / 1.055)^2.4
+        // Test the piecewise function at the threshold Linear segment: C_srgb <= 0.04045 → C_linear = C_srgb / 12.92 Gamma segment: C_srgb > 0.04045 → C_linear = ((C_srgb + 0.055) / 1.055)^2.4
 
         // Test black (always linear segment)
         assert_eq!(linearize_srgb(0.0), 0.0);
@@ -2488,8 +2458,7 @@ mod tests {
 
     #[test]
     fn test_srgb_vsf_rgb_conversion() {
-        // Test sRGB → VSF RGB → sRGB roundtrip
-        // Start with sRGB values to avoid gamma mismatch
+        // Test sRGB → VSF RGB → sRGB roundtrip Start with sRGB values to avoid gamma mismatch
         let test_colours = [
             (0u8, 0u8, 0u8),       // Black
             (255u8, 255u8, 255u8), // White
@@ -2602,9 +2571,7 @@ mod tests {
         let bt2020_white = VsfType::from_rec2020_f32(235u8, 235u8, 235u8, ColourFormat::Ru);
         let vsf_white = bt2020_white.to_rgb_linear_f32().unwrap();
 
-        // D65 white → E white adaptation results in slightly shifted values
-        // This is expected - D65 is bluer than E, so we expect non-uniform RGB
-        // After chromatic adaptation and studio range normalization
+        // D65 white → E white adaptation results in slightly shifted values This is expected - D65 is bluer than E, so we expect non-uniform RGB After chromatic adaptation and studio range normalization
         assert!(vsf_white.r > 0.8 && vsf_white.r < 0.9, "r={}", vsf_white.r);
         assert!(vsf_white.g > 0.9 && vsf_white.g <= 1.0, "g={}", vsf_white.g);
         assert!(vsf_white.b > 0.9 && vsf_white.b <= 1.0, "b={}", vsf_white.b);

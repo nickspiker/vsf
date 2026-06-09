@@ -99,8 +99,7 @@ use super::toka_tree::{
 ///
 /// Example usage in named fields:
 /// ```text
-/// (d"name":a"nick")      // Field name uses 'd', ASCII value uses 'a'
-/// (d"greeting":x"Hello 世界")  // Field name uses 'd', Unicode value uses 'x'
+/// (d"name":a"nick")      // Field name uses 'd', ASCII value uses 'a' (d"greeting":x"Hello 世界")  // Field name uses 'd', Unicode value uses 'x'
 /// ```
 ///
 /// ## Other Metadata
@@ -143,8 +142,7 @@ pub enum VsfType {
     nu(String),                  // Network URL: full URL including path/query
     nn(String),                  // Network name: DNS name (validated format)
 
-    // ==================== CRYPTOGRAPHIC TYPES ====================
-    // Hash algorithms
+    // ==================== CRYPTOGRAPHIC TYPES ==================== Hash algorithms
     hp(Vec<u8>), // BLAKE3 provenance hash (immutable content identity)
     hb(Vec<u8>), // BLAKE3 rolling hash (current file state)
     hs(Vec<u8>), // SHA hash (SHA-256, SHA-512, etc.)
@@ -236,10 +234,7 @@ pub enum VsfType {
     // wb reserved: world bounds (geographic bounding box) wc..wz reserved for future world/physical types
 
     // ==================== VECTORS (1D CONTIGUOUS) ====================
-    /// 1D contiguous vectors - compact encoding with count marker
-    /// Binary format: [t][n][count][type][data...]
-    /// Where n indicates 1D (count) vs multi-dimensional (shape)
-    /// Primitive element types
+    /// 1D contiguous vectors - compact encoding with count marker Binary format: [t][n][count][type][data...] Where n indicates 1D (count) vs multi-dimensional (shape) Primitive element types
     v_u0(Vector<bool>), // Bit-packed bools (8 per byte)
     v_u3(Vector<u8>),
     v_u4(Vector<u16>),
@@ -294,22 +289,13 @@ pub enum VsfType {
     ///
     /// Example usage:
     /// ```ignore
-    /// // Binary blob (raw bytes, no encoding) - displays as vb3{size}
-    /// let file_bytes = std::fs::read("image.png")?;
-    /// let binary = VsfType::v(b'b', file_bytes);
-    /// let raw_bytes: &[u8] = binary.as_bytes(); // Convenience helper
+    /// // Binary blob (raw bytes, no encoding) - displays as vb3{size} let file_bytes = std::fs::read("image.png")?; let binary = VsfType::v(b'b', file_bytes); let raw_bytes: &[u8] = binary.as_bytes(); // Convenience helper
     ///
-    /// // Compress VSF data with zstd - displays as vz3{size}
-    /// let original = VsfType::t_u3(tensor);
-    /// let compressed = compress_zstd(&original.flatten());
-    /// let wrapped = VsfType::v(b'z', compressed);
+    /// // Compress VSF data with zstd - displays as vz3{size} let original = VsfType::t_u3(tensor); let compressed = compress_zstd(&original.flatten()); let wrapped = VsfType::v(b'z', compressed);
     ///
-    /// // Can nest wrappers (compress then error-correct)
-    /// let inner = VsfType::v(b'z', compressed_bytes);
-    /// let outer = VsfType::v(b'r', reed_solomon_encode(&inner.flatten()));
+    /// // Can nest wrappers (compress then error-correct) let inner = VsfType::v(b'z', compressed_bytes); let outer = VsfType::v(b'r', reed_solomon_encode(&inner.flatten()));
     ///
-    /// // KEM ciphertext (FrodoKEM-976 encapsulation output)
-    /// let ciphertext = VsfType::v(b'f', frodo_ciphertext_bytes);
+    /// // KEM ciphertext (FrodoKEM-976 encapsulation output) let ciphertext = VsfType::v(b'f', frodo_ciphertext_bytes);
     /// ```
     ///
     /// **For file storage:** Use `v(b'b', ...)` (standard binary blob). **For app-specific:** Use uppercase encodings only for internal formats.
@@ -372,12 +358,9 @@ pub enum VsfType {
     ///
     /// # Examples
     /// ```ignore
-    /// // Purple using 6×7×6 packing: ri{0x83}
-    /// // RGB = (130, 0, 255) → (3, 0, 5) → ((3*7)+0)*6+5 = 131 = 0x83
+    /// // Purple using 6×7×6 packing: ri{0x83} // RGB = (130, 0, 255) → (3, 0, 5) → ((3*7)+0)*6+5 = 131 = 0x83
     ///
-    /// // Standard RGB red: ru{255, 0, 0}
-    /// // RGBA semi-transparent blue: ra{0, 0, 255, 128}
-    /// // 16-channel spectral: rG3[16 bytes]
+    /// // Standard RGB red: ru{255, 0, 0} // RGBA semi-transparent blue: ra{0, 0, 255, 128} // 16-channel spectral: rG3[16 bytes]
     /// ```
     // General format colour
     r(u8, u8, Vec<u8>), // r(channels_base36, depth_exp, data)
@@ -418,8 +401,7 @@ pub enum VsfType {
     #[cfg(feature = "spirix")]
     rw([ScalarF4E4; 4]), // ScalarF4E4 RGBA
 
-    // General Spirix colour format: rq[F][E][C]{data}
-    // F = fraction exponent (3-7), E = exponent exponent (3-7), C = channels
+    // General Spirix colour format: rq[F][E][C]{data} F = fraction exponent (3-7), E = exponent exponent (3-7), C = channels
     #[cfg(feature = "spirix")]
     rq(u8, u8, u8, Vec<u8>), // rq(fraction_exp, exponent_exp, channels, data)
 
@@ -427,13 +409,11 @@ pub enum VsfType {
     rm(usize, usize, Vec<f32>, f32), // rm(input_channels, output_channels, matrix_NxM, gamma)
     // Where: input_channels - Number of input colour channels (N) output_channels - Number of output colour channels (M, usually 3 for LMS) matrix_NxM - Flattened N×M matrix as Vec<f32> gamma - Gamma correction value as f32
 
-    // ==================== RENDERABLE OBJECT TYPES ====================
-    // Scene graph primitives - everything you can draw (ro* prefix - 3 letters)
+    // ==================== RENDERABLE OBJECT TYPES ==================== Scene graph primitives - everything you can draw (ro* prefix - 3 letters)
     //
     // These types expand the 'r' (renderable) family to include drawing primitives alongside colours. They form the foundation of the Toka scene graph system.
     //
-    // Coordinate system: All positions/sizes use Spirix CircleF4E4 (window coords: -1 to +1)
-    // Fill/Stroke: Use Fill/Stroke types from toka_tree module
+    // Coordinate system: All positions/sizes use Spirix CircleF4E4 (window coords: -1 to +1) Fill/Stroke: Use Fill/Stroke types from toka_tree module
     #[cfg(feature = "spirix")]
     // Shape primitives
     rob(CircleF4E4, CircleF4E4, Fill, Option<Stroke>, Vec<VsfType>), // Box: pos, size, fill, stroke, children
@@ -600,8 +580,7 @@ pub enum VsfType {
     #[cfg(feature = "spirix")]
     c77(CircleF7E7),
 
-    // ==================== CONTIGUOUS TENSORS (DYNAMIC DIMS) ====================
-    // Primitive element types
+    // ==================== CONTIGUOUS TENSORS (DYNAMIC DIMS) ==================== Primitive element types
     t_u0(Tensor<bool>),
     t_u3(Tensor<u8>),
     t_u4(Tensor<u16>),
@@ -618,8 +597,7 @@ pub enum VsfType {
     t_j5(Tensor<Complex<f32>>),
     t_j6(Tensor<Complex<f64>>),
 
-    // ==================== SPIRIX SCALAR TENSORS ====================
-    // F3 (i8 fraction)
+    // ==================== SPIRIX SCALAR TENSORS ==================== F3 (i8 fraction)
     #[cfg(feature = "spirix")]
     t_s33(Tensor<ScalarF3E3>),
     #[cfg(feature = "spirix")]
@@ -675,8 +653,7 @@ pub enum VsfType {
     #[cfg(feature = "spirix")]
     t_s77(Tensor<ScalarF7E7>),
 
-    // ==================== SPIRIX CIRCLE TENSORS ====================
-    // F3 (i8 fraction)
+    // ==================== SPIRIX CIRCLE TENSORS ==================== F3 (i8 fraction)
     #[cfg(feature = "spirix")]
     t_c33(Tensor<CircleF3E3>),
     #[cfg(feature = "spirix")]
@@ -750,8 +727,7 @@ pub enum VsfType {
     q_j5(StridedTensor<Complex<f32>>),
     q_j6(StridedTensor<Complex<f64>>),
 
-    // ==================== SPIRIX SCALAR STRIDED TENSORS ====================
-    // F3 (i8 fraction)
+    // ==================== SPIRIX SCALAR STRIDED TENSORS ==================== F3 (i8 fraction)
     #[cfg(feature = "spirix")]
     q_s33(StridedTensor<ScalarF3E3>),
     #[cfg(feature = "spirix")]
@@ -807,8 +783,7 @@ pub enum VsfType {
     #[cfg(feature = "spirix")]
     q_s77(StridedTensor<ScalarF7E7>),
 
-    // ==================== SPIRIX CIRCLE STRIDED TENSORS ====================
-    // F3 (i8 fraction)
+    // ==================== SPIRIX CIRCLE STRIDED TENSORS ==================== F3 (i8 fraction)
     #[cfg(feature = "spirix")]
     q_c33(StridedTensor<CircleF3E3>),
     #[cfg(feature = "spirix")]
@@ -884,8 +859,7 @@ pub enum VsfType {
     // ==================== TOKA OPCODES ====================
     /// Toka VM opcode - two lowercase letters encoded as `{xx}`
     ///
-    /// Binary format: `{` `a` `b` `}` (4 bytes)
-    /// Where a and b are ASCII lowercase letters (a-z)
+    /// Binary format: `{` `a` `b` `}` (4 bytes) Where a and b are ASCII lowercase letters (a-z)
     ///
     /// Examples:
     /// - `{ps}` = push
@@ -1027,10 +1001,7 @@ impl core::fmt::Display for VsfType {
             VsfType::a(s) => write!(f, "⦉{}⦊", s),
             VsfType::x(s) => write!(f, "⦉{}⦊", s.escape_default()),
 
-            // For all other types, fall back to Debug — but only when the
-            // errors-verbose feature is on. Without it, write a placeholder
-            // so the linker can drop the <VsfType as Debug>::fmt impl (and
-            // with it the IEEE-754 float-to-string code).
+            // For all other types, fall back to Debug — but only when the errors-verbose feature is on. Without it, write a placeholder so the linker can drop the <VsfType as Debug>::fmt impl (and with it the IEEE-754 float-to-string code).
             #[cfg(feature = "errors-verbose")]
             _ => write!(f, "{:?}", self),
             #[cfg(not(feature = "errors-verbose"))]
@@ -1042,8 +1013,7 @@ impl core::fmt::Display for VsfType {
 impl VsfType {
     /// Extract value as usize
     ///
-    /// Supports: u0, u3, u4, u5, u6, u7, u, o, n
-    /// Returns None for incompatible types or overflow
+    /// Supports: u0, u3, u4, u5, u6, u7, u, o, n Returns None for incompatible types or overflow
     pub fn as_usize(&self) -> Option<usize> {
         match self {
             VsfType::u0(b) => Some(*b as usize),
@@ -1071,8 +1041,7 @@ impl VsfType {
 
     /// Extract value as u64
     ///
-    /// Supports: u0, u3, u4, u5, u6, u, o, n (if fits)
-    /// Returns None for u7 (u128 may overflow) or incompatible types
+    /// Supports: u0, u3, u4, u5, u6, u, o, n (if fits) Returns None for u7 (u128 may overflow) or incompatible types
     pub fn as_u64(&self) -> Option<u64> {
         match self {
             VsfType::u0(b) => Some(*b as u64),
@@ -1093,8 +1062,7 @@ impl VsfType {
 
     /// Extract value as u8
     ///
-    /// Supports: u0, u3, u4 (with bounds check)
-    /// Returns None for larger types or overflow
+    /// Supports: u0, u3, u4 (with bounds check) Returns None for larger types or overflow
     pub fn as_u8(&self) -> Option<u8> {
         match self {
             VsfType::u0(b) => Some(*b as u8),

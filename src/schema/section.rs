@@ -4,17 +4,12 @@
 //!
 //! **Building phase (Vec<FieldValue> with multi-valued support):**
 //! ```rust
-//! let section = schema.builder()
-//!     .set("iso", 800u32)?                 // Single value: FieldValue { name: "iso", values: [u5(800)] }
-//!     .set_multi("size", vec![3u8, 4, 5])? // Multi-value: FieldValue { name: "size", values: [u3(3), u3(4), u3(5)] }
-//!     .set_empty("cloudy")?                // Empty: FieldValue { name: "cloudy", values: [] }
-//!     .encode()?;
+//! let section = schema.builder() .set("iso", 800u32)?                 // Single value: FieldValue { name: "iso", values: [u5(800)] } .set_multi("size", vec![3u8, 4, 5])? // Multi-value: FieldValue { name: "size", values: [u3(3), u3(4), u3(5)] } .set_empty("cloudy")?                // Empty: FieldValue { name: "cloudy", values: [] } .encode()?;
 //! ```
 //!
 //! **Wire format (Named fields with d-type keys):**
 //! ```text
-//! [d"camera" (d"iso":u5{800}) (d"size":u3{3},u3{4},u3{5}) (d"cloudy")]
-//!    └─name   └─single value   └─multiple values         └─empty vector
+//! [d"camera" (d"iso":u5{800}) (d"size":u3{3},u3{4},u3{5}) (d"cloudy")] └─name   └─single value   └─multiple values         └─empty vector
 //! ```
 //! Each field is encoded as:
 //! - `(d"field_name":val1,val2,val3)` for multi-valued fields
@@ -36,24 +31,16 @@
 //!
 //! **Concrete example with multi-valued fields:**
 //! ```text
-//! Schema defines:      ["iso", "size", "cloudy"]       (Vec<FieldSchema>)
-//! Builder stores:      [FieldValue { name: "iso", values: [u5(800)] },
-//!                       FieldValue { name: "size", values: [u3(3), u3(4), u3(5)] },
-//!                       FieldValue { name: "cloudy", values: [] }]
-//! Wire bytes:          [d"camera" (d"iso":u5{800}) (d"size":u3{3},u3{4},u3{5}) (d"cloudy")]
+//! Schema defines:      ["iso", "size", "cloudy"]       (Vec<FieldSchema>) Builder stores:      [FieldValue { name: "iso", values: [u5(800)] }, FieldValue { name: "size", values: [u3(3), u3(4), u3(5)] }, FieldValue { name: "cloudy", values: [] }] Wire bytes:          [d"camera" (d"iso":u5{800}) (d"size":u3{3},u3{4},u3{5}) (d"cloudy")]
 //! ```
 //!
 //! ## Parse → Modify → Encode Workflow
 //! ```rust
-//! // Parse existing section
-//! let mut builder = SectionBuilder::parse(schema, section_bytes)?;
+//! // Parse existing section let mut builder = SectionBuilder::parse(schema, section_bytes)?;
 //!
-//! // Modify specific fields
-//! builder = builder.set("iso", 1600u32)?;      // Update ISO
-//! builder = builder.add_value("size", 6u8)?;   // Add value to existing field
+//! // Modify specific fields builder = builder.set("iso", 1600u32)?;      // Update ISO builder = builder.add_value("size", 6u8)?;   // Add value to existing field
 //!
-//! // Re-encode with changes
-//! let updated_bytes = builder.encode()?;
+//! // Re-encode with changes let updated_bytes = builder.encode()?;
 //! ```
 
 use crate::prelude::*;
@@ -139,11 +126,7 @@ impl FieldValue {
 /// ```rust
 /// use vsf::schema::{SectionSchema, TypeConstraint};
 ///
-/// let schema = SectionSchema::new("camera")
-///     .description("Camera metadata")
-///     .field("iso", TypeConstraint::AnyUnsigned)
-///     .field("aperture", TypeConstraint::AnyFloat)
-///     .field("timestamp", TypeConstraint::AnyEagleTime);
+/// let schema = SectionSchema::new("camera") .description("Camera metadata") .field("iso", TypeConstraint::AnyUnsigned) .field("aperture", TypeConstraint::AnyFloat) .field("timestamp", TypeConstraint::AnyEagleTime);
 ///
 /// // Fields are encoded positionally in this order: iso, aperture, timestamp
 /// ```
@@ -207,17 +190,9 @@ impl SectionSchema {
 /// ```rust
 /// use vsf::schema::{SectionSchema, TypeConstraint};
 ///
-/// let schema = SectionSchema::new("image")
-///     .field("width", TypeConstraint::AnyUnsigned)
-///     .field("height", TypeConstraint::AnyUnsigned)
-///     .field("cloudy", TypeConstraint::AnyUnsigned);
+/// let schema = SectionSchema::new("image") .field("width", TypeConstraint::AnyUnsigned) .field("height", TypeConstraint::AnyUnsigned) .field("cloudy", TypeConstraint::AnyUnsigned);
 ///
-/// let section = schema.build()
-///     .set("width", 1920u32)?           // Single value
-///     .set("height", 1080u32)?          // Single value
-///     .set_empty("cloudy")?             // Empty field
-///     .encode()?;
-/// // Wire: [d"image" (d"width":u5{1920}) (d"height":u5{1080}) (d"cloudy")]
+/// let section = schema.build() .set("width", 1920u32)?           // Single value .set("height", 1080u32)?          // Single value .set_empty("cloudy")?             // Empty field .encode()?; // Wire: [d"image" (d"width":u5{1920}) (d"height":u5{1080}) (d"cloudy")]
 /// ```
 #[derive(Debug)]
 pub struct SectionBuilder {
@@ -302,8 +277,7 @@ impl SectionBuilder {
         Ok(self)
     }
 
-    /// Append a new field with multiple values (does NOT replace existing fields)
-    /// Use this for repeated fields like (contact: a, b, c)(contact: d, e, f)
+    /// Append a new field with multiple values (does NOT replace existing fields) Use this for repeated fields like (contact: a, b, c)(contact: d, e, f)
     pub fn append_multi<T: IntoVsfType>(
         mut self,
         name: impl AsRef<str>,
@@ -376,15 +350,12 @@ impl SectionBuilder {
         Ok(self.get(name)?.clone())
     }
 
-    /// Get all fields with a given name (for repeated fields)
-    /// Returns a Vec of references to FieldValue, each containing its values
+    /// Get all fields with a given name (for repeated fields) Returns a Vec of references to FieldValue, each containing its values
     pub fn get_fields(&self, name: &str) -> Vec<&FieldValue> {
         self.fields.iter().filter(|f| f.name == name).collect()
     }
 
-    /// Encode to VSF bytes
-    /// Format: [d"section_name" (d"field1":val1,val2) (d"field2") ...]
-    /// Uses FieldValue.flatten() for each field
+    /// Encode to VSF bytes Format: [d"section_name" (d"field1":val1,val2) (d"field2") ...] Uses FieldValue.flatten() for each field
     pub fn encode(&self) -> ValidationResult<Vec<u8>> {
         // Check all required fields are set
         for field_schema in &self.schema.fields {
@@ -513,8 +484,7 @@ impl SectionBuilder {
                 }
             };
 
-            // Check if this is an empty field (no colon)
-            // Skip whitespace first
+            // Check if this is an empty field (no colon) Skip whitespace first
             while ptr < section_bytes.len() && section_bytes[ptr].is_ascii_whitespace() {
                 ptr += 1;
             }

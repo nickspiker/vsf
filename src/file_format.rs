@@ -2,23 +2,12 @@
 //!
 //! Binary structure (following basecalc pattern):
 //! ```text
-//! RÅ<                                    Magic + header start
-//!   b[header_length_bytes]               Header length in BYTES
-//!   z[version]                           Version number
-//!   y[backward_compat]                   Backward compatibility version
-//!   hb[256][hash]                        File integrity hash (BLAKE3)
-//!   n[field_count]                       Number of header field definitions
+//! RÅ<                                    Magic + header start b[header_length_bytes]               Header length in BYTES z[version]                           Version number y[backward_compat]                   Backward compatibility version hb[256][hash]                        File integrity hash (BLAKE3) n[field_count]                       Number of header field definitions
 //!
-//!   (d[section_name] h?[hash] g?[sig] k?[key] o[offset] b[size] n[count])  Header field (section pointer)
-//!   ...
+//!   (d[section_name] h?[hash] g?[sig] k?[key] o[offset] b[size] n[count])  Header field (section pointer) ...
 //! >                                      Header end
 //!
-//! [                                      Section start (if n > 0)
-//!   d[section_name]                      Section name
-//!   (d[field_name]:[value])              Field definition (leaf)
-//!   (d[field_name] o[offset] b[size] n[count])  Nested section (branch)
-//!   ...
-//! ]                                      Section end
+//! [                                      Section start (if n > 0) d[section_name]                      Section name (d[field_name]:[value])              Field definition (leaf) (d[field_name] o[offset] b[size] n[count])  Nested section (branch) ... ]                                      Section end
 //!
 //! [raw_bytes...]                         Unboxed data (if n = 0)
 //! ```
@@ -38,17 +27,7 @@ use crate::types::VsfType;
 ///
 /// # Examples
 /// ```
-/// use vsf::file_format::validate_name;
-/// assert!(validate_name("camera").is_ok());
-/// assert!(validate_name("camera_sensor").is_ok());
-/// assert!(validate_name("camera.sensor").is_ok());
-/// assert!(validate_name("iso_speed_100").is_ok());
-/// assert!(validate_name("Camera").is_err());       // uppercase
-/// assert!(validate_name("9camera").is_err());      // starts with digit
-/// assert!(validate_name(".camera").is_err());      // starts with dot
-/// assert!(validate_name("camera.").is_err());      // ends with dot
-/// assert!(validate_name("camera..sensor").is_err()); // double dot
-/// assert!(validate_name("camera__sensor").is_err()); // double underscore
+/// use vsf::file_format::validate_name; assert!(validate_name("camera").is_ok()); assert!(validate_name("camera_sensor").is_ok()); assert!(validate_name("camera.sensor").is_ok()); assert!(validate_name("iso_speed_100").is_ok()); assert!(validate_name("Camera").is_err());       // uppercase assert!(validate_name("9camera").is_err());      // starts with digit assert!(validate_name(".camera").is_err());      // starts with dot assert!(validate_name("camera.").is_err());      // ends with dot assert!(validate_name("camera..sensor").is_err()); // double dot assert!(validate_name("camera__sensor").is_err()); // double underscore
 /// ```
 pub fn validate_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
@@ -118,9 +97,7 @@ pub struct VsfHeader {
     pub version: usize,
     pub backward_compat: usize,
     pub file_length: usize, // Total file length in bytes (for TCP streaming)
-    /// Creation timestamp.
-    /// `None` when the device cannot know what time it is (no RTC, no network, etc) — in that case the wire-format header omits the `e` field entirely.
-    /// `Some(VsfType::e(…))` carries the standard `eu6`/`ef5`/`ef6` value.
+    /// Creation timestamp. `None` when the device cannot know what time it is (no RTC, no network, etc) — in that case the wire-format header omits the `e` field entirely. `Some(VsfType::e(…))` carries the standard `eu6`/`ef5`/`ef6` value.
     pub creation_time: Option<VsfType>,
     pub provenance_hash: VsfType, // Required: BLAKE3 hash of immutable content (hp)
     pub rolling_hash: Option<VsfType>, // Optional: BLAKE3 hash of current state (hb) - OR signature
@@ -129,10 +106,7 @@ pub struct VsfHeader {
     pub fields: Vec<HeaderField>,
 }
 
-/// Header field definition (section pointer with positional values)
-/// Format: (d[section_name] o[offset] b[size] n[count])
-/// Note: Header fields use POSITIONAL values (no colons or commas)
-/// For inline fields (no section body): (d[name]:value,value,...)
+/// Header field definition (section pointer with positional values) Format: (d[section_name] o[offset] b[size] n[count]) Note: Header fields use POSITIONAL values (no colons or commas) For inline fields (no section body): (d[name]:value,value,...)
 #[derive(Debug, Clone)]
 pub struct HeaderField {
     pub name: String,
@@ -146,9 +120,7 @@ pub struct HeaderField {
 }
 
 impl VsfHeader {
-    /// Create a new header with no creation_time set.
-    /// Callers that know what time it is should set `header.creation_time = Some(VsfType::e(EtType::e6(...)))` before encoding.
-    /// Devices without a clock leave it as `None` and the encoded header omits the `e` field entirely.
+    /// Create a new header with no creation_time set. Callers that know what time it is should set `header.creation_time = Some(VsfType::e(EtType::e6(...)))` before encoding. Devices without a clock leave it as `None` and the encoded header omits the `e` field entirely.
     pub fn new(version: usize, backward_compat: usize) -> Self {
         Self {
             version,
@@ -200,8 +172,7 @@ impl VsfHeader {
         // Provenance hash (always present)
         header.extend_from_slice(&self.provenance_hash.flatten());
 
-        // Rolling hash OR signature (mutually exclusive)
-        // If signature present, include ke (pubkey) + ge (signature) instead of hb
+        // Rolling hash OR signature (mutually exclusive) If signature present, include ke (pubkey) + ge (signature) instead of hb
         if let Some(ref pubkey) = self.signer_pubkey {
             header.extend_from_slice(&pubkey.flatten());
         }
@@ -268,15 +239,7 @@ impl VsfHeader {
     ///
     /// # Format
     /// ```text
-    /// RÅ<                          Magic + header start
-    ///   z[version]                 Version number
-    ///   y[backward_compat]         Backward compatibility version
-    ///   b[header_length_bytes]     Header length in BYTES
-    ///   e[creation_time]           Creation timestamp (eu6 default, ef5/ef6 legacy)
-    ///   hp[hash]                   Provenance hash (BLAKE3)
-    ///   hb[hash]?                  Optional rolling hash (BLAKE3)
-    ///   n[field_count]             Number of header fields
-    ///   (...)                      Header fields
+    /// RÅ<                          Magic + header start z[version]                 Version number y[backward_compat]         Backward compatibility version b[header_length_bytes]     Header length in BYTES e[creation_time]           Creation timestamp (eu6 default, ef5/ef6 legacy) hp[hash]                   Provenance hash (BLAKE3) hb[hash]?                  Optional rolling hash (BLAKE3) n[field_count]             Number of header fields (...)                      Header fields
     /// >                            Header end
     /// ```
     pub fn decode(data: &[u8]) -> Result<(Self, usize), String> {
@@ -355,8 +318,7 @@ impl VsfHeader {
             return Err(crate::type_mismatch_err!("Expected provenance_hash (hp)", provenance_hash));
         }
 
-        // Parse remaining header until '>' using VSF dispatch pattern
-        // See byte → dispatch to parser → repeat
+        // Parse remaining header until '>' using VSF dispatch pattern See byte → dispatch to parser → repeat
         let mut rolling_hash = None;
         let mut signer_pubkey = None;
         let mut signature = None;
@@ -494,8 +456,7 @@ impl VsfHeader {
             return Err("Header too short".to_string());
         }
 
-        // Structure is now: RÅ< z y b ... (version, backward_compat, then header length)
-        // Skip past z (version) and y (backward_compat) to find b (header length)
+        // Structure is now: RÅ< z y b ... (version, backward_compat, then header length) Skip past z (version) and y (backward_compat) to find b (header length)
         let mut ptr = 4; // After "RÅ<"
 
         // Skip version (z) field
@@ -559,8 +520,7 @@ impl VsfHeader {
         Ok(())
     }
 
-    /// Update the file length (L) field in a header to match actual size
-    /// Called automatically by update_header_length() for header-only files
+    /// Update the file length (L) field in a header to match actual size Called automatically by update_header_length() for header-only files
     pub fn update_file_length(header_bytes: &mut Vec<u8>) -> Result<(), String> {
         // Find L field (after b, before e or h)
         let mut ptr = 4; // After "RÅ<"
@@ -630,11 +590,9 @@ impl VsfHeader {
 pub struct VsfSection {
     pub name: String,
     pub fields: Vec<VsfField>,
-    /// Optional length hint from `b{}` prefix (for forensics/validation)
-    /// Only present when section was encoded at offset > 1MB
+    /// Optional length hint from `b{}` prefix (for forensics/validation) Only present when section was encoded at offset > 1MB
     pub length_hint: Option<usize>,
-    /// Optional field count hint from `n{}` prefix (for forensics/validation)
-    /// Only present when section was encoded at offset > 1MB
+    /// Optional field count hint from `n{}` prefix (for forensics/validation) Only present when section was encoded at offset > 1MB
     pub count_hint: Option<usize>,
 }
 
@@ -705,8 +663,7 @@ impl VsfField {
 
     /// Parse a field from bytes
     ///
-    /// Expects format: (name:value1,value2,value3)
-    /// Updates ptr to point after the closing ')'
+    /// Expects format: (name:value1,value2,value3) Updates ptr to point after the closing ')'
     pub fn parse(data: &[u8], ptr: &mut usize) -> Result<Self, String> {
         // Expect '('
         if *ptr >= data.len() || data[*ptr] != b'(' {
@@ -837,9 +794,7 @@ impl VsfSection {
     ///
     /// # Example
     /// ```ignore
-    /// let section = VsfSection::new("metadata")
-    ///     .field("width", VsfType::u(1920, false))
-    ///     .field("height", VsfType::u(1080, false));
+    /// let section = VsfSection::new("metadata") .field("width", VsfType::u(1920, false)) .field("height", VsfType::u(1080, false));
     /// ```
     pub fn field(mut self, name: impl Into<String>, value: VsfType) -> Self {
         self.add_field(name, value);
@@ -855,9 +810,7 @@ impl VsfSection {
     ///
     /// # Example
     /// ```ignore
-    /// let section = VsfSection::new("metadata")
-    ///     .field("width", VsfType::u(1920, false))
-    ///     .field_opt("description", description_opt);  // Only added if Some
+    /// let section = VsfSection::new("metadata") .field("width", VsfType::u(1920, false)) .field_opt("description", description_opt);  // Only added if Some
     /// ```
     pub fn field_opt(mut self, name: impl Into<String>, value: Option<VsfType>) -> Self {
         if let Some(v) = value {
@@ -875,11 +828,7 @@ impl VsfSection {
     ///
     /// # Example
     /// ```ignore
-    /// let fields = vec![
-    ///     ("width".to_string(), VsfType::u(1920, false)),
-    ///     ("height".to_string(), VsfType::u(1080, false)),
-    /// ];
-    /// let section = VsfSection::new("metadata").fields(fields);
+    /// let fields = vec![ ("width".to_string(), VsfType::u(1920, false)), ("height".to_string(), VsfType::u(1080, false)), ]; let section = VsfSection::new("metadata").fields(fields);
     /// ```
     pub fn fields(mut self, fields: Vec<(String, VsfType)>) -> Self {
         for (name, value) in fields {
@@ -902,8 +851,7 @@ impl VsfSection {
     ///
     /// Use this when encoding a section that will be encrypted and sent without a VSF header. The `n` and `b` fields allow validation after decryption.
     ///
-    /// Format: [d{name}n{count}b{length}(field:value)...]
-    /// Empty sections produce: [d{name}n{0}b{X}]
+    /// Format: [d{name}n{count}b{length}(field:value)...] Empty sections produce: [d{name}n{0}b{X}]
     pub fn encode_encrypted(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.push(b'[');
@@ -949,9 +897,7 @@ impl VsfSection {
     /// # Format
     ///
     /// ```text
-    /// Small files:  [d"section_name"(d"field":val)...]
-    /// Large files:  [d"section_name"n{5}b{203}(d"field":val)...]
-    ///                               ↑    ↑
+    /// Small files:  [d"section_name"(d"field":val)...] Large files:  [d"section_name"n{5}b{203}(d"field":val)...] ↑    ↑
     ///                               |    total section length (inclusive)
     ///                               field count
     /// ```
@@ -961,13 +907,9 @@ impl VsfSection {
     /// The `b{}` value uses **inclusive encoding** - it includes its own size in the total. This avoids the "255 + overhead = 256 BOINK" problem where adding the length field's size pushes you into a larger encoding:
     ///
     /// ```text
-    /// Content = 252 bytes, need to add b{} (3 bytes for values < 256)
-    /// Naive:  252 + 3 = 255 → fits in u8 → b3{255} ✓
-    /// But:    253 + 3 = 256 → needs u16 → b4{} is 4 bytes!
-    ///         253 + 4 = 257 → still fits u16 ✓
+    /// Content = 252 bytes, need to add b{} (3 bytes for values < 256) Naive:  252 + 3 = 255 → fits in u8 → b3{255} ✓ But:    253 + 3 = 256 → needs u16 → b4{} is 4 bytes! 253 + 4 = 257 → still fits u16 ✓
     ///
-    /// Inclusive encoding handles this automatically by including its own
-    /// overhead in the encoded value, converging to the correct size.
+    /// Inclusive encoding handles this automatically by including its own overhead in the encoded value, converging to the correct size.
     /// ```
     ///
     /// # Why name-first?
@@ -982,8 +924,7 @@ impl VsfSection {
         let mut bytes = Vec::new();
         bytes.push(b'[');
 
-        // Add n{count}b{length} suffix + section name for sections >1MB from file start
-        // For sections <=1MB, section name is ONLY in the header TOC, not in the body
+        // Add n{count}b{length} suffix + section name for sections >1MB from file start For sections <=1MB, section name is ONLY in the header TOC, not in the body
         const ONE_MB: usize = 1_048_576;
         if file_offset > ONE_MB {
             // Section name + metadata only for distant sections (>1MB from header)
@@ -997,8 +938,7 @@ impl VsfSection {
                 fields_bytes.extend_from_slice(&field.flatten());
             }
 
-            // Use inclusive encoding for b{} - iterate until stable (adding b{} size might push us into a larger encoding class)
-            // Total = '[' + name + n{} + b{} + fields + ']'
+            // Use inclusive encoding for b{} - iterate until stable (adding b{} size might push us into a larger encoding class) Total = '[' + name + n{} + b{} + fields + ']'
             let name_bytes = VsfType::d(self.name.clone()).flatten();
             let n_encoded = VsfType::n(field_count).flatten();
 
@@ -1032,8 +972,7 @@ impl VsfSection {
 
     /// Parse a section from bytes (low-level, schema-agnostic)
     ///
-    /// Expects format: `[d"section_name"(d"field":value)...]`
-    /// Updates ptr to point after the closing `]`
+    /// Expects format: `[d"section_name"(d"field":value)...]` Updates ptr to point after the closing `]`
     ///
     /// This is the **low-level** parsing API that extracts raw data without validation. Each field is stored as a single `VsfField` with one value.
     ///
@@ -1056,8 +995,7 @@ impl VsfSection {
         let section_start = *ptr;
         *ptr += 1;
 
-        // For sections <1MB, no name is present - fields start immediately with '('
-        // For sections >1MB, name is REQUIRED with n{count}b{length}: [d"name"n{count}b{length}(fields...)]
+        // For sections <1MB, no name is present - fields start immediately with '(' For sections >1MB, name is REQUIRED with n{count}b{length}: [d"name"n{count}b{length}(fields...)]
         let (name, length_hint, count_hint) = if *ptr < data.len() && data[*ptr] == b'(' {
             // No name - section within 1MB of header
             (String::from(""), None, None)
@@ -1072,8 +1010,7 @@ impl VsfSection {
                 }
             };
 
-            // When section name is present, n{count} and b{length} are REQUIRED
-            // Parse n{count}
+            // When section name is present, n{count} and b{length} are REQUIRED Parse n{count}
             let count = match crate::parse(data, ptr) {
                 Ok(VsfType::n(c)) => c,
                 Ok(other) => {
