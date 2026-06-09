@@ -32,8 +32,7 @@ pub struct Keypair {
 
 #[cfg(feature = "crypto")]
 impl Keypair {
-    /// Load keypair from VSF file (expects fgtw_device_key or similar format)
-    /// Format: [d"fgtw_device_key" (d"secret":ke{32}{bytes}) (d"public":ke{32}{bytes})]
+    /// Load keypair from VSF file (expects fgtw_device_key or similar format) Format: [d"fgtw_device_key" (d"secret":ke{32}{bytes}) (d"public":ke{32}{bytes})]
     #[cfg(feature = "std")]
     pub fn load_from_vsf(path: impl AsRef<Path>) -> Result<Self, String> {
         let bytes =
@@ -134,8 +133,7 @@ impl Keypair {
         )
         .map_err(|e| format!("Invalid public key: {}", e))?;
 
-        // Derive X25519 keys from Ed25519
-        // Ed25519 secret key is 32 bytes, X25519 needs 32 bytes
+        // Derive X25519 keys from Ed25519 Ed25519 secret key is 32 bytes, X25519 needs 32 bytes
         let x25519_secret = StaticSecret::from(ed25519_secret.to_bytes());
         let x25519_public = PublicKey::from(&x25519_secret);
 
@@ -148,8 +146,7 @@ impl Keypair {
     }
 }
 
-/// Decrypt v'e' encrypted data (ephemeral X25519 + AES-256-GCM)
-/// Format: [ephemeral_pubkey:32][nonce:12][ciphertext+tag]
+/// Decrypt v'e' encrypted data (ephemeral X25519 + AES-256-GCM) Format: [ephemeral_pubkey:32][nonce:12][ciphertext+tag]
 #[cfg(feature = "crypto")]
 pub fn decrypt_ve(encrypted_bytes: &[u8], x25519_secret: &StaticSecret) -> Result<Vec<u8>, String> {
     // Extract ephemeral public key (32 bytes)

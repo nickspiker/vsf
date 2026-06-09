@@ -12,8 +12,7 @@ pub fn build_global_frequencies(output_path: &str) -> std::io::Result<()> {
 
     let mut freqs: HashMap<u32, f32> = HashMap::new();
 
-    // Language weights based on digital content presence
-    // Total: 100%
+    // Language weights based on digital content presence Total: 100%
 
     // 1. English (25%) - Latin script
     add_english(&mut freqs, 0.25);
@@ -110,8 +109,7 @@ pub fn build_global_frequencies(output_path: &str) -> std::io::Result<()> {
 
 /// Add English character frequencies (published data)
 fn add_english(freqs: &mut HashMap<u32, f32>, weight: f32) {
-    // Based on English letter frequency analysis from large corpora
-    // Source: Oxford English Corpus, Google Books Ngrams
+    // Based on English letter frequency analysis from large corpora Source: Oxford English Corpus, Google Books Ngrams
     let chars = [
         (' ', 0.182),  // Space is most common
         ('e', 0.127), ('t', 0.091), ('a', 0.082), ('o', 0.075),
@@ -157,8 +155,7 @@ fn add_spanish(freqs: &mut HashMap<u32, f32>, weight: f32) {
 
 /// Add Chinese character frequencies (Top 3000 most common)
 fn add_chinese(freqs: &mut HashMap<u32, f32>, weight: f32) {
-    // Top 500 most common Chinese characters
-    // Source: Jun Da's Modern Chinese Character Frequency List
+    // Top 500 most common Chinese characters Source: Jun Da's Modern Chinese Character Frequency List
     let common_chars = [
         '的', '一', '是', '不', '了', '在', '人', '有', '我', '他',
         '这', '个', '们', '中', '来', '上', '大', '为', '和', '国',
@@ -596,8 +593,7 @@ fn add_common_symbols(freqs: &mut HashMap<u32, f32>, weight: f32) {
 fn fill_remaining_unicode(freqs: &mut HashMap<u32, f32>) {
     println!("Filling remaining Unicode codepoints...");
 
-    // Unicode ranges to include: U+0000 - U+D7FF (BMP before surrogates)
-    // U+E000 - U+10FFFF (After surrogates through all supplementary planes)
+    // Unicode ranges to include: U+0000 - U+D7FF (BMP before surrogates) U+E000 - U+10FFFF (After surrogates through all supplementary planes)
 
     let minimal_freq = 0.0000001; // Very small frequency for unused characters
 

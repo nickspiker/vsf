@@ -19,8 +19,7 @@ use colored::*;
 
 static THEME: std::sync::LazyLock<Theme> = std::sync::LazyLock::new(Theme::dark);
 
-/// Wrapper that forces truecolor ANSI output regardless of COLORTERM detection
-/// This is needed because the colored crate falls back to 8-colour in WASM
+/// Wrapper that forces truecolor ANSI output regardless of COLORTERM detection This is needed because the colored crate falls back to 8-colour in WASM
 struct Tc(String);
 
 impl Tc {
@@ -55,10 +54,7 @@ pub enum OutputFormat {
     Html,
     /// Plain text, no colour codes
     Plain,
-    // Future formats:
-    // Rtf,      // Rich Text Format
-    // Pdf,      // PDF with colour
-    // Spectral, // VSF-native spectral colour encoding
+    // Future formats: Rtf,      // Rich Text Format Pdf,      // PDF with colour Spectral, // VSF-native spectral colour encoding
 }
 
 /// Colour roles for semantic styling
@@ -158,8 +154,7 @@ impl Styler {
     }
 }
 
-/// Convert ANSI escape codes to HTML spans
-/// Supports truecolor (38;2;r;g;b), basic colours, and bold
+/// Convert ANSI escape codes to HTML spans Supports truecolor (38;2;r;g;b), basic colours, and bold
 pub fn ansi_to_html(input: &str) -> String {
     let mut output = String::with_capacity(input.len() * 2);
     let mut chars = input.chars().peekable();
@@ -211,8 +206,7 @@ pub fn ansi_to_html(input: &str) -> String {
                     }
                     output.push('\n');
                     if in_span {
-                        // Re-open span on new line (for pre blocks)
-                        // Actually, let's not - cleaner HTML
+                        // Re-open span on new line (for pre blocks) Actually, let's not - cleaner HTML
                         in_span = false;
                     }
                 }
@@ -338,8 +332,7 @@ const BOX_CORNER: &str = "╰"; // U+2570 Light arc up and right
 const BOX_TEE: &str = "├"; // U+251C Light vertical and right
 const BOX_HORIZ: &str = "─"; // U+2500 Light horizontal
 
-// ==================== SEMANTIC COLOUR PALETTE ====================
-// All colours are sourced from the active theme (THEME static above). To add theme support: replace `std::sync::LazyLock::new(Theme::dark)` with a runtime loader, e.g. from ~/.vsf/theme.toml or a --theme CLI flag.
+// ==================== SEMANTIC COLOUR PALETTE ==================== All colours are sourced from the active theme (THEME static above). To add theme support: replace `std::sync::LazyLock::new(Theme::dark)` with a runtime loader, e.g. from ~/.vsf/theme.toml or a --theme CLI flag.
 
 fn col_uint() -> (u8, u8, u8) {
     THEME.uint
@@ -536,8 +529,7 @@ fn format_children(children: &[VsfType]) -> String {
     result
 }
 
-/// Universal VSF formatter: value first, label as hint, with indentation tracking
-/// This provides consistent formatting across all VSF types
+/// Universal VSF formatter: value first, label as hint, with indentation tracking This provides consistent formatting across all VSF types
 #[allow(dead_code)]
 fn format_vsf_universal(vsf: &VsfType, indent_level: usize, label: Option<&str>) -> String {
     let indent = "  ".repeat(indent_level);
@@ -566,8 +558,7 @@ const HEX_MAX_HEAD: usize = 1024;
 /// Max bytes shown at the tail of a binary blob (default 1KB)
 const HEX_MAX_TAIL: usize = 1024;
 
-/// Format hex data as lines of HEX_BYTES_PER_LINE bytes each
-/// Returns a Vec of hex line strings for caller to join with appropriate separator
+/// Format hex data as lines of HEX_BYTES_PER_LINE bytes each Returns a Vec of hex line strings for caller to join with appropriate separator
 fn format_hex_lines(data: &[u8]) -> Vec<String> {
     let hex_str = hex::encode(data).to_uppercase();
     let chars_per_line = HEX_BYTES_PER_LINE * 2;
@@ -582,8 +573,7 @@ fn format_hex_lines(data: &[u8]) -> Vec<String> {
     }
 }
 
-/// Format binary data with head+tail truncation and omission notice
-/// Returns (head_lines, omitted_notice, tail_lines)
+/// Format binary data with head+tail truncation and omission notice Returns (head_lines, omitted_notice, tail_lines)
 fn format_hex_head_tail(data: &[u8]) -> (Vec<String>, Option<String>, Vec<String>) {
     let total = data.len();
     if total <= HEX_MAX_HEAD + HEX_MAX_TAIL {
@@ -612,10 +602,7 @@ fn format_crypto_literal(type_name: &str, data: &[u8]) -> String {
     }
 }
 
-/// Format crypto field with colour coding: type{size}0xHEX
-/// Type markers are coloured by semantic category (hash=teal, sig=purple, key=blue, etc.)
-/// Size shown as len-1 (wire encoding) with punctuation in dark gray
-/// Large PQC keys (McEliece 512KB, Frodo 15KB) are truncated to 64 bytes for readable logs
+/// Format crypto field with colour coding: type{size}0xHEX Type markers are coloured by semantic category (hash=teal, sig=purple, key=blue, etc.) Size shown as len-1 (wire encoding) with punctuation in dark gray Large PQC keys (McEliece 512KB, Frodo 15KB) are truncated to 64 bytes for readable logs
 
 /// Get semantic colour for a crypto type based on its prefix
 fn crypto_type_colour(type_name: &str) -> (u8, u8, u8) {
@@ -682,8 +669,7 @@ fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
     }
 }
 
-/// Get the VSF size marker for a length value
-/// Returns '3' for u8, '4' for u16, '5' for u32, '6' for u64, '7' for u128
+/// Get the VSF size marker for a length value Returns '3' for u8, '4' for u16, '5' for u32, '6' for u64, '7' for u128
 fn size_marker(len: usize) -> char {
     if len <= 255 {
         '3'
@@ -803,8 +789,7 @@ fn opcode_hint(a: u8, b: u8) -> Option<&'static str> {
     }
 }
 
-/// Format a VsfType as literal VSF wire notation with semantic colour coding
-/// Shows actual encoding: type code, size marker, length/value, content
+/// Format a VsfType as literal VSF wire notation with semantic colour coding Shows actual encoding: type code, size marker, length/value, content
 ///
 /// Colour scheme by category:
 /// - Text (d, l, x): COL_TEXT (light blue)
@@ -1034,8 +1019,7 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             tc("⦊", col_punct())
         ),
 
-        // Crypto types - use semantic colours via format_crypto_hex
-        // Hashes (teal)
+        // Crypto types - use semantic colours via format_crypto_hex Hashes (teal)
         VsfType::hp(h) => format_crypto_hex("hp", h),
         VsfType::hb(h) => format_crypto_hex("hb", h),
         VsfType::hs(h) => format_crypto_hex("hs", h),
@@ -1098,8 +1082,7 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             format_crypto_wrap(*algo, data)
         }
 
-        // Tensors: light blue
-        // Wire format: t3{dims}u3 + shape values + data e.g., t3{1}u3 3{16} [38,0,16,15,...] for a 16-element 1D u8 tensor
+        // Tensors: light blue Wire format: t3{dims}u3 + shape values + data e.g., t3{1}u3 3{16} [38,0,16,15,...] for a 16-element 1D u8 tensor
         VsfType::t_u3(tensor) => {
             let dims = tensor.shape.len();
             // Build shape encoding: 3{dim0}3{dim1}...
@@ -1814,8 +1797,7 @@ pub fn format_number(n: usize) -> String {
     result
 }
 
-/// Format Eagle Time (ET) in human-readable format: 2025-OCT-29 6:42:21.813 PM
-/// Displays in local timezone (Eagle Time → UTC → Local)
+/// Format Eagle Time (ET) in human-readable format: 2025-OCT-29 6:42:21.813 PM Displays in local timezone (Eagle Time → UTC → Local)
 pub fn format_eagle_time(et: &EtType) -> String {
     // Convert EtType to EagleTime and then to DateTime (UTC), then to local
     let eagle_time = EagleTime::new(et.clone());
@@ -1837,9 +1819,7 @@ pub fn format_eagle_time(et: &EtType) -> String {
     };
     let dt = dt_utc.with_timezone(&Local);
 
-    // Extract milliseconds from fractional seconds
-    // For integer types (u/i), oscillations are converted to seconds with picosecond precision
-    // For float types (f5/f6), seconds are stored directly
+    // Extract milliseconds from fractional seconds For integer types (u/i), oscillations are converted to seconds with picosecond precision For float types (f5/f6), seconds are stored directly
     let seconds_f64 = eagle_time.to_seconds_f64();
     let milliseconds = ((seconds_f64.fract().abs() * 1000.0) as u32) % 1000;
 
@@ -2143,8 +2123,7 @@ pub fn format_value(vsf: &VsfType) -> String {
     }
 }
 
-/// Format a VsfType value for compact display (tree view)
-/// Shows full hex for crypto fields (32/64 byte hashes, keys, signatures)
+/// Format a VsfType value for compact display (tree view) Shows full hex for crypto fields (32/64 byte hashes, keys, signatures)
 pub fn format_value_short(vsf: &VsfType) -> String {
     match vsf {
         VsfType::p(tensor) => {
@@ -2230,8 +2209,7 @@ pub fn parse_section_fields(data: &[u8], label: &LabelInfo) -> Result<Vec<VsfFie
 
     pointer += 1;
 
-    // For sections <1MB, no name is present - fields start immediately with '('
-    // For sections >1MB, name + n{count}b{length} are required
+    // For sections <1MB, no name is present - fields start immediately with '(' For sections >1MB, name + n{count}b{length} are required
     if pointer < data.len() && data[pointer] != b'(' {
         // Parse section name
         let section_name_type = parse(data, &mut pointer)
@@ -2263,8 +2241,7 @@ pub fn parse_section_fields(data: &[u8], label: &LabelInfo) -> Result<Vec<VsfFie
     Ok(fields)
 }
 
-/// Try to parse section fields without knowing child_count - parse until ']'
-/// Used for sections with wrap/signature where child_count is omitted from header
+/// Try to parse section fields without knowing child_count - parse until ']' Used for sections with wrap/signature where child_count is omitted from header
 pub fn try_parse_section_fields(data: &[u8], offset: usize) -> Result<Vec<VsfField>, String> {
     let mut pointer = offset;
     let mut fields = Vec::new();
@@ -2278,8 +2255,7 @@ pub fn try_parse_section_fields(data: &[u8], offset: usize) -> Result<Vec<VsfFie
     }
     pointer += 1;
 
-    // For sections <1MB, no name is present - fields start immediately with '('
-    // For sections >1MB, name + n{count}b{length} are required
+    // For sections <1MB, no name is present - fields start immediately with '(' For sections >1MB, name + n{count}b{length} are required
     if pointer < data.len() && data[pointer] != b'(' {
         // Parse and skip section name
         let section_name_type = parse(data, &mut pointer)
@@ -2322,10 +2298,7 @@ pub fn labels_from_header(header: &VsfHeader) -> Vec<LabelInfo> {
         .collect()
 }
 
-/// Format complete VSF stream for inspection (coloured output with tree structure)
-/// Returns multi-line string with header info, labels, and section tree
-/// Shows literal VSF encoding first (white), then descriptive hints (dark grey)
-/// Wire-format size suffix for an unsigned value, matching `EncodeNumber for usize` in encoding/primitives.rs. `3`=u8, `4`=u16, `5`=u32, `6`=u64, `7`=u128. Used by the inspector so the displayed marker (e.g. `l5⦉65636⦊`) matches the actual bytes on disk rather than a hardcoded `3`.
+/// Format complete VSF stream for inspection (coloured output with tree structure) Returns multi-line string with header info, labels, and section tree Shows literal VSF encoding first (white), then descriptive hints (dark grey) Wire-format size suffix for an unsigned value, matching `EncodeNumber for usize` in encoding/primitives.rs. `3`=u8, `4`=u16, `5`=u32, `6`=u64, `7`=u128. Used by the inspector so the displayed marker (e.g. `l5⦉65636⦊`) matches the actual bytes on disk rather than a hardcoded `3`.
 fn usize_size_suffix(n: usize) -> &'static str {
     if n <= u8::MAX as usize {
         "3"
@@ -2406,8 +2379,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         tc("backward compat", col_tree())
     ));
 
-    // Creation time: et{timestamp} - time (pink-magenta).
-    // creation_time is Option<VsfType>; absent when the producing device had no clock.
+    // Creation time: et{timestamp} - time (pink-magenta). creation_time is Option<VsfType>; absent when the producing device had no clock.
     if let Some(VsfType::e(ref et)) = header.creation_time {
         #[allow(deprecated)]
         let type_suffix = match et {
@@ -2669,8 +2641,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             format!(" {}", tree_tee())
         };
 
-        // For sections < 1MB, just show `[` - name is already in header labels
-        // For sections >= 1MB, show `[name n{count}b{size}` for navigation
+        // For sections < 1MB, just show `[` - name is already in header labels For sections >= 1MB, show `[name n{count}b{size}` for navigation
         if label.size < 1024 * 1024 {
             out.push_str(&format!("{}{}\n", connector, tc("[", col_tree())));
         } else {
@@ -2691,9 +2662,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
             ));
         }
 
-        // Parse and show fields
-        // For child_count == 0 (signed/wrapped sections), try dynamic parsing
-        // For child_count > 0, use the known count
+        // Parse and show fields For child_count == 0 (signed/wrapped sections), try dynamic parsing For child_count > 0, use the known count
         let field_prefix = if is_last {
             "  "
         } else {
@@ -2827,8 +2796,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                                 line_buffer.clear();
                             }
 
-                            // Add value to buffer
-                            // If previous value was an opcode and this isn't, add newline before this value
+                            // Add value to buffer If previous value was an opcode and this isn't, add newline before this value
                             if prev_was_opcode && !is_opcode && !line_buffer.is_empty() {
                                 line_buffer.push('\n');
                             }
@@ -2903,14 +2871,11 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
     Ok(out)
 }
 
-/// Format a section fragment (starts with '[')
-/// Used for inspecting VSF section bytes before they're wrapped in a file
+/// Format a section fragment (starts with '[') Used for inspecting VSF section bytes before they're wrapped in a file
 ///
 /// Shows literal VSF wire notation:
 /// ```text
-/// [error
-///   └─ (d3{7}message : l3{24}handle claimed elsewhere)
-/// ]
+/// [error └─ (d3{7}message : l3{24}handle claimed elsewhere) ]
 /// ```
 pub fn inspect_section(data: &[u8]) -> Result<String, String> {
     if data.is_empty() || data[0] != b'[' {
@@ -3017,8 +2982,7 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
             let val_str = format_value_literal(val);
 
             if vi == 0 {
-                // First value on same line as field name
-                // Check if it has hex lines that need continuation
+                // First value on same line as field name Check if it has hex lines that need continuation
                 if val_str.contains('\n') {
                     let parts: Vec<&str> = val_str.split('\n').collect();
                     out.push_str(parts[0]);

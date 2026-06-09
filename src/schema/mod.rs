@@ -23,30 +23,18 @@
 //! ## Example
 //!
 //! ```ignore
-//! // Define schema
-//! let image_schema = SectionSchema::new("image")
-//!     .field("iso", FieldType::U16)
-//!     .field("shutter_speed", FieldType::F32)
-//!     .field("aperture", FieldType::F32);
+//! // Define schema let image_schema = SectionSchema::new("image") .field("iso", FieldType::U16) .field("shutter_speed", FieldType::F32) .field("aperture", FieldType::F32);
 //!
-//! // Build section with validation
-//! let section = image_schema.build()
-//!     .set("iso", 400)?
-//!     .set("shutter_speed", 1.0/125.0)?
-//!     .set("aperture", 2.8)?
-//!     .encode()?;
+//! // Build section with validation let section = image_schema.build() .set("iso", 400)? .set("shutter_speed", 1.0/125.0)? .set("aperture", 2.8)? .encode()?;
 //!
-//! // Parse and validate
-//! let parsed = image_schema.parse(&bytes)?;
-//! assert_eq!(parsed.get::<u16>("iso")?, 400);
+//! // Parse and validate let parsed = image_schema.parse(&bytes)?; assert_eq!(parsed.get::<u16>("iso")?, 400);
 //! ```
 
 pub mod constraint;
 pub mod conversions;
 pub mod field;
 pub mod official;
-/// `SchemaRegistry` singleton — gated behind the `registry` feature because it depends on `spin` (which requires atomic CAS, unavailable on e.g. Cortex-M0+).
-/// Embedded callers that only need the per-schema builder/parser (no global lookup) can omit `registry` and still use `bridge_cmd_schema()`, `SectionBuilder::parse`, etc.
+/// `SchemaRegistry` singleton — gated behind the `registry` feature because it depends on `spin` (which requires atomic CAS, unavailable on e.g. Cortex-M0+). Embedded callers that only need the per-schema builder/parser (no global lookup) can omit `registry` and still use `bridge_cmd_schema()`, `SectionBuilder::parse`, etc.
 #[cfg(feature = "registry")]
 pub mod registry;
 pub mod section;

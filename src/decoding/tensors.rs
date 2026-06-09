@@ -67,8 +67,7 @@ pub fn parse_bitpacked_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfTyp
 
 // ==================== TENSORS ====================
 
-/// Parse contiguous tensor: [t][ndim OR 'n'][elem_type][elem_size][shape... OR][data...]
-/// Supports two formats:
+/// Parse contiguous tensor: [t][ndim OR 'n'][elem_type][elem_size][shape... OR][data...] Supports two formats:
 /// - Multi-dim: [t][u:ndim][elem_type][elem_size][shape...][data...]
 /// - 1D vector: [t]['n'][u:count][elem_type][elem_size][data...]
 pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {

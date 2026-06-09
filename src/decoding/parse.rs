@@ -32,10 +32,7 @@ use crate::types::{Fill, GradientStop, GradientVariant, Stroke, StrokeCap, Strok
 ///
 /// # Example
 /// ```ignore
-/// let data = vec![b'u', b'3', 42];
-/// let mut pointer = 0;
-/// let value = parse(&data, &mut pointer)?;
-/// // pointer is now 3, value is VsfType::u3(42)
+/// let data = vec![b'u', b'3', 42]; let mut pointer = 0; let value = parse(&data, &mut pointer)?; // pointer is now 3, value is VsfType::u3(42)
 /// ```
 pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     if *pointer >= data.len() {

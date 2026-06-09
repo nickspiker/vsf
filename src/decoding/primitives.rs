@@ -15,8 +15,7 @@ pub fn parse_unsigned(data: &[u8], pointer: &mut usize) -> Result<VsfType, Decod
 
     let size_byte = data[*pointer];
 
-    // Special case: u0 (boolean) has no size marker '0', just the value directly
-    // Format: [b'u', 0 or 255]
+    // Special case: u0 (boolean) has no size marker '0', just the value directly Format: [b'u', 0 or 255]
     if size_byte == 0 || size_byte == 255 {
         *pointer += 1;
         return Ok(VsfType::u0(size_byte == 255));

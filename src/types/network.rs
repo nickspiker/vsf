@@ -106,16 +106,7 @@ impl core::fmt::Display for NaScheme {
 /// All fields are optional.  Fields present on the wire are indicated by a one-byte presence bitmask followed by the data in order:
 ///
 /// ```text
-/// [mask: u8]
-///   bit 0 — line1       (null-terminated UTF-8)
-///   bit 1 — line2       (null-terminated UTF-8)
-///   bit 2 — city        (null-terminated UTF-8)
-///   bit 3 — region      (null-terminated UTF-8, state/province/territory)
-///   bit 4 — postal_code (null-terminated UTF-8)
-///   bit 5 — country     (2 bytes, ISO 3166-1 alpha-2, e.g. b"US")
-///   bits 6-7 — reserved, must be zero
-/// [line1 if bit 0] [line2 if bit 1] [city if bit 2]
-/// [region if bit 3] [postal_code if bit 4] [country if bit 5]
+/// [mask: u8] bit 0 — line1       (null-terminated UTF-8) bit 1 — line2       (null-terminated UTF-8) bit 2 — city        (null-terminated UTF-8) bit 3 — region      (null-terminated UTF-8, state/province/territory) bit 4 — postal_code (null-terminated UTF-8) bit 5 — country     (2 bytes, ISO 3166-1 alpha-2, e.g. b"US") bits 6-7 — reserved, must be zero [line1 if bit 0] [line2 if bit 1] [city if bit 2] [region if bit 3] [postal_code if bit 4] [country if bit 5]
 /// ```
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WaAddress {
@@ -229,8 +220,7 @@ impl core::fmt::Display for WaAddress {
 }
 
 // ============================================================
-// From / TryFrom — std::net ↔ VsfType ============================================================
-// Gated on `std` because `std::net::*` (IpAddr, Ipv4Addr, …) only exists in std.
+// From / TryFrom — std::net ↔ VsfType ============================================================ Gated on `std` because `std::net::*` (IpAddr, Ipv4Addr, …) only exists in std.
 
 #[cfg(feature = "std")]
 impl From<Ipv4Addr> for VsfType {

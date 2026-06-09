@@ -50,24 +50,10 @@
 //! VSF files follow a hierarchical structure:
 //!
 //! ```text
-//! RÅ<                                  Magic number + header start
-//!   z3{5}                        Format version (FIRST - determines encoding)
-//!   y3{5}               Backward compatibility version
-//!   b#{header length}                  Header size (now we know how to encode it!)
-//!   L#{file length}                    Total file size in bytes (optional, for TCP streaming without parse-as-you-go)
-//!   eu6{current time as u64}           Eagle Time when emitted (u64 oscillations, 704ps precision). OPTIONAL — devices without a clock (no RTC, no network, pre-handshake) omit the `e` field entirely rather than lie with a placeholder. Readers detect absence by the next byte being `h` (provenance hash) instead of `e`.
-//!   hp3{31}{provenance hash}            Provenance: BLAKE3 hash of content (required, always 32 bytes)
-//!   ge{64}{signature}                  Ed25519 signature over entire file AFTER provinence hash is patched in (optional, rolling or provinence, must have one or the other)
-//!   hb{31}{rolling_hash}               Rolling: BLAKE3 of current state with History (optional)
-//!   k#{key}                            File-level encryption key (optional)
-//!   n#{field count}                    Number of fields
-//!   (d3{9}raw_image:h#{hash},o#{offset},b#{size},n#{count})     Field with values
-//!   (d3{9}thumbnail:h#{hash},o#{offset},b#{size},n#{count})
-//!   ...
+//! RÅ<                                  Magic number + header start z3{5}                        Format version (FIRST - determines encoding) y3{5}               Backward compatibility version b#{header length}                  Header size (now we know how to encode it!) L#{file length}                    Total file size in bytes (optional, for TCP streaming without parse-as-you-go) eu6{current time as u64}           Eagle Time when emitted (u64 oscillations, 704ps precision). OPTIONAL — devices without a clock (no RTC, no network, pre-handshake) omit the `e` field entirely rather than lie with a placeholder. Readers detect absence by the next byte being `h` (provenance hash) instead of `e`. hp3{31}{provenance hash}            Provenance: BLAKE3 hash of content (required, always 32 bytes) ge{64}{signature}                  Ed25519 signature over entire file AFTER provinence hash is patched in (optional, rolling or provinence, must have one or the other) hb{31}{rolling_hash}               Rolling: BLAKE3 of current state with History (optional) k#{key}                            File-level encryption key (optional) n#{field count}                    Number of fields (d3{9}raw_image:h#{hash},o#{offset},b#{size},n#{count})     Field with values (d3{9}thumbnail:h#{hash},o#{offset},b#{size},n#{count}) ...
 //! >                                    Header end
 //!
-//! [(section_fields...)...]           Section data at offset for RAW image, note that if section is not encrypted and closer than 1MB from the header, section name, count and length are not required. otherwise all three.
-//! [d3{9}thumbnailn#{number of fields}b#{length of section}(section_fields...)...]
+//! [(section_fields...)...]           Section data at offset for RAW image, note that if section is not encrypted and closer than 1MB from the header, section name, count and length are not required. otherwise all three. [d3{9}thumbnailn#{number of fields}b#{length of section}(section_fields...)...]
 //! ```
 //!
 //! **Hash Strategy (Always BLAKE3):**
@@ -75,8 +61,7 @@
 //! - **ge** (signature): Optional Ed25519 signature. When signing, compute hp, sign it, then **replace** hp bytes with ge signature.
 //! - **hb** (hash rolling): Current file state - Optional BLAKE3 hash including History section. Updates when History updates. Useful for tracking mutable file evolution. ge or hb, must have one.
 //!
-//! **Provenance Verification:**
-//! To verify a file's provenance, zero the hp and signature/rolling hash fields and compute BLAKE3 - it will match the stored hp if original. If present, verify the ge signature against hp to authenticate the creator.
+//! **Provenance Verification:** To verify a file's provenance, zero the hp and signature/rolling hash fields and compute BLAKE3 - it will match the stored hp if original. If present, verify the ge signature against hp to authenticate the creator.
 //!
 //! **Terminology:**
 //! - **Header**: Everything between `RÅ<` and `>`
@@ -93,20 +78,13 @@
 //! A section with hierarchical fields for camera metadata:
 //!
 //! ```text
-//! [d{Imaging}
-//!   (l{shutter_speed}:f6{0.01})      // 1/100s as f64
-//!   (l{aperture}:f5{2.8})            // f/2.8 as f32
-//!   (l{iso}:u4{400})                 // ISO 400
-//! ]
+//! [d{Imaging} (l{shutter_speed}:f6{0.01})      // 1/100s as f64 (l{aperture}:f5{2.8})            // f/2.8 as f32 (l{iso}:u4{400})                 // ISO 400 ]
 //! ```
 //!
 //! Which flattens to:
 //!
 //! ```text
-//! '[' + 'd' + '3' + {7u8} + "Imaging" +
-//! '(' + 'l' + '3' + {13u8} + "shutter_speed" + ':' + 'f' + '6' + {0.01f64} + ')' +
-//! '(' + 'l' + '3' + {8u8} + "aperture"      + ':' + 'f' + '5' + {2.8f32} + ')' +
-//! '(' + 'l' + '3' + {3u8} + "iso" + ':' + 'u' + '4'+ {400u16} + ')' + ']'
+//! '[' + 'd' + '3' + {7u8} + "Imaging" + '(' + 'l' + '3' + {13u8} + "shutter_speed" + ':' + 'f' + '6' + {0.01f64} + ')' + '(' + 'l' + '3' + {8u8} + "aperture"      + ':' + 'f' + '5' + {2.8f32} + ')' + '(' + 'l' + '3' + {3u8} + "iso" + ':' + 'u' + '4'+ {400u16} + ')' + ']'
 //! ```
 //!
 //! Where 'char' indicates a single byte character, and "string" indicates ASCII text bytes.
@@ -124,11 +102,7 @@
 //! For applications requiring detailed tracking beyond the immutable creation timestamp:
 //!
 //! ```text
-//! [dHistory
-//!  (ef6{1234567890.5},hb{256}{hash_at_creation},ltool:x{Lumis},lversion:z{0.1.2},lhost:x{workstation-sea})
-//!  (ef6{1234567920.3},hb{256}{hash_after_modify},ltool:x{Photon},laction:x{modified},lhost:x{laptop-pdx})
-//!  (ef6{1234567950.1},hb{256}{hash_after_access},laction:x{accessed},lhost:x{phone-mobile})
-//! ]
+//! [dHistory (ef6{1234567890.5},hb{256}{hash_at_creation},ltool:x{Lumis},lversion:z{0.1.2},lhost:x{workstation-sea}) (ef6{1234567920.3},hb{256}{hash_after_modify},ltool:x{Photon},laction:x{modified},lhost:x{laptop-pdx}) (ef6{1234567950.1},hb{256}{hash_after_access},laction:x{accessed},lhost:x{phone-mobile}) ]
 //! ```
 //!
 //! Each history entry records the file's `hb` hash at that point in time, creating a verifiable chain of file states. To verify history integrity, recompute `hb` for each historical state by truncating the History section to that entry.
@@ -136,21 +110,7 @@
 //! Which flattens to:
 //!
 //! ```text
-//! '[' + 'd' + '1' + {7u8} + "History" +
-//! '(' + 'e' + 'f' + '6' + {1234567890.5f64} + ',' +
-//!       'h' + 'b' + '3' + {32u8} + {32 bytes BLAKE3 hash} + ',' +
-//!       'l' + '1' + {4u8} + "tool" + ':' + 'x' + '1' + {5u8} + "Lumis" + ',' +
-//!       'l' + '1' + {7u8} + "version" + ':' + 'z' + '1' + {5u8} + "0.1.2" + ',' +
-//!       'l' + '1' + {4u8} + "host" + ':' + 'x' + '2' + {15u8} + "workstation-sea" + ')' +
-//! '(' + 'e' + 'f' + '6' + {1234567920.3f64} + ',' +
-//!       'h' + 'b' + '3' + {32u8} + {32 bytes BLAKE3 hash} + ',' +
-//!       'l' + '1' + {4u8} + "tool" + ':' + 'x' + '1' + {6u8} + "Photon" + ',' +
-//!       'l' + '1' + {6u8} + "action" + ':' + 'x' + '1' + {8u8} + "modified" + ',' +
-//!       'l' + '1' + {4u8} + "host" + ':' + 'x' + '1' + {10u8} + "laptop-pdx" + ')' +
-//! '(' + 'e' + 'f' + '6' + {1234567950.1f64} + ',' +
-//!       'h' + 'b' + '3' + {32u8} + {32 bytes BLAKE3 hash} + ',' +
-//!       'l' + '1' + {6u8} + "action" + ':' + 'x' + '1' + {8u8} + "accessed" + ',' +
-//!       'l' + '1' + {4u8} + "host" + ':' + 'x' + '1' + {12u8} + "mobile" + ')' + ']'
+//! '[' + 'd' + '1' + {7u8} + "History" + '(' + 'e' + 'f' + '6' + {1234567890.5f64} + ',' + 'h' + 'b' + '3' + {32u8} + {32 bytes BLAKE3 hash} + ',' + 'l' + '1' + {4u8} + "tool" + ':' + 'x' + '1' + {5u8} + "Lumis" + ',' + 'l' + '1' + {7u8} + "version" + ':' + 'z' + '1' + {5u8} + "0.1.2" + ',' + 'l' + '1' + {4u8} + "host" + ':' + 'x' + '2' + {15u8} + "workstation-sea" + ')' + '(' + 'e' + 'f' + '6' + {1234567920.3f64} + ',' + 'h' + 'b' + '3' + {32u8} + {32 bytes BLAKE3 hash} + ',' + 'l' + '1' + {4u8} + "tool" + ':' + 'x' + '1' + {6u8} + "Photon" + ',' + 'l' + '1' + {6u8} + "action" + ':' + 'x' + '1' + {8u8} + "modified" + ',' + 'l' + '1' + {4u8} + "host" + ':' + 'x' + '1' + {10u8} + "laptop-pdx" + ')' + '(' + 'e' + 'f' + '6' + {1234567950.1f64} + ',' + 'h' + 'b' + '3' + {32u8} + {32 bytes BLAKE3 hash} + ',' + 'l' + '1' + {6u8} + "action" + ':' + 'x' + '1' + {8u8} + "accessed" + ',' + 'l' + '1' + {4u8} + "host" + ':' + 'x' + '1' + {12u8} + "mobile" + ')' + ']'
 //! ```
 //!
 //! Each history entry is a complete event enclosed in `()`'s with timestamp, tool, action, and context. The History section has its own hash in the header label record for integrity verification, but is NOT included in `hs` (static content hash). It IS included in `hb` (rolling file hash).
@@ -170,8 +130,7 @@
 //!
 //! ## Eagle Time Formats
 //!
-//! Eagle Time counts oscillations since 1969-07-20 20:17:40 UTC (Apollo 11 lunar landing).
-//! Always coordinated, no timezones, no daylight saving. One universal time standard.
+//! Eagle Time counts oscillations since 1969-07-20 20:17:40 UTC (Apollo 11 lunar landing). Always coordinated, no timezones, no daylight saving. One universal time standard.
 //!
 //! - **eu6**: 64-bit oscillation count (`u64`) - 704ps precision, deterministic integer timestamps (default)
 //! - **ef5**: 32-bit float (`f32`) - ~2 minute precision, legacy compact format
@@ -181,29 +140,21 @@
 //!
 //! ### Optional in the header
 //!
-//! Eagle Time is OPTIONAL in the file header.
-//! Devices that genuinely cannot know what time it is — embedded sensors without an RTC, freshly-booted SoCs before any network sync, single-purpose ASICs — omit the `e` field rather than emit a placeholder.
-//! A reader that finds the next byte after `l` (file length) is `h` (provenance hash) rather than `e` knows the producer was clockless and skips the field.
-//! Devices that DO know the time (host CLIs via `nunc-time`, kernels via QTIMER, anything network-synced) include it normally.
-//! Lying about the time is worse than admitting you don't know it.
+//! Eagle Time is OPTIONAL in the file header. Devices that genuinely cannot know what time it is — embedded sensors without an RTC, freshly-booted SoCs before any network sync, single-purpose ASICs — omit the `e` field rather than emit a placeholder. A reader that finds the next byte after `l` (file length) is `h` (provenance hash) rather than `e` knows the producer was clockless and skips the field. Devices that DO know the time (host CLIs via `nunc-time`, kernels via QTIMER, anything network-synced) include it normally. Lying about the time is worse than admitting you don't know it.
 //!
 //! ## Parsing and Encoding
 //!
 //! **Element-level parsing:**
 //! ```ignore
-//! use vsf::parse; let data = vec![b'u', b'3', 42]; let mut ptr = 0;
-//! let value = parse(&data, &mut ptr)?;  // Parses one VsfType element
+//! use vsf::parse; let data = vec![b'u', b'3', 42]; let mut ptr = 0; let value = parse(&data, &mut ptr)?;  // Parses one VsfType element
 //! ```
 //!
 //! **Header encoding (VsfHeader):**
 //! ```ignore
-//! use vsf::file_format::VsfHeader; let mut header = VsfHeader::new(version, backward_compat); header.add_field(field);
-//! let bytes = header.encode()?;  // Encodes header to bytes
+//! use vsf::file_format::VsfHeader; let mut header = VsfHeader::new(version, backward_compat); header.add_field(field); let bytes = header.encode()?;  // Encodes header to bytes
 //! ```
 //!
-//! **Note:** `VsfHeader::decode()` is not yet implemented. To parse headers, use element-level
-//! `parse()` to read individual fields. A future schema system will provide type-safe
-//! header and section parsing with automatic validation.
+//! **Note:** `VsfHeader::decode()` is not yet implemented. To parse headers, use element-level `parse()` to read individual fields. A future schema system will provide type-safe header and section parsing with automatic validation.
 //!
 //! ## Parsing APIs: Two Tiers
 //!
@@ -243,8 +194,7 @@
 //! - You need to modify and re-encode sections
 //! - Building applications with defined schemas
 //!
-//! Both parse the same `[d"name"(d"field":value)...]` binary format—`SectionBuilder`
-//! adds schema enforcement on top of the low-level parsing.
+//! Both parse the same `[d"name"(d"field":value)...]` binary format—`SectionBuilder` adds schema enforcement on top of the low-level parsing.
 //!
 //! ## Module Structure
 //!
@@ -268,14 +218,9 @@ extern crate alloc;
 
 /// Build an error string for an unexpected VsfType variant at decode time.
 ///
-/// With the `errors-verbose` feature (default-on), expands to `format!` of the
-/// expected-label plus a `{:?}` of the value. Without it, expands to a static
-/// string with just the expected label and drops the value via `let _ = &v;`.
+/// With the `errors-verbose` feature (default-on), expands to `format!` of the expected-label plus a `{:?}` of the value. Without it, expands to a static string with just the expected label and drops the value via `let _ = &v;`.
 ///
-/// Disabling `errors-verbose` lets the linker remove `<VsfType as Debug>::fmt`
-/// — which transitively removes the IEEE-754 grisu/dragon float formatters
-/// (~10 KB on cortex-m) since they're only kept alive by the float variants'
-/// Debug arms.
+/// Disabling `errors-verbose` lets the linker remove `<VsfType as Debug>::fmt` — which transitively removes the IEEE-754 grisu/dragon float formatters (~10 KB on cortex-m) since they're only kept alive by the float variants' Debug arms.
 #[macro_export]
 macro_rules! type_mismatch_err {
     ($expected:literal, $got:expr) => {{
@@ -291,8 +236,7 @@ macro_rules! type_mismatch_err {
     }};
 }
 
-/// no_std-friendly prelude: re-exports of the `alloc` types that std's prelude provides automatically.
-/// Individual files import via `use crate::prelude::*;` to stay compatible across `std` and `no_std + alloc` builds.
+/// no_std-friendly prelude: re-exports of the `alloc` types that std's prelude provides automatically. Individual files import via `use crate::prelude::*;` to stay compatible across `std` and `no_std + alloc` builds.
 pub mod prelude {
     pub use alloc::borrow::ToOwned;
     pub use alloc::boxed::Box;
@@ -412,8 +356,7 @@ pub use builders::{
     WhiteLevel,
 };
 
-// Coming soon
-// pub mod registry;  // Metadata key registry
+// Coming soon pub mod registry;  // Metadata key registry
 
 #[cfg(test)]
 mod tests {
@@ -742,8 +685,7 @@ mod tests {
 
     #[test]
     fn test_1d_vector_optimization_unsigned() {
-        // Test all unsigned types with 1D vector optimization 1D tensors encode with 'tn' format and decode as vectors
-        // Exception: u8 stays as tensor (since Vec<u8> == raw bytes)
+        // Test all unsigned types with 1D vector optimization 1D tensors encode with 'tn' format and decode as vectors Exception: u8 stays as tensor (since Vec<u8> == raw bytes)
 
         // u8 vector - special case: stays as tensor
         let data_u8 = vec![1u8, 2, 3, 4, 5, 10, 20, 30, 40, 50, 100, 200];
@@ -898,9 +840,7 @@ mod tests {
         assert_eq!(flat_2d[0], b't');
         assert_ne!(flat_2d[1], b'n'); // Should NOT be 'n'
 
-        // 1D should be more compact
-        // Format comparison: 1D: t n <count> u 4 <data> 2D: t <ndim> u 4 <shape[0]> <shape[1]> <data>
-        // For small shapes, 1D should save bytes
+        // 1D should be more compact Format comparison: 1D: t n <count> u 4 <data> 2D: t <ndim> u 4 <shape[0]> <shape[1]> <data> For small shapes, 1D should save bytes
         assert!(flat_1d.len() <= flat_2d.len());
     }
 

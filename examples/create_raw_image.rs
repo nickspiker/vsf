@@ -38,14 +38,12 @@ fn main() -> Result<(), String> {
         image.data.len()
     );
 
-    // ========== BUILDER PATTERN API ==========
-    // The builder accepts raw types for ergonomics - validation happens at build() time
+    // ========== BUILDER PATTERN API ========== The builder accepts raw types for ergonomics - validation happens at build() time
     println!("Building VSF RAW image with metadata...");
 
     let mut raw = RawImageBuilder::new(image);
 
-    // Set RAW metadata (sensor characteristics)
-    // Builder fields accept simple types - they get validated and wrapped when you call build()
+    // Set RAW metadata (sensor characteristics) Builder fields accept simple types - they get validated and wrapped when you call build()
     raw.raw.cfa_pattern = Some(cfa);
     raw.raw.black_level = Some(blackpoint as f32);
     raw.raw.white_level = Some(whitepoint as f32);
@@ -76,8 +74,7 @@ fn main() -> Result<(), String> {
     raw.lens.min_aperture_f = Some(2.8);
     raw.lens.max_aperture_f = Some(22.);
 
-    // Build validates all fields and wraps them in type-safe newtypes
-    // This is where validation errors would surface (e.g., invalid CFA colour codes)
+    // Build validates all fields and wraps them in type-safe newtypes This is where validation errors would surface (e.g., invalid CFA colour codes)
     let raw_bytes = raw.build()?;
 
     println!("✓ Built VSF RAW image: {} bytes", raw_bytes.len());

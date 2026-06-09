@@ -11,8 +11,7 @@ use core::fmt;
 
 /// Type constraint for VSF schema fields
 ///
-/// Constraints validate VsfType values using pattern matching rather than creating a parallel type system. This ensures complete coverage of all
-/// VsfType variants including future additions.
+/// Constraints validate VsfType values using pattern matching rather than creating a parallel type system. This ensures complete coverage of all VsfType variants including future additions.
 #[derive(Clone)]
 pub enum TypeConstraint {
     // === CATEGORY CONSTRAINTS (most common) ===
@@ -112,8 +111,7 @@ pub enum TypeConstraint {
     AllOf(Vec<TypeConstraint>),
 
     // === CUSTOM VALIDATION ===
-    /// Custom predicate function for complex validation.
-    /// Requires `Arc`, which requires `target_has_atomic = "ptr"`; gated out on single-core embedded targets (e.g., Cortex-M0+).
+    /// Custom predicate function for complex validation. Requires `Arc`, which requires `target_has_atomic = "ptr"`; gated out on single-core embedded targets (e.g., Cortex-M0+).
     #[cfg(target_has_atomic = "ptr")]
     Custom {
         name: &'static str,
@@ -236,8 +234,7 @@ impl TypeConstraint {
             TypeConstraint::EcdsaP256Sig => matches!(value, VsfType::gp(_)),
 
             TypeConstraint::Tensor(_elem_constraint) => {
-                // Check if it's any t_* variant
-                // TODO: Also validate element type with elem_constraint
+                // Check if it's any t_* variant TODO: Also validate element type with elem_constraint
                 matches!(
                     value,
                     VsfType::t_u0(_)
@@ -518,15 +515,9 @@ mod tests {
     }
 }
 
-/// Helper function to get human-readable type name for VsfType
-/// Used in error messages and debugging.
+/// Helper function to get human-readable type name for VsfType Used in error messages and debugging.
 ///
-/// With `errors-verbose` (default-on), uses Debug formatting and extracts the
-/// variant name prefix. Without it (embedded builds), returns `"?"` — this
-/// kills the `<VsfType as Debug>::fmt` chain (and its ~10 KB of IEEE-754
-/// float-to-string code) from being linked. Callers that depend on the
-/// returned string for runtime classification (e.g. `AnyColour`'s
-/// `starts_with('r')` check) only work correctly under `errors-verbose`.
+/// With `errors-verbose` (default-on), uses Debug formatting and extracts the variant name prefix. Without it (embedded builds), returns `"?"` — this kills the `<VsfType as Debug>::fmt` chain (and its ~10 KB of IEEE-754 float-to-string code) from being linked. Callers that depend on the returned string for runtime classification (e.g. `AnyColour`'s `starts_with('r')` check) only work correctly under `errors-verbose`.
 #[cfg(feature = "errors-verbose")]
 pub fn vsf_type_name(vsf: &VsfType) -> String {
     let debug_str = format!("{:?}", vsf);

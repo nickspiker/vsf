@@ -150,8 +150,7 @@ impl VsfType {
                     // Huffman-encode the text (no internal header)
                     let encoded_text = encode_text(value);
 
-                    // Encode ONLY character count (for Huffman decoder)
-                    // VSF structure handles byte boundaries
+                    // Encode ONLY character count (for Huffman decoder) VSF structure handles byte boundaries
                     let char_count = value.chars().count();
                     flat.extend_from_slice(&char_count.encode_number());
 
@@ -365,8 +364,7 @@ impl VsfType {
                 flat
             }
 
-            // ==================== RENDERABLE OBJECT TYPES ====================
-            // Scene graph primitives (ro* prefix - 3 letters)
+            // ==================== RENDERABLE OBJECT TYPES ==================== Scene graph primitives (ro* prefix - 3 letters)
             #[cfg(feature = "spirix")]
             VsfType::rob(pos, size, fill, stroke, children) => {
                 let mut flat = vec![b'r', b'o', b'b'];
@@ -1058,8 +1056,7 @@ impl VsfType {
             }
 
             VsfType::b(value, _inclusive) => {
-                // Note: inclusive mode is handled by the stabilization loop in vsf_builder
-                // The value already includes its own encoding size when needed
+                // Note: inclusive mode is handled by the stabilization loop in vsf_builder The value already includes its own encoding size when needed
                 let mut flat = Vec::new();
                 flat.push(b'b');
                 flat.extend_from_slice(&value.encode_number());
@@ -2260,8 +2257,7 @@ impl VsfType {
                 flat
             }
 
-            // ==================== SPIRIX SCALARS (PRIMITIVES) ====================
-            // Format: [s][F][E][fraction_bytes][exponent_bytes]
+            // ==================== SPIRIX SCALARS (PRIMITIVES) ==================== Format: [s][F][E][fraction_bytes][exponent_bytes]
             #[cfg(feature = "spirix")]
             VsfType::s33(v) => {
                 let mut flat = vec![b's', b'3', b'3'];
@@ -2438,8 +2434,7 @@ impl VsfType {
                 flat
             }
 
-            // ==================== SPIRIX CIRCLES (PRIMITIVES) ====================
-            // Format: [c][F][E][real_bytes][imaginary_bytes][exponent_bytes]
+            // ==================== SPIRIX CIRCLES (PRIMITIVES) ==================== Format: [c][F][E][real_bytes][imaginary_bytes][exponent_bytes]
             #[cfg(feature = "spirix")]
             VsfType::c33(v) => {
                 let mut flat = vec![b'c', b'3', b'3'];
@@ -2640,8 +2635,7 @@ impl VsfType {
                 flat.extend_from_slice(&v.exponent.to_be_bytes());
                 flat
             }
-            // ==================== SPIRIX SCALAR TENSORS ====================
-            // Format: [t][dim_count][s][F][E][shape...][data...]
+            // ==================== SPIRIX SCALAR TENSORS ==================== Format: [t][dim_count][s][F][E][shape...][data...]
             #[cfg(feature = "spirix")]
             VsfType::t_s33(tensor) => {
                 let mut flat = vec![b't'];
@@ -3142,8 +3136,7 @@ impl VsfType {
 
                 flat
             }
-            // ==================== SPIRIX CIRCLE TENSORS ====================
-            // Format: [t][dim_count][c][F][E][shape...][data...]
+            // ==================== SPIRIX CIRCLE TENSORS ==================== Format: [t][dim_count][c][F][E][shape...][data...]
             #[cfg(feature = "spirix")]
             VsfType::t_c33(tensor) => {
                 let mut flat = vec![b't'];
@@ -3670,8 +3663,7 @@ impl VsfType {
                 flat
             }
 
-            // ==================== SPIRIX STRIDED TENSORS ====================
-            // Same as above but with 'q' marker and stride encoding
+            // ==================== SPIRIX STRIDED TENSORS ==================== Same as above but with 'q' marker and stride encoding
             #[cfg(feature = "spirix")]
             VsfType::q_s33(tensor) => {
                 let mut flat = vec![b'q'];
@@ -4866,9 +4858,7 @@ impl VsfType {
 
             VsfType::u(value, inclusive) => {
                 if *inclusive {
-                    // Inclusive mode - would call encode_usize_inclusive()
-                    // This is complex, so for now just flatten and measure
-                    // TODO: optimize this later
+                    // Inclusive mode - would call encode_usize_inclusive() This is complex, so for now just flatten and measure TODO: optimize this later
                     self.flatten().len()
                 } else {
                     1 + encoded_usize_len(*value) // 'u' + encoded number
@@ -4922,8 +4912,7 @@ impl VsfType {
             }
 
             VsfType::b(size, _inclusive) => {
-                // 'b' + encoded size (as usize)
-                // Note: inclusive mode is handled by stabilization, encoding is same
+                // 'b' + encoded size (as usize) Note: inclusive mode is handled by stabilization, encoding is same
                 1 + encoded_usize_len(*size)
             }
 
@@ -5001,8 +4990,7 @@ impl VsfType {
             // Toka opcodes: { a b } = 4 bytes
             VsfType::op(_, _) => 4,
 
-            // For complex types, fall back to flatten().len()
-            // TODO: add optimized versions for these
+            // For complex types, fall back to flatten().len() TODO: add optimized versions for these
             _ => self.flatten().len(),
         }
     }
@@ -5112,8 +5100,7 @@ mod tests {
         assert_eq!(result[2], 5); // 5 characters
                                   // result[3..] is Huffman-encoded data
 
-        // Overhead: 3 bytes (x + marker + count)
-        // For short strings, Huffman may not compress
+        // Overhead: 3 bytes (x + marker + count) For short strings, Huffman may not compress
         assert!(result.len() >= 3); // At minimum: x + char_count_marker + char_count
     }
 
@@ -5155,8 +5142,7 @@ mod tests {
         assert_eq!(result[9], 0x0C); // 3072 = 0x0C00
         assert_eq!(result[10], 0x00);
 
-        // Data starts at byte 11
-        // Total size = 11 (header) + 4096*3072*2 (data) = 25,165,835 bytes
+        // Data starts at byte 11 Total size = 11 (header) + 4096*3072*2 (data) = 25,165,835 bytes
         assert_eq!(result.len(), 11 + 4096 * 3072 * 2);
     }
 
@@ -5267,8 +5253,7 @@ mod tests {
         assert_eq!(result[4], b'6');
         assert_eq!(result[5], b'4');
 
-        // Header: 1 + 2 + 3 + 2 + 2 = 10 bytes
-        // Data: 200 elements × 10 bytes each = 2000 bytes
+        // Header: 1 + 2 + 3 + 2 + 2 = 10 bytes Data: 200 elements × 10 bytes each = 2000 bytes
         assert_eq!(result.len(), 10 + 200 * 10);
     }
 }

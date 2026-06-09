@@ -236,8 +236,7 @@ pub fn parse_backward_version(data: &[u8], pointer: &mut usize) -> Result<VsfTyp
 
 /// Parse colour constant: `rc[a-z]`
 ///
-/// Format: 3 bytes total - 'r', 'c', colour letter
-/// Examples: rcn (green), rcr (red), rcb (blue), etc.
+/// Format: 3 bytes total - 'r', 'c', colour letter Examples: rcn (green), rcr (red), rcb (blue), etc.
 pub fn parse_colour_constant(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // Already consumed 'r', now expect 'c' and colour letter
     if *pointer + 2 > data.len() {
@@ -418,8 +417,7 @@ pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeErro
 
     // Handle shared secrets (ks*) - these have a 3-byte prefix
     if algo == b's' {
-        // This is a shared secret - dispatch to parse_shared_secret
-        // Note: pointer is now at the third byte (algorithm variant)
+        // This is a shared secret - dispatch to parse_shared_secret Note: pointer is now at the third byte (algorithm variant)
         return parse_shared_secret(data, pointer);
     }
 

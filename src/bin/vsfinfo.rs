@@ -39,8 +39,7 @@ struct Cli {
     #[arg(long, value_name = "HEX")]
     identity_seed: Option<String>,
 
-    /// Their identity seed (hex) - for Photon per-contact state files
-    /// Key = BLAKE3("photon_contact_state_v2" || our_seed || their_seed)
+    /// Their identity seed (hex) - for Photon per-contact state files Key = BLAKE3("photon_contact_state_v2" || our_seed || their_seed)
     #[arg(long, value_name = "HEX")]
     their_seed: Option<String>,
 
@@ -67,8 +66,7 @@ enum Commands {
     /// Show file structure as a tree
     Tree,
 
-    /// Derive Photon identity seed from a handle string
-    /// Formula: BLAKE3(VsfType::x(handle).flatten())
+    /// Derive Photon identity seed from a handle string Formula: BLAKE3(VsfType::x(handle).flatten())
     #[command(name = "seed")]
     DeriveSeed {
         /// Handle string to derive seed from
@@ -158,9 +156,7 @@ fn main() {
     }
 }
 
-/// Decrypt Photon contact list using identity seed
-/// Key derivation: BLAKE3("photon_contact_list_v2" || seed)
-/// Format: [12-byte nonce][ciphertext + 16-byte auth tag]
+/// Decrypt Photon contact list using identity seed Key derivation: BLAKE3("photon_contact_list_v2" || seed) Format: [12-byte nonce][ciphertext + 16-byte auth tag]
 #[cfg(feature = "crypto")]
 fn decrypt_photon_contacts(encrypted: &[u8], seed_hex: &str) -> Result<Vec<u8>, String> {
     use blake3::Hasher;
@@ -184,9 +180,7 @@ fn decrypt_photon_contacts(_encrypted: &[u8], _seed_hex: &str) -> Result<Vec<u8>
     Err("Crypto feature not enabled - rebuild with --features crypto".to_string())
 }
 
-/// Decrypt Photon per-contact state using both identity seeds
-/// Key derivation: BLAKE3("photon_contact_state_v2" || our_seed || their_seed)
-/// Format: [12-byte nonce][ciphertext + 16-byte auth tag]
+/// Decrypt Photon per-contact state using both identity seeds Key derivation: BLAKE3("photon_contact_state_v2" || our_seed || their_seed) Format: [12-byte nonce][ciphertext + 16-byte auth tag]
 #[cfg(feature = "crypto")]
 fn decrypt_photon_contact_state(
     encrypted: &[u8],
@@ -231,8 +225,7 @@ fn decrypt_photon_contact_state(
     Err("Crypto feature not enabled - rebuild with --features crypto".to_string())
 }
 
-/// Decrypt using raw symmetric key (ChaCha20-Poly1305)
-/// Format: [12-byte nonce][ciphertext + 16-byte auth tag]
+/// Decrypt using raw symmetric key (ChaCha20-Poly1305) Format: [12-byte nonce][ciphertext + 16-byte auth tag]
 #[cfg(feature = "crypto")]
 fn decrypt_symmetric(encrypted: &[u8], key_hex: &str) -> Result<Vec<u8>, String> {
     let key = hex::decode(key_hex).map_err(|e| format!("Invalid hex: {}", e))?;
@@ -274,8 +267,7 @@ fn decrypt_chacha20poly1305(encrypted: &[u8], key: &[u8; 32]) -> Result<Vec<u8>,
 
 /// Show basic file information in literal VSF format
 fn show_info(data: &[u8], _detailed: bool, _key_path: Option<&Path>) -> Result<(), String> {
-    // Use the unified inspect_vsf() function from the library
-    // This ensures consistent output between CLI and browser/WASM
+    // Use the unified inspect_vsf() function from the library This ensures consistent output between CLI and browser/WASM
     let formatted = vsf::inspect::inspect_vsf(data)?;
     println!("{}", formatted);
     Ok(())
@@ -622,8 +614,7 @@ fn show_tree(data: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Derive Photon identity seed from a handle string
-/// Formula: BLAKE3(VsfType::x(handle).flatten())
+/// Derive Photon identity seed from a handle string Formula: BLAKE3(VsfType::x(handle).flatten())
 fn derive_seed(handle: &str) -> Result<(), String> {
     use blake3::Hasher;
 

@@ -37,8 +37,7 @@ pub trait DecodeNumber: Sized {
 ///
 /// The decoder reads the encoded value and subtracts the overhead:
 /// ```ignore
-/// // Encoded: [u][4][0x01, 0x18] → 280
-/// // Subtract overhead: 280 - 24 = 256 ✓
+/// // Encoded: [u][4][0x01, 0x18] → 280 // Subtract overhead: 280 - 24 = 256 ✓
 /// ```
 pub trait DecodeNumberInclusive: Sized {
     /// Decode a number in inclusive mode (subtracts encoding overhead from value)
@@ -74,16 +73,13 @@ pub enum DecodeError {
     /// Generic error with message
     Other(String),
 
-    /// Truncated input where more bytes were expected; carries a contextual message.
-    /// Absorbs former `std::io::Error::new(ErrorKind::UnexpectedEof, …)` sites.
+    /// Truncated input where more bytes were expected; carries a contextual message. Absorbs former `std::io::Error::new(ErrorKind::UnexpectedEof, …)` sites.
     UnexpectedEofMsg(String),
 
-    /// Malformed/corrupt input that does not match the expected structure; carries a contextual message.
-    /// Absorbs former `std::io::Error::new(ErrorKind::InvalidData, …)` sites.
+    /// Malformed/corrupt input that does not match the expected structure; carries a contextual message. Absorbs former `std::io::Error::new(ErrorKind::InvalidData, …)` sites.
     InvalidDataMsg(String),
 
-    /// Operation not supported by the current build/configuration; carries a contextual message.
-    /// Absorbs former `std::io::Error::new(ErrorKind::Unsupported, …)` sites.
+    /// Operation not supported by the current build/configuration; carries a contextual message. Absorbs former `std::io::Error::new(ErrorKind::Unsupported, …)` sites.
     Unsupported(String),
 }
 

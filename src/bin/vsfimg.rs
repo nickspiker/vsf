@@ -8,16 +8,11 @@
 //!    - ≤ 256×256: gamma2-encode to u8, pack into `Tensor<u8>` shape `[h, w, 3]`,
 //!                 emit as `image:` section with field `data: t_u3(tensor)`
 //!    - > 256×256: gamma2-encode, rav1e AV1 encode (same params photon uses for avatars),
-//!                 emit as `image:` section with field `data: v(b'a', av1_bytes)` —
-//!                 the `v` (wrapped data) type's encoding-byte = `'a'` marks AV1
+//!                 emit as `image:` section with field `data: v(b'a', av1_bytes)` — the `v` (wrapped data) type's encoding-byte = `'a'` marks AV1
 //! 5. `VsfBuilder` auto-computes rolling hash (`hb`); provenance hash (`hp`) is the
-//!    BLAKE3 of the source bytes (not the VSF file — by design they hash different
-//!    things, so `hp != hb` is expected and `hb` is required for VSF integrity)
+//!    BLAKE3 of the source bytes (not the VSF file — by design they hash different things, so `hp != hb` is expected and `hb` is required for VSF integrity)
 //!
-//! The conversion functions are lifted from photon/src/ui/avatar.rs verbatim where
-//! possible (ICC parsing, sRGB fallback, AV1 encode) so byte-for-byte equivalence
-//! is preserved across the ecosystem — same source image, same VSF bytes regardless
-//! of which tool produced them. Differences from photon's `encode_avatar_from_image`:
+//! The conversion functions are lifted from photon/src/ui/avatar.rs verbatim where possible (ICC parsing, sRGB fallback, AV1 encode) so byte-for-byte equivalence is preserved across the ecosystem — same source image, same VSF bytes regardless of which tool produced them. Differences from photon's `encode_avatar_from_image`:
 //! - no circular mask (vsfimg produces general images, not avatars)
 //! - no forced resize to 256×256 (uncompressed/AV1 branch decides based on source dims)
 //! - no center-crop to square (preserves source aspect)
@@ -49,9 +44,7 @@ struct Cli {
     output: PathBuf,
 }
 
-/// Threshold (per axis) above which we switch from uncompressed Tensor<u8> to AV1.
-/// Matches photon's `AVATAR_SIZE` — photon avatars are exactly 256×256 AV1; vsfimg
-/// uses the same boundary so the format-selection rule is consistent across tools.
+/// Threshold (per axis) above which we switch from uncompressed Tensor<u8> to AV1. Matches photon's `AVATAR_SIZE` — photon avatars are exactly 256×256 AV1; vsfimg uses the same boundary so the format-selection rule is consistent across tools.
 const UNCOMPRESSED_MAX_DIM: u32 = 256;
 
 fn main() {
@@ -66,10 +59,7 @@ fn run(cli: &Cli) -> Result<(), String> {
     let source_bytes = fs::read(&cli.input)
         .map_err(|e| format!("reading {}: {e}", cli.input.display()))?;
 
-    // Provenance hash: BLAKE3 of the source file's bytes. This is the immutable identity
-    // of "the image that produced this VSF" — distinct from the VSF file's own rolling
-    // hash. Both go in the header; consumers can use `hp` to dedupe / cite the source
-    // and `hb` to verify the VSF file hasn't been tampered with.
+    // Provenance hash: BLAKE3 of the source file's bytes. This is the immutable identity of "the image that produced this VSF" — distinct from the VSF file's own rolling hash. Both go in the header; consumers can use `hp` to dedupe / cite the source and `hb` to verify the VSF file hasn't been tampered with.
     let hp = blake3::hash(&source_bytes);
 
     let icc_profile_bytes = extract_icc_profile(&source_bytes)?;
@@ -86,23 +76,18 @@ fn run(cli: &Cli) -> Result<(), String> {
     // Convert source pixels to linear VSF RGB (f32). Whole image, no crop, no resize.
     let linear_vsf = decode_to_linear_vsf(&img, &icc_converter)?;
 
-    // Format-selection rule: ≤ UNCOMPRESSED_MAX_DIM on BOTH axes → uncompressed tensor;
-    // otherwise → AV1. Square AV1 is what rav1e + photon's pipeline are tuned for, so
-    // for non-square sources we currently still hand them to rav1e at native dims —
-    // rav1e accepts arbitrary widths/heights (subject to its own minimums).
+    // Format-selection rule: ≤ UNCOMPRESSED_MAX_DIM on BOTH axes → uncompressed tensor; otherwise → AV1. Square AV1 is what rav1e + photon's pipeline are tuned for, so for non-square sources we currently still hand them to rav1e at native dims — rav1e accepts arbitrary widths/heights (subject to its own minimums).
     let use_av1 = width > UNCOMPRESSED_MAX_DIM || height > UNCOMPRESSED_MAX_DIM;
 
     let pixels_field: VsfType = if use_av1 {
         let av1 = encode_av1(&linear_vsf, width as usize, height as usize)?;
-        // Wrap the AV1 byte payload with encoding-byte 'a' (= AV1) via `v(u8, Vec<u8>)`.
-        // Consumers dispatch on the encoding byte to pick the right decoder.
+        // Wrap the AV1 byte payload with encoding-byte 'a' (= AV1) via `v(u8, Vec<u8>)`. Consumers dispatch on the encoding byte to pick the right decoder.
         VsfType::v(b'a', av1)
     } else {
         // Gamma2-encode each linear channel into u8, pack interleaved [h, w, 3].
         let mut bytes = Vec::with_capacity((width as usize) * (height as usize) * 3);
         for &lin in &linear_vsf {
-            // `.max(0.)` defends against negative linear values that out-of-gamut ICC
-            // matrices can produce — sqrt of negative would be NaN.
+            // `.max(0.)` defends against negative linear values that out-of-gamut ICC matrices can produce — sqrt of negative would be NaN.
             bytes.push(vsf::colour::convert::delinearize_gamma2_u8_f32(lin.max(0.)));
         }
         let tensor = Tensor::new(vec![height as usize, width as usize, 3], bytes);
@@ -131,10 +116,7 @@ fn run(cli: &Cli) -> Result<(), String> {
     Ok(())
 }
 
-/// Decode a `DynamicImage` to linear VSF RGB f32, one channel-triple per pixel
-/// in row-major order. Uses the ICC converter when present; falls back to
-/// sRGB-assumption (the realistic default for the wild, where most images either
-/// have no profile or have a profile tagged as sRGB).
+/// Decode a `DynamicImage` to linear VSF RGB f32, one channel-triple per pixel in row-major order. Uses the ICC converter when present; falls back to sRGB-assumption (the realistic default for the wild, where most images either have no profile or have a profile tagged as sRGB).
 fn decode_to_linear_vsf(
     img: &DynamicImage,
     icc_converter: &Option<IccColourConverter>,
@@ -188,9 +170,7 @@ fn decode_to_linear_vsf(
 }
 
 // ============================================================================
-// ICC profile extraction + parsing
-// (lifted from photon/src/ui/avatar.rs — verbatim where possible so byte-for-byte
-// behavior is identical across the ecosystem)
+// ICC profile extraction + parsing (lifted from photon/src/ui/avatar.rs — verbatim where possible so byte-for-byte behavior is identical across the ecosystem)
 // ============================================================================
 
 /// Extract ICC profile bytes from an image file. Returns `None` if no profile present.
@@ -211,8 +191,7 @@ fn extract_icc_profile(image_data: &[u8]) -> Result<Option<Vec<u8>>, String> {
     Ok(None)
 }
 
-/// TIFF stores ICC in tag 34675 (0x8773, InterColorProfile). The `image` crate
-/// doesn't expose this; parse the TIFF IFD manually.
+/// TIFF stores ICC in tag 34675 (0x8773, InterColorProfile). The `image` crate doesn't expose this; parse the TIFF IFD manually.
 fn extract_tiff_icc(data: &[u8]) -> Option<Vec<u8>> {
     if data.len() < 8 {
         return None;
@@ -272,8 +251,7 @@ fn extract_tiff_icc(data: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
-/// Tone Reproduction Curve from an ICC profile — encodes the per-channel transfer
-/// function (gamma, LUT, parametric, or linear).
+/// Tone Reproduction Curve from an ICC profile — encodes the per-channel transfer function (gamma, LUT, parametric, or linear).
 #[derive(Clone)]
 enum TrcCurve {
     Linear,
@@ -282,8 +260,7 @@ enum TrcCurve {
     Parametric { function_type: u16, vals: Vec<f32> },
 }
 
-/// Pre-parsed ICC converter for fast per-pixel use. Stores the ICC RGB → XYZ
-/// matrix + the static XYZ → VSF RGB matrix, plus the three TRC curves.
+/// Pre-parsed ICC converter for fast per-pixel use. Stores the ICC RGB → XYZ matrix + the static XYZ → VSF RGB matrix, plus the three TRC curves.
 struct IccColourConverter {
     icc_to_xyz: [f32; 9],
     xyz_to_vsf: [f32; 9],
@@ -371,9 +348,7 @@ fn apply_trc_normalized(normalized: f32, trc: &TrcCurve) -> f32 {
             lut[i0] + (lut[i1] - lut[i0]) * frac
         }
         TrcCurve::Parametric { function_type, vals } => {
-            // ICC parametric curve formulas (function type 0–4). Falls back to identity
-            // for unrecognized function types; gives the best-effort answer rather than
-            // erroring on exotic profiles.
+            // ICC parametric curve formulas (function type 0–4). Falls back to identity for unrecognized function types; gives the best-effort answer rather than erroring on exotic profiles.
             match function_type {
                 0x0000 => normalized.powf(vals[0]),
                 0x0001 => {
@@ -437,12 +412,7 @@ fn convert_pixel_linear_u16(r: u16, g: u16, b: u16, converter: &IccColourConvert
     [vsf[0].max(0.), vsf[1].max(0.), vsf[2].max(0.)]
 }
 
-/// sRGB fallback when no ICC profile is present. Most "untagged" images in the wild
-/// are sRGB by convention, so this is the right default — but it's a guess, and that
-/// guess being wrong is exactly why ICC profiles exist. Using `#[allow(deprecated)]`
-/// because the sRGB helpers in vsf::colour::legacy are marked deprecated by design
-/// (they're for compat with legacy 1931-based standards, which is precisely what
-/// this fallback is for).
+/// sRGB fallback when no ICC profile is present. Most "untagged" images in the wild are sRGB by convention, so this is the right default — but it's a guess, and that guess being wrong is exactly why ICC profiles exist. Using `#[allow(deprecated)]` because the sRGB helpers in vsf::colour::legacy are marked deprecated by design (they're for compat with legacy 1931-based standards, which is precisely what this fallback is for).
 #[allow(deprecated)]
 fn srgb_fallback_u8(r: u8, g: u8, b: u8) -> [f32; 3] {
     use vsf::colour::convert::apply_matrix_3x3_f32;
@@ -466,21 +436,12 @@ fn srgb_fallback_u16(r: u16, g: u16, b: u16) -> [f32; 3] {
 }
 
 // ============================================================================
-// AV1 encoding via rav1e
-// (lifted from photon/src/ui/avatar.rs::encode_av1 — same encoder params,
-// same VSF YCbCr math, so a 256×256-output photon avatar and an arbitrary-size
-// vsfimg AV1 produce identical encodes for the same input)
+// AV1 encoding via rav1e (lifted from photon/src/ui/avatar.rs::encode_av1 — same encoder params, same VSF YCbCr math, so a 256×256-output photon avatar and an arbitrary-size vsfimg AV1 produce identical encodes for the same input)
 // ============================================================================
 
-/// Encode linear VSF RGB f32 → AV1 bytes. Input is `width * height * 3` f32 values
-/// in row-major order. Output is raw AV1 OBU bitstream.
+/// Encode linear VSF RGB f32 → AV1 bytes. Input is `width * height * 3` f32 values in row-major order. Output is raw AV1 OBU bitstream.
 ///
-/// VSF YCbCr derivation:
-///   Y  = (R + 2G + B) / 4
-///   Cb = (B − Y) / 2 + 0.5
-///   Cr = (R − Y) / 2 + 0.5
-/// Chosen for VSF RGB primaries; differs from BT.601/BT.709 luma weights because
-/// those are tuned for the 1931-derived primaries which VSF rejects.
+/// VSF YCbCr derivation: Y  = (R + 2G + B) / 4 Cb = (B − Y) / 2 + 0.5 Cr = (R − Y) / 2 + 0.5 Chosen for VSF RGB primaries; differs from BT.601/BT.709 luma weights because those are tuned for the 1931-derived primaries which VSF rejects.
 fn encode_av1(linear_vsf: &[f32], width: usize, height: usize) -> Result<Vec<u8>, String> {
     use vsf::colour::convert::delinearize_gamma2_f32 as delinearize_gamma2;
 
@@ -521,8 +482,7 @@ fn encode_av1(linear_vsf: &[f32], width: usize, height: usize) -> Result<Vec<u8>
     }
     frame.planes[0].copy_from_raw_u8(&y_plane, width, 1);
 
-    // Cb / Cr planes (4:2:0 — half resolution on each axis, 2×2 block average).
-    // Chroma dims round down; rav1e handles odd source dims by padding internally.
+    // Cb / Cr planes (4:2:0 — half resolution on each axis, 2×2 block average). Chroma dims round down; rav1e handles odd source dims by padding internally.
     let chroma_w = width / 2;
     let chroma_h = height / 2;
     let mut cb_plane = vec![128u8; chroma_w * chroma_h];

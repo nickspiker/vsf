@@ -32,9 +32,7 @@ impl SectionMeta {
 pub struct VsfBuilder {
     version: usize,
     backward_compat: usize,
-    /// Creation timestamp.
-    /// `None` means the device cannot know the current time (no clock, no network) and the header omits the `e` field entirely rather than emitting a fake/zero value — see the README and `pipe_message` schema docs.
-    /// `Some(VsfType::e(…))` writes a standard `eu6` / `ef5` / `ef6` field.
+    /// Creation timestamp. `None` means the device cannot know the current time (no clock, no network) and the header omits the `e` field entirely rather than emitting a fake/zero value — see the README and `pipe_message` schema docs. `Some(VsfType::e(…))` writes a standard `eu6` / `ef5` / `ef6` field.
     creation_time: Option<VsfType>,
     sections: Vec<(VsfSection, SectionMeta)>, // Section with optional crypto metadata
     unboxed: Vec<(String, Vec<u8>, SectionMeta)>, // Name, data, and optional crypto metadata
@@ -49,9 +47,7 @@ pub struct VsfBuilder {
 impl VsfBuilder {
     /// Create a new VSF file builder.
     ///
-    /// Creation time defaults to **absent** — callers should set it explicitly with `creation_time_oscillations(...)` (or `creation_time_nanos(...)` for the legacy float form) before `build()` if they know what time it is.
-    /// Devices without a clock (no RTC, no network, pre-handshake) simply leave it unset; the resulting VSF document omits the `e` field rather than emitting a fake timestamp.
-    /// Every VSF file always includes a BLAKE3 hash for integrity verification (computed during `build()`).
+    /// Creation time defaults to **absent** — callers should set it explicitly with `creation_time_oscillations(...)` (or `creation_time_nanos(...)` for the legacy float form) before `build()` if they know what time it is. Devices without a clock (no RTC, no network, pre-handshake) simply leave it unset; the resulting VSF document omits the `e` field rather than emitting a fake timestamp. Every VSF file always includes a BLAKE3 hash for integrity verification (computed during `build()`).
     pub fn new() -> Self {
         Self {
             version: VSF_VERSION,
@@ -129,13 +125,7 @@ impl VsfBuilder {
     ///
     /// # Example
     /// ```ignore
-    /// let unsigned = VsfBuilder::new()
-    ///     .signed_only(VsfType::ke(pubkey.to_vec()))
-    ///     .build()?;
-    /// let hash = verification::compute_provenance_hash(&unsigned)?;
-    /// let signature = sign_async(&hash, &secret_key).await;
-    /// verification::fill_provenance_hash(&mut unsigned, &hash)?;
-    /// verification::fill_signature(&mut unsigned, &signature)?;
+    /// let unsigned = VsfBuilder::new() .signed_only(VsfType::ke(pubkey.to_vec())) .build()?; let hash = verification::compute_provenance_hash(&unsigned)?; let signature = sign_async(&hash, &secret_key).await; verification::fill_provenance_hash(&mut unsigned, &hash)?; verification::fill_signature(&mut unsigned, &signature)?;
     /// ```
     pub fn signed_only(mut self, pubkey: VsfType) -> Self {
         self.include_file_hash = false;
@@ -153,11 +143,7 @@ impl VsfBuilder {
     ///
     /// # Example
     /// ```ignore
-    /// VsfBuilder::new()
-    ///     .provenance_hash(chunk_hash)
-    ///     .provenance_only()
-    ///     .add_inline_field("pt_ack", vec![VsfType::u3(seq), VsfType::u3(buf)])
-    ///     .build()
+    /// VsfBuilder::new() .provenance_hash(chunk_hash) .provenance_only() .add_inline_field("pt_ack", vec![VsfType::u3(seq), VsfType::u3(buf)]) .build()
     /// ```
     pub fn add_inline_field(mut self, name: impl Into<String>, values: Vec<VsfType>) -> Self {
         self.inline_fields.push((name.into(), values));
@@ -188,12 +174,7 @@ impl VsfBuilder {
     ///
     /// # Example
     /// ```ignore
-    /// let builder = VsfBuilder::new()
-    ///     .add_section_with_meta(
-    ///         "encrypted_data",
-    ///         vec![("payload".to_string(), VsfType::v(b'e', encrypted_bytes))],
-    ///         SectionMeta::new(VsfType::ke(pubkey.to_vec())),
-    ///     );
+    /// let builder = VsfBuilder::new() .add_section_with_meta( "encrypted_data", vec![("payload".to_string(), VsfType::v(b'e', encrypted_bytes))], SectionMeta::new(VsfType::ke(pubkey.to_vec())), );
     /// ```
     pub fn add_section_with_meta(
         mut self,
@@ -209,8 +190,7 @@ impl VsfBuilder {
         self
     }
 
-    /// Add a pre-built VsfSection directly
-    /// Use this when you need fields with multiple values (Vec<VsfType>)
+    /// Add a pre-built VsfSection directly Use this when you need fields with multiple values (Vec<VsfType>)
     pub fn add_section_direct(mut self, section: VsfSection) -> Self {
         self.sections.push((section, SectionMeta::default()));
         self
@@ -311,8 +291,7 @@ impl VsfBuilder {
             + avatar_field_count;
         vsf[header_index].extend_from_slice(&VsfType::n(total_fields).flatten());
 
-        // Create header field definitions (section pointers)
-        // Note: Using VsfField::flatten() for cleaner separator handling
+        // Create header field definitions (section pointers) Note: Using VsfField::flatten() for cleaner separator handling
         let mut field_offset_indices = Vec::new();
         let mut field_size_indices = Vec::new();
 
@@ -341,8 +320,7 @@ impl VsfBuilder {
 
             let field_bytes = field.flatten();
 
-            // Track indices for stabilization loop
-            // We'll need to rebuild entire field when updating
+            // Track indices for stabilization loop We'll need to rebuild entire field when updating
             field_offset_indices.push((i, vsf.len()));
             field_size_indices.push((i, vsf.len()));
 
@@ -371,8 +349,7 @@ impl VsfBuilder {
             vsf.push(field_bytes);
         }
 
-        // Inline metadata fields (no section body, just name + values in header)
-        // Format: (d#{name}:value1,value2,...) - no offset/size/count
+        // Inline metadata fields (no section body, just name + values in header) Format: (d#{name}:value1,value2,...) - no offset/size/count
         for (name, values) in &self.inline_fields {
             let mut field = crate::file_format::VsfField::new(name);
             for value in values {
@@ -381,8 +358,7 @@ impl VsfBuilder {
             vsf.push(field.flatten());
         }
 
-        // Avatar ID metadata-only field (if set)
-        // Format: (davatar_id:hp[hash]) - no offset/size/count, just name + provenance hash
+        // Avatar ID metadata-only field (if set) Format: (davatar_id:hp[hash]) - no offset/size/count, just name + provenance hash
         if let Some(hash) = &self.avatar_hash {
             let field = crate::file_format::VsfField::new("avatar_id")
                 .with_value(VsfType::hp(hash.to_vec()));
@@ -502,8 +478,7 @@ impl VsfBuilder {
             result.extend_from_slice(&data);
         }
 
-        // Now structure is finalized - compute and write crypto primitives
-        // Skip if custom values were provided (they're already in the header)
+        // Now structure is finalized - compute and write crypto primitives Skip if custom values were provided (they're already in the header)
 
         if self.custom_provenance.is_none() {
             // Auto-compute provenance hash
@@ -599,8 +574,7 @@ mod tests {
         assert!(result.is_ok());
         let bytes = result.unwrap();
 
-        // Verify file structure (instead of counting all '[' bytes which may appear in binary data)
-        // Should have magic number
+        // Verify file structure (instead of counting all '[' bytes which may appear in binary data) Should have magic number
         assert_eq!(&bytes[0..3], "RÅ".as_bytes());
 
         // Should have header

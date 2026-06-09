@@ -5,8 +5,7 @@ use vsf::types::BitPackedTensor;
 fn main() -> Result<(), String> {
     println!("Creating minimal barebones RAW image for hex inspection...\n");
 
-    // Tiny 4x4 8-bit image with simple pattern
-    // Create simple gradient: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, A, B, C, D, E, F
+    // Tiny 4x4 8-bit image with simple pattern Create simple gradient: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, A, B, C, D, E, F
     let samples: Vec<u64> = (0..16).collect();
 
     println!("Image data:");

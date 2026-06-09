@@ -11,11 +11,9 @@
 //!
 //! # Examples ∞
 //! ```ignore
-//! use vsf::builders::*;
-//! use vsf::types::*;
+//! use vsf::builders::*; use vsf::types::*;
 //!
-//! // RAW camera image (12-bit sensor)
-//! let raw = raw_image(12, 4096, 3072, pixel_data);
+//! // RAW camera image (12-bit sensor) let raw = raw_image(12, 4096, 3072, pixel_data);
 
 use crate::prelude::*;
 use crate::types::{BitPackedTensor, Tensor, VsfType, WorldCoord};
@@ -158,8 +156,7 @@ impl CalibrationHash {
     }
 }
 
-/// Magic 9: 3×3 colour transformation matrix (Sensor RGB → LMS)
-/// Must contain exactly 9 elements in row-major order
+/// Magic 9: 3×3 colour transformation matrix (Sensor RGB → LMS) Must contain exactly 9 elements in row-major order
 #[derive(Debug, Clone)]
 pub struct Magic9(VsfType);
 
@@ -670,17 +667,11 @@ impl LensBuilder {
 ///
 /// # Example
 /// ```ignore
-/// use vsf::builders::RawImageBuilder;
-/// use vsf::types::BitPackedTensor;
+/// use vsf::builders::RawImageBuilder; use vsf::types::BitPackedTensor;
 ///
-/// let samples: Vec<u64> = vec![2048; 4096 * 3072];
-/// let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
+/// let samples: Vec<u64> = vec![2048; 4096 * 3072]; let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
 ///
-/// let mut raw = RawImageBuilder::new(image);
-/// raw.camera.iso_speed = Some(800.0);
-/// raw.camera.shutter_time_s = Some(1.0 / 60.0);
-/// raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']);
-/// raw.lens.make = Some("Sony".to_string());
+/// let mut raw = RawImageBuilder::new(image); raw.camera.iso_speed = Some(800.0); raw.camera.shutter_time_s = Some(1.0 / 60.0); raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']); raw.lens.make = Some("Sony".to_string());
 ///
 /// let bytes = raw.build()?;
 /// ```
@@ -727,8 +718,7 @@ impl RawImageBuilder {
 ///
 /// # Example
 /// ```ignore
-/// let samples: Vec<u64> = vec![2048; 4096 * 3072]; // 12-bit mid-gray
-/// let raw = raw_image(12, 4096, 3072, samples);
+/// let samples: Vec<u64> = vec![2048; 4096 * 3072]; // 12-bit mid-gray let raw = raw_image(12, 4096, 3072, samples);
 /// ```
 pub fn raw_image(bit_depth: u8, width: usize, height: usize, samples: Vec<u64>) -> VsfType {
     let tensor = BitPackedTensor::pack(bit_depth, vec![width, height], &samples);
@@ -741,11 +731,7 @@ pub fn raw_image(bit_depth: u8, width: usize, height: usize, samples: Vec<u64>) 
 ///
 /// # Example
 /// ```ignore
-/// let track = gps_track(vec![
-///     (40.7128, -74.0060),  // NYC
-///     (51.5074, -0.1278),   // London
-///     (35.6762, 139.6503),  // Tokyo
-/// ]);
+/// let track = gps_track(vec![ (40.7128, -74.0060),  // NYC (51.5074, -0.1278),   // London (35.6762, 139.6503),  // Tokyo ]);
 /// ```
 pub fn gps_track(coords: Vec<(f64, f64)>) -> Vec<WorldCoord> {
     coords
@@ -758,8 +744,7 @@ pub fn gps_track(coords: Vec<(f64, f64)>) -> Vec<WorldCoord> {
 ///
 /// # Example
 /// ```ignore
-/// let nyc = gps_waypoint(40.7128, -74.0060);
-/// let encoded = VsfType::w(nyc).flatten();
+/// let nyc = gps_waypoint(40.7128, -74.0060); let encoded = VsfType::w(nyc).flatten();
 /// ```
 pub fn gps_waypoint(lat: f64, lon: f64) -> WorldCoord {
     WorldCoord::from_lat_lon(lat, lon)
@@ -771,11 +756,7 @@ pub fn gps_waypoint(lat: f64, lon: f64) -> WorldCoord {
 ///
 /// # Example
 /// ```ignore
-/// let (img, loc) = geotagged_photo(
-///     1920, 1080,
-///     rgb_data,
-///     40.7128, -74.0060  // Photo taken in NYC
-/// );
+/// let (img, loc) = geotagged_photo( 1920, 1080, rgb_data, 40.7128, -74.0060  // Photo taken in NYC );
 /// ```
 pub fn geotagged_photo(
     width: usize,
@@ -803,16 +784,10 @@ pub fn geotagged_photo(
 ///
 /// # VSF Structure Created
 /// ```text
-/// RÅ<...n1 or n2 labels...>
-/// [(dimage:p[bitdepth, shape, pixels])    ← Image is FIRST field (self-describing!)
-///  (diso speed:u...)                      ← Optional metadata follows
-///  (dshutter time ns:u...)
-///  (dcfa pattern:t_u3['R','G','G','B'])   ← ASCII characters for readability
-///  (dcolour matrix:t_f6[...])]
+/// RÅ<...n1 or n2 labels...> [(dimage:p[bitdepth, shape, pixels])    ← Image is FIRST field (self-describing!) (diso speed:u...)                      ← Optional metadata follows (dshutter time ns:u...) (dcfa pattern:t_u3['R','G','G','B'])   ← ASCII characters for readability (dcolour matrix:t_f6[...])]
 /// ```
 ///
-/// If TOKEN auth is provided, creates TWO labels: "token auth" and "raw"
-/// If no TOKEN auth, creates ONE label: "raw" only
+/// If TOKEN auth is provided, creates TWO labels: "token auth" and "raw" If no TOKEN auth, creates ONE label: "raw" only
 ///
 /// # Arguments
 /// * `image` - BitPackedTensor (use `BitPackedTensor::pack(bit_depth, shape, samples)`)
@@ -1539,8 +1514,7 @@ mod tests {
         assert_eq!(&bytes[0..3], "RÅ".as_bytes());
         assert_eq!(bytes[3], b'<');
 
-        // Verify file is structured correctly
-        // Should have header + one "raw" section with p type
+        // Verify file is structured correctly Should have header + one "raw" section with p type
         assert!(bytes.len() > 50); // Minimal file should be small
     }
 
@@ -1597,8 +1571,7 @@ mod tests {
 
     #[test]
     fn test_lumis_raw_capture() {
-        // Lumis 12-bit: 4096x3072 = 12,582,912 pixels
-        // Samples are u64 values (0-4095), will be bitpacked by the function
+        // Lumis 12-bit: 4096x3072 = 12,582,912 pixels Samples are u64 values (0-4095), will be bitpacked by the function
         let pixel_count = 4096 * 3072;
         let samples: Vec<u64> = vec![2048; pixel_count]; // Mid-gray
 
@@ -1744,9 +1717,7 @@ mod tests {
         // Find the first section (after header)
         let header_end = raw_bytes.iter().position(|&b| b == b'>').unwrap();
 
-        // In v4 wire format, sections start after header '>'
-        // There may be no preamble, or there may be additional metadata
-        // Just verify we can find a section marker '['
+        // In v4 wire format, sections start after header '>' There may be no preamble, or there may be additional metadata Just verify we can find a section marker '['
         let section_start = raw_bytes[header_end..]
             .iter()
             .position(|&b| b == b'[')

@@ -21,17 +21,9 @@ pub enum LayoutOrder {
 /// ```
 /// use vsf::Tensor;
 ///
-/// // 2D image: 1920×1080 u16 pixels
-/// let img = Tensor::new(
-///     vec![1920, 1080],
-///     vec![0u16; 1920 * 1080]
-/// );
+/// // 2D image: 1920×1080 u16 pixels let img = Tensor::new( vec![1920, 1080], vec![0u16; 1920 * 1080] );
 ///
-/// // 3D tensor: 100×200×3 RGB
-/// let rgb = Tensor::new(
-///     vec![100, 200, 3],
-///     vec![0u8; 100 * 200 * 3]
-/// );
+/// // 3D tensor: 100×200×3 RGB let rgb = Tensor::new( vec![100, 200, 3], vec![0u8; 100 * 200 * 3] );
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor<T> {
@@ -70,19 +62,9 @@ pub struct Vector<T> {
 /// ```
 /// use vsf::StridedTensor;
 ///
-/// // Column-major 1000×1000 matrix
-/// let mat = StridedTensor::new(
-///     vec![1000, 1000],
-///     vec![1, 1000],  // Column-major stride
-///     vec![0.0f64; 1_000_000]
-/// );
+/// // Column-major 1000×1000 matrix let mat = StridedTensor::new( vec![1000, 1000], vec![1, 1000],  // Column-major stride vec![0.0f64; 1_000_000] );
 ///
-/// // 2D slice with custom stride
-/// let slice = StridedTensor::new(
-///     vec![100, 50],
-///     vec![200, 2],  // Every other element
-///     vec![0u8; 10_000]
-/// );
+/// // 2D slice with custom stride let slice = StridedTensor::new( vec![100, 50], vec![200, 2],  // Every other element vec![0u8; 10_000] );
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct StridedTensor<T> {
@@ -184,14 +166,9 @@ impl<T> StridedTensor<T> {
 /// ```
 /// use vsf::BitPackedTensor;
 ///
-/// // Option 1: Generic "just works" (most common)
-/// let samples: Vec<u16> = vec![2048; 1920 * 1080];  // 12-bit values (0-4095)
-/// let tensor = BitPackedTensor::pack(12, vec![1920, 1080], &samples);
-/// let unpacked = tensor.unpack().into_u64();  // Auto-sized, then promoted
+/// // Option 1: Generic "just works" (most common) let samples: Vec<u16> = vec![2048; 1920 * 1080];  // 12-bit values (0-4095) let tensor = BitPackedTensor::pack(12, vec![1920, 1080], &samples); let unpacked = tensor.unpack().into_u64();  // Auto-sized, then promoted
 ///
-/// // Option 2: Explicit type control (when you need guarantees)
-/// let tensor = BitPackedTensor::pack_u16(12, vec![1920, 1080], &samples);
-/// let unpacked: Vec<u16> = tensor.unpack_u16();  // Explicit, no enum
+/// // Option 2: Explicit type control (when you need guarantees) let tensor = BitPackedTensor::pack_u16(12, vec![1920, 1080], &samples); let unpacked: Vec<u16> = tensor.unpack_u16();  // Explicit, no enum
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct BitPackedTensor {
@@ -260,8 +237,7 @@ macro_rules! impl_bitpack {
                 let byte_count = (total_bits + 7) / 8;
                 let mut data = vec![0u8; byte_count];
 
-                // Pack samples MSB-first, big-endian
-                // Only low bit_depth bits are read; high bits are ignored
+                // Pack samples MSB-first, big-endian Only low bit_depth bits are read; high bits are ignored
                 let mut bit_offset = 0;
                 for &sample in samples {
                     let value = sample as $work_t;
@@ -284,9 +260,7 @@ macro_rules! impl_bitpack {
     };
 }
 
-// Generate pack_* methods for each unsigned type
-// Use u64 as work type for u8/u16/u32/u64 (native 64-bit ops)
-// Use u128 for u128 (unavoidably emulated until hardware u256 support)
+// Generate pack_* methods for each unsigned type Use u64 as work type for u8/u16/u32/u64 (native 64-bit ops) Use u128 for u128 (unavoidably emulated until hardware u256 support)
 impl_bitpack!(pack_u8, u8, u64);
 impl_bitpack!(pack_u16, u16, u64);
 impl_bitpack!(pack_u32, u32, u64);
@@ -392,9 +366,7 @@ impl BitPackedTensor {
     ///
     /// # Examples
     /// ```ignore
-    /// // Generic - works with any unsigned type
-    /// let samples: Vec<u16> = vec![2048; 1920 * 1080];
-    /// let tensor = BitPackedTensor::pack(12, vec![1920, 1080], &samples);
+    /// // Generic - works with any unsigned type let samples: Vec<u16> = vec![2048; 1920 * 1080]; let tensor = BitPackedTensor::pack(12, vec![1920, 1080], &samples);
     /// ```
     pub fn pack<T: PackableUnsigned>(bit_depth: u8, shape: Vec<usize>, samples: &[T]) -> Self {
         T::pack_samples(bit_depth, shape, samples)
@@ -413,9 +385,7 @@ impl BitPackedTensor {
     ///
     /// # Examples
     /// ```ignore
-    /// let tensor = BitPackedTensor::pack(12, vec![100, 100], &samples);
-    /// // Auto-sized, then promoted to u64
-    /// let unpacked = tensor.unpack().into_u64();
+    /// let tensor = BitPackedTensor::pack(12, vec![100, 100], &samples); // Auto-sized, then promoted to u64 let unpacked = tensor.unpack().into_u64();
     /// ```
     pub fn unpack(&self) -> UnpackedSamples {
         let bits = self.bit_depth as usize;

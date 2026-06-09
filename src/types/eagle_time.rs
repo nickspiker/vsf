@@ -153,8 +153,7 @@ impl EagleTime {
     pub fn to_datetime_opt(&self) -> Option<DateTime<Utc>> {
         let eagle_epoch = Utc.with_ymd_and_hms(1969, 7, 20, 20, 17, 40).unwrap();
         let seconds = self.to_seconds_f64();
-        // Build Duration from i64 seconds + i64 nanoseconds so we don't need std::time::Duration::from_secs_f64.
-        // Splitting also avoids the f64×1e9 overflow that would happen for values >~9.2e9 s.
+        // Build Duration from i64 seconds + i64 nanoseconds so we don't need std::time::Duration::from_secs_f64. Splitting also avoids the f64×1e9 overflow that would happen for values >~9.2e9 s.
         let abs = seconds.abs();
         let int_secs = abs.trunc() as i64;
         let frac_nanos = (abs.fract() * 1_000_000_000.0).round() as i64;
@@ -301,9 +300,7 @@ pub fn datetime_to_eagle_time(dt: DateTime<Utc>) -> EagleTime {
 
 /// Get current Eagle Time as oscillation count
 ///
-/// Returns the number of hydrogen-1 hyperfine oscillations since the Apollo 11 landing at picosecond precision.
-/// Only available with the `std` feature, because chrono's `Utc::now()` requires `std::time::SystemTime`.
-/// `no_std` callers must read their own clock (QTIMER, nunc-time, etc) and call `EagleTime::from_oscillations`.
+/// Returns the number of hydrogen-1 hyperfine oscillations since the Apollo 11 landing at picosecond precision. Only available with the `std` feature, because chrono's `Utc::now()` requires `std::time::SystemTime`. `no_std` callers must read their own clock (QTIMER, nunc-time, etc) and call `EagleTime::from_oscillations`.
 #[cfg(feature = "std")]
 pub fn eagle_time_now() -> EagleTime {
     datetime_to_eagle_time(Utc::now())
@@ -311,8 +308,7 @@ pub fn eagle_time_now() -> EagleTime {
 
 /// Get current Eagle Time as i64 oscillations (704ps precision)
 ///
-/// Returns the oscillation count since Apollo 11 landing. Preferred method for timestamps - preserves full precision.
-/// `std`-only because the underlying clock comes from `chrono::Utc::now()`.
+/// Returns the oscillation count since Apollo 11 landing. Preferred method for timestamps - preserves full precision. `std`-only because the underlying clock comes from `chrono::Utc::now()`.
 #[cfg(feature = "std")]
 pub fn eagle_time_oscillations() -> i64 {
     eagle_time_now().oscillations().unwrap_or(0)

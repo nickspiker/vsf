@@ -69,14 +69,12 @@ const VSF_RED_NM: f64 = 703.0;
 const VSF_GREEN_NM: f64 = 523.0;
 const VSF_BLUE_NM: f64 = 462.0;
 
-/// Rec.2020 primaries (wavelengths in nm)
-/// ITU-R BT.2020 specifies these monochromatic primaries
+/// Rec.2020 primaries (wavelengths in nm) ITU-R BT.2020 specifies these monochromatic primaries
 const REC2020_RED_NM: f64 = 630.0;
 const REC2020_GREEN_NM: f64 = 532.0;
 const REC2020_BLUE_NM: f64 = 467.0;
 
-/// sRGB primaries (CIE xy chromaticity coordinates with D65 white point)
-/// These are the standard sRGB primaries from IEC 61966-2-1:1999
+/// sRGB primaries (CIE xy chromaticity coordinates with D65 white point) These are the standard sRGB primaries from IEC 61966-2-1:1999
 const SRGB_RED_XY: [f64; 2] = [0.6400, 0.3300];
 const SRGB_GREEN_XY: [f64; 2] = [0.3000, 0.6000];
 const SRGB_BLUE_XY: [f64; 2] = [0.1500, 0.0600];
@@ -108,8 +106,7 @@ struct ObserverConfig {
     normalize_channels: bool,
 }
 
-/// Parse Stockman & Sharpe 2000 10° cone fundamentals from log10 format
-/// Just converts from log10 to linear - normalization happens after interpolation
+/// Parse Stockman & Sharpe 2000 10° cone fundamentals from log10 format Just converts from log10 to linear - normalization happens after interpolation
 fn parse_lms_data() -> Vec<[f64; 3]> {
     let mut lms_values = Vec::with_capacity(SS2000_SAMPLES);
 
@@ -131,8 +128,7 @@ fn parse_lms_data() -> Vec<[f64; 3]> {
     lms_values
 }
 
-/// Linear interpolation between two wavelength samples in log space
-/// For data outside the range, extrapolate linearly in log space
+/// Linear interpolation between two wavelength samples in log space For data outside the range, extrapolate linearly in log space
 fn interpolate_lms_log(lms_data_log: &[[f64; 3]], wavelength_nm: f64) -> [f64; 3] {
     let index_f = (wavelength_nm - SS2000_START_NM) / SS2000_STEP_NM;
 
@@ -399,12 +395,9 @@ fn calculate_illuminant_e_lms(lms_data: &[[f64; 3]]) -> [f64; 3] {
     [l_sum, m_sum, s_sum]
 }
 
-/// Build VSF RGB → lms transformation matrix using geometric mean normalization
-/// Each ROW is one primary's geometric mean normalized [l, m, s] triplet
-/// Uses normalized 1nm data (uppercase LMS where each channel sums to 1.0)
+/// Build VSF RGB → lms transformation matrix using geometric mean normalization Each ROW is one primary's geometric mean normalized [l, m, s] triplet Uses normalized 1nm data (uppercase LMS where each channel sums to 1.0)
 fn build_vsf_to_lms_matrix(lms_1nm: &[f64]) -> [f64; 9] {
-    // Extract LMS values at VSF primaries from 1nm data
-    // Data starts at 390nm, so index = wavelength - 390
+    // Extract LMS values at VSF primaries from 1nm data Data starts at 390nm, so index = wavelength - 390
     let red_idx = (VSF_RED_NM as usize - 390) * 3;
     let green_idx = (VSF_GREEN_NM as usize - 390) * 3;
     let blue_idx = (VSF_BLUE_NM as usize - 390) * 3;
@@ -438,8 +431,7 @@ fn build_vsf_to_lms_matrix(lms_1nm: &[f64]) -> [f64; 9] {
              red_lms[2] + green_lms[2] + blue_lms[2],
              red_lms[0] + red_lms[1] + red_lms[2] + green_lms[0] + green_lms[1] + green_lms[2] + blue_lms[0] + blue_lms[1] + blue_lms[2]);
 
-    // Build unscaled matrix in column-major format
-    // Each column is a primary's full [L, M, S] response
+    // Build unscaled matrix in column-major format Each column is a primary's full [L, M, S] response
     let unscaled = [
         red_lms[0], red_lms[1], red_lms[2],         // Column 0: Red primary's [L, M, S]
         green_lms[0], green_lms[1], green_lms[2],   // Column 1: Green primary's [L, M, S]
@@ -449,17 +441,14 @@ fn build_vsf_to_lms_matrix(lms_1nm: &[f64]) -> [f64; 9] {
     // Invert the matrix
     let unscaled_inv = invert_matrix_3x3(&unscaled);
 
-    // Multiply our target Illuminant E [1,1,1] thru the INVERSE
-    // This tells us what RGB input we need to produce lms=[1,1,1]
+    // Multiply our target Illuminant E [1,1,1] thru the INVERSE This tells us what RGB input we need to produce lms=[1,1,1]
     let illum_e = [1.0, 1.0, 1.0];
     let rgb_scale_factors = apply_matrix_3x3(&unscaled_inv, &illum_e);
 
     println!("// RGB brightness needed to produce Illuminant E:");
     println!("//   RGB = [{}, {}, {}]", rgb_scale_factors[0], rgb_scale_factors[1], rgb_scale_factors[2]);
 
-    // Scale each column (primary) by MULTIPLYING by the corresponding RGB scaling factor
-    // This ensures equal brightness primaries (RGB=[1,1,1]) produce Illuminant E
-    // Matrix is in column-major format, so each group of 3 values is a PRIMARY's full LMS response
+    // Scale each column (primary) by MULTIPLYING by the corresponding RGB scaling factor This ensures equal brightness primaries (RGB=[1,1,1]) produce Illuminant E Matrix is in column-major format, so each group of 3 values is a PRIMARY's full LMS response
     let scaled = [
         red_lms[0] * rgb_scale_factors[0], red_lms[1] * rgb_scale_factors[0], red_lms[2] * rgb_scale_factors[0],        // Red primary scaled
         green_lms[0] * rgb_scale_factors[1], green_lms[1] * rgb_scale_factors[1], green_lms[2] * rgb_scale_factors[1],  // Green primary scaled
@@ -485,12 +474,9 @@ fn format_matrix(m: &[f64; 9], name: &str) -> String {
     )
 }
 
-/// Build VSF RGB → XYZ transformation matrix
-/// Each ROW is one primary's normalized [x, y, z] triplet (sum normalization)
-/// Uses normalized 1nm data where Y (luminance) is scaled to peak at 1.0
+/// Build VSF RGB → XYZ transformation matrix Each ROW is one primary's normalized [x, y, z] triplet (sum normalization) Uses normalized 1nm data where Y (luminance) is scaled to peak at 1.0
 fn build_vsf_to_xyz_matrix(xyz_1nm: &[f64]) -> [f64; 9] {
-    // Extract XYZ values at VSF primaries from 1nm data
-    // Data starts at 380nm, so index = wavelength - 380
+    // Extract XYZ values at VSF primaries from 1nm data Data starts at 380nm, so index = wavelength - 380
     let red_idx = (VSF_RED_NM as usize - 380) * 3;
     let green_idx = (VSF_GREEN_NM as usize - 380) * 3;
     let blue_idx = (VSF_BLUE_NM as usize - 380) * 3;
@@ -529,16 +515,14 @@ fn build_vsf_to_xyz_matrix(xyz_1nm: &[f64]) -> [f64; 9] {
     // Invert the matrix
     let unscaled_inv = invert_matrix_3x3(&unscaled);
 
-    // Multiply our target Illuminant E [1,1,1] thru the INVERSE
-    // This tells us what RGB input we need to produce XYZ=[1,1,1]
+    // Multiply our target Illuminant E [1,1,1] thru the INVERSE This tells us what RGB input we need to produce XYZ=[1,1,1]
     let illum_e = [1.0, 1.0, 1.0];
     let rgb_scale_factors = apply_matrix_3x3(&unscaled_inv, &illum_e);
 
     println!("// RGB brightness needed to produce Illuminant E in XYZ:");
     println!("//   RGB = [{}, {}, {}]", rgb_scale_factors[0], rgb_scale_factors[1], rgb_scale_factors[2]);
 
-    // Scale each column (primary) by multiplying by the corresponding RGB scaling factor
-    // Matrix is in column-major format, so each column (group of 3 consecutive values) is a PRIMARY
+    // Scale each column (primary) by multiplying by the corresponding RGB scaling factor Matrix is in column-major format, so each column (group of 3 consecutive values) is a PRIMARY
     let scaled = [
         red_xyz[0] * rgb_scale_factors[0], red_xyz[1] * rgb_scale_factors[0], red_xyz[2] * rgb_scale_factors[0],  // Red column scaled
         green_xyz[0] * rgb_scale_factors[1], green_xyz[1] * rgb_scale_factors[1], green_xyz[2] * rgb_scale_factors[1],  // Green column scaled
@@ -554,18 +538,14 @@ fn build_vsf_to_xyz_matrix(xyz_1nm: &[f64]) -> [f64; 9] {
     scaled
 }
 
-/// Build RGB → XYZ transformation matrix from xy chromaticity coordinates
-/// Uses CIE xy coordinates with D65 white point
+/// Build RGB → XYZ transformation matrix from xy chromaticity coordinates Uses CIE xy coordinates with D65 white point
 fn build_rgb_from_xy_to_xyz_matrix(
     red_xy: [f64; 2],
     green_xy: [f64; 2],
     blue_xy: [f64; 2],
     space_name: &str,
 ) -> [f64; 9] {
-    // Convert xy to XYZ (assume Y=1 for each primary)
-    // X = x * Y / y
-    // Y = Y (normalized to 1)
-    // Z = (1 - x - y) * Y / y
+    // Convert xy to XYZ (assume Y=1 for each primary) X = x * Y / y Y = Y (normalized to 1) Z = (1 - x - y) * Y / y
 
     let red_XYZ = [red_xy[0] / red_xy[1], 1.0, (1.0 - red_xy[0] - red_xy[1]) / red_xy[1]];
     let green_XYZ = [green_xy[0] / green_xy[1], 1.0, (1.0 - green_xy[0] - green_xy[1]) / green_xy[1]];
@@ -598,8 +578,7 @@ fn build_rgb_from_xy_to_xyz_matrix(
     println!("// RGB brightness needed to produce D65 white point in XYZ:");
     println!("//   RGB = [{}, {}, {}]", rgb_scale_factors[0], rgb_scale_factors[1], rgb_scale_factors[2]);
 
-    // Scale each column (primary) by multiplying by the corresponding RGB scaling factor
-    // Matrix is in column-major format, so each column (group of 3 consecutive values) is a PRIMARY
+    // Scale each column (primary) by multiplying by the corresponding RGB scaling factor Matrix is in column-major format, so each column (group of 3 consecutive values) is a PRIMARY
     let scaled = [
         red_XYZ[0] * rgb_scale_factors[0], red_XYZ[1] * rgb_scale_factors[0], red_XYZ[2] * rgb_scale_factors[0],  // Red column scaled
         green_XYZ[0] * rgb_scale_factors[1], green_XYZ[1] * rgb_scale_factors[1], green_XYZ[2] * rgb_scale_factors[1],  // Green column scaled
@@ -615,11 +594,9 @@ fn build_rgb_from_xy_to_xyz_matrix(
     scaled
 }
 
-/// Build Rec.2020 RGB → XYZ transformation matrix
-/// Uses monochromatic primaries (630nm, 532nm, 467nm) with D65 white point
+/// Build Rec.2020 RGB → XYZ transformation matrix Uses monochromatic primaries (630nm, 532nm, 467nm) with D65 white point
 fn build_rec2020_to_xyz_matrix(xyz_1nm: &[f64]) -> [f64; 9] {
-    // Extract XYZ values at Rec.2020 primaries from 1nm data
-    // Data starts at 380nm, so index = wavelength - 380
+    // Extract XYZ values at Rec.2020 primaries from 1nm data Data starts at 380nm, so index = wavelength - 380
     let red_idx = (REC2020_RED_NM as usize - 380) * 3;
     let green_idx = (REC2020_GREEN_NM as usize - 380) * 3;
     let blue_idx = (REC2020_BLUE_NM as usize - 380) * 3;
@@ -657,16 +634,14 @@ fn build_rec2020_to_xyz_matrix(xyz_1nm: &[f64]) -> [f64; 9] {
     // Invert the matrix
     let unscaled_inv = invert_matrix_3x3(&unscaled);
 
-    // D65 white point in XYZ (normalized so Y=1.0)
-    // CIE Standard Illuminant D65
+    // D65 white point in XYZ (normalized so Y=1.0) CIE Standard Illuminant D65
     let d65_xyz = [0.95047, 1.0, 1.08883];
     let rgb_scale_factors = apply_matrix_3x3(&unscaled_inv, &d65_xyz);
 
     println!("// RGB brightness needed to produce D65 white point in XYZ:");
     println!("//   RGB = [{}, {}, {}]", rgb_scale_factors[0], rgb_scale_factors[1], rgb_scale_factors[2]);
 
-    // Scale each column (primary) by multiplying by the corresponding RGB scaling factor
-    // Matrix is in column-major format, so each column (group of 3 consecutive values) is a PRIMARY
+    // Scale each column (primary) by multiplying by the corresponding RGB scaling factor Matrix is in column-major format, so each column (group of 3 consecutive values) is a PRIMARY
     let scaled = [
         red_xyz[0] * rgb_scale_factors[0], red_xyz[1] * rgb_scale_factors[0], red_xyz[2] * rgb_scale_factors[0],  // Red column scaled
         green_xyz[0] * rgb_scale_factors[1], green_xyz[1] * rgb_scale_factors[1], green_xyz[2] * rgb_scale_factors[1],  // Green column scaled
@@ -682,8 +657,7 @@ fn build_rec2020_to_xyz_matrix(xyz_1nm: &[f64]) -> [f64; 9] {
     scaled
 }
 
-/// Generate 1nm-spaced XYZ data from 380nm to 780nm (401 samples)
-/// Interpolates linearly, keeps raw CIE 1931 2° values (Y peaks at ~1.0)
+/// Generate 1nm-spaced XYZ data from 380nm to 780nm (401 samples) Interpolates linearly, keeps raw CIE 1931 2° values (Y peaks at ~1.0)
 fn generate_1nm_xyz_data() -> Vec<f64> {
     let xyz_data = parse_xyz_data();
     let mut xyz_1nm = Vec::new();
@@ -700,8 +674,7 @@ fn generate_1nm_xyz_data() -> Vec<f64> {
     xyz_1nm
 }
 
-/// Generate 1nm-spaced LMS data from 390nm to 830nm (441 samples)
-/// Interpolates in log space, then normalizes so each channel sums to 1.0
+/// Generate 1nm-spaced LMS data from 390nm to 830nm (441 samples) Interpolates in log space, then normalizes so each channel sums to 1.0
 fn generate_1nm_lms_data() -> Vec<f64> {
     // First, interpolate to 1nm spacing in log space
     let mut lms_1nm = Vec::new();
@@ -804,8 +777,7 @@ fn write_spectral_constants(vsf_to_lms: &[f64; 9], lms_to_vsf: &[f64; 9], lms_1n
     let content = format!(
 r#"//! Spectral colourspace transformation matrices and constants
 //!
-//! **Auto-generated - do not edit directly!**
-//! Generated by tools/src/bin/generate_constants.rs
+//! **Auto-generated - do not edit directly!** Generated by tools/src/bin/generate_constants.rs
 //!
 //! All matrices in this module are derived from wavelength-based primaries and observer models (Stockman & Sharpe 2000 10° cone fundamentals). These are independent of the CIE 1931 xy coordinate system.
 //!
@@ -841,8 +813,7 @@ pub const LMS2PHOTOPIC: [f32; 3] = [
     0.0,  // s cone weight (S-cones don't contribute to photopic luminance)
 ];
 
-// Rec.2020 transformation matrices are now in the rec2020 module
-// See: src/colour/rec2020/constants.rs
+// Rec.2020 transformation matrices are now in the rec2020 module See: src/colour/rec2020/constants.rs
 "#,
         format_lms_1nm_array(lms_1nm),
         format_matrix(vsf_to_lms, "VSF_RGB2LMS"),
@@ -899,8 +870,7 @@ fn write_xyz_constants(
     let content = format!(
 r#"//! Legacy colourspace transformation matrices and constants
 //!
-//! **Auto-generated - do not edit directly!**
-//! Generated by tools/src/bin/generate_constants.rs
+//! **Auto-generated - do not edit directly!** Generated by tools/src/bin/generate_constants.rs
 //!
 //! # ⚠️ Legacy Warning
 //!
@@ -987,8 +957,7 @@ fn write_rec2020_constants(vsf_to_rec2020: &[f64; 9], rec2020_to_vsf: &[f64; 9])
     let content = format!(
 r#"//! Rec.2020 colourspace transformation matrices
 //!
-//! **Auto-generated - do not edit directly!**
-//! Generated by tools/src/bin/generate_constants.rs
+//! **Auto-generated - do not edit directly!** Generated by tools/src/bin/generate_constants.rs
 //!
 //! ITU-R BT.2020 (Rec.2020) is a wide colour gamut standard for UHDTV. These matrices use monochromatic primaries (630nm, 532nm, 467nm) with D65 white point.
 

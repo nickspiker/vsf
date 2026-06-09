@@ -5,42 +5,25 @@
 //! # Example: IntoVsfType (Rust → VsfType)
 //!
 //! ```rust
-//! use vsf::schema::IntoVsfType;
-//! use vsf::VsfType;
+//! use vsf::schema::IntoVsfType; use vsf::VsfType;
 //!
-//! // Automatic conversion from Rust primitives
-//! let u: VsfType = 42u32.into_vsf_type();          // VsfType::u5(42)
-//! let i: VsfType = (-100i32).into_vsf_type();      // VsfType::i5(-100)
-//! let f: VsfType = 3.14f64.into_vsf_type();        // VsfType::f6(3.14)
-//! let b: VsfType = true.into_vsf_type();           // VsfType::u0(true)
-//! let s: VsfType = "hello".into_vsf_type();        // VsfType::x("hello")
+//! // Automatic conversion from Rust primitives let u: VsfType = 42u32.into_vsf_type();          // VsfType::u5(42) let i: VsfType = (-100i32).into_vsf_type();      // VsfType::i5(-100) let f: VsfType = 3.14f64.into_vsf_type();        // VsfType::f6(3.14) let b: VsfType = true.into_vsf_type();           // VsfType::u0(true) let s: VsfType = "hello".into_vsf_type();        // VsfType::x("hello")
 //!
-//! // Used automatically in SectionBuilder::set()
-//! let section = schema.builder()
-//!     .set("count", 42u32)?      // Calls into_vsf_type() internally
-//!     .set("name", "test")?      // Calls into_vsf_type() internally
-//!     .build()?;
+//! // Used automatically in SectionBuilder::set() let section = schema.builder() .set("count", 42u32)?      // Calls into_vsf_type() internally .set("name", "test")?      // Calls into_vsf_type() internally .build()?;
 //! ```
 //!
 //! # Example: FromVsfType (VsfType → Rust)
 //!
 //! ```rust
-//! use vsf::schema::FromVsfType;
-//! use vsf::VsfType;
+//! use vsf::schema::FromVsfType; use vsf::VsfType;
 //!
 //! let vsf = VsfType::u5(42);
 //!
-//! // Extract to specific Rust type
-//! let n: u32 = u32::from_vsf_type(&vsf)?;          // Ok(42)
-//! let n2: u64 = u64::from_vsf_type(&vsf)?;         // Ok(42u64) - cross-size works
+//! // Extract to specific Rust type let n: u32 = u32::from_vsf_type(&vsf)?;          // Ok(42) let n2: u64 = u64::from_vsf_type(&vsf)?;         // Ok(42u64) - cross-size works
 //!
-//! // Type mismatch produces clear error
-//! let vsf = VsfType::f6(3.14);
-//! let result = u32::from_vsf_type(&vsf);
-//! assert!(result.is_err());  // Cannot convert f6 to u32
+//! // Type mismatch produces clear error let vsf = VsfType::f6(3.14); let result = u32::from_vsf_type(&vsf); assert!(result.is_err());  // Cannot convert f6 to u32
 //!
-//! // Used automatically in SectionBuilder::get_value()
-//! let count: u32 = section.get_value("count")?;    // Calls from_vsf_type() internally
+//! // Used automatically in SectionBuilder::get_value() let count: u32 = section.get_value("count")?;    // Calls from_vsf_type() internally
 //! ```
 //!
 //! # Cross-Size Conversions
@@ -48,17 +31,11 @@
 //! The traits support automatic widening conversions with bounds checking:
 //!
 //! ```rust
-//! use vsf::schema::FromVsfType;
-//! use vsf::VsfType;
+//! use vsf::schema::FromVsfType; use vsf::VsfType;
 //!
-//! // Widen u8 → u32 (always safe)
-//! let small = VsfType::u3(100u8);
-//! let big: u32 = u32::from_vsf_type(&small)?;      // Ok(100u32)
+//! // Widen u8 → u32 (always safe) let small = VsfType::u3(100u8); let big: u32 = u32::from_vsf_type(&small)?;      // Ok(100u32)
 //!
-//! // Narrow u32 → u8 (bounds checked)
-//! let vsf = VsfType::u5(1000u32);
-//! let result = u8::from_vsf_type(&vsf);
-//! assert!(result.is_err());  // 1000 doesn't fit in u8
+//! // Narrow u32 → u8 (bounds checked) let vsf = VsfType::u5(1000u32); let result = u8::from_vsf_type(&vsf); assert!(result.is_err());  // 1000 doesn't fit in u8
 //! ```
 
 use crate::prelude::*;
@@ -391,30 +368,23 @@ impl IntoVsfType for &str {
 ///
 /// # Example
 /// ```
-/// use vsf::schema::{AsciiText, IntoVsfType};
-/// use vsf::VsfType;
+/// use vsf::schema::{AsciiText, IntoVsfType}; use vsf::VsfType;
 ///
-/// // Create ASCII text explicitly
-/// let ascii = AsciiText::new("hello");
-/// let vsf_value = ascii.into_vsf_type();  // VsfType::a("hello")
+/// // Create ASCII text explicitly let ascii = AsciiText::new("hello"); let vsf_value = ascii.into_vsf_type();  // VsfType::a("hello")
 ///
 /// // Use in schema builder
 /// # use vsf::schema::{SectionSchema, FieldSchema, TypeConstraint};
 /// # let schema = SectionSchema::new("test")
 /// #     .add_field(FieldSchema::new("name", TypeConstraint::AsciiText));
-/// let section = schema.builder()
-///     .set("name", AsciiText::new("nick"))?
-///     .build()?;
+/// let section = schema.builder() .set("name", AsciiText::new("nick"))? .build()?;
 /// # Ok::<(), vsf::schema::ValidationError>(())
 /// ```
 ///
 /// Contrast with regular strings that create UTF-8 text:
 /// ```
-/// use vsf::schema::IntoVsfType;
-/// use vsf::VsfType;
+/// use vsf::schema::IntoVsfType; use vsf::VsfType;
 ///
-/// let utf8 = "hello".into_vsf_type();     // VsfType::x("hello")
-/// let ascii = vsf::schema::AsciiText::new("hello").into_vsf_type();  // VsfType::a("hello")
+/// let utf8 = "hello".into_vsf_type();     // VsfType::x("hello") let ascii = vsf::schema::AsciiText::new("hello").into_vsf_type();  // VsfType::a("hello")
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AsciiText(pub String);

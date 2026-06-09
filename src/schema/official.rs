@@ -5,8 +5,7 @@
 use super::constraint::TypeConstraint;
 use super::section::SectionSchema;
 
-/// Create image metadata schema
-/// Common fields for image data sections
+/// Create image metadata schema Common fields for image data sections
 pub fn image_schema() -> SectionSchema {
     SectionSchema::new("image")
         .description("Image capture metadata")
@@ -21,8 +20,7 @@ pub fn image_schema() -> SectionSchema {
         .field("aperture", TypeConstraint::AnyFloat) // f-number
 }
 
-/// Create camera configuration schema
-/// Settings and calibration for camera hardware
+/// Create camera configuration schema Settings and calibration for camera hardware
 pub fn camera_schema() -> SectionSchema {
     SectionSchema::new("camera")
         .description("Camera hardware configuration")
@@ -37,8 +35,7 @@ pub fn camera_schema() -> SectionSchema {
         .field("timestamp", TypeConstraint::AnyEagleTime)
 }
 
-/// Create audio stream schema
-/// Metadata for audio data
+/// Create audio stream schema Metadata for audio data
 pub fn audio_schema() -> SectionSchema {
     SectionSchema::new("audio")
         .description("Audio stream metadata")
@@ -50,8 +47,7 @@ pub fn audio_schema() -> SectionSchema {
         .field("timestamp", TypeConstraint::AnyEagleTime)
 }
 
-/// Create network peer schema
-/// Information about network peers for P2P protocols
+/// Create network peer schema Information about network peers for P2P protocols
 pub fn network_peer_schema() -> SectionSchema {
     SectionSchema::new("network_peer")
         .description("Network peer information")
@@ -63,8 +59,7 @@ pub fn network_peer_schema() -> SectionSchema {
         .field("protocol_version", TypeConstraint::AnyUnsigned)
 }
 
-/// Create announce schema for FGTW bootstrap
-/// Used in challenge-response protocol
+/// Create announce schema for FGTW bootstrap Used in challenge-response protocol
 pub fn announce_schema() -> SectionSchema {
     SectionSchema::new("announce")
         .description("FGTW bootstrap announce message")
@@ -80,16 +75,14 @@ pub fn announce_schema() -> SectionSchema {
 
 /// `pipe_message` — every wire packet on a PIPE link is a complete VSF document with this single section.
 ///
-/// One registry entry covers both directions of the protocol — USB transfer direction (IN vs OUT) already tells you who sent it, and the `op` field carries the verb (`ping`/`pong`/`info`/`uptime`/`random`/`bootsel`/`reset`/`err`).
-/// Section body is the standard small-section shape `[(field)(field)…]`; section name lives in the TOC entry only (bridge packets are <200 B so we are well under the 1 MB threshold that would require the body to repeat name+count+length).
+/// One registry entry covers both directions of the protocol — USB transfer direction (IN vs OUT) already tells you who sent it, and the `op` field carries the verb (`ping`/`pong`/`info`/`uptime`/`random`/`bootsel`/`reset`/`err`). Section body is the standard small-section shape `[(field)(field)…]`; section name lives in the TOC entry only (bridge packets are <200 B so we are well under the 1 MB threshold that would require the body to repeat name+count+length).
 ///
 /// Field roles by direction:
 ///
 /// * host → device (cmd): `op` ∈ {`ping`, `info`, `uptime`, `random`, `bootsel`, `reset`}, `id` (correlation id echoed back), optionally `n` (numeric arg, e.g. byte count for `random`).
 /// * device → host (resp): always `id` (echoes cmd's id). On success: `op` = `pong` for ping; info-fields {`name`, `ver`, `did`, `clk`, `up`} for info; `ms` for uptime; `data` for random. On unknown op: `err` carries the error code string.
 ///
-/// All fields are optional; the schema accepts any subset and protocol semantics are field-driven.
-/// Vendors define what fields make sense for their device inside the standard "pipe_message" envelope.
+/// All fields are optional; the schema accepts any subset and protocol semantics are field-driven. Vendors define what fields make sense for their device inside the standard "pipe_message" envelope.
 pub fn pipe_message_schema() -> SectionSchema {
     SectionSchema::new("pipe_message")
         .field("op", TypeConstraint::AsciiText)
@@ -103,14 +96,11 @@ pub fn pipe_message_schema() -> SectionSchema {
         .field("up", TypeConstraint::AnyUnsigned)
         .field("ms", TypeConstraint::AnyUnsigned)
         .field("data", TypeConstraint::Wrapped(b'b'))
-        // pipe-bridge: PIPE comms state from the most recent fast_sync/wire_mirror.
-        // 0 = unlocked / never synced, 1 = lock held (256+ consecutive in-threshold
-        // edges per polarity, well within the proven 2^12-slot stability margin).
+        // pipe-bridge: PIPE comms state from the most recent fast_sync/wire_mirror. 0 = unlocked / never synced, 1 = lock held (256+ consecutive in-threshold edges per polarity, well within the proven 2^12-slot stability margin).
         .field("pipe", TypeConstraint::AnyUnsigned)
 }
 
-/// Register all official schemas.
-/// Gated on `registry` because `SchemaRegistry` itself is — see `schema/mod.rs`.
+/// Register all official schemas. Gated on `registry` because `SchemaRegistry` itself is — see `schema/mod.rs`.
 #[cfg(feature = "registry")]
 pub fn register_official_schemas(registry: &super::registry::SchemaRegistry) {
     registry.register(image_schema());
