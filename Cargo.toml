@@ -1,6 +1,6 @@
 [package]
 name = "vsf"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2021"
 authors = ["Nick Spiker <nick@verichrome.cc>"]
 description = "Versatile Storage Format"
@@ -85,7 +85,8 @@ registry = ["dep:spin"]
 crypto = ["ed25519-dalek", "x25519-dalek", "rand", "chacha20poly1305", "aes-gcm"]
 spirix = ["dep:spirix"]
 inspect = ["std", "registry", "dep:colored"]
-text = ["std", "registry", "dep:clap", "inspect"]
+text-encode = ["std"]
+text = ["std", "registry", "dep:clap", "inspect", "text-encode"]
 # image-tools: enable the vsfimg binary (image format decode + ICC + rav1e AV1 encode). Heavy deps — only pulled in when building image conversion tooling.
 image-tools = [
     "std",
