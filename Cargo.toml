@@ -9,15 +9,25 @@ repository = "https://github.com/nickspiker/vsf"
 keywords = ["binary", "serialization", "storage", "data-format"]
 categories = ["encoding", "data-structures"]
 exclude = [
-    "*.rlib",          # Build artifacts
-    "*.vsf",           # Example VSF files
-    "vsf.png",         # Logo (GitHub only, not needed in package - 1.5MB)
-    "target/",         # Build directory
-    "tools/",          # Code generation tools
+    "*.rlib",            # Build artifacts
+    "*.vsf",             # Example VSF files
+    "vsf.png",           # Logo (GitHub only, not needed in package - 1.5MB)
+    "target/",           # Build directory
+    "tools/",            # Code generation tools
+    "frequencies.bin",   # 8.5MB corpus — only needed by offline codebook regen, not at runtime
+    "test_determinism",  # Local debug artifacts (compiled binary + source)
+    "test_determinism.rs",
 ]
-# frequencies.bin (~8.5MB) AND huffman_codes.bin are vendored — verified by BLAKE3 in build.rs.
-# Both must be byte-identical across every published version: the Huffman codebook IS the wire
-# format for VsfType::x, and any drift silently bifurcates the identity namespace via ihi.
+# huffman_codes.bin (~8.5MB) is vendored in the published crate — verified by BLAKE3 in
+# build.rs at every build. It IS the wire format for VsfType::x; any drift silently
+# bifurcates the identity namespace via ihi.
+#
+# frequencies.bin is the input corpus from which huffman_codes.bin is derived. It's NOT
+# shipped in the published crate (size budget + the corpus is the SOURCE, not the RUNTIME
+# artifact). build.rs verifies it when present (developers from git clone) and skips the
+# check when absent (end-users from crates.io). To regenerate the codebook, clone the
+# repo, edit frequencies.bin, run tools/frequency-analyzer/, update both BLAKE3 constants
+# in build.rs, and bump vsf MAJOR.
 
 [[bin]]
 name = "vsfinfo"
