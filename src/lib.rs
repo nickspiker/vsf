@@ -340,7 +340,8 @@ pub mod crypto_algorithms;
 // Verification functions for hashing and signing VSF files
 pub mod verification;
 
-// Handle identity: plaintext → proof-of-work → public ID
+// Handle identity: plaintext → proof-of-work → public ID (requires ihi, gated to break cycle: ihi depends on vsf for text-encode)
+#[cfg(feature = "handle")]
 pub mod handle;
 
 // Decryption utilities
