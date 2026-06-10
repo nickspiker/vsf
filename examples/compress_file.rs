@@ -15,20 +15,21 @@ fn main() {
         utf8_size as f64 / 1024.
     );
 
-    // Count ASCII vs Unicode and total chars
+    // Count ASCII vs Unicode and total chars (pre-NFC)
     let ascii_count = text.chars().filter(|c| c.is_ascii()).count();
     let unicode_count = text.chars().filter(|c| !c.is_ascii()).count();
-    let char_count = text.chars().count();
     println!(
         "Characters: {} total ({} ASCII, {} Unicode)",
-        char_count, ascii_count, unicode_count
+        text.chars().count(),
+        ascii_count,
+        unicode_count
     );
 
     // Encode (with warm-up and multiple runs for accuracy)
     println!("\n=== Encoding Performance ===");
 
-    // Warm-up
-    let _ = encode_text(&text);
+    // Warm-up — also sources the post-NFC char count we'll need for decode.
+    let (_, char_count) = encode_text(&text);
 
     // Benchmark with multiple runs
     let runs = 100;
@@ -37,7 +38,8 @@ fn main() {
 
     for _ in 0..runs {
         let start = Instant::now();
-        encoded = encode_text(&text);
+        let (bytes, _) = encode_text(&text);
+        encoded = bytes;
         total_encode_time += start.elapsed();
     }
 
@@ -95,8 +97,10 @@ fn main() {
         utf8_size as f64 / avg_decode_time.as_secs_f64() / 1_000_000.0
     );
 
-    // Verify round-trip
-    if decoded == text {
+    // Verify round-trip — decoder returns NFC form, so compare against text's NFC projection.
+    use unicode_normalization::UnicodeNormalization;
+    let expected: String = text.nfc().collect();
+    if decoded == expected {
         println!("\n✓ Round-trip successful!");
     } else {
         println!("\n✗ Round-trip FAILED!");

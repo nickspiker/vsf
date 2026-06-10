@@ -147,14 +147,14 @@ impl VsfType {
                     let mut flat = Vec::new();
                     flat.push(b'x');
 
-                    // Huffman-encode the text (no internal header)
-                    let encoded_text = encode_text(value);
+                    // Huffman-encode the text (no internal header). encode_text NFC-normalizes
+                    // the input first and returns the post-NFC char count alongside the bytes —
+                    // we MUST use that count, not value.chars().count(), because NFC can change
+                    // the codepoint sequence length (e.g. precomposed → decomposed under NFD
+                    // would have a different count, and vice versa).
+                    let (encoded_text, char_count) = encode_text(value);
 
-                    // Encode ONLY character count (for Huffman decoder) VSF structure handles byte boundaries
-                    let char_count = value.chars().count();
                     flat.extend_from_slice(&char_count.encode_number());
-
-                    // Append Huffman bytes directly
                     flat.extend_from_slice(&encoded_text);
 
                     flat
@@ -4891,7 +4891,7 @@ impl VsfType {
             VsfType::d(s) => {
                 // 'd' + encoded_string
                 #[cfg(feature = "text")]
-                let encoded_len = encode_text(s).len();
+                let encoded_len = encode_text(s).0.len();
                 #[cfg(not(feature = "text"))]
                 let encoded_len = s.len();
                 1 + encoded_usize_len(encoded_len) + encoded_len
@@ -4900,7 +4900,7 @@ impl VsfType {
             VsfType::a(s) => {
                 // 'a' + encoded_string (ASCII text)
                 #[cfg(feature = "text")]
-                let encoded_len = encode_text(s).len();
+                let encoded_len = encode_text(s).0.len();
                 #[cfg(not(feature = "text"))]
                 let encoded_len = s.len();
                 1 + encoded_usize_len(encoded_len) + encoded_len
