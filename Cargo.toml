@@ -1,6 +1,6 @@
 [package]
 name = "vsf"
-version = "0.3.8"
+version = "0.4.0"
 edition = "2021"
 authors = ["Nick Spiker <nick@verichrome.cc>"]
 description = "Versatile Storage Format"
@@ -9,14 +9,15 @@ repository = "https://github.com/nickspiker/vsf"
 keywords = ["binary", "serialization", "storage", "data-format"]
 categories = ["encoding", "data-structures"]
 exclude = [
-    "*.bin",           # Huffman frequency data - downloaded at build time from GitHub
     "*.rlib",          # Build artifacts
     "*.vsf",           # Example VSF files
     "vsf.png",         # Logo (GitHub only, not needed in package - 1.5MB)
     "target/",         # Build directory
     "tools/",          # Code generation tools
 ]
-# frequencies.bin (8.5MB) is downloaded from GitHub during build instead of being bundled
+# frequencies.bin (~8.5MB) AND huffman_codes.bin are vendored — verified by BLAKE3 in build.rs.
+# Both must be byte-identical across every published version: the Huffman codebook IS the wire
+# format for VsfType::x, and any drift silently bifurcates the identity namespace via ihi.
 
 [[bin]]
 name = "vsfinfo"
@@ -52,6 +53,12 @@ colored = { version = "2", optional = true }
 num-traits = { version = "0.2.19", default-features = false, features = ["libm"] }
 libm = { version = "0.2" }
 spin = { version = "0.9", default-features = false, features = ["once", "rwlock"], optional = true }
+# unicode-normalization: NFC canonicalization for VsfType::x. Anchored by Unicode's stability
+# policy — the NFC form of an assigned codepoint is guaranteed not to change across Unicode
+# versions. Same byte-determinism guarantee class as blake3/sha2/sha3 (output anchored by an
+# external standard, not the dep's implementation choices). Optional + feature-gated to keep it
+# off the embedded build surface.
+unicode-normalization = { version = "0.1", default-features = false, optional = true }
 
 # image-tools deps: gated behind the `image-tools` feature, only pulled in for the `vsfimg` binary.
 # Versions pinned to match photon/Cargo.toml so cross-codebase pixel pipelines stay byte-identical.
@@ -85,7 +92,7 @@ registry = ["dep:spin"]
 crypto = ["ed25519-dalek", "x25519-dalek", "rand", "chacha20poly1305", "aes-gcm"]
 spirix = ["dep:spirix"]
 inspect = ["std", "registry", "dep:colored"]
-text-encode = ["std"]
+text-encode = ["std", "dep:unicode-normalization"]
 handle = ["dep:ihi"]
 text = ["std", "registry", "dep:clap", "inspect", "text-encode", "handle"]
 # image-tools: enable the vsfimg binary (image format decode + ICC + rav1e AV1 encode). Heavy deps — only pulled in when building image conversion tooling.
@@ -101,7 +108,10 @@ image-tools = [
 ]
 
 [build-dependencies]
-ureq = "2"
+# BLAKE3 for verifying frequencies.bin and huffman_codes.bin integrity at build time.
+# Both files are vendored in the repo; the build fails loudly if either has been tampered
+# with or regenerated without an explicit codebook bump.
+blake3 = "1"
 
 [[example]]
 name = "compress_file"
