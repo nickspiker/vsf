@@ -57,8 +57,14 @@ fn main() {
         return;
     }
 
-    if let Err(msg) = verify_blake3("frequencies.bin", FREQUENCIES_BLAKE3) {
-        panic!("{}", msg);
+    // frequencies.bin is the input corpus; it's vendored in the git repo but excluded from
+    // the published .crate to stay under the crates.io 10MiB limit. Verify it when present
+    // (developer builds from a clone), skip when absent (downstream users from crates.io).
+    // huffman_codes.bin — the runtime-load artifact — is ALWAYS verified.
+    if Path::new("frequencies.bin").exists() {
+        if let Err(msg) = verify_blake3("frequencies.bin", FREQUENCIES_BLAKE3) {
+            panic!("{}", msg);
+        }
     }
     if let Err(msg) = verify_blake3("huffman_codes.bin", HUFFMAN_CODES_BLAKE3) {
         panic!("{}", msg);
