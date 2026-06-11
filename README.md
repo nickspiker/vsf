@@ -527,6 +527,24 @@ File I/O is intentionally out of scope - you know your use case better than we d
 
 ---
 
+## Versioning: The Crate Tracks the Wire
+
+From 0.8.0 forward, **the crate minor IS the format version**: vsf 0.8.x writes z8 files, vsf 0.9.x will write z9, always.
+Any breaking change — wire or API — bumps both together, so the version string is the dialect declaration.
+The backward-compat floor (`y`) lives in every file header and is enforced by the reader, not encoded in the crate version: a build rejects files older than its floor by name ("file is v7, this build reads v8+") instead of misparsing them.
+
+**The 0.6 lane (`0.6.42`) is special: it is the frozen encoder lane for [ihi](https://crates.io/crates/ihi).**
+It is byte-identical code to 0.8.0, published under a version ihi can pin (`vsf = "0.6"`) so the identity-critical `x` text encoder (NFC normalization + full-codespace Huffman) can never move underneath handle-proof derivation while the main lane iterates.
+It also structurally breaks the historical vsf↔ihi dependency cycle: `vsf 0.8 + handle → ihi → vsf 0.6` resolves as two coexisting copies instead of a cycle error.
+Do not pin `"0.6"` unless you are ihi — everyone else uses the latest main lane.
+The lane changes only for coordinated encoder emergencies (0.6.43+), never routinely.
+
+History and the yank policy: 0.4.0/0.4.1 are yanked (encode-side NFC bug — wrote wrong bytes into the world; encode corruption gets yanked).
+0.4.2 and 0.5.0 remain as superseded history (decode-side x bug under `text-encode`-only builds — misread valid files but never wrote a bad byte; decode bugs get superseded, not yanked).
+The z7 era shipped two wire breaks without version bumps; `tests/frozen_wire.rs` pins the exact v8 bytes of `x`/`a`/`d` so that can never happen silently again.
+
+---
+
 ## Quick Start
 
 ```rust
@@ -558,10 +576,12 @@ VSF uses optional features to keep the default build minimal:
 
 ```toml
 [dependencies]
-vsf = "0.2"                    # Core only (no optional features)
-vsf = { version = "0.2", features = ["text"] }    # + Huffman compression
-vsf = { version = "0.2", features = ["crypto"] }  # + Ed25519, X25519, AES-GCM
-vsf = { version = "0.2", features = ["spirix"] }  # + Spirix arithmetic
+vsf = "0.8"                    # Core only (no optional features)
+vsf = { version = "0.8", features = ["text-encode"] }  # + Huffman text (x type)
+vsf = { version = "0.8", features = ["text"] }    # umbrella: inspect + text-encode + clap (NOT handle)
+vsf = { version = "0.8", features = ["crypto"] }  # + Ed25519, X25519, AES-GCM
+vsf = { version = "0.8", features = ["spirix"] }  # + Spirix arithmetic
+vsf = { version = "0.8", features = ["handle"] }  # + vsf::handle shim (pulls ihi)
 ```
 
 | Feature | Enables | Use Case |
