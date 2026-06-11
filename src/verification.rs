@@ -79,6 +79,16 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
         ));
     }
 
+    // Reject files OLDER than our backward-compat floor. Without this check a v7 file sails into a v8 reader and its x fields Huffman-decode under the wrong codebook — garbage text or a misleading UTF-8 error instead of a version error. Same no-silent-misinterpretation rule as everywhere else: if we can't read it correctly, say so loudly and say why. The floor is build-time chosen (see VSF_BACKWARD_COMPAT): compat-v* features lower it and compile in the matching era's decode paths, dispatched on `version` from this point down.
+    if version < crate::VSF_BACKWARD_COMPAT {
+        return Err(format!(
+            "File is VSF v{} but this build reads v{}+ — a compat-v{} feature of vsf is required to read this archive",
+            version,
+            crate::VSF_BACKWARD_COMPAT,
+            version
+        ));
+    }
+
     // Parse header length (now we know how to decode it!)
     let _ = parse(data, &mut ptr).map_err(|e| format!("Failed to parse header length: {}", e))?;
 

@@ -8,7 +8,8 @@ use crate::types::{EtType, VsfType, WorldCoord};
 // ==================== METADATA ====================
 
 pub fn parse_string(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
-    #[cfg(feature = "text")]
+    // Gate must match the ENCODER's gate in encoding/flatten.rs (`any(text, text-encode)`). vsf 0.5.0 shipped with `text` alone here, so builds with only `text-encode` wrote Huffman but read raw UTF-8 — every x roundtrip failed.
+    #[cfg(any(feature = "text", feature = "text-encode"))]
     {
         use crate::text_encoding::decode_text_with_size;
 
@@ -31,21 +32,13 @@ pub fn parse_string(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
 
         Ok(VsfType::x(value))
     }
-    #[cfg(not(feature = "text"))]
+    #[cfg(not(any(feature = "text", feature = "text-encode")))]
     {
-        // Without text feature, decode as raw UTF-8 bytes
-        let byte_count = decode_usize(data, pointer)?;
-
-        if *pointer + byte_count > data.len() {
-            return Err(DecodeError::UnexpectedEofMsg("Not enough data for string bytes".into()));
-        }
-
-        let bytes = &data[*pointer..*pointer + byte_count];
-        let value = String::from_utf8(bytes.to_vec())
-            .map_err(|e| DecodeError::InvalidDataMsg(format!("Invalid UTF-8: {}", e)))?;
-
-        *pointer += byte_count;
-        Ok(VsfType::x(value))
+        // x is Huffman-coded by spec — ALWAYS. There is no raw-bytes form of x on the wire; ASCII text has its own type. A build without the text machinery cannot interpret x, and silently reinterpreting the bitstream as UTF-8 (what this branch did through 0.5.0) can return a WRONG string without erroring. Mirror the encoder (which panics) by refusing loudly.
+        let _ = (data, pointer);
+        Err(DecodeError::InvalidDataMsg(
+            "VsfType::x is Huffman-coded and requires the 'text' or 'text-encode' feature to decode".into(),
+        ))
     }
 }
 

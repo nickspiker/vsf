@@ -93,9 +93,9 @@ use super::toka_tree::{
 /// ## Text Types
 /// VSF provides three distinct text types for different use cases:
 ///
-/// - `d`: Dictionary key - Internal naming (section names, field names, dictionary keys)
-/// - `x`: UTF-8 text - User-facing text with full Unicode support
-/// - `l`: ASCII text - User-facing text restricted to ASCII characters
+/// - `d`: Dictionary key - Internal naming (section names, field names, dictionary keys); raw bytes on the wire
+/// - `x`: Unicode text - User-facing text, NFC-normalized + Huffman-coded on the wire (never raw UTF-8)
+/// - `a`: ASCII text - User-facing text restricted to ASCII characters; raw bytes on the wire
 ///
 /// Example usage in named fields:
 /// ```text
@@ -104,9 +104,9 @@ use super::toka_tree::{
 ///
 /// ## Other Metadata
 /// - `e`: Eagle Time
-/// - `o`: Offset in bits
-/// - `b`: Length in bits
-/// - `l`: Length in bytes (wire or file)
+/// - `o`: Offset in Bytes
+/// - `b`: Length in Bytes of the structure it annotates (header, section, field)
+/// - `l`: Length in Bytes of the entire file (exactly one per file)
 /// - `n`: Number/count
 /// - `z`: Version
 /// - `y`: Backward version
@@ -122,9 +122,9 @@ use super::toka_tree::{
 pub enum VsfType {
     // VSF Structure
     d(String), // VSF internal dictionary key (internal naming: section names, field names, keys)
-    o(usize),  // Offset in Bytes
-    b(usize, bool), // Length in Bytes (value, inclusive_mode)
-    l(usize, bool), // Length in bytes (wire or file)
+    o(usize),  // Offset in Bytes from file start (header TOC entries, section pointers)
+    b(usize, bool), // Length in Bytes of the structure this field annotates — header size, section b{length}, field size. Distinct letter from l so the order-independent header can tell header-size from file-length apart without positional rules. inclusive_mode: the value counts its own encoded bytes (stabilized by iteration in builders).
+    l(usize, bool), // Length in Bytes of the ENTIRE file; exactly one per file. Lets TCP readers preallocate and stream without parse-as-you-go. Same (value, inclusive_mode) mechanics as b.
     n(usize),  // Number/count
     z(usize),  // Version
     y(usize),  // Backward version

@@ -604,18 +604,25 @@ mod tests {
 
     #[test]
     fn test_section_parser_validates_name() {
+        // Near-form bodies are anonymous (name lives in the file header only), so name validation can only fire when a body actually carries a name. Hand-craft a named body with the wrong name and confirm the mismatch is rejected.
         let schema = SectionSchema::new("test").field("value", TypeConstraint::AnyUnsigned);
 
-        // Create a section with wrong name
         let wrong_section = SectionSchema::new("wrong").field("value", TypeConstraint::AnyUnsigned);
-
         let built = wrong_section.build().set("value", 42u16).unwrap();
-        let encoded = built.encode().unwrap();
+        let near = built.encode().unwrap(); // `[(fields)...]` — anonymous
 
-        // Should fail because names don't match
-        let result = SectionBuilder::parse(schema, &encoded);
+        // Splice the wrong name into the body: `[` + d"wrong" + fields...
+        let mut named = vec![b'['];
+        named.extend_from_slice(&crate::VsfType::d("wrong".to_string()).flatten());
+        named.extend_from_slice(&near[1..]);
+
+        let result = SectionBuilder::parse(schema.clone(), &named);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("name mismatch"));
+
+        // And the anonymous near form parses fine under any schema name — no name to disagree with.
+        let ok = SectionBuilder::parse(schema, &near);
+        assert!(ok.is_ok());
     }
 
     #[test]

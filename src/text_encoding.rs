@@ -13,14 +13,10 @@
 //! "café" (U+00E9 precomposed) and "cafe\u{0301}" (e + combining acute) produce byte-identical
 //! Huffman output — both reduce to the same NFC codepoint sequence first.
 //!
-//! NFC is anchored by Unicode's stability policy: once a codepoint is assigned, its NFC form
-//! is guaranteed not to change across Unicode versions. This is the same byte-determinism
-//! anchor as a frozen wire-format hash function — the canonical output is specified outside
-//! this crate and cannot drift.
+//! NFC is anchored by Unicode's stability policy: once a codepoint is assigned, its NFC form is guaranteed not to change across Unicode versions. This is the same byte-determinism anchor as a frozen wire-format hash function — the canonical output is specified outside this crate and cannot drift.
 //!
 //! Callers downstream that use VSF for identity hashing (notably `ihi::handle_to_proof`)
-//! inherit café-stability automatically: there is no way to construct an `x`-encoded byte
-//! stream that distinguishes NFC from NFD input.
+//! inherit café-stability automatically: there is no way to construct an `x`-encoded byte stream that distinguishes NFC from NFD input.
 
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
@@ -150,20 +146,15 @@ fn get_ascii_lut() -> &'static [BitPattern; 128] {
 
 /// Encode Unicode text to Huffman-compressed bytes after NFC normalization.
 ///
-/// Returns `(huffman_bytes, nfc_char_count)`. The byte vector is the Huffman bitstream padded
-/// to a byte boundary; the char count is the number of codepoints AFTER NFC normalization,
-/// not the input length. Callers MUST use the returned count when writing the VSF `x`
-/// marker — NFC can collapse or expand codepoint sequences, and using the original count
-/// would corrupt the wire format.
+/// Returns `(huffman_bytes, nfc_char_count)`. The byte vector is the Huffman bitstream padded to a byte boundary; the char count is the number of codepoints AFTER NFC normalization, not the input length. Callers MUST use the returned count when writing the VSF `x`
+/// marker — NFC can collapse or expand codepoint sequences, and using the original count would corrupt the wire format.
 ///
 /// All characters use variable-length Huffman codes (3-24 bits). The codebook covers all
 /// 1,112,064 valid Unicode codepoints, so this function never fails on valid `&str` input.
 ///
 /// ## Canonicalization
 ///
-/// Input is NFC-normalized before encoding. Café/café-class identity splits are impossible
-/// at this boundary: any two strings that compare equal under NFC produce byte-identical
-/// output.
+/// Input is NFC-normalized before encoding. Café/café-class identity splits are impossible at this boundary: any two strings that compare equal under NFC produce byte-identical output.
 ///
 /// # Performance
 /// Uses optimized ASCII fast path (direct array access) for characters 0-127, falling back to HashMap lookup for full Unicode. NFC over pure-ASCII input is the identity transform, so the ASCII hot path stays cheap.
@@ -174,8 +165,7 @@ fn get_ascii_lut() -> &'static [BitPattern; 128] {
 /// x [char_count] [huffman_bytes]
 /// ```
 /// `char_count` here is the NFC count returned from this function, encoded via
-/// `encode_number()` (3-6+ bytes depending on size). No arbitrary limits — supports billions
-/// of characters.
+/// `encode_number()` (3-6+ bytes depending on size). No arbitrary limits — supports billions of characters.
 ///
 /// # Example
 /// ```ignore
@@ -194,17 +184,18 @@ pub fn encode_text(text: &str) -> (Vec<u8>, usize) {
             &ascii_lut[c as usize]
         } else {
             // Slow path: HashMap lookup for Unicode (~10-20 cycles).
-            // The codebook covers all 1,112,064 valid codepoints, so this lookup
-            // cannot fail for any character producible by NFC over a valid &str.
-            // If it does, the codebook itself is corrupted — fall through to the
-            // .expect for a loud build-time-only failure mode (huffman_codes.bin
-            // is verified by BLAKE3 in build.rs, so this is unreachable in shipped
-            // builds; the message addresses the only real cause, which is a
-            // docs.rs-style build that skipped huffman_codes.bin generation).
+            // The codebook covers all 1,112,064 valid codepoints, so this lookup cannot fail for any character producible by NFC over a valid &str.
+            // If it does, the codebook itself is corrupted — fall through to the .expect for a loud failure; huffman_codes.bin is BLAKE3-verified in build.rs, so the only real cause is a docs.rs-style build that skipped codebook generation.
             codes
                 .get(&c)
                 .expect("huffman_codes.bin missing or codebook lookup table corrupted")
         };
+        // A zero-length code is impossible in a valid codebook (every codepoint gets ≥1 bit). It means the table never loaded (cfg(not(huffman_available)) build) — the ASCII LUT defaults to length 0 there, and extend_bits(_, 0) would silently emit NOTHING, producing an empty bitstream that claims to encode char_count characters. Refuse loudly instead.
+        assert_ne!(
+            pattern.length, 0,
+            "huffman_codes.bin missing — VsfType::x cannot encode in this build (char {:?})",
+            c
+        );
         bits.extend_bits(pattern.bits, pattern.length);
         char_count += 1;
     }
@@ -453,10 +444,7 @@ impl DecodeNode {
 
             if start_bit + consumed >= bytes.len() * 8 {
                 // Premature end of stream — must error, not silently inject U+0000.
-                // Returning Ok(('\0', 0)) used to let truncated bitstreams decode to strings
-                // ending in U+0000 that then re-encoded to different bytes — a wire-format
-                // canonicalization break that an attacker could exploit to produce two
-                // distinct VSF capsules with the "same" decoded text.
+                // Returning Ok(('\0', 0)) used to let truncated bitstreams decode to strings ending in U+0000 that then re-encoded to different bytes — a wire-format canonicalization break that an attacker could exploit to produce two distinct VSF capsules with the "same" decoded text.
                 return Err("Premature end of Huffman bitstream");
             }
 
@@ -526,11 +514,8 @@ mod tests {
 
     /// NFC/NFD equivalence at the encoder boundary — the test the universe has been missing.
     ///
-    /// Until this work, `encode_text` iterated raw codepoints with no normalization. "café"
-    /// with U+00E9 (precomposed, 1 codepoint) and "cafe\u{0301}" (e + combining acute,
-    /// 2 codepoints) produced completely different Huffman bitstreams, silently breaking
-    /// every downstream identity primitive that round-tripped through `VsfType::x`. This
-    /// assertion locks the fixed behavior.
+    /// Until this work, `encode_text` iterated raw codepoints with no normalization. "café" with U+00E9 (precomposed, 1 codepoint) and "cafe\u{0301}" (e + combining acute,
+    /// 2 codepoints) produced completely different Huffman bitstreams, silently breaking every downstream identity primitive that round-tripped through `VsfType::x`. This assertion locks the fixed behavior.
     #[test]
     fn test_nfc_equivalence_e_acute() {
         let precomposed = "\u{00E9}";      // é as one codepoint
@@ -617,8 +602,7 @@ mod tests {
         for text in texts {
             let (encoded, char_count) = encode_text(text);
             let (decoded, _) = decode_text(&encoded, char_count).expect("Decode failed");
-            // After NFC normalization the decoded form is canonical NFC; compare against
-            // the input's own NFC projection so non-NFC source-file literals still pass.
+            // After NFC normalization the decoded form is canonical NFC; compare against the input's own NFC projection so non-NFC source-file literals still pass.
             let expected: String = text.nfc().collect();
             assert_eq!(decoded, expected, "Failed for: {}", text);
 
@@ -636,8 +620,7 @@ mod tests {
 
     #[test]
     fn test_rare_unicode_planes() {
-        // Test characters from various Unicode planes — all 1,112,064 valid codepoints
-        // have pre-assigned Huffman codes regardless of whether they appeared in the corpus.
+        // Test characters from various Unicode planes — all 1,112,064 valid codepoints have pre-assigned Huffman codes regardless of whether they appeared in the corpus.
         let rare_chars = vec![
             '\u{1F600}',  // Emoji (SMP)
             '\u{10000}',  // Linear B Syllable (SMP)
