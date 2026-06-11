@@ -164,6 +164,7 @@
 //!
 //! Schema-agnostic parsing that extracts raw data without validation:
 //!
+//!
 //! ```ignore
 //! use vsf::VsfSection;
 //!
@@ -179,6 +180,7 @@
 //! ### High-Level: `SectionBuilder::parse()` ([schema/section.rs](src/schema/section.rs))
 //!
 //! Schema-validated parsing for type-safe workflows:
+//!
 //!
 //! ```ignore
 //! use vsf::schema::{SectionSchema, SectionBuilder, TypeConstraint};
@@ -247,11 +249,11 @@ pub mod prelude {
 }
 
 // VSF format version constants
-/// Current VSF format version v7: Added opcodes (op type), literal VSF format, proper bracket notation (⦉⦊ vs {})
-pub const VSF_VERSION: usize = 7;
+/// Current VSF format version v8: x text codebook remapped to cover the full Unicode codespace (all 1,112,064 codepoints pre-assigned) + NFC canonicalization at the encoder boundary. Changed the Huffman bitstream for every x value — even pure-ASCII strings — so v7 x bytes and v8 x bytes are mutually unintelligible. v7: Added opcodes (op type), literal VSF format, proper bracket notation (⦉⦊ vs {})
+pub const VSF_VERSION: usize = 8;
 
-/// Backward compatibility version (oldest version this implementation can read) v7: Breaking changes to type system (opcodes, bracket notation)
-pub const VSF_BACKWARD_COMPAT: usize = 7;
+/// Oldest format version this BUILD can read — the floor is build-time chosen, cargo-style. Default is the current version only: wire breaks are never silently bridged, and a too-old file is rejected by name at the header. The plan for honoring old archives: a `compat-v*` feature per legacy dialect lowers this floor AND compiles in that era's decode paths, dispatched on the file's z at parse time; when none is enabled, old files get the loud version error (never a wrong parse). No compat feature may ship as a floor-only no-op — lowering the floor without the era's real readers recreates silent misinterpretation. None exist yet: a true `compat-v7` needs the pre-remap x codebook vendored from git (c12c7e2~1) plus the l-as-ASCII-label mapping, and v7 sub-dialects (l→a marker remap ~0.3.5, x codebook remap 0.4.0) shipped without z bumps, so "v7" in the field is ambiguous anyway — per-archive forensics if real v7 data ever needs recovering.
+pub const VSF_BACKWARD_COMPAT: usize = 8;
 
 // Core type system
 pub mod types;

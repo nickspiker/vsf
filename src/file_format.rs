@@ -1315,6 +1315,7 @@ mod tests {
 
     #[test]
     fn test_section_parse_roundtrip() {
+        // Near form (≤1MB from file start): name lives ONLY in the header's section-pointer entry, not the body. Parse of a bare near-form body therefore yields name="" — by design, not data loss.
         let mut section = VsfSection::new("test_section");
         section.add_field("width", VsfType::u(1920, false));
         section.add_field("height", VsfType::u(1080, false));
@@ -1327,8 +1328,8 @@ mod tests {
         let mut ptr = 0;
         let parsed = VsfSection::parse(&encoded, &mut ptr).unwrap();
 
-        // Verify roundtrip
-        assert_eq!(parsed.name, "test_section");
+        // Verify roundtrip: fields survive; name is anonymous in the near form.
+        assert_eq!(parsed.name, "");
         assert_eq!(parsed.fields.len(), 3);
         assert_eq!(parsed.fields[0].name, "width");
         assert_eq!(parsed.fields[1].name, "height");
@@ -1341,19 +1342,25 @@ mod tests {
         // Test get_fields for multiple
         let all_fields = parsed.get_fields("width");
         assert_eq!(all_fields.len(), 1);
+
+        // Far form (>1MB): name + n{}b{} embedded for self-description; full name roundtrip.
+        let far = section.encode_at_offset(2 * 1024 * 1024);
+        let mut ptr = 0;
+        let parsed_far = VsfSection::parse(&far, &mut ptr).unwrap();
+        assert_eq!(parsed_far.name, "test_section");
+        assert_eq!(parsed_far.fields.len(), 3);
     }
 
     #[test]
     fn test_section_encode_no_suffix_small_offset() {
-        // Sections at small offsets should NOT have n{}b{} suffix
+        // Near form: no name, no n{}b{} suffix — fields start immediately. The name is the header's job.
         let mut section = VsfSection::new("test");
         section.add_field("value", VsfType::u(42, false));
 
         let encoded = section.encode_at_offset(0);
 
-        // Should start with '[d' (name first, no metadata)
         assert_eq!(encoded[0], b'[');
-        assert_eq!(encoded[1], b'd'); // Section name starts immediately
+        assert_eq!(encoded[1], b'('); // First field opens immediately; no d-name in body
     }
 
     #[test]
@@ -1382,18 +1389,20 @@ mod tests {
 
     #[test]
     fn test_section_parse_without_suffix() {
-        // Parse section without suffix (old format / small files)
+        // Near form parses without name or hints — anonymous body, fields intact.
         let mut section = VsfSection::new("legacy");
         section.add_field("data", VsfType::u(123, false));
 
-        let encoded = section.encode(); // No offset = no suffix
+        let encoded = section.encode(); // No offset = near form: no name, no suffix
 
         let mut ptr = 0;
         let parsed = VsfSection::parse(&encoded, &mut ptr).unwrap();
 
-        assert_eq!(parsed.name, "legacy");
+        assert_eq!(parsed.name, "");
         assert!(parsed.length_hint.is_none());
         assert!(parsed.count_hint.is_none());
+        assert_eq!(parsed.fields.len(), 1);
+        assert_eq!(parsed.fields[0].name, "data");
     }
 
     #[test]

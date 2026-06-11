@@ -35,13 +35,13 @@ pub enum TypeConstraint {
     EagleTime(Box<TypeConstraint>),
 
     // === STRING TYPES ===
-    /// Any string type (x, d, l)
+    /// Any string type (x, d, a)
     AnyString,
-    /// UTF-8 text (x) - User-facing Unicode text
+    /// Unicode text (x) - User-facing text, NFC + Huffman-coded on the wire
     Utf8Text,
     /// Dictionary key (d) - Internal naming (section names, field names, keys)
     DictKey,
-    /// ASCII text (l) - User-facing ASCII-only text
+    /// ASCII text (a) - User-facing ASCII-only text
     AsciiText,
 
     // === HASH TYPES ===
@@ -380,7 +380,7 @@ impl TypeConstraint {
             TypeConstraint::AnyString => "any string (x/d/l)".into(),
             TypeConstraint::Utf8Text => "UTF-8 text (x)".into(),
             TypeConstraint::DictKey => "dictionary key (d)".into(),
-            TypeConstraint::AsciiText => "ASCII text (l)".into(),
+            TypeConstraint::AsciiText => "ASCII text (a)".into(),
             TypeConstraint::AnyHash => "any hash type".into(),
             TypeConstraint::Blake3Provenance => "BLAKE3 provenance hash (hp)".into(),
             TypeConstraint::Blake3Rolling => "BLAKE3 rolling hash (hb)".into(),

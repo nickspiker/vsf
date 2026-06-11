@@ -25,3 +25,4 @@ Thumbs.db
 # Wrangler/Cloudflare
 .wrangler/
 node_modules/
+test_determinism

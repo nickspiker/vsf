@@ -147,11 +147,7 @@ impl VsfType {
                     let mut flat = Vec::new();
                     flat.push(b'x');
 
-                    // Huffman-encode the text (no internal header). encode_text NFC-normalizes
-                    // the input first and returns the post-NFC char count alongside the bytes —
-                    // we MUST use that count, not value.chars().count(), because NFC can change
-                    // the codepoint sequence length (e.g. precomposed → decomposed under NFD
-                    // would have a different count, and vice versa).
+                    // Huffman-encode the text (no internal header). encode_text NFC-normalizes the input first and returns the post-NFC char count alongside the bytes — we MUST use that count, not value.chars().count(), because NFC can change the codepoint sequence length (e.g. precomposed → decomposed under NFD would have a different count, and vice versa).
                     let (encoded_text, char_count) = encode_text(value);
 
                     flat.extend_from_slice(&char_count.encode_number());
@@ -4889,19 +4885,13 @@ impl VsfType {
 
             // ==================== VSF STRUCTURE ====================
             VsfType::d(s) => {
-                // 'd' + encoded_string
-                #[cfg(feature = "text")]
-                let encoded_len = encode_text(s).0.len();
-                #[cfg(not(feature = "text"))]
+                // 'd' + length + raw bytes. flatten() writes d as raw bytes under ALL feature sets — this estimator previously claimed Huffman length under the `text` feature, disagreeing with the actual encoding.
                 let encoded_len = s.len();
                 1 + encoded_usize_len(encoded_len) + encoded_len
             }
 
             VsfType::a(s) => {
-                // 'a' + encoded_string (ASCII text)
-                #[cfg(feature = "text")]
-                let encoded_len = encode_text(s).0.len();
-                #[cfg(not(feature = "text"))]
+                // 'a' + length + raw bytes. Same raw-always rule as d above.
                 let encoded_len = s.len();
                 1 + encoded_usize_len(encoded_len) + encoded_len
             }

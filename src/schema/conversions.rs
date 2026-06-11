@@ -4,6 +4,7 @@
 //!
 //! # Example: IntoVsfType (Rust → VsfType)
 //!
+//!
 //! ```rust
 //! use vsf::schema::IntoVsfType; use vsf::VsfType;
 //!
@@ -13,6 +14,7 @@
 //! ```
 //!
 //! # Example: FromVsfType (VsfType → Rust)
+//!
 //!
 //! ```rust
 //! use vsf::schema::FromVsfType; use vsf::VsfType;
@@ -29,6 +31,7 @@
 //! # Cross-Size Conversions
 //!
 //! The traits support automatic widening conversions with bounds checking:
+//!
 //!
 //! ```rust
 //! use vsf::schema::FromVsfType; use vsf::VsfType;
@@ -375,8 +378,7 @@ impl IntoVsfType for &str {
 /// // Use in schema builder
 /// # use vsf::schema::{SectionSchema, FieldSchema, TypeConstraint};
 /// # let schema = SectionSchema::new("test")
-/// #     .add_field(FieldSchema::new("name", TypeConstraint::AsciiText));
-/// let section = schema.builder() .set("name", AsciiText::new("nick"))? .build()?;
+/// #     .add_field(FieldSchema::new("name", TypeConstraint::AsciiText)); let section = schema.builder() .set("name", AsciiText::new("nick"))? .build()?;
 /// # Ok::<(), vsf::schema::ValidationError>(())
 /// ```
 ///
