@@ -1011,6 +1011,19 @@ impl core::fmt::Display for VsfType {
 }
 
 impl VsfType {
+    /// The narrowest unsigned VSF type that holds `value`, using exponential-width encoding: `u3` ≤ 255, `u4` ≤ 65535, `u5` ≤ 2³²−1, otherwise `u6`. Pass one `u64` and the value is stored at minimal width without choosing a size marker by hand — unlike `IntoVsfType for u64`, which is fixed at `u6`.
+    pub fn uint(value: u64) -> VsfType {
+        if value <= u8::MAX as u64 {
+            VsfType::u3(value as u8)
+        } else if value <= u16::MAX as u64 {
+            VsfType::u4(value as u16)
+        } else if value <= u32::MAX as u64 {
+            VsfType::u5(value as u32)
+        } else {
+            VsfType::u6(value)
+        }
+    }
+
     /// Extract value as usize
     ///
     /// Supports: u0, u3, u4, u5, u6, u7, u, o, n Returns None for incompatible types or overflow
