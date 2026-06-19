@@ -1,6 +1,6 @@
 //! Frequency-based Huffman text encoding for VSF `x` marker
 //!
-//! Achieves ~2× compression over UTF-8 through frequency-optimized encoding:
+//! Achieves ~2× compression over UTF-8 thru frequency-optimized encoding:
 //! - Common characters (space, 'e', 't') use short codes (3-5 bits)
 //! - Less common characters use medium codes (8-12 bits)
 //! - Rare Unicode characters use longer codes (16-24 bits)
@@ -185,7 +185,7 @@ pub fn encode_text(text: &str) -> (Vec<u8>, usize) {
         } else {
             // Slow path: HashMap lookup for Unicode (~10-20 cycles).
             // The codebook covers all 1,112,064 valid codepoints, so this lookup cannot fail for any character producible by NFC over a valid &str.
-            // If it does, the codebook itself is corrupted — fall through to the .expect for a loud failure; huffman_codes.bin is BLAKE3-verified in build.rs, so the only real cause is a docs.rs-style build that skipped codebook generation.
+            // If it does, the codebook itself is corrupted — fall thru to the .expect for a loud failure; huffman_codes.bin is BLAKE3-verified in build.rs, so the only real cause is a docs.rs-style build that skipped codebook generation.
             codes
                 .get(&c)
                 .expect("huffman_codes.bin missing or codebook lookup table corrupted")
@@ -515,7 +515,7 @@ mod tests {
     /// NFC/NFD equivalence at the encoder boundary — the test the universe has been missing.
     ///
     /// Until this work, `encode_text` iterated raw codepoints with no normalization. "café" with U+00E9 (precomposed, 1 codepoint) and "cafe\u{0301}" (e + combining acute,
-    /// 2 codepoints) produced completely different Huffman bitstreams, silently breaking every downstream identity primitive that round-tripped through `VsfType::x`. This assertion locks the fixed behavior.
+    /// 2 codepoints) produced completely different Huffman bitstreams, silently breaking every downstream identity primitive that round-tripped thru `VsfType::x`. This assertion locks the fixed behavior.
     #[test]
     fn test_nfc_equivalence_e_acute() {
         let precomposed = "\u{00E9}";      // é as one codepoint

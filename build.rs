@@ -3,8 +3,8 @@
 //! Verifies that the vendored Huffman corpus and codebook (`frequencies.bin`,
 //! `huffman_codes.bin`) are byte-identical to their pinned BLAKE3 hashes. The codebook IS the
 //! wire format for `VsfType::x`, so drift here silently bifurcates the identity namespace
-//! through every downstream consumer (ihi handle hashing, photon avatar keys, contact tables,
-//! anywhere else that round-trips text through VSF).
+//! thru every downstream consumer (ihi handle hashing, photon avatar keys, contact tables,
+//! anywhere else that round-trips text thru VSF).
 //!
 //! Both files are vendored in the repo and tracked in version control. Regeneration is an
 //! explicit offline operation performed via `tools/frequency-analyzer/` — the build script

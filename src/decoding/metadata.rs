@@ -34,7 +34,7 @@ pub fn parse_string(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
     }
     #[cfg(not(any(feature = "text", feature = "text-encode")))]
     {
-        // x is Huffman-coded by spec — ALWAYS. There is no raw-bytes form of x on the wire; ASCII text has its own type. A build without the text machinery cannot interpret x, and silently reinterpreting the bitstream as UTF-8 (what this branch did through 0.5.0) can return a WRONG string without erroring. Mirror the encoder (which panics) by refusing loudly.
+        // x is Huffman-coded by spec — ALWAYS. There is no raw-bytes form of x on the wire; ASCII text has its own type. A build without the text machinery cannot interpret x, and silently reinterpreting the bitstream as UTF-8 (what this branch did thru 0.5.0) can return a WRONG string without erroring. Mirror the encoder (which panics) by refusing loudly.
         let _ = (data, pointer);
         Err(DecodeError::InvalidDataMsg(
             "VsfType::x is Huffman-coded and requires the 'text' or 'text-encode' feature to decode".into(),
