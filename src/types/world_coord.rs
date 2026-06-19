@@ -217,7 +217,7 @@ fn find_closest_face(x: f64, y: f64, z: f64) -> usize {
     best_face
 }
 
-/// Intersect line from origin through (x,y,z) with plane defined by triangle
+/// Intersect line from origin thru (x,y,z) with plane defined by triangle
 fn intersect_line_plane(
     x: f64,
     y: f64,

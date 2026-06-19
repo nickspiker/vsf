@@ -1021,6 +1021,12 @@ VSF is in active development. Core encoding/decoding is stable.
 
 ---
 
+## Terminology
+
+VSF is the self-describing encoding the rest of the stack is built on — *ihi*, *tohu*, *manifestus*, and Photon all serialise thru it. The identity and protocol vocabulary those layers use (*ihi*, *ira*, *wairua*, *whakaira*, the chip states, *handle* / seed / proof) is defined in the cross-stack glossary: `GLOSSARY.md` in the ferros repo.
+
+---
+
 ## License
 
 Custom open-source:

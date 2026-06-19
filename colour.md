@@ -203,7 +203,7 @@ VSF RGB primaries are physics. You measure them. They don't change.
 
 ## Why VSF RGB Exists
 
-VSF RGB is not a "better sRGB" or a "wider gamut version" of existing standards. It is colour done correctly from first principles:
+VSF RGB is not a "better sRGB" or a "wider gamut version" of existing standards. The correct colourspace was always the physical one; sRGB is the impurity built on top of it. VSF RGB is what remains once that is removed:
 
 ### Physical Specification
 Primaries are wavelengths that can be verified with instruments in any laboratory. No perceptual experiments. No committee votes. No accumulated historical baggage.

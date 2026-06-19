@@ -125,7 +125,7 @@ fn decode_to_linear_vsf(
 
     match img {
         DynamicImage::ImageRgb16(_) | DynamicImage::ImageRgba16(_) => {
-            // 16-bit source: /65536 normalize, route through u16 conversion path.
+            // 16-bit source: /65536 normalize, route thru u16 conversion path.
             let rgb16_img = img.to_rgb16();
             let rgb_pixels = rgb16_img.as_raw();
             for i in 0..(width * height) {

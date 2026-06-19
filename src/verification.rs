@@ -1099,7 +1099,7 @@ fn compute_signature_hash(vsf_bytes: &[u8], section_name: &str) -> Result<[u8; 3
 /// Find the byte position of a section's signature value in the header.
 #[cfg(feature = "crypto")]
 fn find_section_signature_position(vsf_bytes: &[u8], section_name: &str) -> Result<usize, String> {
-    // Parse through header to find the section's signature field
+    // Parse thru header to find the section's signature field
     let mut pointer = 4; // Skip magic "RÅ<"
 
     // VSF design: dispatch on byte until we hit '>' See byte → parse it → repeat

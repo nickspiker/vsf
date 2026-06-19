@@ -157,7 +157,7 @@ pub const KEY_ED25519: u8 = b'e';
 
 /// X25519 public key
 ///
-/// **Algorithm:** Montgomery curve (Curve25519) public key for Diffie-Hellman key exchange **Fixed size:** 32 bytes **Use case:** ECDH key agreement (deriving shared secrets) **Performance:** Very fast key exchange **Note:** X25519 is NOT for signatures - it's for key agreement only (Even though it uses the same underlying curve as Ed25519)
+/// **Algorithm:** Montgomery curve (Curve25519) public key for Diffie-Hellman key exchange **Fixed size:** 32 bytes **Use case:** ECDH key agreement (deriving shared secrets) **Performance:** Very fast key exchange **Note:** X25519 is NOT for signatures - it's for key agreement only (Even tho it uses the same underlying curve as Ed25519)
 pub const KEY_X25519: u8 = b'x';
 
 /// P-curve ECDSA/ECDH public key (P-256, P-384)
