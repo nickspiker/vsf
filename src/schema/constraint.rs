@@ -208,6 +208,9 @@ impl TypeConstraint {
                         | VsfType::hm(_)
                         | VsfType::hg(_)
                         | VsfType::hP(_)
+                        | VsfType::hR(_)
+                        | VsfType::hI(_)
+                        | VsfType::hV(_)
                 )
             }
 

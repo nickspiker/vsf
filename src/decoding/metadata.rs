@@ -369,6 +369,8 @@ pub fn parse_hash(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeErr
         b'g' => Ok(VsfType::hg(hash)),
         b'P' => Ok(VsfType::hP(hash)), // Photon handle proof
         b'R' => Ok(VsfType::hR(hash)), // Random padding material
+        b'I' => Ok(VsfType::hI(hash)), // Photon identity seed
+        b'V' => Ok(VsfType::hV(hash)), // Photon vault seed
         _ => Err(DecodeError::InvalidDataMsg(format!("Unknown hash algorithm: {}", algo as char))),
     }
 }
