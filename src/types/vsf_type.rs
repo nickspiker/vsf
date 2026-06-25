@@ -154,6 +154,8 @@ pub enum VsfType {
     // Application-specific hashes (capital letter = app-specific)
     hP(Vec<u8>), // Photon handle proof (memory-hard PoW result, 32 bytes)
     hR(Vec<u8>), // Random material used for padding, obscurity and other ambiguous Photon uses
+    hI(Vec<u8>), // Photon identity seed (BLAKE3-derived network/contacts root, 32 bytes)
+    hV(Vec<u8>), // Photon vault seed (BLAKE3-derived local storage root, 32 bytes)
 
     // Signature algorithms
     ge(Vec<u8>), // Ed25519 signature
