@@ -839,7 +839,7 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
                 tc("⦉", col_punct()),
                 s.len().to_string().white(),
                 tc("⦊", col_punct()),
-                s.escape_default().to_string().white()
+                display_x_value(s).white()
             )
         }
 
@@ -1876,6 +1876,46 @@ pub fn hex_preview(bytes: &[u8]) -> String {
         .join("")
 }
 
+/// Human-readable rendering of a VSF `x` (string) value's CONTENTS.
+///
+/// VSF `x` fields nominally hold text, but the stack also stuffs binary blobs into them (an
+/// encrypted message, a VSF-encoded sub-record, random padding). Rust's `escape_default()` turns
+/// such a blob into an unreadable wall of `\u{fffd}\u{7}\\` debug escapes. Instead:
+/// - mostly-printable text → shown verbatim (control chars still escaped so the line stays intact),
+/// - binary-ish content → a compact hex dump (`<N bytes binary> AABBCC…`), which is what you can
+///   actually read at a glance.
+/// "Binary-ish" = >15% of bytes are non-tab/newline control chars or the content isn't valid UTF-8
+/// text. Caps the hex at 64 bytes with an ellipsis so a 286-byte blob doesn't blow up the line.
+pub fn display_x_value(s: &str) -> String {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
+        return String::new();
+    }
+    let nonprint = bytes
+        .iter()
+        .filter(|&&b| (b < 0x20 && b != b'\t' && b != b'\n' && b != b'\r') || b == 0x7f)
+        .count();
+    let binary_ish =
+        s.contains('\u{fffd}') || (nonprint * 100 / bytes.len()) > 15;
+    if binary_ish {
+        const MAX: usize = 64;
+        let hex: String = bytes
+            .iter()
+            .take(MAX)
+            .map(|b| format!("{:02X}", b))
+            .collect();
+        let ell = if bytes.len() > MAX { "…" } else { "" };
+        format!("<{} bytes binary> {}{}", bytes.len(), hex, ell)
+    } else {
+        // Printable text: escape only the few control chars so multi-line content can't break the
+        // surrounding tree layout, but leave normal characters untouched (no \u{} for every char).
+        s.replace('\\', "\\\\")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t")
+    }
+}
+
 /// Format a VsfType value for human-readable display
 pub fn format_value(vsf: &VsfType) -> String {
     match vsf {
@@ -1894,7 +1934,7 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::i7(v) => format!("{}", v),
         VsfType::f5(v) => format!("{:.4}", v),
         VsfType::f6(v) => format!("{:.8}", v),
-        VsfType::x(s) => format!("\"{}\"", s.escape_default()),
+        VsfType::x(s) => format!("\"{}\"", display_x_value(s)),
         VsfType::p(tensor) => {
             let shape_str = tensor
                 .shape
@@ -2146,7 +2186,18 @@ pub fn format_value_short(vsf: &VsfType) -> String {
                 format_number(tensor.data.len())
             )
         }
-        VsfType::x(s) if s.len() > 30 => format!("\"{}\"...", s[..27].escape_default()),
+        // display_x_value self-caps binary at 64B; for long printable text show a head + ellipsis.
+        VsfType::x(s) if s.len() > 30 => {
+            let shown = display_x_value(s);
+            if shown.starts_with('<') {
+                // binary-ish: helper already produced "<N bytes binary> HEX…"
+                shown
+            } else {
+                // printable: head-truncate by chars (not bytes — no UTF-8 boundary panic)
+                let head: String = shown.chars().take(27).collect();
+                format!("\"{}\"...", head)
+            }
+        }
         // Show literal VSF notation for crypto fields with colour coding type{size}0xHEX - type=cyan, size=yellow, 0x=gray, hex=white
         VsfType::hp(hash) => format_crypto_hex("hp", hash),
         VsfType::hb(hash) => format_crypto_hex("hb", hash),
