@@ -570,6 +570,7 @@ mod tests {
     use super::super::constraint::TypeConstraint;
     use super::*;
 
+    #[cfg(feature = "text-encode")]
     #[test]
     fn test_section_builder_round_trip() {
         // Create a schema

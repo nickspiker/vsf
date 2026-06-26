@@ -536,6 +536,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "text-encode")]
     #[test]
     fn test_roundtrip_string() {
         let val = VsfType::x("Hello, VSF!".to_string());
@@ -547,6 +548,50 @@ mod tests {
         } else {
             panic!("Expected x");
         }
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_roundtrip_hP() {
+        let bytes = vec![0xABu8; 32];
+        let val = VsfType::hP(bytes.clone());
+        let flat = val.flatten();
+        let mut ptr = 0;
+        let parsed = parse(&flat, &mut ptr).unwrap();
+        assert!(matches!(parsed, VsfType::hP(ref b) if *b == bytes), "hP round-trip failed");
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_roundtrip_hR() {
+        let bytes = vec![0xCDu8; 32];
+        let val = VsfType::hR(bytes.clone());
+        let flat = val.flatten();
+        let mut ptr = 0;
+        let parsed = parse(&flat, &mut ptr).unwrap();
+        assert!(matches!(parsed, VsfType::hR(ref b) if *b == bytes), "hR round-trip failed");
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_roundtrip_hI() {
+        let bytes = vec![0x11u8; 32];
+        let val = VsfType::hI(bytes.clone());
+        let flat = val.flatten();
+        let mut ptr = 0;
+        let parsed = parse(&flat, &mut ptr).unwrap();
+        assert!(matches!(parsed, VsfType::hI(ref b) if *b == bytes), "hI round-trip failed");
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_roundtrip_hV() {
+        let bytes = vec![0x22u8; 32];
+        let val = VsfType::hV(bytes.clone());
+        let flat = val.flatten();
+        let mut ptr = 0;
+        let parsed = parse(&flat, &mut ptr).unwrap();
+        assert!(matches!(parsed, VsfType::hV(ref b) if *b == bytes), "hV round-trip failed");
     }
 
     #[test]

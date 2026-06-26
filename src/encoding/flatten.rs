@@ -5093,6 +5093,7 @@ mod tests {
         assert_eq!(result.len(), 10); // 2 + 4 + 4
     }
 
+    #[cfg(feature = "text-encode")]
     #[test]
     fn test_flatten_string() {
         let result = VsfType::x("hello".to_string()).flatten();
