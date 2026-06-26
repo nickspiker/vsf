@@ -1518,6 +1518,7 @@ mod tests {
         assert!(bytes.len() > 50); // Minimal file should be small
     }
 
+    #[cfg(feature = "text-encode")]
     #[test]
     fn test_complete_raw_image_with_metadata() {
         let samples: Vec<u64> = vec![255; 64]; // 8x8
@@ -1622,6 +1623,7 @@ mod tests {
         assert!(parsed.lens.is_none());
     }
 
+    #[cfg(feature = "text-encode")]
     #[test]
     fn test_roundtrip_full_metadata() {
         // Create image with full metadata
@@ -1749,6 +1751,7 @@ mod tests {
         assert_eq!(parsed.image.shape, vec![4, 4]);
     }
 
+    #[cfg(feature = "text-encode")]
     #[test]
     fn test_builder_pattern_camera_settings() {
         // Test builder with camera settings
@@ -1794,6 +1797,7 @@ mod tests {
         // Note: Can't use assert_eq on newtypes (no PartialEq), but successful parsing validates data
     }
 
+    #[cfg(feature = "text-encode")]
     #[test]
     fn test_builder_pattern_lens_info() {
         // Test builder with lens info
@@ -1819,6 +1823,7 @@ mod tests {
         // Note: Can't use assert_eq on newtypes (no PartialEq), but successful parsing validates data
     }
 
+    #[cfg(feature = "text-encode")]
     #[test]
     fn test_builder_pattern_full() {
         // Test builder with all fields populated
