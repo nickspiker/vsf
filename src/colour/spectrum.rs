@@ -1,6 +1,5 @@
 //! Spectral data structures for representing wavelength-based colour information
 
-use num_traits::Float;
 use crate::prelude::*;
 
 /// A spectrum represents spectral data at regular wavelength intervals

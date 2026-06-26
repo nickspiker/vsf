@@ -1,7 +1,6 @@
 //! Primitive type parsers (unsigned, signed, float, complex)
 
 use crate::decoding::traits::DecodeError;
-use crate::prelude::*;
 use super::helpers::{decode_isize, decode_usize};
 use crate::types::VsfType;
 use num_complex::Complex;

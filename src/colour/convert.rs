@@ -54,7 +54,6 @@
 //!   - Transfer function: Rec.709 OETF for encoding
 
 #[allow(deprecated)] // Need legacy functions for backward compatibility conversions
-use num_traits::Float;
 use crate::colour::legacy::{
     delinearize_srgb, encode_bt709, linearize_bt709, linearize_srgb_u16, linearize_srgb_u8,
 };

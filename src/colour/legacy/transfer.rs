@@ -6,7 +6,6 @@
 //! - **OETF** (Opto-Electronic Transfer Function): linear → gamma-corrected (encoding)
 //! - **EOTF** (Electro-Optical Transfer Function): gamma-corrected → linear (decoding)
 
-use num_traits::Float;
 
 // ==================== sRGB TRANSFER FUNCTIONS ====================
 

@@ -25,7 +25,6 @@
 //! // Raw u64 for serialization let raw = coord.raw(); let restored = WorldCoord::from_raw(raw);
 //! ```
 
-use num_traits::Float;
 use crate::prelude::*;
 use core::f64::consts::PI;
 
