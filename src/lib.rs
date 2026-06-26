@@ -50,7 +50,19 @@
 //! VSF files follow a hierarchical structure:
 //!
 //! ```text
-//! RÅ<                                  Magic number + header start z3{5}                        Format version (FIRST - determines encoding) y3{5}               Backward compatibility version b#{header length}                  Header size (now we know how to encode it!) L#{file length}                    Total file size in bytes (optional, for TCP streaming without parse-as-you-go) eu6{current time as u64}           Eagle Time when emitted (u64 oscillations, 704ps precision). OPTIONAL — devices without a clock (no RTC, no network, pre-handshake) omit the `e` field entirely rather than lie with a placeholder. Readers detect absence by the next byte being `h` (provenance hash) instead of `e`. hp3{31}{provenance hash}            Provenance: BLAKE3 hash of content (required, always 32 bytes) ge{64}{signature}                  Ed25519 signature over entire file AFTER provinence hash is patched in (optional, rolling or provinence, must have one or the other) hb{31}{rolling_hash}               Rolling: BLAKE3 of current state with History (optional) k#{key}                            File-level encryption key (optional) n#{field count}                    Number of fields (d3{9}raw_image:h#{hash},o#{offset},b#{size},n#{count})     Field with values (d3{9}thumbnail:h#{hash},o#{offset},b#{size},n#{count}) ...
+//! RÅ<                                  Magic number + header start
+//! z3{5}                                Format version (FIRST - determines encoding)
+//! y3{5}                                Backward compatibility version
+//! b#{header length}                    Header size (now we know how to encode it!)
+//! L#{file length}                      Total file size in bytes (optional, for TCP streaming without parse-as-you-go)
+//! eu6{current time as u64}             Eagle Time when emitted (u64 oscillations, 704ps precision). OPTIONAL — devices without a clock (no RTC, no network, pre-handshake) omit the `e` field entirely rather than lie with a placeholder. Readers detect absence by the next byte being `h` (provenance hash) instead of `e`.
+//! hp3{31}{provenance hash}             Provenance: BLAKE3 hash of content (required, always 32 bytes)
+//! ge{64}{signature}                    Ed25519 signature over entire file AFTER provinence hash is patched in (optional, rolling or provinence, must have one or the other)
+//! hb{31}{rolling_hash}                 Rolling: BLAKE3 of current state with History (optional)
+//! k#{key}                              File-level encryption key (optional)
+//! n#{field count}                      Number of fields
+//! (d3{9}raw_image:h#{hash},o#{offset},b#{size},n#{count})     Field with values
+//! (d3{9}thumbnail:h#{hash},o#{offset},b#{size},n#{count}) ...
 //! >                                    Header end
 //!
 //! [(section_fields...)...]           Section data at offset for RAW image, note that if section is not encrypted and closer than 1MB from the header, section name, count and length are not required. otherwise all three. [d3{9}thumbnailn#{number of fields}b#{length of section}(section_fields...)...]
