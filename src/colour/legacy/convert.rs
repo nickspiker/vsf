@@ -2,7 +2,6 @@
 //!
 //! **DEPRECATED**: These colourspaces are based on CIE 1931 xy chromaticity coordinates and are permanently tied to the 1931 Standard Observer. Use spectral colourspaces (VSF RGB, Rec.2020) instead for future-proof colour workflows.
 
-use num_traits::Float;
 
 // ==================== BT.709/Rec.709 CONSTANTS AND FUNCTIONS ====================
 

@@ -1,5 +1,3 @@
-use num_traits::Float;
-use crate::prelude::*;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
 /// Oscillations per Eagle second.

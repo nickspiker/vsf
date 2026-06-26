@@ -215,7 +215,6 @@
 //! - `inspect` - Inspection and formatting utilities (requires `inspect` feature)
 //!
 
-#[macro_use]
 extern crate alloc;
 
 /// Build an error string for an unexpected VsfType variant at decode time.
