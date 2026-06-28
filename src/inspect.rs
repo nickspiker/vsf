@@ -553,10 +553,41 @@ fn format_vsf_universal(vsf: &VsfType, indent_level: usize, label: Option<&str>)
 
 /// Bytes per line in hex display (default 32 — future: user configurable)
 const HEX_BYTES_PER_LINE: usize = 32;
-/// Max bytes shown at the head of a binary blob (default 1KB)
-const HEX_MAX_HEAD: usize = 1024;
-/// Max bytes shown at the tail of a binary blob (default 1KB)
-const HEX_MAX_TAIL: usize = 1024;
+
+/// Default bytes shown at the head/tail of a large binary blob before eliding the middle.
+/// Small enough to keep logs readable (a 16+16 fingerprint distinguishes distinct payloads and
+/// confirms presence + size) yet recoverable for spot-checks. The old default was 1024/1024, which
+/// dumped up to 2KB of hex PER FIELD — readable for one packet, ruinous for whole-session logs.
+const HEX_HEAD_DEFAULT: usize = 32;
+const HEX_TAIL_DEFAULT: usize = 32;
+
+/// Runtime-configurable head/tail elision lengths. This is the "local settings" knob: set it once at
+/// startup (a consumer can read its own config file and call [`set_hex_elision`]) or override per-run
+/// with the `VSF_HEX_HEAD` / `VSF_HEX_TAIL` environment variables — no recompile needed.
+/// 0/0 prints nothing but the notice; a huge value effectively disables elision.
+static HEX_ELISION: std::sync::OnceLock<(usize, usize)> = std::sync::OnceLock::new();
+
+/// Set the hex head/tail elision lengths programmatically. First writer wins (it's a OnceLock), so
+/// call this before any inspect output if you want it to take effect. Ignored if elision was already
+/// initialized (e.g. a prior inspect call read the env defaults).
+pub fn set_hex_elision(head: usize, tail: usize) {
+    let _ = HEX_ELISION.set((head, tail));
+}
+
+fn hex_elision() -> (usize, usize) {
+    *HEX_ELISION.get_or_init(|| {
+        let env = |k: &str, d: usize| {
+            std::env::var(k)
+                .ok()
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .unwrap_or(d)
+        };
+        (
+            env("VSF_HEX_HEAD", HEX_HEAD_DEFAULT),
+            env("VSF_HEX_TAIL", HEX_TAIL_DEFAULT),
+        )
+    })
+}
 
 /// Format hex data as lines of HEX_BYTES_PER_LINE bytes each Returns a Vec of hex line strings for caller to join with appropriate separator
 fn format_hex_lines(data: &[u8]) -> Vec<String> {
@@ -576,13 +607,14 @@ fn format_hex_lines(data: &[u8]) -> Vec<String> {
 /// Format binary data with head+tail truncation and omission notice Returns (head_lines, omitted_notice, tail_lines)
 fn format_hex_head_tail(data: &[u8]) -> (Vec<String>, Option<String>, Vec<String>) {
     let total = data.len();
-    if total <= HEX_MAX_HEAD + HEX_MAX_TAIL {
+    let (max_head, max_tail) = hex_elision();
+    if total <= max_head + max_tail {
         (format_hex_lines(data), None, vec![])
     } else {
-        let head = format_hex_lines(&data[..HEX_MAX_HEAD]);
-        let omitted = total - HEX_MAX_HEAD - HEX_MAX_TAIL;
+        let head = format_hex_lines(&data[..max_head]);
+        let omitted = total - max_head - max_tail;
         let notice = format!("... {} bytes omitted ...", omitted);
-        let tail = format_hex_lines(&data[total - HEX_MAX_TAIL..]);
+        let tail = format_hex_lines(&data[total - max_tail..]);
         (head, Some(notice), tail)
     }
 }
@@ -3139,12 +3171,17 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
 
 /// Hex dump with ASCII sidebar (like xxd), truncated to 1KB head + 1KB tail
 pub fn hex_dump(data: &[u8]) -> String {
-    const MAX_BYTES: usize = 1024;
+    // Honor the same runtime elision knob as the structured inspector (VSF_HEX_HEAD/TAIL or
+    // set_hex_elision), rounded UP to whole 16-byte lines so this ASCII hexdump stays aligned.
+    let (cfg_head, cfg_tail) = hex_elision();
+    let round_up = |n: usize| n.div_ceil(16) * 16;
+    let max_head = round_up(cfg_head);
+    let max_tail = round_up(cfg_tail);
     let mut out = String::new();
 
-    let (head, omitted, tail_offset) = if data.len() > MAX_BYTES * 2 {
-        let omitted = data.len() - MAX_BYTES * 2;
-        (&data[..MAX_BYTES], Some(omitted), data.len() - MAX_BYTES)
+    let (head, omitted, tail_offset) = if data.len() > max_head + max_tail {
+        let omitted = data.len() - max_head - max_tail;
+        (&data[..max_head], Some(omitted), data.len() - max_tail)
     } else {
         (data, None, 0)
     };
@@ -3181,4 +3218,32 @@ pub fn hex_dump(data: &[u8]) -> String {
     }
 
     out
+}
+
+#[cfg(test)]
+mod hex_elision_tests {
+    use super::*;
+
+    #[test]
+    fn elision_uses_configured_lengths_and_elides_large_blobs() {
+        // First writer wins on the OnceLock, so set before any inspect output in this test binary.
+        set_hex_elision(16, 16);
+        let (h, t) = hex_elision();
+        assert_eq!((h, t), (16, 16));
+
+        // Small blob (<= head+tail): printed whole, no notice.
+        let small = vec![0xABu8; 24];
+        let (head, notice, tail) = format_hex_head_tail(&small);
+        assert!(notice.is_none(), "24B should not be elided with 16+16");
+        assert!(tail.is_empty());
+        assert_eq!(head.join("").replace(' ', "").len(), 24 * 2); // full hex
+
+        // Large blob: head 16B + notice + tail 16B, middle omitted.
+        let big = (0..15791u32).map(|i| i as u8).collect::<Vec<u8>>();
+        let (head, notice, tail) = format_hex_head_tail(&big);
+        let notice = notice.expect("15791B must be elided");
+        assert!(notice.contains(&format!("{} bytes omitted", 15791 - 16 - 16)));
+        assert_eq!(head.join("").len(), 16 * 2); // 16 bytes of hex
+        assert_eq!(tail.join("").len(), 16 * 2);
+    }
 }
