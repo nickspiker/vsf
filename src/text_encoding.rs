@@ -9,14 +9,11 @@
 //!
 //! ## NFC canonicalization
 //!
-//! Input text is NFC-normalized inside `encode_text` before Huffman encoding. This means
-//! "café" (U+00E9 precomposed) and "cafe\u{0301}" (e + combining acute) produce byte-identical
-//! Huffman output — both reduce to the same NFC codepoint sequence first.
+//! Input text is NFC-normalized inside `encode_text` before Huffman encoding. This means "café" (U+00E9 precomposed) and "cafe\u{0301}" (e + combining acute) produce byte-identical Huffman output — both reduce to the same NFC codepoint sequence first.
 //!
 //! NFC is anchored by Unicode's stability policy: once a codepoint is assigned, its NFC form is guaranteed not to change across Unicode versions. This is the same byte-determinism anchor as a frozen wire-format hash function — the canonical output is specified outside this crate and cannot drift.
 //!
-//! Callers downstream that use VSF for identity hashing (notably `ihi::handle_to_proof`)
-//! inherit café-stability automatically: there is no way to construct an `x`-encoded byte stream that distinguishes NFC from NFD input.
+//! Callers downstream that use VSF for identity hashing (notably `ihi::handle_to_proof`) inherit café-stability automatically: there is no way to construct an `x`-encoded byte stream that distinguishes NFC from NFD input.
 
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
@@ -146,11 +143,9 @@ fn get_ascii_lut() -> &'static [BitPattern; 128] {
 
 /// Encode Unicode text to Huffman-compressed bytes after NFC normalization.
 ///
-/// Returns `(huffman_bytes, nfc_char_count)`. The byte vector is the Huffman bitstream padded to a byte boundary; the char count is the number of codepoints AFTER NFC normalization, not the input length. Callers MUST use the returned count when writing the VSF `x`
-/// marker — NFC can collapse or expand codepoint sequences, and using the original count would corrupt the wire format.
+/// Returns `(huffman_bytes, nfc_char_count)`. The byte vector is the Huffman bitstream padded to a byte boundary; the char count is the number of codepoints AFTER NFC normalization, not the input length. Callers MUST use the returned count when writing the VSF `x` marker — NFC can collapse or expand codepoint sequences, and using the original count would corrupt the wire format.
 ///
-/// All characters use variable-length Huffman codes (3-24 bits). The codebook covers all
-/// 1,112,064 valid Unicode codepoints, so this function never fails on valid `&str` input.
+/// All characters use variable-length Huffman codes (3-24 bits). The codebook covers all 1,112,064 valid Unicode codepoints, so this function never fails on valid `&str` input.
 ///
 /// ## Canonicalization
 ///
@@ -164,8 +159,7 @@ fn get_ascii_lut() -> &'static [BitPattern; 128] {
 /// ```text
 /// x [char_count] [huffman_bytes]
 /// ```
-/// `char_count` here is the NFC count returned from this function, encoded via
-/// `encode_number()` (3-6+ bytes depending on size). No arbitrary limits — supports billions of characters.
+/// `char_count` here is the NFC count returned from this function, encoded via `encode_number()` (3-6+ bytes depending on size). No arbitrary limits — supports billions of characters.
 ///
 /// # Example
 /// ```ignore
@@ -337,8 +331,7 @@ fn get_fast_decoder() -> &'static FastDecoder {
 /// Convenience wrapper around `decode_text_with_size()` that discards byte count.
 ///
 /// # Arguments
-/// * `bytes` - Huffman-encoded bitstream (padded to byte boundary)
-/// * `char_count` - Number of characters to decode (from VSF x marker)
+/// * `bytes` - Huffman-encoded bitstream (padded to byte boundary) * `char_count` - Number of characters to decode (from VSF x marker)
 ///
 /// # Returns
 /// Tuple of (decoded_string, bytes_consumed)
@@ -507,15 +500,13 @@ mod tests {
         let text = "café";
         let (encoded, char_count) = encode_text(text);
         let (decoded, _) = decode_text(&encoded, char_count).unwrap();
-        // Roundtrip must equal the NFC form of the input. The source-file "café" is already
-        // NFC ("e\u{0301}" would not be), so a direct comparison is correct here.
+        // Roundtrip must equal the NFC form of the input. The source-file "café" is already NFC ("e\u{0301}" would not be), so a direct comparison is correct here.
         assert_eq!(decoded, text);
     }
 
     /// NFC/NFD equivalence at the encoder boundary — the test the universe has been missing.
     ///
-    /// Until this work, `encode_text` iterated raw codepoints with no normalization. "café" with U+00E9 (precomposed, 1 codepoint) and "cafe\u{0301}" (e + combining acute,
-    /// 2 codepoints) produced completely different Huffman bitstreams, silently breaking every downstream identity primitive that round-tripped thru `VsfType::x`. This assertion locks the fixed behavior.
+    /// Until this work, `encode_text` iterated raw codepoints with no normalization. "café" with U+00E9 (precomposed, 1 codepoint) and "cafe\u{0301}" (e + combining acute, 2 codepoints) produced completely different Huffman bitstreams, silently breaking every downstream identity primitive that round-tripped thru `VsfType::x`. This assertion locks the fixed behavior.
     #[test]
     fn test_nfc_equivalence_e_acute() {
         let precomposed = "\u{00E9}";      // é as one codepoint

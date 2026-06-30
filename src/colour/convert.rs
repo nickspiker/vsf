@@ -1521,10 +1521,7 @@ impl VsfType {
     /// LMS represents Long, Medium, and Short wavelength cone responses. Based on CIE 2006 2° Standard Observer.
     ///
     /// # Arguments
-    /// * `l` - Long wavelength cone response (linear, 0-1 nominal range)
-    /// * `m` - Medium wavelength cone response (linear, 0-1 nominal range)
-    /// * `s` - Short wavelength cone response (linear, 0-1 nominal range)
-    /// * `format` - Target VSF colour format
+    /// * `l` - Long wavelength cone response (linear, 0-1 nominal range) * `m` - Medium wavelength cone response (linear, 0-1 nominal range) * `s` - Short wavelength cone response (linear, 0-1 nominal range) * `format` - Target VSF colour format
     ///
     /// # Examples
     /// ```ignore
@@ -1544,10 +1541,7 @@ impl VsfType {
     /// XYZ tristimulus values are the foundation of most xy-coordinate-based colour standards.
     ///
     /// # Arguments
-    /// * `x` - X tristimulus value (linear, 0-1 nominal range)
-    /// * `y` - Y tristimulus value (linear, 0-1 nominal range)
-    /// * `z` - Z tristimulus value (linear, 0-1 nominal range)
-    /// * `format` - Target VSF colour format
+    /// * `x` - X tristimulus value (linear, 0-1 nominal range) * `y` - Y tristimulus value (linear, 0-1 nominal range) * `z` - Z tristimulus value (linear, 0-1 nominal range) * `format` - Target VSF colour format
     ///
     /// # Examples
     /// ```ignore

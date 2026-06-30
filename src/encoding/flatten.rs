@@ -9,8 +9,7 @@ use crate::types::{EtType, VsfType};
 /// This function creates a properly formatted hash field filled with zeros, used when the actual hash will be computed and written later.
 ///
 /// # Arguments
-/// * `hash_type` - The hash subtype: `b'b'` (BLAKE3), `b's'` (SHA2), or `b'p'` (provenance)
-/// * `len` - The length of the hash in bytes (e.g., 32 for BLAKE3)
+/// * `hash_type` - The hash subtype: `b'b'` (BLAKE3), `b's'` (SHA2), or `b'p'` (provenance) * `len` - The length of the hash in bytes (e.g., 32 for BLAKE3)
 ///
 /// # Returns
 /// A Vec<u8> containing: [b'h', hash_type, encoded_length, zeros...]

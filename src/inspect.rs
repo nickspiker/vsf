@@ -555,21 +555,15 @@ fn format_vsf_universal(vsf: &VsfType, indent_level: usize, label: Option<&str>)
 const HEX_BYTES_PER_LINE: usize = 32;
 
 /// Default bytes shown at the head/tail of a large binary blob before eliding the middle.
-/// Small enough to keep logs readable (a 16+16 fingerprint distinguishes distinct payloads and
-/// confirms presence + size) yet recoverable for spot-checks. The old default was 1024/1024, which
-/// dumped up to 2KB of hex PER FIELD — readable for one packet, ruinous for whole-session logs.
+/// Small enough to keep logs readable (a 16+16 fingerprint distinguishes distinct payloads and confirms presence + size) yet recoverable for spot-checks. The old default was 1024/1024, which dumped up to 2KB of hex PER FIELD — readable for one packet, ruinous for whole-session logs.
 const HEX_HEAD_DEFAULT: usize = 32;
 const HEX_TAIL_DEFAULT: usize = 32;
 
-/// Runtime-configurable head/tail elision lengths. This is the "local settings" knob: set it once at
-/// startup (a consumer can read its own config file and call [`set_hex_elision`]) or override per-run
-/// with the `VSF_HEX_HEAD` / `VSF_HEX_TAIL` environment variables — no recompile needed.
+/// Runtime-configurable head/tail elision lengths. This is the "local settings" knob: set it once at startup (a consumer can read its own config file and call [`set_hex_elision`]) or override per-run with the `VSF_HEX_HEAD` / `VSF_HEX_TAIL` environment variables — no recompile needed.
 /// 0/0 prints nothing but the notice; a huge value effectively disables elision.
 static HEX_ELISION: std::sync::OnceLock<(usize, usize)> = std::sync::OnceLock::new();
 
-/// Set the hex head/tail elision lengths programmatically. First writer wins (it's a OnceLock), so
-/// call this before any inspect output if you want it to take effect. Ignored if elision was already
-/// initialized (e.g. a prior inspect call read the env defaults).
+/// Set the hex head/tail elision lengths programmatically. First writer wins (it's a OnceLock), so call this before any inspect output if you want it to take effect. Ignored if elision was already initialized (e.g. a prior inspect call read the env defaults).
 pub fn set_hex_elision(head: usize, tail: usize) {
     let _ = HEX_ELISION.set((head, tail));
 }
@@ -1910,14 +1904,10 @@ pub fn hex_preview(bytes: &[u8]) -> String {
 
 /// Human-readable rendering of a VSF `x` (string) value's CONTENTS.
 ///
-/// VSF `x` fields nominally hold text, but the stack also stuffs binary blobs into them (an
-/// encrypted message, a VSF-encoded sub-record, random padding). Rust's `escape_default()` turns
-/// such a blob into an unreadable wall of `\u{fffd}\u{7}\\` debug escapes. Instead:
+/// VSF `x` fields nominally hold text, but the stack also stuffs binary blobs into them (an encrypted message, a VSF-encoded sub-record, random padding). Rust's `escape_default()` turns such a blob into an unreadable wall of `\u{fffd}\u{7}\\` debug escapes. Instead:
 /// - mostly-printable text → shown verbatim (control chars still escaped so the line stays intact),
-/// - binary-ish content → a compact hex dump (`<N bytes binary> AABBCC…`), which is what you can
-///   actually read at a glance.
-/// "Binary-ish" = >15% of bytes are non-tab/newline control chars or the content isn't valid UTF-8
-/// text. Caps the hex at 64 bytes with an ellipsis so a 286-byte blob doesn't blow up the line.
+/// - binary-ish content → a compact hex dump (`<N bytes binary> AABBCC…`), which is what you can actually read at a glance.
+/// "Binary-ish" = >15% of bytes are non-tab/newline control chars or the content isn't valid UTF-8 text. Caps the hex at 64 bytes with an ellipsis so a 286-byte blob doesn't blow up the line.
 pub fn display_x_value(s: &str) -> String {
     let bytes = s.as_bytes();
     if bytes.is_empty() {
@@ -1939,8 +1929,7 @@ pub fn display_x_value(s: &str) -> String {
         let ell = if bytes.len() > MAX { "…" } else { "" };
         format!("<{} bytes binary> {}{}", bytes.len(), hex, ell)
     } else {
-        // Printable text: escape only the few control chars so multi-line content can't break the
-        // surrounding tree layout, but leave normal characters untouched (no \u{} for every char).
+        // Printable text: escape only the few control chars so multi-line content can't break the surrounding tree layout, but leave normal characters untouched (no \u{} for every char).
         s.replace('\\', "\\\\")
             .replace('\n', "\\n")
             .replace('\r', "\\r")
@@ -3171,8 +3160,7 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
 
 /// Hex dump with ASCII sidebar (like xxd), truncated to 1KB head + 1KB tail
 pub fn hex_dump(data: &[u8]) -> String {
-    // Honor the same runtime elision knob as the structured inspector (VSF_HEX_HEAD/TAIL or
-    // set_hex_elision), rounded UP to whole 16-byte lines so this ASCII hexdump stays aligned.
+    // Honor the same runtime elision knob as the structured inspector (VSF_HEX_HEAD/TAIL or set_hex_elision), rounded UP to whole 16-byte lines so this ASCII hexdump stays aligned.
     let (cfg_head, cfg_tail) = hex_elision();
     let round_up = |n: usize| n.div_ceil(16) * 16;
     let max_head = round_up(cfg_head);
