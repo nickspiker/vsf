@@ -24,8 +24,7 @@ use crate::types::{Fill, GradientStop, GradientVariant, Stroke, StrokeCap, Strok
 /// The pointer is advanced as bytes are consumed.
 ///
 /// # Arguments
-/// * `data` - The byte slice containing VSF-encoded data
-/// * `pointer` - Mutable reference to the current position in the data
+/// * `data` - The byte slice containing VSF-encoded data * `pointer` - Mutable reference to the current position in the data
 ///
 /// # Returns
 /// The parsed VsfType, or an error if parsing fails

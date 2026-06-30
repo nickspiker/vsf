@@ -1,15 +1,8 @@
 //! Build script for VSF.
 //!
-//! Verifies that the vendored Huffman corpus and codebook (`frequencies.bin`,
-//! `huffman_codes.bin`) are byte-identical to their pinned BLAKE3 hashes. The codebook IS the
-//! wire format for `VsfType::x`, so drift here silently bifurcates the identity namespace
-//! thru every downstream consumer (ihi handle hashing, photon avatar keys, contact tables,
-//! anywhere else that round-trips text thru VSF).
+//! Verifies that the vendored Huffman corpus and codebook (`frequencies.bin`, `huffman_codes.bin`) are byte-identical to their pinned BLAKE3 hashes. The codebook IS the wire format for `VsfType::x`, so drift here silently bifurcates the identity namespace thru every downstream consumer (ihi handle hashing, photon avatar keys, contact tables, anywhere else that round-trips text thru VSF).
 //!
-//! Both files are vendored in the repo and tracked in version control. Regeneration is an
-//! explicit offline operation performed via `tools/frequency-analyzer/` — the build script
-//! never regenerates, never downloads, never silently mutates either file. A hash mismatch is
-//! a hard build failure.
+//! Both files are vendored in the repo and tracked in version control. Regeneration is an explicit offline operation performed via `tools/frequency-analyzer/` — the build script never regenerates, never downloads, never silently mutates either file. A hash mismatch is a hard build failure.
 
 use std::fs;
 use std::path::Path;
@@ -46,10 +39,7 @@ fn main() {
     println!("cargo:rerun-if-changed=huffman_codes.bin");
     println!("cargo:rerun-if-changed=build.rs");
 
-    // Docs.rs and similar restricted environments still need to compile even without the
-    // vendored codebook. If huffman_codes.bin is genuinely absent, leave the cfg flag unset —
-    // text_encoding.rs sees the missing cfg and returns an empty HashMap. Encoding then panics
-    // with a helpful message rather than silently producing wrong bytes.
+    // Docs.rs and similar restricted environments still need to compile even without the vendored codebook. If huffman_codes.bin is genuinely absent, leave the cfg flag unset — text_encoding.rs sees the missing cfg and returns an empty HashMap. Encoding then panics with a helpful message rather than silently producing wrong bytes.
     if !Path::new("huffman_codes.bin").exists() {
         eprintln!(
             "cargo:warning=huffman_codes.bin missing — text encoding will be unavailable in this build"
@@ -57,9 +47,7 @@ fn main() {
         return;
     }
 
-    // frequencies.bin is the input corpus; it's vendored in the git repo but excluded from
-    // the published .crate to stay under the crates.io 10MiB limit. Verify it when present
-    // (developer builds from a clone), skip when absent (downstream users from crates.io).
+    // frequencies.bin is the input corpus; it's vendored in the git repo but excluded from the published .crate to stay under the crates.io 10MiB limit. Verify it when present (developer builds from a clone), skip when absent (downstream users from crates.io).
     // huffman_codes.bin — the runtime-load artifact — is ALWAYS verified.
     if Path::new("frequencies.bin").exists() {
         if let Err(msg) = verify_blake3("frequencies.bin", FREQUENCIES_BLAKE3) {

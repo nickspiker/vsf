@@ -501,8 +501,7 @@ fn find_signature_value_position(data: &[u8], sig_marker_pos: usize) -> Result<u
 /// Write computed provenance hash (hp) into the placeholder
 ///
 /// # Arguments
-/// * `vsf_bytes` - Complete VSF file bytes with hp placeholder
-/// * `hash` - 32-byte BLAKE3 hash to write
+/// * `vsf_bytes` - Complete VSF file bytes with hp placeholder * `hash` - 32-byte BLAKE3 hash to write
 ///
 /// # Returns
 /// Modified VSF bytes with hp hash written
@@ -584,8 +583,7 @@ fn find_hp_value_position(data: &[u8], hash_marker_pos: usize) -> Result<usize, 
 /// Fill the provenance hash (hp) placeholder with computed hash bytes
 ///
 /// # Arguments
-/// * `vsf_bytes` - Mutable VSF file bytes with hp placeholder (32 zeros)
-/// * `hash` - The computed 32-byte BLAKE3 hash
+/// * `vsf_bytes` - Mutable VSF file bytes with hp placeholder (32 zeros) * `hash` - The computed 32-byte BLAKE3 hash
 ///
 /// # Returns
 /// Ok(()) on success
@@ -621,8 +619,7 @@ pub fn fill_provenance_hash(vsf_bytes: &mut [u8], hash: &[u8; 32]) -> Result<(),
 /// Fill the signature (ge) placeholder with signature bytes
 ///
 /// # Arguments
-/// * `vsf_bytes` - Mutable VSF file bytes with ge placeholder (64 zeros)
-/// * `signature` - The 64-byte Ed25519 signature
+/// * `vsf_bytes` - Mutable VSF file bytes with ge placeholder (64 zeros) * `signature` - The 64-byte Ed25519 signature
 ///
 /// # Returns
 /// Ok(()) on success
@@ -778,8 +775,7 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
 /// Write computed hash into the file hash placeholder
 ///
 /// # Arguments
-/// * `vsf_bytes` - Complete VSF file bytes with hash placeholder
-/// * `hash` - 32-byte BLAKE3 hash to write
+/// * `vsf_bytes` - Complete VSF file bytes with hash placeholder * `hash` - 32-byte BLAKE3 hash to write
 ///
 /// # Returns
 /// Modified VSF bytes with hash written
@@ -958,9 +954,7 @@ fn write_header_field_signatures_from_list(
 /// 4. Recomputes file hash
 ///
 /// # Arguments
-/// * `vsf_bytes` - Complete VSF file bytes
-/// * `section` - Name of the section to sign (e.g., "raw")
-/// * `signing_key` - Ed25519 signing key bytes (must be valid SigningKey)
+/// * `vsf_bytes` - Complete VSF file bytes * `section` - Name of the section to sign (e.g., "raw") * `signing_key` - Ed25519 signing key bytes (must be valid SigningKey)
 ///
 /// # Returns
 /// Modified VSF bytes with section signature in header field definition
@@ -979,8 +973,7 @@ fn write_header_field_signatures_from_list(
 ///
 /// 1. **Provenance hash (hp)**: Computed over the entire file with all crypto fields zeroed (hp=0, sig=0). This is the immutable content identity.
 ///
-/// 2. **Signature**: Signs the hash of the entire file WITH provenance filled in but signature still zeroed. This binds the signer to both the content
-///    AND its provenance.
+/// 2. **Signature**: Signs the hash of the entire file WITH provenance filled in but signature still zeroed. This binds the signer to both the content AND its provenance.
 ///
 /// ```text
 /// Creation: file[hp=0, sig=0] → BLAKE3 → hp file[hp=✓, sig=0] → BLAKE3 → sign() → sig
@@ -997,9 +990,7 @@ fn write_header_field_signatures_from_list(
 /// When signing, we use signature (ge) instead of rolling hash (hb). Both cover file integrity; signature additionally proves authorship.
 ///
 /// # Arguments
-/// * `vsf_bytes` - Complete VSF file with hp already computed
-/// * `section_name` - Section to associate signature with in header
-/// * `signing_key` - Ed25519 signing key (32 bytes)
+/// * `vsf_bytes` - Complete VSF file with hp already computed * `section_name` - Section to associate signature with in header * `signing_key` - Ed25519 signing key (32 bytes)
 ///
 /// # Returns
 /// VSF file bytes with signature added to header
@@ -1190,10 +1181,7 @@ fn write_section_signature(
 /// data BEFORE building the VSF file. This just adds metadata to the header.
 ///
 /// # Arguments
-/// * `vsf_bytes` - Complete VSF file bytes
-/// * `section_name` - Name of the section (e.g., "sensitive")
-/// * `algorithm` - Encryption algorithm ID (e.g., b'c' for ChaCha20)
-/// * `encryption_key` - Encryption key bytes
+/// * `vsf_bytes` - Complete VSF file bytes * `section_name` - Name of the section (e.g., "sensitive") * `algorithm` - Encryption algorithm ID (e.g., b'c' for ChaCha20) * `encryption_key` - Encryption key bytes
 ///
 /// # Returns
 /// Modified VSF bytes with encryption metadata in header field
@@ -1337,8 +1325,7 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
 /// 4. Patch ge with signature
 ///
 /// # Arguments
-/// * `vsf_bytes` - Complete VSF file with ke and ge placeholder
-/// * `signing_key` - Ed25519 signing key (32 bytes)
+/// * `vsf_bytes` - Complete VSF file with ke and ge placeholder * `signing_key` - Ed25519 signing key (32 bytes)
 ///
 /// # Returns
 /// VSF file bytes with hp and ge filled in

@@ -7,8 +7,7 @@
 //! 4. Branch on output size:
 //! - ≤ 256×256: gamma2-encode to u8, pack into `Tensor<u8>` shape `[h, w, 3]`, emit as `image:` section with field `data: t_u3(tensor)`
 //! - > 256×256: gamma2-encode, rav1e AV1 encode (same params photon uses for avatars), emit as `image:` section with field `data: v(b'a', av1_bytes)` — the `v` (wrapped data) type's encoding-byte = `'a'` marks AV1
-//! 5. `VsfBuilder` auto-computes rolling hash (`hb`); provenance hash (`hp`) is the
-//!    BLAKE3 of the source bytes (not the VSF file — by design they hash different things, so `hp != hb` is expected and `hb` is required for VSF integrity)
+//! 5. `VsfBuilder` auto-computes rolling hash (`hb`); provenance hash (`hp`) is the BLAKE3 of the source bytes (not the VSF file — by design they hash different things, so `hp != hb` is expected and `hb` is required for VSF integrity)
 //!
 //! The conversion functions are lifted from photon/src/ui/avatar.rs verbatim where possible (ICC parsing, sRGB fallback, AV1 encode) so byte-for-byte equivalence is preserved across the ecosystem — same source image, same VSF bytes regardless of which tool produced them. Differences from photon's `encode_avatar_from_image`:
 //! - no circular mask (vsfimg produces general images, not avatars)

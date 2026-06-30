@@ -711,10 +711,7 @@ impl RawImageBuilder {
 /// Supports 1-256 bits per sample
 ///
 /// # Arguments
-/// * `bit_depth` - Bits per sample (1-256, where 0 = 256)
-/// * `width` - Image width in samples
-/// * `height` - Image height in samples
-/// * `samples` - RAW sensor sample values (unreferenced, single-plane)
+/// * `bit_depth` - Bits per sample (1-256, where 0 = 256) * `width` - Image width in samples * `height` - Image height in samples * `samples` - RAW sensor sample values (unreferenced, single-plane)
 ///
 /// # Example
 /// ```ignore
@@ -790,9 +787,7 @@ pub fn geotagged_photo(
 /// If TOKEN auth is provided, creates TWO labels: "token auth" and "raw" If no TOKEN auth, creates ONE label: "raw" only
 ///
 /// # Arguments
-/// * `image` - BitPackedTensor (use `BitPackedTensor::pack(bit_depth, shape, samples)`)
-/// * `metadata` - Optional sensor metadata (CFA pattern, black/white levels, calibration hashes)
-/// * `camera` - Optional camera settings (ISO, shutter, aperture, etc.)
+/// * `image` - BitPackedTensor (use `BitPackedTensor::pack(bit_depth, shape, samples)`) * `metadata` - Optional sensor metadata (CFA pattern, black/white levels, calibration hashes) * `camera` - Optional camera settings (ISO, shutter, aperture, etc.)
 /// * `lens` - Optional lens info (make, model, focal range, aperture range)
 ///
 /// # Returns
@@ -957,9 +952,7 @@ pub fn build_raw_image(
 /// - No separate sample data section (p has the bitpacked bytes)
 ///
 /// # Arguments
-/// * `samples` - RAW sensor sample values as u64 (0-4095 for 12-bit), will be bitpacked
-/// * `iso` - ISO speed (e.g., 100, 200, 400, 800, 1600, 3200)
-/// * `shutter_s` - Shutter time in seconds (e.g., 1./60. = 0.0167 for 1/60 second)
+/// * `samples` - RAW sensor sample values as u64 (0-4095 for 12-bit), will be bitpacked * `iso` - ISO speed (e.g., 100, 200, 400, 800, 1600, 3200) * `shutter_s` - Shutter time in seconds (e.g., 1./60. = 0.0167 for 1/60 second)
 pub fn lumis_raw_capture(samples: Vec<u64>, iso: f32, shutter_s: f32) -> Result<Vec<u8>, String> {
     // Create BitPackedTensor for 12-bit Lumis sensor
     let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
