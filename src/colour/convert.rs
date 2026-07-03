@@ -2115,7 +2115,7 @@ const PHOTOPIC_WHITE_NORM: f32 = {
 ///
 /// This performs colourimetric conversion:
 /// 1. VSF RGB → LMS (cone responses using column-major matrix)
-/// 2. LMS → Photopic luminance (weighted sum: 1.05L + 0.62M)
+/// 2. LMS → Photopic luminance (LMS2PHOTOPIC: CIE 170-2 10° V*₁₀ weights in the sum-normalized basis)
 /// 3. Normalize so Illuminant E white [1,1,1] → 1.0
 pub fn vsf_rgb_to_photopic_f32(r: f32, g: f32, b: f32) -> f32 {
     // VSF RGB → LMS (matrix in column-major order)
@@ -2134,7 +2134,7 @@ pub fn vsf_rgb_to_photopic_f32(r: f32, g: f32, b: f32) -> f32 {
 ///
 /// This performs colourimetric conversion:
 /// 1. VSF RGB → LMS (cone responses using column-major matrix)
-/// 2. LMS → Photopic luminance (weighted sum: 1.05L + 0.62M)
+/// 2. LMS → Photopic luminance (LMS2PHOTOPIC: CIE 170-2 10° V*₁₀ weights in the sum-normalized basis)
 /// 3. Normalize so Illuminant E white [1,1,1] → 1.0
 #[cfg(feature = "spirix")]
 pub fn vsf_rgb_to_photopic_s44(r: S44, g: S44, b: S44) -> S44 {
