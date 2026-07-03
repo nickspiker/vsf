@@ -774,6 +774,18 @@ fn format_lms_1nm_array(data: &[f64]) -> String {
 }
 
 fn write_spectral_constants(vsf_to_lms: &[f64; 9], lms_to_vsf: &[f64; 9], lms_1nm: &[f64]) -> std::io::Result<()> {
+    // lms → photopic weights: CIE 170-2 / Stockman & Sharpe define the 10° luminous efficiency on UNIT-PEAK energy fundamentals as V*₁₀(λ) = 0.692839·l̄(λ) + 0.349676·m̄(λ).
+    // Our channels are sum-normalized (l̂ = l̄/Σl̄) and the unit-peak table's max is 1, so Σl̄ = 1/max(l̂) — the weights convert to our basis as w = coefficient/max(channel).
+    // S-cones contribute zero to photopic luminance by definition.
+    let mut max_l = 0.0f64;
+    let mut max_m = 0.0f64;
+    for i in (0..lms_1nm.len()).step_by(3) {
+        max_l = max_l.max(lms_1nm[i]);
+        max_m = max_m.max(lms_1nm[i + 1]);
+    }
+    let w_l = 0.692839 / max_l;
+    let w_m = 0.349676 / max_m;
+
     let content = format!(
 r#"//! Spectral colourspace transformation matrices and constants
 //!
@@ -806,18 +818,21 @@ use crate::colour::spectrum::ConstSpectrum;
 
 /// lms → Photopic luminance weights
 ///
-/// Standard photopic luminosity function weights for converting lms to luminance.
+/// CIE 170-2 / Stockman & Sharpe 10° luminous efficiency V*₁₀(λ) = 0.692839·l̄(λ) + 0.349676·m̄(λ) (unit-peak energy fundamentals), converted to VSF's sum-normalized basis via w = coefficient/max(channel).
+/// Reconstructs unit-peak V*₁₀ from the sum-normalized channels; downstream white normalization (e.g. PHOTOPIC_WHITE_NORM) handles absolute scale. S-cones contribute zero to photopic luminance by definition.
 pub const LMS2PHOTOPIC: [f32; 3] = [
-    1.0,  // l cone weight (placeholder - needs actual photopic weights)
-    1.0,  // m cone weight
-    0.0,  // s cone weight (S-cones don't contribute to photopic luminance)
+    {}f32, // l cone weight
+    {}f32, // m cone weight
+    0.0,   // s cone weight
 ];
 
 // Rec.2020 transformation matrices are now in the rec2020 module See: src/colour/rec2020/constants.rs
 "#,
         format_lms_1nm_array(lms_1nm),
         format_matrix(vsf_to_lms, "VSF_RGB2LMS"),
-        format_matrix(lms_to_vsf, "LMS2VSF_RGB")
+        format_matrix(lms_to_vsf, "LMS2VSF_RGB"),
+        w_l as f32,
+        w_m as f32
     );
 
     let path = Path::new("../src/colour/spectral/constants.rs");
