@@ -1385,12 +1385,12 @@ pub const LMS2VSF_RGB: [f32; 9] = [
 
 /// lms → Photopic luminance weights
 ///
-/// CIE 170-2 / Stockman & Sharpe 10° luminous efficiency V*₁₀(λ) = 0.692839·l̄(λ) + 0.349676·m̄(λ) (defined on unit-peak energy fundamentals), converted to VSF's sum-normalized basis via w = coefficient/max(channel).
-/// Reconstructs unit-peak V*₁₀ from the sum-normalized channels; downstream white normalization (PHOTOPIC_WHITE_NORM) handles absolute scale.
+/// CIE 170-2 / Stockman & Sharpe 10° luminous efficiency V*₁₀(λ) = 0.692839·l̄(λ) + 0.349676·m̄(λ) (defined on unit-peak energy fundamentals), converted to VSF's sum-normalized basis via w = coefficient/max(channel), then rescaled to sum to 1.
+/// The weights read as the L and M SHARES of photopic luminance; only the ratio (2.332) affects output — PHOTOPIC_WHITE_NORM divides out any absolute scale, and the sum-to-1 scale makes E-white's raw luminance ≈ 1 before normalization.
 pub const LMS2PHOTOPIC: [f32; 3] = [
-    84.18661_f32,  // l cone weight
-    36.098335_f32, // m cone weight
-    0.0,           // s cone weight (S-cones don't contribute to photopic luminance)
+    0.699_893_16_f32, // l cone share
+    0.300_106_84_f32, // m cone share
+    0.0,              // s cone share (S-cones don't contribute to photopic luminance)
 ];
 
 #[cfg(feature = "spirix")]
@@ -1425,8 +1425,8 @@ mod s44_consts {
     ];
 
     pub const LMS2PHOTOPIC_S44: [S44; 3] = [
-        sf!(84.18661_f32),
-        sf!(36.098335_f32),
+        sf!(0.699_893_16_f32),
+        sf!(0.300_106_84_f32),
         S44::ZERO,
     ];
 }
