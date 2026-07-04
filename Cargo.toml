@@ -48,7 +48,7 @@ required-features = ["image-tools"]
 bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 chrono = { version = "0.4.38", default-features = false, features = ["alloc"] }
 num-complex = { version = "0.4.5", default-features = false }
-spirix = { version = "0.1.1", optional = true }
+spirix = { path = "../spirix", optional = true }
 # ihi 0.0.45+ (currently 0.0.47, the sole live version) pins vsf "0.6" (the frozen encoder lane), so enabling our handle feature resolves vsf 0.8 + ihi + vsf 0.6.42 as two coexisting copies — structurally cycle-free. Bumping ihi here is safe only while ihi stays on the 0.6 lane.
 ihi = { version = "0.0.47", default-features = false, features = ["handle"], optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
