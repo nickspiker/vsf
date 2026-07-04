@@ -1,5 +1,5 @@
-use crate::prelude::*;
 use super::traits::{EncodeNumber, EncodeNumberInclusive};
+use crate::prelude::*;
 
 // ==================== UNSIGNED INTEGER ENCODING ====================
 

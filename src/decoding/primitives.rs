@@ -1,7 +1,7 @@
 //! Primitive type parsers (unsigned, signed, float, complex)
 
-use crate::decoding::traits::DecodeError;
 use super::helpers::{decode_isize, decode_usize};
+use crate::decoding::traits::DecodeError;
 use crate::types::VsfType;
 use num_complex::Complex;
 
@@ -9,7 +9,9 @@ use num_complex::Complex;
 
 pub fn parse_unsigned(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     if *pointer >= data.len() {
-        return Err(DecodeError::UnexpectedEofMsg("Not enough data for unsigned size marker".into()));
+        return Err(DecodeError::UnexpectedEofMsg(
+            "Not enough data for unsigned size marker".into(),
+        ));
     }
 
     let size_byte = data[*pointer];
@@ -26,7 +28,9 @@ pub fn parse_unsigned(data: &[u8], pointer: &mut usize) -> Result<VsfType, Decod
         b'0' => {
             // Boolean: u0 with explicit '0' marker (alternative format)
             if *pointer >= data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for u0".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for u0".into(),
+                ));
             }
             let value = data[*pointer];
             *pointer += 1;
@@ -39,7 +43,9 @@ pub fn parse_unsigned(data: &[u8], pointer: &mut usize) -> Result<VsfType, Decod
         b'3' => {
             // u3: u8
             if *pointer >= data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for u3".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for u3".into(),
+                ));
             }
             let value = data[*pointer];
             *pointer += 1;
@@ -48,7 +54,9 @@ pub fn parse_unsigned(data: &[u8], pointer: &mut usize) -> Result<VsfType, Decod
         b'4' => {
             // u4: u16
             if *pointer + 2 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for u4".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for u4".into(),
+                ));
             }
             let value = u16::from_be_bytes([data[*pointer], data[*pointer + 1]]);
             *pointer += 2;
@@ -57,7 +65,9 @@ pub fn parse_unsigned(data: &[u8], pointer: &mut usize) -> Result<VsfType, Decod
         b'5' => {
             // u5: u32
             if *pointer + 4 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for u5".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for u5".into(),
+                ));
             }
             let value = u32::from_be_bytes([
                 data[*pointer],
@@ -71,7 +81,9 @@ pub fn parse_unsigned(data: &[u8], pointer: &mut usize) -> Result<VsfType, Decod
         b'6' => {
             // u6: u64
             if *pointer + 8 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for u6".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for u6".into(),
+                ));
             }
             let value = u64::from_be_bytes([
                 data[*pointer],
@@ -89,7 +101,9 @@ pub fn parse_unsigned(data: &[u8], pointer: &mut usize) -> Result<VsfType, Decod
         b'7' => {
             // u7: u128
             if *pointer + 16 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for u7".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for u7".into(),
+                ));
             }
             let value = u128::from_be_bytes([
                 data[*pointer],
@@ -125,7 +139,9 @@ pub fn parse_unsigned(data: &[u8], pointer: &mut usize) -> Result<VsfType, Decod
 
 pub fn parse_signed(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     if *pointer >= data.len() {
-        return Err(DecodeError::UnexpectedEofMsg("Not enough data for signed size marker".into()));
+        return Err(DecodeError::UnexpectedEofMsg(
+            "Not enough data for signed size marker".into(),
+        ));
     }
 
     let size_byte = data[*pointer];
@@ -135,7 +151,9 @@ pub fn parse_signed(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
         b'3' => {
             // i3: i8
             if *pointer >= data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for i3".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for i3".into(),
+                ));
             }
             let value = data[*pointer] as i8;
             *pointer += 1;
@@ -144,7 +162,9 @@ pub fn parse_signed(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
         b'4' => {
             // i4: i16
             if *pointer + 2 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for i4".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for i4".into(),
+                ));
             }
             let value = i16::from_be_bytes([data[*pointer], data[*pointer + 1]]);
             *pointer += 2;
@@ -153,7 +173,9 @@ pub fn parse_signed(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
         b'5' => {
             // i5: i32
             if *pointer + 4 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for i5".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for i5".into(),
+                ));
             }
             let value = i32::from_be_bytes([
                 data[*pointer],
@@ -167,7 +189,9 @@ pub fn parse_signed(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
         b'6' => {
             // i6: i64
             if *pointer + 8 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for i6".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for i6".into(),
+                ));
             }
             let value = i64::from_be_bytes([
                 data[*pointer],
@@ -185,7 +209,9 @@ pub fn parse_signed(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
         b'7' => {
             // i7: i128
             if *pointer + 16 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for i7".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for i7".into(),
+                ));
             }
             let value = i128::from_be_bytes([
                 data[*pointer],
@@ -221,7 +247,9 @@ pub fn parse_signed(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
 
 pub fn parse_float(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     if *pointer >= data.len() {
-        return Err(DecodeError::UnexpectedEofMsg("Not enough data for float size marker".into()));
+        return Err(DecodeError::UnexpectedEofMsg(
+            "Not enough data for float size marker".into(),
+        ));
     }
 
     let size_byte = data[*pointer];
@@ -231,7 +259,9 @@ pub fn parse_float(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeEr
         b'5' => {
             // f5: f32
             if *pointer + 4 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for f5".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for f5".into(),
+                ));
             }
             let value = f32::from_be_bytes([
                 data[*pointer],
@@ -245,7 +275,9 @@ pub fn parse_float(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeEr
         b'6' => {
             // f6: f64
             if *pointer + 8 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for f6".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for f6".into(),
+                ));
             }
             let value = f64::from_be_bytes([
                 data[*pointer],
@@ -260,7 +292,9 @@ pub fn parse_float(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeEr
             *pointer += 8;
             Ok(VsfType::f6(value))
         }
-        _ => Err(DecodeError::InvalidDataMsg("Invalid float size marker".into())),
+        _ => Err(DecodeError::InvalidDataMsg(
+            "Invalid float size marker".into(),
+        )),
     }
 }
 
@@ -268,7 +302,9 @@ pub fn parse_float(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeEr
 
 pub fn parse_complex(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     if *pointer >= data.len() {
-        return Err(DecodeError::UnexpectedEofMsg("Not enough data for complex size marker".into()));
+        return Err(DecodeError::UnexpectedEofMsg(
+            "Not enough data for complex size marker".into(),
+        ));
     }
 
     let size_byte = data[*pointer];
@@ -278,7 +314,9 @@ pub fn parse_complex(data: &[u8], pointer: &mut usize) -> Result<VsfType, Decode
         b'5' => {
             // j5: Complex<f32>
             if *pointer + 8 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for j5".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for j5".into(),
+                ));
             }
             let re = f32::from_be_bytes([
                 data[*pointer],
@@ -299,7 +337,9 @@ pub fn parse_complex(data: &[u8], pointer: &mut usize) -> Result<VsfType, Decode
         b'6' => {
             // j6: Complex<f64>
             if *pointer + 16 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("Not enough data for j6".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "Not enough data for j6".into(),
+                ));
             }
             let re = f64::from_be_bytes([
                 data[*pointer],
@@ -325,6 +365,8 @@ pub fn parse_complex(data: &[u8], pointer: &mut usize) -> Result<VsfType, Decode
             *pointer += 8;
             Ok(VsfType::j6(Complex::new(re, im)))
         }
-        _ => Err(DecodeError::InvalidDataMsg("Invalid complex size marker".into())),
+        _ => Err(DecodeError::InvalidDataMsg(
+            "Invalid complex size marker".into(),
+        )),
     }
 }

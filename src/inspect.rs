@@ -510,11 +510,7 @@ fn format_node_compact(node: &crate::types::Node) -> String {
 // Helper to format children with proper indentation
 fn format_children(children: &[VsfType]) -> String {
     if children.is_empty() {
-        return format!(
-            "{}{}",
-            trc("(", col_punct()),
-            trc(")", col_punct())
-        );
+        return format!("{}{}", trc("(", col_punct()), trc(")", col_punct()));
     }
 
     let mut result = String::from(format!("{}\n", trc("(", col_punct())));
@@ -680,7 +676,10 @@ fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
             head[0].white()
         )
     } else {
-        let mut lines: Vec<String> = head.iter().map(|l| format!("        {}", l.white())).collect();
+        let mut lines: Vec<String> = head
+            .iter()
+            .map(|l| format!("        {}", l.white()))
+            .collect();
         if let Some(n) = notice {
             lines.push(format!("        {}", n.dimmed()));
             lines.extend(tail.iter().map(|l| format!("        {}", l.white())));
@@ -1556,20 +1555,35 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
             result.push_str(&format!("\n{}", ro_field(format!("{:?}", text), "text")));
             result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
-            result.push_str(&format!("\n{}", ro_field(format!("{:?}", colour), "colour")));
+            result.push_str(&format!(
+                "\n{}",
+                ro_field(format!("{:?}", colour), "colour")
+            ));
             if let Some(s) = style {
                 let align_str = match s.align {
                     Some(1) => "left",
                     Some(2) => "right",
-                    _       => "center",
+                    _ => "center",
                 };
                 result.push_str(&format!("\n{}", ro_field(align_str.to_string(), "align")));
-                if let Some(v) = s.leading { result.push_str(&format!("\n{}", ro_field(format!("{}", v), "leading"))); }
-                if let Some(v) = s.kerning { result.push_str(&format!("\n{}", ro_field(format!("{}", v), "kerning"))); }
-                if let Some(v) = s.weight  { result.push_str(&format!("\n{}", ro_field(format!("{}", v), "weight"))); }
-                if let Some(v) = s.tilt    { result.push_str(&format!("\n{}", ro_field(format!("{}", v), "tilt"))); }
-                if let Some(v) = s.wrap    { result.push_str(&format!("\n{}", ro_field(format!("{}", v), "wrap"))); }
-                if let Some(h) = s.font    { result.push_str(&format!("\n{}", ro_field(hex::encode(h), "font hash"))); }
+                if let Some(v) = s.leading {
+                    result.push_str(&format!("\n{}", ro_field(format!("{}", v), "leading")));
+                }
+                if let Some(v) = s.kerning {
+                    result.push_str(&format!("\n{}", ro_field(format!("{}", v), "kerning")));
+                }
+                if let Some(v) = s.weight {
+                    result.push_str(&format!("\n{}", ro_field(format!("{}", v), "weight")));
+                }
+                if let Some(v) = s.tilt {
+                    result.push_str(&format!("\n{}", ro_field(format!("{}", v), "tilt")));
+                }
+                if let Some(v) = s.wrap {
+                    result.push_str(&format!("\n{}", ro_field(format!("{}", v), "wrap")));
+                }
+                if let Some(h) = s.font {
+                    result.push_str(&format!("\n{}", ro_field(hex::encode(h), "font hash")));
+                }
             }
             result
         }
@@ -1594,7 +1608,10 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             let mut result = format!("roq {}", trc("text_input", col_ro()));
             result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
             result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
-            result.push_str(&format!("\n{}", ro_field(format!("{:?}", placeholder), "placeholder")));
+            result.push_str(&format!(
+                "\n{}",
+                ro_field(format!("{:?}", placeholder), "placeholder")
+            ));
             result.push_str(&format!(
                 "\n{}",
                 ro_field(format!("{:?}", colour), "colour")
@@ -1606,9 +1623,15 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             let mut result = format!("roa {}", trc("array", col_ro()));
             result.push_str(&format!("\n{}", ro_field(format!("{}", cols), "cols")));
             result.push_str(&format!("\n{}", ro_field(format!("{}", rows), "rows")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", children.len()), "children")));
+            result.push_str(&format!(
+                "\n{}",
+                ro_field(format!("{}", children.len()), "children")
+            ));
             for (i, child) in children.iter().enumerate() {
-                result.push_str(&format!("\n{}", ro_field(format!("{:?}", child), &format!("[{}]", i))));
+                result.push_str(&format!(
+                    "\n{}",
+                    ro_field(format!("{:?}", child), &format!("[{}]", i))
+                ));
             }
             result
         }
@@ -1698,38 +1721,111 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         // ==================== NETWORK FAMILY ====================
         VsfType::ni(b) => {
             let ip = std::net::Ipv4Addr::from(*b);
-            format!("{}{}{}{}", trc("ni", col_uint()), tc("⦉", col_punct()), ip, tc("⦊", col_punct()))
+            format!(
+                "{}{}{}{}",
+                trc("ni", col_uint()),
+                tc("⦉", col_punct()),
+                ip,
+                tc("⦊", col_punct())
+            )
         }
         VsfType::nj(b) => {
             let ip = std::net::Ipv6Addr::from(*b);
-            format!("{}{}{}{}", trc("nj", col_uint()), tc("⦉", col_punct()), ip, tc("⦊", col_punct()))
+            format!(
+                "{}{}{}{}",
+                trc("nj", col_uint()),
+                tc("⦉", col_punct()),
+                ip,
+                tc("⦊", col_punct())
+            )
         }
-        VsfType::nh(h) => format!("{}{}{}{}", trc("nh", col_uint()), tc("⦉", col_punct()), h, tc("⦊", col_punct())),
+        VsfType::nh(h) => format!(
+            "{}{}{}{}",
+            trc("nh", col_uint()),
+            tc("⦉", col_punct()),
+            h,
+            tc("⦊", col_punct())
+        ),
         VsfType::na(scheme, host, port) => {
-            let scheme_str = NaScheme::from_byte(*scheme).map_or_else(|| scheme.to_string(), |s| s.to_string());
+            let scheme_str =
+                NaScheme::from_byte(*scheme).map_or_else(|| scheme.to_string(), |s| s.to_string());
             let addr = match port {
                 Some(p) => format!("{}://{}:{}", scheme_str, host, p),
-                None    => format!("{}://{}", scheme_str, host),
+                None => format!("{}://{}", scheme_str, host),
             };
-            format!("{}{}{}{}", trc("na", col_uint()), tc("⦉", col_punct()), addr, tc("⦊", col_punct()))
+            format!(
+                "{}{}{}{}",
+                trc("na", col_uint()),
+                tc("⦉", col_punct()),
+                addr,
+                tc("⦊", col_punct())
+            )
         }
         VsfType::nc(addr, prefix) => {
-            format!("{}{}{}/{}{}", trc("nc", col_uint()), tc("⦉", col_punct()), addr, prefix, tc("⦊", col_punct()))
+            format!(
+                "{}{}{}/{}{}",
+                trc("nc", col_uint()),
+                tc("⦉", col_punct()),
+                addr,
+                prefix,
+                tc("⦊", col_punct())
+            )
         }
         VsfType::nm(mac) => {
-            let s = mac.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(":");
-            format!("{}{}{}{}", trc("nm", col_uint()), tc("⦉", col_punct()), s, tc("⦊", col_punct()))
+            let s = mac
+                .iter()
+                .map(|b| format!("{:02X}", b))
+                .collect::<Vec<_>>()
+                .join(":");
+            format!(
+                "{}{}{}{}",
+                trc("nm", col_uint()),
+                tc("⦉", col_punct()),
+                s,
+                tc("⦊", col_punct())
+            )
         }
-        VsfType::np(port) => format!("{}{}{}{}", trc("np", col_uint()), tc("⦉", col_punct()), port, tc("⦊", col_punct())),
+        VsfType::np(port) => format!(
+            "{}{}{}{}",
+            trc("np", col_uint()),
+            tc("⦉", col_punct()),
+            port,
+            tc("⦊", col_punct())
+        ),
         VsfType::ns(host, port) => {
-            format!("{}{}{}:{}{}", trc("ns", col_uint()), tc("⦉", col_punct()), host, port, tc("⦊", col_punct()))
+            format!(
+                "{}{}{}:{}{}",
+                trc("ns", col_uint()),
+                tc("⦉", col_punct()),
+                host,
+                port,
+                tc("⦊", col_punct())
+            )
         }
-        VsfType::nu(url) => format!("{}{}{}{}", trc("nu", col_uint()), tc("⦉", col_punct()), url, tc("⦊", col_punct())),
-        VsfType::nn(name) => format!("{}{}{}{}", trc("nn", col_uint()), tc("⦉", col_punct()), name, tc("⦊", col_punct())),
+        VsfType::nu(url) => format!(
+            "{}{}{}{}",
+            trc("nu", col_uint()),
+            tc("⦉", col_punct()),
+            url,
+            tc("⦊", col_punct())
+        ),
+        VsfType::nn(name) => format!(
+            "{}{}{}{}",
+            trc("nn", col_uint()),
+            tc("⦉", col_punct()),
+            name,
+            tc("⦊", col_punct())
+        ),
 
         // ==================== WORLD ADDRESS ====================
         VsfType::wa(addr) => {
-            format!("{}{}{}{}", trc("wa", col_uint()), tc("⦉", col_punct()), addr, tc("⦊", col_punct()))
+            format!(
+                "{}{}{}{}",
+                trc("wa", col_uint()),
+                tc("⦉", col_punct()),
+                addr,
+                tc("⦊", col_punct())
+            )
         }
 
         // Fall back to debug for unhandled types
@@ -1917,8 +2013,7 @@ pub fn display_x_value(s: &str) -> String {
         .iter()
         .filter(|&&b| (b < 0x20 && b != b'\t' && b != b'\n' && b != b'\r') || b == 0x7f)
         .count();
-    let binary_ish =
-        s.contains('\u{fffd}') || (nonprint * 100 / bytes.len()) > 15;
+    let binary_ish = s.contains('\u{fffd}') || (nonprint * 100 / bytes.len()) > 15;
     if binary_ish {
         const MAX: usize = 64;
         let hex: String = bytes
@@ -2066,11 +2161,19 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::nj(b) => std::net::Ipv6Addr::from(*b).to_string(),
         VsfType::nh(h) => h.clone(),
         VsfType::na(scheme, host, port) => {
-            let s = NaScheme::from_byte(*scheme).map_or_else(|| scheme.to_string(), |s| s.to_string());
-            match port { Some(p) => format!("{}://{}:{}", s, host, p), None => format!("{}://{}", s, host) }
+            let s =
+                NaScheme::from_byte(*scheme).map_or_else(|| scheme.to_string(), |s| s.to_string());
+            match port {
+                Some(p) => format!("{}://{}:{}", s, host, p),
+                None => format!("{}://{}", s, host),
+            }
         }
         VsfType::nc(addr, prefix) => format!("{}/{}", addr, prefix),
-        VsfType::nm(mac) => mac.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(":"),
+        VsfType::nm(mac) => mac
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<_>>()
+            .join(":"),
         VsfType::np(port) => format!(":{}", port),
         VsfType::ns(host, port) => format!("{}:{}", host, port),
         VsfType::nu(url) => url.clone(),
@@ -2820,8 +2923,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                         if val.contains('\n') {
                             // Multi-line crypto value
                             let hex_indent = format!("{}{}    ", field_prefix, continuation_bar);
-                            let formatted =
-                                val.replace('\n', &format!("\n{}", hex_indent));
+                            let formatted = val.replace('\n', &format!("\n{}", hex_indent));
                             out.push_str(&format!(
                                 "{}{}{}{} {} {}{}\n",
                                 field_prefix,
@@ -2938,11 +3040,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         } else {
             format!(" {} ", tree_vert())
         };
-        out.push_str(&format!(
-            "{}{}\n",
-            tree_suffix,
-            tc("]", col_tree())
-        ));
+        out.push_str(&format!("{}{}\n", tree_suffix, tc("]", col_tree())));
 
         if !is_last {
             out.push_str(&format!(" {}\n", tree_vert()));
@@ -3127,9 +3225,7 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
 
         if let Some(expected_len) = length_hint {
             if actual_len == expected_len {
-                validation.push_str(
-                    &trc(format!(" {}B", actual_len), col_pass()).to_string(),
-                );
+                validation.push_str(&trc(format!(" {}B", actual_len), col_pass()).to_string());
             } else {
                 validation.push_str(
                     &trc(format!(" {}B/{}", actual_len, expected_len), col_fail()).to_string(),
@@ -3139,9 +3235,7 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
         }
 
         if let Some(expected_count) = count_hint {
-            validation.push_str(
-                &trc(format!(" n={}", expected_count), col_hint()).to_string(),
-            );
+            validation.push_str(&trc(format!(" n={}", expected_count), col_hint()).to_string());
         }
 
         if valid {
@@ -3177,17 +3271,25 @@ pub fn hex_dump(data: &[u8]) -> String {
     let mut format_chunk = |offset: usize, chunk: &[u8]| {
         let mut line = format!("{:08x}: ", offset);
         for (j, byte) in chunk.iter().enumerate() {
-            if j == 8 { line.push(' '); }
+            if j == 8 {
+                line.push(' ');
+            }
             line.push_str(&format!("{:02x} ", byte));
         }
         let padding = 16 - chunk.len();
         for j in 0..padding {
-            if chunk.len() + j == 8 { line.push(' '); }
+            if chunk.len() + j == 8 {
+                line.push(' ');
+            }
             line.push_str("   ");
         }
         line.push(' ');
         for byte in chunk {
-            if *byte >= 0x20 && *byte < 0x7f { line.push(*byte as char); } else { line.push('.'); }
+            if *byte >= 0x20 && *byte < 0x7f {
+                line.push(*byte as char);
+            } else {
+                line.push('.');
+            }
         }
         line.push('\n');
         line

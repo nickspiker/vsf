@@ -155,7 +155,8 @@ impl EagleTime {
         let abs = seconds.abs();
         let int_secs = abs.trunc() as i64;
         let frac_nanos = (abs.fract() * 1_000_000_000.0).round() as i64;
-        let duration = Duration::seconds(int_secs).checked_add(&Duration::nanoseconds(frac_nanos))?;
+        let duration =
+            Duration::seconds(int_secs).checked_add(&Duration::nanoseconds(frac_nanos))?;
         if seconds >= 0.0 {
             Some(eagle_epoch + duration)
         } else {
@@ -230,8 +231,7 @@ impl EagleTime {
 
     /// Returns the picosecond precision timestamp (oscillations × 704.032 ps). Returns None for deprecated float types.
     pub fn picoseconds(&self) -> Option<i128> {
-        self.oscillations_i128()
-            .map(|osc| (osc * 704_032) / 1000)
+        self.oscillations_i128().map(|osc| (osc * 704_032) / 1000)
     }
 }
 
@@ -243,8 +243,10 @@ impl PartialEq for EagleTime {
             (EtType::e6(a), EtType::e6(b)) => a == b,
             (EtType::e7(a), EtType::e7(b)) => a == b,
             // Cross-width integer comparison via i128
-            (a, b) if matches!(a, EtType::e5(_) | EtType::e6(_) | EtType::e7(_))
-                   && matches!(b, EtType::e5(_) | EtType::e6(_) | EtType::e7(_)) => {
+            (a, b)
+                if matches!(a, EtType::e5(_) | EtType::e6(_) | EtType::e7(_))
+                    && matches!(b, EtType::e5(_) | EtType::e6(_) | EtType::e7(_)) =>
+            {
                 self.oscillations_i128() == other.oscillations_i128()
             }
             // Float involvement: fall back to f64
@@ -350,8 +352,7 @@ mod tests {
         assert_eq!(one_second.to_seconds_f64(), 1.0);
 
         // 100 seconds
-        let hundred_seconds =
-            EagleTime::from_oscillations(OSCILLATIONS_PER_SECOND as i64 * 100);
+        let hundred_seconds = EagleTime::from_oscillations(OSCILLATIONS_PER_SECOND as i64 * 100);
         assert_eq!(hundred_seconds.to_seconds_f64(), 100.0);
     }
 

@@ -5,7 +5,17 @@ All notable changes to VSF will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.0] - 2026-07-04
+## [0.9.1] - 2026-07-04
+
+### Fixed
+
+- **Format version markers now say v9.** 0.9.0 shipped the spirix 0.1 wire break (see below) but still wrote `z8`/`y8`, so old readers would accept new spirix-carrying files and silently misdecode them. 0.9.0 is yanked; files written by it should be re-encoded. `VSF_VERSION = 9`, `VSF_BACKWARD_COMPAT = 9`.
+
+### Added
+
+- **Compile-time version gate.** A const assertion ties `VSF_VERSION` to the semver-breaking number in `Cargo.toml` (minor while 0.x, major at 1.0+). A version bump without the matching format-version bump no longer builds, and since `cargo publish` runs a verify build, it can no longer be published either. A second assertion enforces `VSF_BACKWARD_COMPAT <= VSF_VERSION`.
+
+## [0.9.0] - 2026-07-04 (YANKED — z/y markers were left at 8 despite the spirix wire break)
 
 ### Changed (breaking)
 

@@ -2,8 +2,8 @@
 //!
 //! TypeConstraint provides a flexible way to validate VsfType values without duplicating the VsfType enum. Instead of parallel type systems, we use pattern-based constraints that can match categories, specific types, or apply custom validation logic.
 
-use crate::prelude::*;
 use super::validate::{ValidationError, ValidationResult};
+use crate::prelude::*;
 use crate::types::{EtType, VsfType};
 #[cfg(target_has_atomic = "ptr")]
 use alloc::sync::Arc;

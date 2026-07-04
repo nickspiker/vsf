@@ -87,7 +87,11 @@ impl core::fmt::Display for DecodeError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             DecodeError::UnexpectedEof { expected, got } => {
-                write!(f, "Unexpected end of file: expected {} bytes, got {}", expected, got)
+                write!(
+                    f,
+                    "Unexpected end of file: expected {} bytes, got {}",
+                    expected, got
+                )
             }
             DecodeError::InvalidSizeMarker(m) => {
                 write!(f, "Invalid size marker: {}", m)

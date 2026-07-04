@@ -1398,7 +1398,7 @@ pub use s44_consts::*;
 
 #[cfg(feature = "spirix")]
 mod s44_consts {
-    use spirix::{ScalarF4E4 as S44, sf};
+    use spirix::{sf, ScalarF4E4 as S44};
 
     pub const VSF_RGB2LMS_S44: [S44; 9] = [
         sf!(0.358_562_77_f32),
@@ -1424,9 +1424,6 @@ mod s44_consts {
         sf!(1.023_017_9_f32),
     ];
 
-    pub const LMS2PHOTOPIC_S44: [S44; 3] = [
-        sf!(0.699_893_16_f32),
-        sf!(0.300_106_84_f32),
-        S44::ZERO,
-    ];
+    pub const LMS2PHOTOPIC_S44: [S44; 3] =
+        [sf!(0.699_893_16_f32), sf!(0.300_106_84_f32), S44::ZERO];
 }

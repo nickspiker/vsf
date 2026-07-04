@@ -143,7 +143,10 @@ impl WorldCoord {
                 out.extend_from_slice(&raw.to_be_bytes());
                 out.extend_from_slice(&[0u8; 8]); // low 64 bits reserved for future precision
             }
-            _ => panic!("WorldCoord::flatten_at: invalid size byte '{}'", size_byte as char),
+            _ => panic!(
+                "WorldCoord::flatten_at: invalid size byte '{}'",
+                size_byte as char
+            ),
         }
         out
     }
@@ -159,12 +162,10 @@ impl WorldCoord {
                 (u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64) << 32
             }
             b'6' if bytes.len() >= 8 => u64::from_be_bytes([
-                bytes[0], bytes[1], bytes[2], bytes[3],
-                bytes[4], bytes[5], bytes[6], bytes[7],
+                bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
             ]),
             b'7' if bytes.len() >= 16 => u64::from_be_bytes([
-                bytes[0], bytes[1], bytes[2], bytes[3],
-                bytes[4], bytes[5], bytes[6], bytes[7],
+                bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
             ]), // low 64 bits ignored for now
             _ => return None,
         };

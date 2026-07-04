@@ -2,9 +2,9 @@
 //!
 //! Defines how fields within VSF sections are validated using type constraints rather than parallel type enums. This ensures complete coverage of all VsfType variants without duplication.
 
-use crate::prelude::*;
 use super::constraint::{vsf_type_name, TypeConstraint};
 use super::validate::ValidationResult;
+use crate::prelude::*;
 use crate::VsfType;
 
 /// Schema definition for a field within a section

@@ -19,8 +19,8 @@
 //! // Add verification as needed
 //! ```
 
-use crate::prelude::*;
 use crate::decoding::parse;
+use crate::prelude::*;
 
 /// Skip the optional creation_time field in a VSF header at `pointer`. The field is identified by the `e` marker byte; if not present, the header simply omits it (callers without a clock).
 fn skip_optional_creation_time(bytes: &[u8], pointer: &mut usize) -> Result<(), String> {
