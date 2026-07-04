@@ -12,8 +12,7 @@ use std::path::Path;
 //   2. Update both constants below
 //   3. Bump vsf MAJOR version (any codebook change is a wire-format break)
 //   4. Update ihi to depend on the new vsf version and re-attest existing identities
-const FREQUENCIES_BLAKE3: &str =
-    "0652a53f8ac8b1989a3c0a6f7290af1d41d4b58cd960b77f879b38223ccd7b0d";
+const FREQUENCIES_BLAKE3: &str = "0652a53f8ac8b1989a3c0a6f7290af1d41d4b58cd960b77f879b38223ccd7b0d";
 const HUFFMAN_CODES_BLAKE3: &str =
     "523769a934a407aa87d9ddef37ad186c546e205cb1280b0e9300d6e98c6dad0e";
 

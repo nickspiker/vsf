@@ -125,22 +125,22 @@ pub enum VsfType {
     o(usize),  // Offset in Bytes from file start (header TOC entries, section pointers)
     b(usize, bool), // Length in Bytes of the structure this field annotates — header size, section b{length}, field size. Distinct letter from l so the order-independent header can tell header-size from file-length apart without positional rules. inclusive_mode: the value counts its own encoded bytes (stabilized by iteration in builders).
     l(usize, bool), // Length in Bytes of the ENTIRE file; exactly one per file. Lets TCP readers preallocate and stream without parse-as-you-go. Same (value, inclusive_mode) mechanics as b.
-    n(usize),  // Number/count
-    z(usize),  // Version
-    y(usize),  // Backward version
+    n(usize),       // Number/count
+    z(usize),       // Version
+    y(usize),       // Backward version
 
     // ==================== NETWORK FAMILY (n + lowercase) ==================== n + digit = count/number — no conflict, different second-char class
     na(u8, String, Option<u16>), // Network address: scheme(u8) + host + optional port
-                                 // scheme: 0=https 1=http 2=ftp 3=sftp 4=ssh 5=ntp 6=smtp 7=ws 8=wss
-    nh(String),                  // Network host: bare hostname or IP string
-    ni([u8; 4]),                 // Network IPv4: 4 bytes
-    nj([u8; 16]),                // Network IPv6: 16 bytes
-    nc(String, u8),              // Network CIDR: address string + prefix length
-    nm([u8; 6]),                 // Network MAC: 6 bytes
-    np(u16),                     // Network port: standalone port number
-    ns(String, u16),             // Network socket: host + port (no scheme)
-    nu(String),                  // Network URL: full URL including path/query
-    nn(String),                  // Network name: DNS name (validated format)
+    // scheme: 0=https 1=http 2=ftp 3=sftp 4=ssh 5=ntp 6=smtp 7=ws 8=wss
+    nh(String),      // Network host: bare hostname or IP string
+    ni([u8; 4]),     // Network IPv4: 4 bytes
+    nj([u8; 16]),    // Network IPv6: 16 bytes
+    nc(String, u8),  // Network CIDR: address string + prefix length
+    nm([u8; 6]),     // Network MAC: 6 bytes
+    np(u16),         // Network port: standalone port number
+    ns(String, u16), // Network socket: host + port (no scheme)
+    nu(String),      // Network URL: full URL including path/query
+    nn(String),      // Network name: DNS name (validated format)
 
     // ==================== CRYPTOGRAPHIC TYPES ==================== Hash algorithms
     hp(Vec<u8>), // BLAKE3 provenance hash (immutable content identity)

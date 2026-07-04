@@ -41,9 +41,9 @@
 //! // Narrow u32 → u8 (bounds checked) let vsf = VsfType::u5(1000u32); let result = u8::from_vsf_type(&vsf); assert!(result.is_err());  // 1000 doesn't fit in u8
 //! ```
 
-use crate::prelude::*;
 use super::constraint::vsf_type_name;
 use super::validate::{ValidationError, ValidationResult};
+use crate::prelude::*;
 use crate::types::VsfType;
 
 /// Convert Rust types to VsfType

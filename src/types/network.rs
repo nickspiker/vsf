@@ -33,14 +33,14 @@ use super::vsf_type::VsfType;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NaScheme {
     Https = 0,
-    Http  = 1,
-    Ftp   = 2,
-    Sftp  = 3,
-    Ssh   = 4,
-    Ntp   = 5,
-    Smtp  = 6,
-    Ws    = 7,
-    Wss   = 8,
+    Http = 1,
+    Ftp = 2,
+    Sftp = 3,
+    Ssh = 4,
+    Ntp = 5,
+    Smtp = 6,
+    Ws = 7,
+    Wss = 8,
 }
 
 impl NaScheme {
@@ -60,19 +60,21 @@ impl NaScheme {
         })
     }
 
-    pub const fn as_byte(self) -> u8 { self as u8 }
+    pub const fn as_byte(self) -> u8 {
+        self as u8
+    }
 
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Https => "https",
-            Self::Http  => "http",
-            Self::Ftp   => "ftp",
-            Self::Sftp  => "sftp",
-            Self::Ssh   => "ssh",
-            Self::Ntp   => "ntp",
-            Self::Smtp  => "smtp",
-            Self::Ws    => "ws",
-            Self::Wss   => "wss",
+            Self::Http => "http",
+            Self::Ftp => "ftp",
+            Self::Sftp => "sftp",
+            Self::Ssh => "ssh",
+            Self::Ntp => "ntp",
+            Self::Smtp => "smtp",
+            Self::Ws => "ws",
+            Self::Wss => "wss",
         }
     }
 
@@ -80,14 +82,14 @@ impl NaScheme {
     pub const fn default_port(self) -> Option<u16> {
         Some(match self {
             Self::Https => 443,
-            Self::Http  => 80,
-            Self::Ftp   => 21,
-            Self::Sftp  => 22,
-            Self::Ssh   => 22,
-            Self::Ntp   => 123,
-            Self::Smtp  => 25,
-            Self::Ws    => 80,
-            Self::Wss   => 443,
+            Self::Http => 80,
+            Self::Ftp => 21,
+            Self::Sftp => 22,
+            Self::Ssh => 22,
+            Self::Ntp => 123,
+            Self::Smtp => 25,
+            Self::Ws => 80,
+            Self::Wss => 443,
         })
     }
 }
@@ -110,45 +112,89 @@ impl core::fmt::Display for NaScheme {
 /// ```
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WaAddress {
-    pub line1:       Option<String>,   // Street address
-    pub line2:       Option<String>,   // Apt, suite, floor, etc.
-    pub city:        Option<String>,
-    pub region:      Option<String>,   // State, province, territory
-    pub postal_code: Option<String>,   // ZIP / postcode
-    pub country:     Option<[u8; 2]>,  // ISO 3166-1 alpha-2, e.g. *b"US"
+    pub line1: Option<String>, // Street address
+    pub line2: Option<String>, // Apt, suite, floor, etc.
+    pub city: Option<String>,
+    pub region: Option<String>,      // State, province, territory
+    pub postal_code: Option<String>, // ZIP / postcode
+    pub country: Option<[u8; 2]>,    // ISO 3166-1 alpha-2, e.g. *b"US"
 }
 
 impl WaAddress {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-    pub fn with_line1(mut self, v: impl Into<String>) -> Self { self.line1 = Some(v.into()); self }
-    pub fn with_line2(mut self, v: impl Into<String>) -> Self { self.line2 = Some(v.into()); self }
-    pub fn with_city(mut self, v: impl Into<String>) -> Self  { self.city = Some(v.into()); self }
-    pub fn with_region(mut self, v: impl Into<String>) -> Self { self.region = Some(v.into()); self }
-    pub fn with_postal_code(mut self, v: impl Into<String>) -> Self { self.postal_code = Some(v.into()); self }
-    pub fn with_country(mut self, v: [u8; 2]) -> Self { self.country = Some(v); self }
+    pub fn with_line1(mut self, v: impl Into<String>) -> Self {
+        self.line1 = Some(v.into());
+        self
+    }
+    pub fn with_line2(mut self, v: impl Into<String>) -> Self {
+        self.line2 = Some(v.into());
+        self
+    }
+    pub fn with_city(mut self, v: impl Into<String>) -> Self {
+        self.city = Some(v.into());
+        self
+    }
+    pub fn with_region(mut self, v: impl Into<String>) -> Self {
+        self.region = Some(v.into());
+        self
+    }
+    pub fn with_postal_code(mut self, v: impl Into<String>) -> Self {
+        self.postal_code = Some(v.into());
+        self
+    }
+    pub fn with_country(mut self, v: [u8; 2]) -> Self {
+        self.country = Some(v);
+        self
+    }
 
     /// Encode to wire bytes (presence mask + fields). Does NOT include the `wa` tag bytes — those are added by the flattener.
     pub fn to_wire(&self) -> Vec<u8> {
         let mut mask: u8 = 0;
-        if self.line1.is_some()       { mask |= 0x01; }
-        if self.line2.is_some()       { mask |= 0x02; }
-        if self.city.is_some()        { mask |= 0x04; }
-        if self.region.is_some()      { mask |= 0x08; }
-        if self.postal_code.is_some() { mask |= 0x10; }
-        if self.country.is_some()     { mask |= 0x20; }
+        if self.line1.is_some() {
+            mask |= 0x01;
+        }
+        if self.line2.is_some() {
+            mask |= 0x02;
+        }
+        if self.city.is_some() {
+            mask |= 0x04;
+        }
+        if self.region.is_some() {
+            mask |= 0x08;
+        }
+        if self.postal_code.is_some() {
+            mask |= 0x10;
+        }
+        if self.country.is_some() {
+            mask |= 0x20;
+        }
 
         let mut out = vec![mask];
         let push_str = |out: &mut Vec<u8>, s: &str| {
             out.extend_from_slice(s.as_bytes());
             out.push(0);
         };
-        if let Some(s) = &self.line1       { push_str(&mut out, s); }
-        if let Some(s) = &self.line2       { push_str(&mut out, s); }
-        if let Some(s) = &self.city        { push_str(&mut out, s); }
-        if let Some(s) = &self.region      { push_str(&mut out, s); }
-        if let Some(s) = &self.postal_code { push_str(&mut out, s); }
-        if let Some(c) = &self.country     { out.extend_from_slice(c); }
+        if let Some(s) = &self.line1 {
+            push_str(&mut out, s);
+        }
+        if let Some(s) = &self.line2 {
+            push_str(&mut out, s);
+        }
+        if let Some(s) = &self.city {
+            push_str(&mut out, s);
+        }
+        if let Some(s) = &self.region {
+            push_str(&mut out, s);
+        }
+        if let Some(s) = &self.postal_code {
+            push_str(&mut out, s);
+        }
+        if let Some(c) = &self.country {
+            out.extend_from_slice(c);
+        }
         out
     }
 
@@ -166,7 +212,9 @@ impl WaAddress {
                 *pointer += 1;
             }
             if *pointer >= data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("wa: unterminated string".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "wa: unterminated string".into(),
+                ));
             }
             let s = core::str::from_utf8(&data[start..*pointer])
                 .map_err(|e| DecodeError::InvalidDataMsg(format!("{}", e)))?
@@ -176,14 +224,26 @@ impl WaAddress {
         };
 
         let mut addr = WaAddress::default();
-        if mask & 0x01 != 0 { addr.line1       = Some(read_str(data, pointer)?); }
-        if mask & 0x02 != 0 { addr.line2       = Some(read_str(data, pointer)?); }
-        if mask & 0x04 != 0 { addr.city        = Some(read_str(data, pointer)?); }
-        if mask & 0x08 != 0 { addr.region      = Some(read_str(data, pointer)?); }
-        if mask & 0x10 != 0 { addr.postal_code = Some(read_str(data, pointer)?); }
+        if mask & 0x01 != 0 {
+            addr.line1 = Some(read_str(data, pointer)?);
+        }
+        if mask & 0x02 != 0 {
+            addr.line2 = Some(read_str(data, pointer)?);
+        }
+        if mask & 0x04 != 0 {
+            addr.city = Some(read_str(data, pointer)?);
+        }
+        if mask & 0x08 != 0 {
+            addr.region = Some(read_str(data, pointer)?);
+        }
+        if mask & 0x10 != 0 {
+            addr.postal_code = Some(read_str(data, pointer)?);
+        }
         if mask & 0x20 != 0 {
             if *pointer + 2 > data.len() {
-                return Err(DecodeError::UnexpectedEofMsg("wa: country truncated".into()));
+                return Err(DecodeError::UnexpectedEofMsg(
+                    "wa: country truncated".into(),
+                ));
             }
             addr.country = Some([data[*pointer], data[*pointer + 1]]);
             *pointer += 2;
@@ -207,13 +267,25 @@ impl WaAddress {
 impl core::fmt::Display for WaAddress {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut parts = Vec::new();
-        if let Some(s) = &self.line1       { parts.push(s.as_str().to_string()); }
-        if let Some(s) = &self.line2       { parts.push(s.as_str().to_string()); }
-        if let Some(s) = &self.city        { parts.push(s.as_str().to_string()); }
-        if let Some(s) = &self.region      { parts.push(s.as_str().to_string()); }
-        if let Some(s) = &self.postal_code { parts.push(s.as_str().to_string()); }
+        if let Some(s) = &self.line1 {
+            parts.push(s.as_str().to_string());
+        }
+        if let Some(s) = &self.line2 {
+            parts.push(s.as_str().to_string());
+        }
+        if let Some(s) = &self.city {
+            parts.push(s.as_str().to_string());
+        }
+        if let Some(s) = &self.region {
+            parts.push(s.as_str().to_string());
+        }
+        if let Some(s) = &self.postal_code {
+            parts.push(s.as_str().to_string());
+        }
         if let Some(c) = &self.country {
-            if let Ok(s) = core::str::from_utf8(c) { parts.push(s.to_string()); }
+            if let Ok(s) = core::str::from_utf8(c) {
+                parts.push(s.to_string());
+            }
         }
         write!(f, "{}", parts.join(", "))
     }
@@ -224,12 +296,16 @@ impl core::fmt::Display for WaAddress {
 
 #[cfg(feature = "std")]
 impl From<Ipv4Addr> for VsfType {
-    fn from(a: Ipv4Addr) -> Self { VsfType::ni(a.octets()) }
+    fn from(a: Ipv4Addr) -> Self {
+        VsfType::ni(a.octets())
+    }
 }
 
 #[cfg(feature = "std")]
 impl From<Ipv6Addr> for VsfType {
-    fn from(a: Ipv6Addr) -> Self { VsfType::nj(a.octets()) }
+    fn from(a: Ipv6Addr) -> Self {
+        VsfType::nj(a.octets())
+    }
 }
 
 #[cfg(feature = "std")]
@@ -269,7 +345,9 @@ impl From<SocketAddr> for VsfType {
 
 /// Postal address → `wa`
 impl From<WaAddress> for VsfType {
-    fn from(a: WaAddress) -> Self { VsfType::wa(a) }
+    fn from(a: WaAddress) -> Self {
+        VsfType::wa(a)
+    }
 }
 
 // ---- TryFrom<VsfType> ----
@@ -292,8 +370,10 @@ impl TryFrom<VsfType> for Ipv6Addr {
     fn try_from(v: VsfType) -> Result<Self, Self::Error> {
         match v {
             VsfType::nj(b) => Ok(Ipv6Addr::from(b)),
-            VsfType::nh(s) => s.trim_matches(|c| c == '[' || c == ']')
-                               .parse().map_err(|_| "not a valid IPv6 string"),
+            VsfType::nh(s) => s
+                .trim_matches(|c| c == '[' || c == ']')
+                .parse()
+                .map_err(|_| "not a valid IPv6 string"),
             _ => Err("not an IPv6 type"),
         }
     }

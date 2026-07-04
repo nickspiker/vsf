@@ -61,9 +61,9 @@ use crate::colour::rec2020::REC2020_2VSF_RGB;
 use crate::colour::{LMS2PHOTOPIC, VSF_RGB2LMS};
 use crate::types::VsfType;
 #[cfg(feature = "spirix")]
-use spirix::ScalarF4E4 as S44;
-#[cfg(feature = "spirix")]
 use spirix::sf;
+#[cfg(feature = "spirix")]
+use spirix::ScalarF4E4 as S44;
 /// Trait for colour value types that can be converted to/from linear
 ///
 /// **Convention**:
@@ -243,8 +243,8 @@ impl ColourValue<f32> for u8 {
 #[cfg(feature = "spirix")]
 // Shared colour transfer constants (compile-time, no IEEE runtime ops)
 mod colour_tf_consts {
-    use spirix::ScalarF4E4 as S44;
     use spirix::sf;
+    use spirix::ScalarF4E4 as S44;
     pub const SRGB_EOTF_THRESH: S44 = sf!(0.04045);
     pub const SRGB_OETF_THRESH: S44 = sf!(0.0031308);
     pub const SRGB_LINEAR_SLOPE: S44 = sf!(12.92);

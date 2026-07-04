@@ -509,18 +509,21 @@ mod tests {
     /// Until this work, `encode_text` iterated raw codepoints with no normalization. "café" with U+00E9 (precomposed, 1 codepoint) and "cafe\u{0301}" (e + combining acute, 2 codepoints) produced completely different Huffman bitstreams, silently breaking every downstream identity primitive that round-tripped thru `VsfType::x`. This assertion locks the fixed behavior.
     #[test]
     fn test_nfc_equivalence_e_acute() {
-        let precomposed = "\u{00E9}";      // é as one codepoint
-        let decomposed = "e\u{0301}";      // e + combining acute
+        let precomposed = "\u{00E9}"; // é as one codepoint
+        let decomposed = "e\u{0301}"; // e + combining acute
         let (bytes_a, count_a) = encode_text(precomposed);
         let (bytes_b, count_b) = encode_text(decomposed);
         assert_eq!(bytes_a, bytes_b, "NFC/NFD must encode to identical bytes");
-        assert_eq!(count_a, count_b, "NFC/NFD must report identical char counts");
+        assert_eq!(
+            count_a, count_b,
+            "NFC/NFD must report identical char counts"
+        );
     }
 
     #[test]
     fn test_nfc_equivalence_cafe() {
-        let nfc = "café";                       // "café" with precomposed é
-        let nfd = "cafe\u{0301}";              // "cafe" + combining acute
+        let nfc = "café"; // "café" with precomposed é
+        let nfd = "cafe\u{0301}"; // "cafe" + combining acute
         let (bytes_a, count_a) = encode_text(nfc);
         let (bytes_b, count_b) = encode_text(nfd);
         assert_eq!(bytes_a, bytes_b, "café NFC vs NFD must encode identically");
@@ -549,7 +552,10 @@ mod tests {
         // Asking for the full char_count from a truncated stream must fail.
         let truncated = &encoded[..1];
         let result = decode_text(truncated, char_count);
-        assert!(result.is_err(), "truncated bitstream must error, not silently inject U+0000");
+        assert!(
+            result.is_err(),
+            "truncated bitstream must error, not silently inject U+0000"
+        );
     }
 
     #[test]

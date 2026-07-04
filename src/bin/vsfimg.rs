@@ -53,8 +53,8 @@ fn main() {
 }
 
 fn run(cli: &Cli) -> Result<(), String> {
-    let source_bytes = fs::read(&cli.input)
-        .map_err(|e| format!("reading {}: {e}", cli.input.display()))?;
+    let source_bytes =
+        fs::read(&cli.input).map_err(|e| format!("reading {}: {e}", cli.input.display()))?;
 
     // Provenance hash: BLAKE3 of the source file's bytes. This is the immutable identity of "the image that produced this VSF" — distinct from the VSF file's own rolling hash. Both go in the header; consumers can use `hp` to dedupe / cite the source and `hb` to verify the VSF file hasn't been tampered with.
     let hp = blake3::hash(&source_bytes);
@@ -271,8 +271,8 @@ fn parse_icc_converter(icc_profile: &[u8]) -> Result<IccColourConverter, String>
     use vsf::colour::XYZ2VSF_RGB;
 
     let icc_vec = icc_profile.to_vec();
-    let profile = DecodedICCProfile::new(&icc_vec)
-        .map_err(|e| format!("parsing ICC profile: {e:?}"))?;
+    let profile =
+        DecodedICCProfile::new(&icc_vec).map_err(|e| format!("parsing ICC profile: {e:?}"))?;
 
     let extract_xyz = |tag: &str| -> Result<[f32; 3], String> {
         match profile.tags.get(tag) {
@@ -344,7 +344,10 @@ fn apply_trc_normalized(normalized: f32, trc: &TrcCurve) -> f32 {
             let frac = index - i0 as f32;
             lut[i0] + (lut[i1] - lut[i0]) * frac
         }
-        TrcCurve::Parametric { function_type, vals } => {
+        TrcCurve::Parametric {
+            function_type,
+            vals,
+        } => {
             // ICC parametric curve formulas (function type 0–4). Falls back to identity for unrecognized function types; gives the best-effort answer rather than erroring on exotic profiles.
             match function_type {
                 0x0000 => normalized.powf(vals[0]),
@@ -373,8 +376,9 @@ fn apply_trc_normalized(normalized: f32, trc: &TrcCurve) -> f32 {
                     }
                 }
                 0x0004 => {
-                    let (gamma, a, b, c, d, e, f) =
-                        (vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6]);
+                    let (gamma, a, b, c, d, e, f) = (
+                        vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6],
+                    );
                     if normalized >= d {
                         (a * normalized + b).powf(gamma) + e
                     } else {
@@ -493,16 +497,12 @@ fn encode_av1(linear_vsf: &[f32], width: usize, height: usize) -> Result<Vec<u8>
             let idx10 = ((y0 + 1) * width + x0) * 3;
             let idx11 = ((y0 + 1) * width + x0 + 1) * 3;
             let r = (vsf_rgb[idx00] + vsf_rgb[idx01] + vsf_rgb[idx10] + vsf_rgb[idx11]) / 4.0;
-            let g = (vsf_rgb[idx00 + 1]
-                + vsf_rgb[idx01 + 1]
-                + vsf_rgb[idx10 + 1]
-                + vsf_rgb[idx11 + 1])
-                / 4.0;
-            let b = (vsf_rgb[idx00 + 2]
-                + vsf_rgb[idx01 + 2]
-                + vsf_rgb[idx10 + 2]
-                + vsf_rgb[idx11 + 2])
-                / 4.0;
+            let g =
+                (vsf_rgb[idx00 + 1] + vsf_rgb[idx01 + 1] + vsf_rgb[idx10 + 1] + vsf_rgb[idx11 + 1])
+                    / 4.0;
+            let b =
+                (vsf_rgb[idx00 + 2] + vsf_rgb[idx01 + 2] + vsf_rgb[idx10 + 2] + vsf_rgb[idx11 + 2])
+                    / 4.0;
             let y = (r + 2.0 * g + b) / 4.0;
             let cb = (b - y) / 2.0 + 0.5;
             let cr = (r - y) / 2.0 + 0.5;

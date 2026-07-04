@@ -47,11 +47,11 @@
 //! // Re-encode with changes let updated_bytes = builder.encode()?;
 //! ```
 
-use crate::prelude::*;
 use super::constraint::TypeConstraint;
 use super::conversions::{FromVsfType, IntoVsfType};
 use super::field::FieldSchema;
 use super::validate::{ValidationError, ValidationResult};
+use crate::prelude::*;
 use crate::VsfType;
 
 /// A field with a name and vector of VsfType values
@@ -440,8 +440,9 @@ impl SectionBuilder {
 
         // Parse section name if present (encoder omits it for sections within 1MB of header)
         if ptr < section_bytes.len() && section_bytes[ptr] != b'(' && section_bytes[ptr] != b']' {
-            let section_name = parse(section_bytes, &mut ptr)
-                .map_err(|e| ValidationError::Custom(format!("Failed to parse section name: {}", e)))?;
+            let section_name = parse(section_bytes, &mut ptr).map_err(|e| {
+                ValidationError::Custom(format!("Failed to parse section name: {}", e))
+            })?;
             let section_name_str = match section_name {
                 crate::VsfType::d(name) => name,
                 _ => {

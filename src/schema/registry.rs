@@ -2,9 +2,9 @@
 //!
 //! TODO: Implement full registry with official VSF schemas
 
-use crate::prelude::*;
 use super::section::SectionSchema;
 use super::validate::{ValidationError, ValidationResult};
+use crate::prelude::*;
 use alloc::collections::BTreeMap;
 use spin::{Once, RwLock};
 

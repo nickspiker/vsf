@@ -21,8 +21,8 @@ pub mod toka_tree;
 pub use eagle_time::{datetime_to_eagle_time, EagleTime, EtType, OSCILLATIONS_PER_SECOND};
 #[cfg(feature = "std")]
 pub use eagle_time::{eagle_time_nanos, eagle_time_oscillations};
-pub use tensor::{BitPackedTensor, LayoutOrder, StridedTensor, Tensor, Vector};
 pub use network::{NaScheme, WaAddress};
+pub use tensor::{BitPackedTensor, LayoutOrder, StridedTensor, Tensor, Vector};
 pub use vsf_type::VsfType;
 pub use world_coord::WorldCoord;
 

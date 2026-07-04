@@ -11,8 +11,7 @@ fn frozen_x_huffman_v8() {
     // Pinned v8 bytes for x("octopus") — NFC + full-codespace Huffman codebook.
     let bytes = VsfType::x("octopus".to_string()).flatten();
     assert_eq!(
-        bytes,
-        X_OCTOPUS_V8,
+        bytes, X_OCTOPUS_V8,
         "x wire encoding shifted — this is a format break, see module docs"
     );
 }
@@ -31,8 +30,7 @@ fn frozen_a_ascii_v8() {
     // a is raw ASCII bytes + length, always — never Huffman, never anything else.
     let bytes = VsfType::a("octopus".to_string()).flatten();
     assert_eq!(
-        bytes,
-        A_OCTOPUS_V8,
+        bytes, A_OCTOPUS_V8,
         "a wire encoding shifted — this is a format break, see module docs"
     );
 }
@@ -42,8 +40,7 @@ fn frozen_d_dict_key_v8() {
     // d is raw bytes + length, always.
     let bytes = VsfType::d("octopus".to_string()).flatten();
     assert_eq!(
-        bytes,
-        D_OCTOPUS_V8,
+        bytes, D_OCTOPUS_V8,
         "d wire encoding shifted — this is a format break, see module docs"
     );
 }

@@ -271,11 +271,43 @@ pub mod prelude {
 }
 
 // VSF format version constants
-/// Current VSF format version v8: x text codebook remapped to cover the full Unicode codespace (all 1,112,064 codepoints pre-assigned) + NFC canonicalization at the encoder boundary. Changed the Huffman bitstream for every x value — even pure-ASCII strings — so v7 x bytes and v8 x bytes are mutually unintelligible. v7: Added opcodes (op type), literal VSF format, proper bracket notation (⦉⦊ vs {})
-pub const VSF_VERSION: usize = 8;
+/// Current VSF format version v9: spirix payloads (rd/rb/rw/rq and everything nesting them) reinterpreted under spirix 0.1 semantics: implicit-sign Scalar fraction, AMBIG=0 exponent convention, Circle keeps the N1 fraction. Same bytes decode to DIFFERENT values than v8, so this is a wire break for spirix-carrying files even tho non-spirix files are bit-identical. v8: x text codebook remapped to cover the full Unicode codespace (all 1,112,064 codepoints pre-assigned) + NFC canonicalization at the encoder boundary. Changed the Huffman bitstream for every x value — even pure-ASCII strings — so v7 x bytes and v8 x bytes are mutually unintelligible. v7: Added opcodes (op type), literal VSF format, proper bracket notation (⦉⦊ vs {})
+pub const VSF_VERSION: usize = 9;
 
-/// Oldest format version this BUILD can read — the floor is build-time chosen, cargo-style. Default is the current version only: wire breaks are never silently bridged, and a too-old file is rejected by name at the header. The plan for honoring old archives: a `compat-v*` feature per legacy dialect lowers this floor AND compiles in that era's decode paths, dispatched on the file's z at parse time; when none is enabled, old files get the loud version error (never a wrong parse). No compat feature may ship as a floor-only no-op — lowering the floor without the era's real readers recreates silent misinterpretation. None exist yet: a true `compat-v7` needs the pre-remap x codebook vendored from git (c12c7e2~1) plus the l-as-ASCII-label mapping, and v7 sub-dialects (l→a marker remap ~0.3.5, x codebook remap 0.4.0) shipped without z bumps, so "v7" in the field is ambiguous anyway — per-archive forensics if real v7 data ever needs recovering.
-pub const VSF_BACKWARD_COMPAT: usize = 8;
+/// Oldest format version this BUILD can read — the floor is build-time chosen, cargo-style. Default is the current version only: wire breaks are never silently bridged, and a too-old file is rejected by name at the header. The plan for honoring old archives: a `compat-v*` feature per legacy dialect lowers this floor AND compiles in that era's decode paths, dispatched on the file's z at parse time; when none is enabled, old files get the loud version error (never a wrong parse). No compat feature may ship as a floor-only no-op — lowering the floor without the era's real readers recreates silent misinterpretation. None exist yet: a true `compat-v8` needs spirix 0.0.x payload decode vendored (the old Scalar bit semantics), and a true `compat-v7` needs the pre-remap x codebook vendored from git (c12c7e2~1) plus the l-as-ASCII-label mapping, and v7 sub-dialects (l→a marker remap ~0.3.5, x codebook remap 0.4.0) shipped without z bumps, so "v7" in the field is ambiguous anyway — per-archive forensics if real v7 data ever needs recovering.
+pub const VSF_BACKWARD_COMPAT: usize = 9;
+
+// THE GATE: the crate's semver-breaking number IS the format version, enforced at compile time.
+// While vsf is 0.x the breaking number is the MINOR (0.9.z ⇒ format v9); at 1.0+ it becomes the MAJOR.
+// cargo publish runs a verify build, so a stale VSF_VERSION cannot reach crates.io — it fails right here first.
+// Four VSF releases (plus one spirix) have been yanked because a human forgot this bump; no human step remains.
+const fn semver_breaking_number(version: &str) -> usize {
+    let b = version.as_bytes();
+    let mut i = 0;
+    let mut major = 0;
+    while i < b.len() && b[i] != b'.' {
+        major = major * 10 + (b[i] - b'0') as usize;
+        i += 1;
+    }
+    if major > 0 {
+        return major;
+    }
+    i += 1;
+    let mut minor = 0;
+    while i < b.len() && b[i] != b'.' {
+        minor = minor * 10 + (b[i] - b'0') as usize;
+        i += 1;
+    }
+    minor
+}
+const _: () = assert!(
+    VSF_VERSION == semver_breaking_number(env!("CARGO_PKG_VERSION")),
+    "VSF_VERSION does not match the semver-breaking number in Cargo.toml. Bump VSF_VERSION (and review VSF_BACKWARD_COMPAT with it) — the z marker is the wire contract, not a formality."
+);
+const _: () = assert!(
+    VSF_BACKWARD_COMPAT <= VSF_VERSION,
+    "VSF_BACKWARD_COMPAT cannot exceed VSF_VERSION — the compat floor can only reach backward."
+);
 
 // Core type system
 pub mod types;
@@ -580,7 +612,10 @@ mod tests {
         let flat = val.flatten();
         let mut ptr = 0;
         let parsed = parse(&flat, &mut ptr).unwrap();
-        assert!(matches!(parsed, VsfType::hP(ref b) if *b == bytes), "hP round-trip failed");
+        assert!(
+            matches!(parsed, VsfType::hP(ref b) if *b == bytes),
+            "hP round-trip failed"
+        );
     }
 
     #[test]
@@ -591,7 +626,10 @@ mod tests {
         let flat = val.flatten();
         let mut ptr = 0;
         let parsed = parse(&flat, &mut ptr).unwrap();
-        assert!(matches!(parsed, VsfType::hR(ref b) if *b == bytes), "hR round-trip failed");
+        assert!(
+            matches!(parsed, VsfType::hR(ref b) if *b == bytes),
+            "hR round-trip failed"
+        );
     }
 
     #[test]
@@ -602,7 +640,10 @@ mod tests {
         let flat = val.flatten();
         let mut ptr = 0;
         let parsed = parse(&flat, &mut ptr).unwrap();
-        assert!(matches!(parsed, VsfType::hI(ref b) if *b == bytes), "hI round-trip failed");
+        assert!(
+            matches!(parsed, VsfType::hI(ref b) if *b == bytes),
+            "hI round-trip failed"
+        );
     }
 
     #[test]
@@ -613,7 +654,10 @@ mod tests {
         let flat = val.flatten();
         let mut ptr = 0;
         let parsed = parse(&flat, &mut ptr).unwrap();
-        assert!(matches!(parsed, VsfType::hV(ref b) if *b == bytes), "hV round-trip failed");
+        assert!(
+            matches!(parsed, VsfType::hV(ref b) if *b == bytes),
+            "hV round-trip failed"
+        );
     }
 
     #[test]

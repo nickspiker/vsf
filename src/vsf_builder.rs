@@ -4,9 +4,9 @@
 //!
 //! **Note:** Every VSF file requires and automatically includes a BLAKE3 hash in the header for integrity verification. This is computed transparently during `build()`. No manual hashing required - just call `builder.build()` and you're done!
 
-use crate::prelude::*;
 use crate::encoding::hash_placeholder;
 use crate::file_format::VsfSection;
+use crate::prelude::*;
 use crate::types::VsfType;
 use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
 
@@ -37,11 +37,11 @@ pub struct VsfBuilder {
     sections: Vec<(VsfSection, SectionMeta)>, // Section with optional crypto metadata
     unboxed: Vec<(String, Vec<u8>, SectionMeta)>, // Name, data, and optional crypto metadata
     inline_fields: Vec<(String, Vec<VsfType>)>, // Metadata-only fields: (name, inline values)
-    include_file_hash: bool, // True for rolling hash, false if signed
-    custom_provenance: Option<[u8; 32]>, // Custom provenance hash (immutable identity)
+    include_file_hash: bool,                  // True for rolling hash, false if signed
+    custom_provenance: Option<[u8; 32]>,      // Custom provenance hash (immutable identity)
     signer_pubkey: Option<VsfType>, // Signer's Ed25519 pubkey (ke) - for signature verification
     signature: Option<(VsfType, [u8; 64])>, // (signature type, signature bytes) - replaces hb
-    avatar_hash: Option<[u8; 32]>, // Optional avatar provenance hash as header field
+    avatar_hash: Option<[u8; 32]>,  // Optional avatar provenance hash as header field
 }
 
 impl VsfBuilder {
@@ -76,7 +76,9 @@ impl VsfBuilder {
     pub fn creation_time_nanos(mut self, eagle_time: f64) -> Self {
         use crate::types::EtType;
         #[allow(deprecated)]
-        { self.creation_time = Some(VsfType::e(EtType::f6(eagle_time))); }
+        {
+            self.creation_time = Some(VsfType::e(EtType::f6(eagle_time)));
+        }
         self
     }
 

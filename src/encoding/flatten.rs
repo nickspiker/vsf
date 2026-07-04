@@ -1,5 +1,5 @@
-use crate::prelude::*;
 use super::traits::{EncodeNumber, EncodeNumberInclusive};
+use crate::prelude::*;
 #[cfg(any(feature = "text", feature = "text-encode"))]
 use crate::text_encoding::encode_text;
 use crate::types::{EtType, VsfType};
@@ -1071,7 +1071,9 @@ impl VsfType {
                 flat.push(*scheme);
                 flat.extend_from_slice(host.as_bytes());
                 flat.push(0); // null-terminate host
-                if let Some(p) = port { flat.extend_from_slice(&p.to_be_bytes()); }
+                if let Some(p) = port {
+                    flat.extend_from_slice(&p.to_be_bytes());
+                }
                 flat
             }
             VsfType::nh(host) => {
@@ -1080,8 +1082,16 @@ impl VsfType {
                 flat.push(0);
                 flat
             }
-            VsfType::ni(addr) => { let mut f = vec![b'n', b'i']; f.extend_from_slice(addr); f }
-            VsfType::nj(addr) => { let mut f = vec![b'n', b'j']; f.extend_from_slice(addr); f }
+            VsfType::ni(addr) => {
+                let mut f = vec![b'n', b'i'];
+                f.extend_from_slice(addr);
+                f
+            }
+            VsfType::nj(addr) => {
+                let mut f = vec![b'n', b'j'];
+                f.extend_from_slice(addr);
+                f
+            }
             VsfType::nc(addr, prefix) => {
                 let mut flat = vec![b'n', b'c'];
                 flat.extend_from_slice(addr.as_bytes());
@@ -1089,8 +1099,16 @@ impl VsfType {
                 flat.push(*prefix);
                 flat
             }
-            VsfType::nm(mac) => { let mut f = vec![b'n', b'm']; f.extend_from_slice(mac); f }
-            VsfType::np(port) => { let mut f = vec![b'n', b'p']; f.extend_from_slice(&port.to_be_bytes()); f }
+            VsfType::nm(mac) => {
+                let mut f = vec![b'n', b'm'];
+                f.extend_from_slice(mac);
+                f
+            }
+            VsfType::np(port) => {
+                let mut f = vec![b'n', b'p'];
+                f.extend_from_slice(&port.to_be_bytes());
+                f
+            }
             VsfType::ns(host, port) => {
                 let mut flat = vec![b'n', b's'];
                 flat.extend_from_slice(host.as_bytes());
@@ -4922,16 +4940,18 @@ impl VsfType {
                 1 + encoded_usize_len(*size)
             }
 
-            VsfType::na(_, host, port) => { 2 + 1 + host.len() + 1 + if port.is_some() { 2 } else { 0 } }
-            VsfType::nh(host) => { 2 + host.len() + 1 }
-            VsfType::ni(_) => { 2 + 4 }
-            VsfType::nj(_) => { 2 + 16 }
-            VsfType::nc(addr, _) => { 2 + addr.len() + 1 + 1 }
-            VsfType::nm(_) => { 2 + 6 }
-            VsfType::np(_) => { 2 + 2 }
-            VsfType::ns(host, _) => { 2 + host.len() + 1 + 2 }
-            VsfType::nu(url) => { 2 + url.len() + 1 }
-            VsfType::nn(name) => { 2 + name.len() + 1 }
+            VsfType::na(_, host, port) => {
+                2 + 1 + host.len() + 1 + if port.is_some() { 2 } else { 0 }
+            }
+            VsfType::nh(host) => 2 + host.len() + 1,
+            VsfType::ni(_) => 2 + 4,
+            VsfType::nj(_) => 2 + 16,
+            VsfType::nc(addr, _) => 2 + addr.len() + 1 + 1,
+            VsfType::nm(_) => 2 + 6,
+            VsfType::np(_) => 2 + 2,
+            VsfType::ns(host, _) => 2 + host.len() + 1 + 2,
+            VsfType::nu(url) => 2 + url.len() + 1,
+            VsfType::nn(name) => 2 + name.len() + 1,
 
             VsfType::n(count) => {
                 // 'n' + encoded count (as usize)
