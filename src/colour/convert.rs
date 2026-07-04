@@ -2588,7 +2588,7 @@ mod tests {
     #[cfg(feature = "spirix")]
     fn test_scalar_f4e4_conversions() {
         use super::*;
-        use spirix::S44;
+        use spirix::ScalarF4E4 as S44;
 
         // Test u8 → S44 conversion (direct, no f32 roundtrip)
         let u8_val = 128u8;

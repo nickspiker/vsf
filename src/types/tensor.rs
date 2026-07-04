@@ -166,9 +166,14 @@ impl<T> StridedTensor<T> {
 /// ```
 /// use vsf::BitPackedTensor;
 ///
-/// // Option 1: Generic "just works" (most common) let samples: Vec<u16> = vec![2048; 1920 * 1080];  // 12-bit values (0-4095) let tensor = BitPackedTensor::pack(12, vec![1920, 1080], &samples); let unpacked = tensor.unpack().into_u64();  // Auto-sized, then promoted
+/// // Option 1: Generic "just works" (most common)
+/// let samples: Vec<u16> = vec![2048; 1920 * 1080]; // 12-bit values (0-4095)
+/// let tensor = BitPackedTensor::pack(12, vec![1920, 1080], &samples);
+/// let unpacked = tensor.unpack().into_u64(); // Auto-sized, then promoted
 ///
-/// // Option 2: Explicit type control (when you need guarantees) let tensor = BitPackedTensor::pack_u16(12, vec![1920, 1080], &samples); let unpacked: Vec<u16> = tensor.unpack_u16();  // Explicit, no enum
+/// // Option 2: Explicit type control (when you need guarantees)
+/// let tensor = BitPackedTensor::pack_u16(12, vec![1920, 1080], &samples);
+/// let unpacked: Vec<u16> = tensor.unpack_u16(); // Explicit, no enum
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct BitPackedTensor {

@@ -3,8 +3,12 @@
 //! ## Design: Multi-Valued Fields with Named Encoding
 //!
 //! **Building phase (Vec<FieldValue> with multi-valued support):**
-//! ```rust
-//! let section = schema.builder() .set("iso", 800u32)?                 // Single value: FieldValue { name: "iso", values: [u5(800)] } .set_multi("size", vec![3u8, 4, 5])? // Multi-value: FieldValue { name: "size", values: [u3(3), u3(4), u3(5)] } .set_empty("cloudy")?                // Empty: FieldValue { name: "cloudy", values: [] } .encode()?;
+//! ```text
+//! let section = schema.build()
+//!     .set("iso", 800u32)?                 // Single value: FieldValue { name: "iso", values: [u5(800)] }
+//!     .set_multi("size", vec![3u8, 4, 5])? // Multi-value: FieldValue { name: "size", values: [u3(3), u3(4), u3(5)] }
+//!     .set_empty("cloudy")?                // Empty: FieldValue { name: "cloudy", values: [] }
+//!     .encode()?;
 //! ```
 //!
 //! **Wire format (Named fields with d-type keys):**
@@ -190,9 +194,18 @@ impl SectionSchema {
 /// ```rust
 /// use vsf::schema::{SectionSchema, TypeConstraint};
 ///
-/// let schema = SectionSchema::new("image") .field("width", TypeConstraint::AnyUnsigned) .field("height", TypeConstraint::AnyUnsigned) .field("cloudy", TypeConstraint::AnyUnsigned);
+/// let schema = SectionSchema::new("image")
+///     .field("width", TypeConstraint::AnyUnsigned)
+///     .field("height", TypeConstraint::AnyUnsigned)
+///     .field("cloudy", TypeConstraint::AnyUnsigned);
 ///
-/// let section = schema.build() .set("width", 1920u32)?           // Single value .set("height", 1080u32)?          // Single value .set_empty("cloudy")?             // Empty field .encode()?; // Wire: [d"image" (d"width":u5{1920}) (d"height":u5{1080}) (d"cloudy")]
+/// // Wire: [d"image" (d"width":u5{1920}) (d"height":u5{1080}) (d"cloudy")]
+/// let section = schema.build()
+///     .set("width", 1920u32)?
+///     .set("height", 1080u32)?
+///     .set_empty("cloudy")?
+///     .encode()?;
+/// # Ok::<(), vsf::schema::ValidationError>(())
 /// ```
 #[derive(Debug)]
 pub struct SectionBuilder {

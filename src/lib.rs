@@ -126,18 +126,29 @@
 //! ```
 //!
 //! Each history entry is a complete event enclosed in `()`'s with timestamp, tool, action, and context. The History section has its own hash in the header label record for integrity verification, but is NOT included in `hs` (static content hash). It IS included in `hb` (rolling file hash).
-//! ```
 //!
 //! ## Quick Start
 //!
 //! ```
 //! use vsf::{VsfType, VsfBuilder, Tensor, parse};
 //!
-//! // Encode a tensor let tensor = Tensor::new(vec![3, 4], vec![1u16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]); let encoded = VsfType::t_u4(tensor).flatten();
+//! // Encode a tensor
+//! let tensor = Tensor::new(vec![3, 4], vec![1u16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+//! let encoded = VsfType::t_u4(tensor).flatten();
 //!
-//! // Decode it back let mut ptr = 0; let decoded = parse(&encoded, &mut ptr).unwrap();
+//! // Decode it back
+//! let mut ptr = 0;
+//! let decoded = parse(&encoded, &mut ptr).unwrap();
 //!
-//! // Build a complete VSF file with header let vsf_file = VsfBuilder::new() .add_section("metadata", vec![ ("width".to_string(), VsfType::u(1920, false)), ("height".to_string(), VsfType::u(1080, false)), ]) .add_unboxed("pixels", vec![0xFF; 1024]) .build() .unwrap();
+//! // Build a complete VSF file with header
+//! let vsf_file = VsfBuilder::new()
+//!     .add_section("metadata", vec![
+//!         ("width".to_string(), VsfType::u(1920, false)),
+//!         ("height".to_string(), VsfType::u(1080, false)),
+//!     ])
+//!     .add_unboxed("pixels", vec![0xFF; 1024])
+//!     .build()
+//!     .unwrap();
 //! ```
 //!
 //! ## Eagle Time Formats
@@ -317,8 +328,8 @@ pub mod inspect;
 
 // Re-export main types
 pub use types::{
-    datetime_to_eagle_time, EagleTime, EtType, LayoutOrder, NaScheme, StridedTensor, Tensor,
-    VsfType, WaAddress, WorldCoord, OSCILLATIONS_PER_SECOND,
+    datetime_to_eagle_time, BitPackedTensor, EagleTime, EtType, LayoutOrder, NaScheme,
+    StridedTensor, Tensor, VsfType, WaAddress, WorldCoord, OSCILLATIONS_PER_SECOND,
 };
 #[cfg(feature = "std")]
 pub use types::{eagle_time_nanos, eagle_time_oscillations};
