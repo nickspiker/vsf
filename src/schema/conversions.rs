@@ -371,14 +371,16 @@ impl IntoVsfType for &str {
 ///
 /// # Example
 /// ```
-/// use vsf::schema::{AsciiText, IntoVsfType}; use vsf::VsfType;
+/// use vsf::schema::{AsciiText, IntoVsfType};
 ///
-/// // Create ASCII text explicitly let ascii = AsciiText::new("hello"); let vsf_value = ascii.into_vsf_type();  // VsfType::a("hello")
+/// // Create ASCII text explicitly
+/// let ascii = AsciiText::new("hello");
+/// let vsf_value = ascii.into_vsf_type(); // VsfType::a("hello")
 ///
-/// // Use in schema builder
-/// # use vsf::schema::{SectionSchema, FieldSchema, TypeConstraint};
-/// # let schema = SectionSchema::new("test")
-/// #     .add_field(FieldSchema::new("name", TypeConstraint::AsciiText)); let section = schema.builder() .set("name", AsciiText::new("nick"))? .build()?;
+/// // Use in a schema builder
+/// # use vsf::schema::{SectionSchema, TypeConstraint};
+/// # let schema = SectionSchema::new("test").field("name", TypeConstraint::AsciiText);
+/// let section = schema.build().set("name", AsciiText::new("nick"))?.encode()?;
 /// # Ok::<(), vsf::schema::ValidationError>(())
 /// ```
 ///

@@ -5,6 +5,22 @@ All notable changes to VSF will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-04
+
+### Changed (breaking)
+
+- **Spirix dependency bumped to 0.1.1** (from 0.0.12). Spirix 0.1 changes the Scalar binary representation (implicit sign bit, AMBIG=0 exponent convention), so any VSF file containing Spirix scalar payloads written under 0.0.x will decode to DIFFERENT values under 0.9.0. Circle payloads are unchanged. Spirix 0.1.1 also fixes panics reachable from ordinary arithmetic in debug builds, one of which VSF's own colour conversion tests exposed.
+
+### Fixed
+
+- `BitPackedTensor` is now re-exported at the crate root alongside its tensor siblings (its own doc example imported it from there).
+- Repaired six broken doc examples: an unbalanced code fence in the crate docs swallowed the Quick Start section, method chains had been folded into line comments, and two examples referenced pre-refactor APIs (`schema.builder()`/`add_field`/`build` instead of `build()`/`field()`/`encode()`).
+- `rand` and `aes-gcm` optional dependencies gained the `getrandom`/`std_rng` features their code paths need, so `--all-features` builds again (rand's `OsRng`/`thread_rng` are feature-gated).
+
+### Known issues
+
+- `examples/show_shortcode_colours.rs` (behind the `inspect` feature) predates the colour API refactor and does not compile; it needs a rewrite against `to_rgb_linear_f32`/`to_rgb_linear_s44`.
+
 ## [0.8.1] - 2026-06-16
 
 ### Added
