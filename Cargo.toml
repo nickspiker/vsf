@@ -77,6 +77,10 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 img-parts = { version = "0.4", optional = true }
 icc-profile = { version = "0.0.2", optional = true }
 rav1e = { version = "0.7", default-features = false, optional = true }
+# rav1d = AV1 *decoder* (the read half; rav1e is the write half). Powers `image::decode`.
+# Builds for wasm32-unknown-unknown with a tiny libc shim (see toka's build) — the OS-less
+# target just lacks a few libc type aliases rav1d imports.
+rav1d = { version = "1.1", default-features = false, features = ["bitdepth_8"], optional = true }
 resize = { version = "0.8.8", optional = true }
 rgb = { version = "0.8.52", optional = true }
 
@@ -117,6 +121,10 @@ image-tools = [
     "dep:resize",
     "dep:rgb",
 ]
+# image-decode: the read half — parse a VSF image section and decode (tensor or rav1d AV1) to
+# an α+darkness buffer. Just rav1d + std, no encode deps — light enough to ship into toka.wasm.
+# Off by default; the fgtw-bootstrap worker (size-critical) never enables it.
+image-decode = ["std", "dep:rav1d"]
 
 [build-dependencies]
 # BLAKE3 for verifying frequencies.bin and huffman_codes.bin integrity at build time.

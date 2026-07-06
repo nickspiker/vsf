@@ -284,6 +284,27 @@ impl VsfHeader {
             }
         };
 
+        // ENFORCE the version fields, both directions — same rules as verification::
+        // parse_full_header, applied here too so every consumer that decodes a header (toka
+        // capsule load, worker request routing, activity log) inherits them. Without this, a
+        // version-skewed file sails past the header and misparses downstream into garbage
+        // (e.g. a VM stack underflow) instead of a one-line version error.
+        if backward_compat > crate::VSF_VERSION {
+            return Err(format!(
+                "File requires VSF v{} but this implementation is v{}",
+                backward_compat,
+                crate::VSF_VERSION
+            ));
+        }
+        if version < crate::VSF_BACKWARD_COMPAT {
+            return Err(format!(
+                "File is VSF v{} but this build reads v{}+ — a compat-v{} feature of vsf is required to read this archive",
+                version,
+                crate::VSF_BACKWARD_COMPAT,
+                version
+            ));
+        }
+
         // Parse header length (b) - we validate but don't use it for parsing
         let header_length_type =
             parse(data, &mut ptr).map_err(|e| format!("Failed to parse header_length: {}", e))?;
@@ -1123,7 +1144,7 @@ mod tests {
 
     #[test]
     fn test_header_encoding() {
-        let mut header = VsfHeader::new(1, 1);
+        let mut header = VsfHeader::new(crate::VSF_VERSION, crate::VSF_BACKWARD_COMPAT);
         header.add_field(HeaderField {
             name: "test section".to_string(),
             hash: None,
@@ -1265,7 +1286,7 @@ mod tests {
     #[test]
     fn test_header_decode_basic() {
         // Create a simple header
-        let mut header = VsfHeader::new(1, 1);
+        let mut header = VsfHeader::new(crate::VSF_VERSION, crate::VSF_BACKWARD_COMPAT);
         header.add_field(HeaderField {
             name: "test_section".to_string(),
             hash: None,
@@ -1284,8 +1305,8 @@ mod tests {
         let (decoded, bytes_consumed) = VsfHeader::decode(&encoded).unwrap();
 
         // Verify decoded matches original
-        assert_eq!(decoded.version, 1);
-        assert_eq!(decoded.backward_compat, 1);
+        assert_eq!(decoded.version, crate::VSF_VERSION);
+        assert_eq!(decoded.backward_compat, crate::VSF_BACKWARD_COMPAT);
         assert_eq!(decoded.fields.len(), 1);
         assert_eq!(decoded.fields[0].name, "test_section");
         assert_eq!(decoded.fields[0].offset_bytes, 256);
@@ -1297,7 +1318,7 @@ mod tests {
     #[test]
     fn test_header_decode_with_crypto() {
         // Create a header with crypto fields
-        let mut header = VsfHeader::new(1, 1);
+        let mut header = VsfHeader::new(crate::VSF_VERSION, crate::VSF_BACKWARD_COMPAT);
         header.add_field(HeaderField {
             name: "encrypted_section".to_string(),
             hash: Some(VsfType::hb(vec![0u8; 32])), // BLAKE3 rolling hash
@@ -1316,7 +1337,7 @@ mod tests {
         let (decoded, bytes_consumed) = VsfHeader::decode(&encoded).unwrap();
 
         // Verify decoded matches original
-        assert_eq!(decoded.version, 1);
+        assert_eq!(decoded.version, crate::VSF_VERSION);
         assert_eq!(decoded.fields.len(), 1);
         assert_eq!(decoded.fields[0].name, "encrypted_section");
         assert!(decoded.fields[0].hash.is_some());
