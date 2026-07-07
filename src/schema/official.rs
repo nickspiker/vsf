@@ -100,6 +100,16 @@ pub fn pipe_message_schema() -> SectionSchema {
         .field("pipe", TypeConstraint::AnyUnsigned)
 }
 
+/// Create error schema — the standard shape for a worker/protocol error frame.
+///
+/// `reason` is the short machine-readable cause; `detail` is an optional human-readable elaboration.
+/// Both are free-form strings so any subsystem can populate the envelope without a bespoke schema.
+pub fn error_schema() -> SectionSchema {
+    SectionSchema::new("error")
+        .field("reason", TypeConstraint::AnyString)
+        .field("detail", TypeConstraint::AnyString)
+}
+
 /// Register all official schemas. Gated on `registry` because `SchemaRegistry` itself is — see `schema/mod.rs`.
 #[cfg(feature = "registry")]
 pub fn register_official_schemas(registry: &super::registry::SchemaRegistry) {
@@ -109,6 +119,7 @@ pub fn register_official_schemas(registry: &super::registry::SchemaRegistry) {
     registry.register(network_peer_schema());
     registry.register(announce_schema());
     registry.register(pipe_message_schema());
+    registry.register(error_schema());
 }
 
 #[cfg(test)]

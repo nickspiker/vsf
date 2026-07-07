@@ -44,7 +44,7 @@
 use super::constraint::vsf_type_name;
 use super::validate::{ValidationError, ValidationResult};
 use crate::prelude::*;
-use crate::types::VsfType;
+use crate::types::{EtType, VsfType};
 
 /// Convert Rust types to VsfType
 ///
@@ -460,6 +460,107 @@ impl FromVsfType for Vec<u8> {
     }
 }
 
+// === u128 (widest unsigned) ===
+
+impl IntoVsfType for u128 {
+    fn into_vsf_type(self) -> VsfType {
+        VsfType::u7(self)
+    }
+}
+
+impl FromVsfType for u128 {
+    fn from_vsf_type(vsf: &VsfType) -> ValidationResult<Self> {
+        match vsf {
+            VsfType::u7(v) => Ok(*v),
+            VsfType::u3(v) => Ok(*v as u128),
+            VsfType::u4(v) => Ok(*v as u128),
+            VsfType::u5(v) => Ok(*v as u128),
+            VsfType::u6(v) => Ok(*v as u128),
+            VsfType::u(v, _) => Ok(*v as u128),
+            VsfType::u0(v) => Ok(if *v { 1 } else { 0 }),
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to u128",
+                vsf_type_name(vsf)
+            ))),
+        }
+    }
+}
+
+// === FIXED-SIZE BYTE ARRAYS ===
+
+// 32-byte fixed arrays cover the BLAKE3-width hashes, the Photon app-specific hashes, and the 32-byte key types. The length is checked so a wrong-width value fails loudly rather than truncating.
+impl FromVsfType for [u8; 32] {
+    fn from_vsf_type(vsf: &VsfType) -> ValidationResult<Self> {
+        let bytes: &[u8] = match vsf {
+            VsfType::hp(b)
+            | VsfType::hb(b)
+            | VsfType::hs(b)
+            | VsfType::hm(b)
+            | VsfType::hg(b)
+            | VsfType::hP(b)
+            | VsfType::hI(b)
+            | VsfType::hV(b)
+            | VsfType::ke(b)
+            | VsfType::kx(b)
+            | VsfType::kc(b)
+            | VsfType::ka(b) => b,
+            _ => {
+                return Err(ValidationError::Custom(format!(
+                    "Cannot convert {} to [u8; 32]",
+                    vsf_type_name(vsf)
+                )))
+            }
+        };
+        bytes.try_into().map_err(|_| {
+            ValidationError::Custom(format!(
+                "Expected 32 bytes for [u8; 32], got {}",
+                bytes.len()
+            ))
+        })
+    }
+}
+
+// 64-byte fixed arrays cover Ed25519 signatures (ge) and HMAC-SHA512 MACs (mh). The length is checked so a wrong-width value fails loudly rather than truncating.
+impl FromVsfType for [u8; 64] {
+    fn from_vsf_type(vsf: &VsfType) -> ValidationResult<Self> {
+        let bytes: &[u8] = match vsf {
+            VsfType::ge(b) | VsfType::mh(b) => b,
+            _ => {
+                return Err(ValidationError::Custom(format!(
+                    "Cannot convert {} to [u8; 64]",
+                    vsf_type_name(vsf)
+                )))
+            }
+        };
+        bytes.try_into().map_err(|_| {
+            ValidationError::Custom(format!(
+                "Expected 64 bytes for [u8; 64], got {}",
+                bytes.len()
+            ))
+        })
+    }
+}
+
+// === EAGLE TIME ===
+
+impl IntoVsfType for EtType {
+    fn into_vsf_type(self) -> VsfType {
+        VsfType::e(self)
+    }
+}
+
+impl FromVsfType for EtType {
+    fn from_vsf_type(vsf: &VsfType) -> ValidationResult<Self> {
+        match vsf {
+            VsfType::e(et) => Ok(et.clone()),
+            _ => Err(ValidationError::Custom(format!(
+                "Cannot convert {} to EtType (expected e type)",
+                vsf_type_name(vsf)
+            ))),
+        }
+    }
+}
+
 // === VsfType PASSTHROUGH ===
 
 impl IntoVsfType for VsfType {
@@ -533,5 +634,48 @@ mod tests {
         let vsf = VsfType::f6(3.14);
         let result = u32::from_vsf_type(&vsf);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_u128_roundtrip_and_widening() {
+        let original: u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455; // u128::MAX
+        let vsf = original.into_vsf_type();
+        assert!(matches!(vsf, VsfType::u7(_)));
+        assert_eq!(u128::from_vsf_type(&vsf).unwrap(), original);
+
+        // Widening from a narrower unsigned still lands in u128.
+        assert_eq!(u128::from_vsf_type(&VsfType::u5(42)).unwrap(), 42u128);
+    }
+
+    #[test]
+    fn test_array32_len_checked() {
+        let good = VsfType::hP(vec![7u8; 32]);
+        assert_eq!(<[u8; 32]>::from_vsf_type(&good).unwrap(), [7u8; 32]);
+
+        let wrong_len = VsfType::hP(vec![7u8; 31]);
+        assert!(<[u8; 32]>::from_vsf_type(&wrong_len).is_err());
+
+        let wrong_type = VsfType::u5(5);
+        assert!(<[u8; 32]>::from_vsf_type(&wrong_type).is_err());
+    }
+
+    #[test]
+    fn test_array64_matches_ge_and_mh() {
+        let sig = VsfType::ge(vec![9u8; 64]);
+        assert_eq!(<[u8; 64]>::from_vsf_type(&sig).unwrap(), [9u8; 64]);
+
+        let mac = VsfType::mh(vec![1u8; 64]);
+        assert_eq!(<[u8; 64]>::from_vsf_type(&mac).unwrap(), [1u8; 64]);
+
+        let wrong_len = VsfType::ge(vec![9u8; 32]);
+        assert!(<[u8; 64]>::from_vsf_type(&wrong_len).is_err());
+    }
+
+    #[test]
+    fn test_ettype_roundtrip() {
+        let et = EtType::e6(123_456);
+        let vsf = et.clone().into_vsf_type();
+        assert!(matches!(vsf, VsfType::e(_)));
+        assert_eq!(EtType::from_vsf_type(&vsf).unwrap(), et);
     }
 }

@@ -21,10 +21,52 @@ pub fn hash_placeholder(hash_type: u8, len: usize) -> Vec<u8> {
 }
 
 impl VsfType {
-    /// Flatten this VsfType into its binary representation
+    /// Flatten this VsfType into its binary representation.
     ///
     /// Returns a Vec<u8> containing the encoded bytes ready to write to a file.
+    ///
+    /// # Panics
+    /// This is the infallible façade over [`VsfType::try_flatten`] and is kept for the many internal callers that build fixed, feature-safe types (integers, hashes, lengths).
+    /// The only variant that can fail is `x` (Unicode text) when neither the `text` nor `text-encode` feature is enabled, because Huffman compression is unavailable.
+    /// Historically that case panicked; it now surfaces through `try_flatten` as an `Err` and, on this infallible path, encodes an empty `x` field as a non-crashing fallback (a `debug_assert!` fires in debug builds to flag the misuse).
+    /// Callers that may hold Unicode text without the text feature should call `try_flatten` and handle the error.
     pub fn flatten(&self) -> Vec<u8> {
+        match self.try_flatten() {
+            Ok(bytes) => bytes,
+            Err(_e) => {
+                debug_assert!(
+                    false,
+                    "VsfType::flatten() hit an unencodable value ({}); use try_flatten() to handle this: {}",
+                    crate::schema::constraint::vsf_type_name(self),
+                    _e
+                );
+                // Non-crashing fallback: an empty `x` field (tag + zero char-count).
+                vec![b'x', 0]
+            }
+        }
+    }
+
+    /// Fallible flatten: encode this VsfType into its binary representation, returning an error instead of panicking on an unencodable value.
+    ///
+    /// The only failure today is `VsfType::x` (Unicode text) built without the `text`/`text-encode` feature, since Huffman compression is then unavailable — use `VsfType::a` for ASCII in that configuration.
+    pub fn try_flatten(&self) -> Result<Vec<u8>, alloc::string::String> {
+        #[cfg(not(any(feature = "text", feature = "text-encode")))]
+        {
+            if let VsfType::x(value) = self {
+                return Err(alloc::format!(
+                    "VsfType::x requires the 'text' or 'text-encode' feature for Huffman compression; use VsfType::a for ASCII text instead. Message: '{}'",
+                    value
+                ));
+            }
+        }
+        Ok(self.flatten_inner())
+    }
+
+    /// Internal infallible flatten body shared by [`flatten`] and [`try_flatten`].
+    ///
+    /// Every arm here is total; the one case that cannot be encoded under the active feature set (`x` without text compression) is routed through the error return of `try_flatten` before reaching this body — see the `x` arm below, which returns early via the enclosing method.
+    fn flatten_inner(&self) -> Vec<u8> {
+        // The `x`-without-feature arm cannot express its failure here (this returns Vec<u8>), so `try_flatten` performs the feature check before delegating. Under default features that arm still needs a value; it emits an empty `x` field, which `try_flatten`'s pre-check has already rejected on the fallible path.
         match self {
             // ==================== UNSIGNED INTEGERS ====================
             VsfType::u0(value) => {
@@ -156,11 +198,9 @@ impl VsfType {
                 }
                 #[cfg(not(any(feature = "text", feature = "text-encode")))]
                 {
-                    panic!(
-                        "VsfType::x requires 'text' or 'text-encode' feature for Huffman compression. \
-                         Use VsfType::a for ASCII text instead. Message: '{}'",
-                        value
-                    );
+                    // Without a text-encoding feature, `x` cannot be Huffman-compressed. try_flatten() rejects this variant before delegating here, so this fallback is only reachable via the infallible flatten() façade, where it emits an empty `x` field (tag + zero char-count) rather than crashing. Use VsfType::a for ASCII text in no-text builds.
+                    let _ = value;
+                    vec![b'x', 0]
                 }
             }
 
@@ -5090,6 +5130,28 @@ mod tests {
     #[test]
     fn test_flatten_signed() {
         assert_eq!(VsfType::i3(-42).flatten(), vec![b'i', b'3', 0xD6]);
+    }
+
+    // Without a text-encoding feature, flattening a Unicode `x` value must NOT panic. try_flatten surfaces the error; flatten falls back to an empty `x` field. With the feature on, both encode the string.
+    #[test]
+    fn test_flatten_x_no_panic_without_text_feature() {
+        let x = VsfType::x("héllo 世界".to_string());
+
+        #[cfg(not(any(feature = "text", feature = "text-encode")))]
+        {
+            // try_flatten reports the missing feature instead of panicking.
+            assert!(x.try_flatten().is_err());
+            // The infallible façade returns a non-crashing empty `x` field.
+            #[cfg(not(debug_assertions))]
+            assert_eq!(x.flatten(), vec![b'x', 0]);
+        }
+
+        #[cfg(any(feature = "text", feature = "text-encode"))]
+        {
+            let bytes = x.try_flatten().unwrap();
+            assert_eq!(bytes[0], b'x');
+            assert_eq!(bytes, x.flatten());
+        }
     }
 
     #[test]

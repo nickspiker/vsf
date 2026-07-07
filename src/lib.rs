@@ -177,7 +177,11 @@
 //! use vsf::file_format::VsfHeader; let mut header = VsfHeader::new(version, backward_compat); header.add_field(field); let bytes = header.encode()?;  // Encodes header to bytes
 //! ```
 //!
-//! **Note:** `VsfHeader::decode()` is not yet implemented. To parse headers, use element-level `parse()` to read individual fields. A future schema system will provide type-safe header and section parsing with automatic validation.
+//! **Header decoding (VsfHeader):**
+//! ```ignore
+//! use vsf::file_format::VsfHeader; let (header, header_end) = VsfHeader::decode(&bytes)?;  // Parses the full RÅ< header
+//! ```
+//! `VsfHeader::decode()` is implemented at [file_format.rs](src/file_format.rs) (`VsfHeader::decode`); it returns the parsed header plus the byte offset where the header ends.
 //!
 //! ## Parsing APIs: Two Tiers
 //!
