@@ -6,11 +6,9 @@ use clap::{Parser, Subcommand};
 use colored::*;
 use std::fs;
 use std::path::{Path, PathBuf};
-use vsf::decoding::parse::parse;
 use vsf::file_format::VsfHeader;
 use vsf::inspect::{
-    format_bytes, format_eagle_time, format_number, format_value, format_value_short,
-    labels_from_header, parse_section_fields, LabelInfo,
+    format_value, format_value_short, labels_from_header, parse_section_fields,
 };
 use vsf::types::VsfType;
 
@@ -270,147 +268,104 @@ fn show_info(data: &[u8], _detailed: bool, _key_path: Option<&Path>) -> Result<(
     // Use the unified inspect_vsf() function from the library This ensures consistent output between CLI and browser/WASM
     let formatted = vsf::inspect::inspect_vsf(data)?;
     println!("{}", formatted);
+
+    // The inspect view SHOWS the crypto fields but only re-computes the rolling hash.
+    // A file inspector must actually VERIFY every anchor it displays, so run the library verify functions and report an unambiguous per-anchor result.
+    print_verification_summary(data);
+
     Ok(())
 }
 
-/// Quick integrity summary (used by show_info)
-fn verify_integrity_summary(
-    data: &[u8],
-    header: &VsfHeader,
-    labels: &[LabelInfo],
-) -> Result<bool, String> {
-    let mut all_checks_pass = true;
-
-    // Display provenance hash (hp)
-    if let VsfType::hp(ref stored_hash) = header.provenance_hash {
-        println!(
-            " {}-Byte {} {}:",
-            stored_hash.len().to_string().white(),
-            "BLAKE3".green(),
-            "provenance hash".cyan()
-        );
-        print!(" {} ", "0x".truecolor(64, 50, 255));
-        for byte in stored_hash.iter() {
-            print!("{:02X}", byte);
+/// Verify every integrity/authenticity anchor the header carries and print a per-anchor PASS/FAIL/absent line.
+///
+/// This is the acceptance gate: parsing a document is not the same as trusting it.
+/// We report three anchors independently:
+/// - provenance (hp): content matches its claimed immutable identity ([`is_original`]).
+/// - integrity (hb): the rolling hash covers the whole file ([`verify_file_hash`]); absent when the file is signed instead.
+/// - signature (ge): the header-level Ed25519 signature ([`verify_file_signature`]); absent when the file is unsigned, and reported as needing the crypto feature when present but this build lacks it.
+///
+/// The final line mirrors [`vsf::verification::read_verified`]'s doctrine: a document that carries neither a rolling hash nor a valid signature is UNVERIFIABLE, not merely "hp-clean".
+fn print_verification_summary(data: &[u8]) {
+    // Decode the header once to know which anchors are even present.
+    let header = match VsfHeader::decode(data) {
+        Ok((h, _)) => h,
+        Err(e) => {
+            println!("\n {} {}", "verification:".cyan(), format!("header parse failed: {e}").truecolor(255, 0, 0));
+            return;
         }
-        println!();
+    };
+
+    println!("\n {}", "Verification".cyan().bold());
+
+    // provenance (hp) — always present in a well-formed VSF file.
+    let provenance_ok = vsf::verification::is_original(data).is_ok();
+    print_anchor("provenance (hp)", Some(provenance_ok));
+
+    // integrity (hb) — the rolling hash. Absent on signed files (signature replaces it).
+    let integrity = if header.rolling_hash.is_some() {
+        Some(vsf::verification::verify_file_hash(data).is_ok())
+    } else {
+        None
+    };
+    print_anchor("integrity  (hb)", integrity);
+
+    // signature (ge) — header-level Ed25519. Present iff both ke and ge are in the header.
+    let is_signed = header.signature.is_some() && header.signer_pubkey.is_some();
+    if is_signed {
+        #[cfg(feature = "crypto")]
+        {
+            let sig_ok = vsf::verification::verify_file_signature(data).unwrap_or(false);
+            print_anchor("signature  (ge)", Some(sig_ok));
+        }
+        #[cfg(not(feature = "crypto"))]
+        {
+            println!(
+                " {} {}",
+                "signature  (ge):".cyan(),
+                "present (rebuild with --features crypto to verify)".yellow()
+            );
+        }
+    } else {
+        print_anchor("signature  (ge)", None);
     }
 
-    // Display signer pubkey (ke) if present
-    if let Some(VsfType::ke(ref pk_bytes)) = header.signer_pubkey {
-        println!(
-            " {}-Byte {} {}:",
-            pk_bytes.len().to_string().white(),
-            "Ed25519".green(),
-            "signer pubkey".cyan()
-        );
-        print!(" {} ", "0x".truecolor(64, 50, 255));
-        for byte in pk_bytes.iter() {
-            print!("{:02X}", byte);
+    // Overall verdict, matching read_verified's un-skippable semantics.
+    let has_semantic_anchor = integrity == Some(true) || {
+        #[cfg(feature = "crypto")]
+        {
+            is_signed && vsf::verification::verify_file_signature(data).unwrap_or(false)
         }
-        println!();
-    }
-
-    // Display optional signature (ge)
-    if let Some(VsfType::ge(ref sig_bytes)) = header.signature {
-        println!(
-            " {}-Byte {} {}:",
-            sig_bytes.len().to_string().white(),
-            "Ed25519".green(),
-            "signature".cyan()
-        );
-        print!(" {} ", "0x".truecolor(64, 50, 255));
-        for byte in sig_bytes.iter().take(32) {
-            print!("{:02X}", byte);
+        #[cfg(not(feature = "crypto"))]
+        {
+            // Without crypto we cannot confirm a signature; treat signed-but-unverifiable conservatively.
+            false
         }
-        if sig_bytes.len() > 32 {
-            print!("...");
-        }
-        println!();
+    };
+
+    print!(" {} ", "verdict:".cyan());
+    if !provenance_ok {
+        println!("{}", "TAMPERED (provenance mismatch)".truecolor(255, 0, 0));
+    } else if has_semantic_anchor {
+        println!("{}", "VERIFIED".truecolor(0, 255, 0));
+    } else if is_signed {
+        // Signed doc but this build can't check the signature.
+        println!("{}", "UNCHECKED (signed; crypto feature off)".yellow());
+    } else {
         println!(
-            " {} {}",
-            "Semantics:".cyan(),
-            "Protocol-specific (signed data unknown)".truecolor(200, 200, 200)
-        );
-    }
-
-    // Display and verify rolling hash (hb)
-    let (file_hash_verified, stored_hash, computed_hash) =
-        if let Some(VsfType::hb(ref stored_hash)) = header.rolling_hash {
-            let computed = vsf::verification::compute_file_hash(data).unwrap_or_else(|_| [0u8; 32]);
-            let verified = computed.as_slice() == stored_hash.as_slice();
-            (verified, Some(stored_hash.clone()), Some(computed.to_vec()))
-        } else {
-            (false, None, None)
-        };
-
-    // Check section-level hashes
-    let mut verified_sections = 0;
-    let mut total_sections = 0;
-
-    for label in labels {
-        if label.child_count > 0 {
-            total_sections += 1;
-            if let Some(ref hash_vsf) = label.hash {
-                let hash_bytes = match hash_vsf {
-                    VsfType::hp(ref bytes) | VsfType::hb(ref bytes) | VsfType::hs(ref bytes) => {
-                        bytes
-                    }
-                    _ => continue,
-                };
-
-                let section_end = label.offset + label.size;
-                if section_end <= data.len() {
-                    let section_data = &data[label.offset..section_end];
-                    let computed = blake3::hash(section_data);
-                    if computed.as_bytes() == hash_bytes.as_slice() {
-                        verified_sections += 1;
-                    }
-                }
-            }
-        }
-    }
-    let _ = (verified_sections, total_sections); // Suppress unused warnings
-
-    // Display rolling hash (hb) if present
-    if stored_hash.is_some() {
-        println!(
-            " {}-Byte {} {}:",
-            32.to_string().white(),
-            "BLAKE3".green(),
-            "rolling hash".cyan()
+            "{}",
+            "UNVERIFIABLE (no rolling hash, no signature)".truecolor(255, 0, 0)
         );
     }
+}
 
-    if file_hash_verified {
-        if let Some(hash) = stored_hash {
-            print!(" {} ", "0x".truecolor(64, 50, 255));
-            for byte in hash.iter() {
-                print!("{:02X}", byte);
-            }
-            println!();
-        }
-        print!(" {} ", "Verification:".cyan());
-        println!("{}", "PASS".truecolor(0, 255, 0));
-    } else if stored_hash.is_some() {
-        all_checks_pass = false;
-        if let (Some(expected), Some(computed)) = (stored_hash, computed_hash) {
-            print!(" {} {} ", "Expected:".cyan(), "0x".truecolor(64, 50, 255));
-            for byte in expected.iter() {
-                print!("{:02X}", byte);
-            }
-            println!();
-            print!(" {} {} ", "Got:".cyan(), "     0x".truecolor(64, 50, 255));
-            for byte in computed.iter() {
-                print!("{:02X}", byte);
-            }
-            println!();
-        }
-        print!(" {} ", "Verification:".cyan());
-        println!("{}", "FAIL".truecolor(255, 0, 0));
-    }
-
-    Ok(all_checks_pass)
+/// Print one anchor line: `Some(true)` → PASS, `Some(false)` → FAIL, `None` → absent.
+fn print_anchor(label: &str, result: Option<bool>) {
+    let status = match result {
+        Some(true) => "PASS".truecolor(0, 255, 0),
+        Some(false) => "FAIL".truecolor(255, 0, 0),
+        None => "absent".truecolor(160, 160, 160),
+    };
+    println!(" {} {}", format!("{label}:").cyan(), status);
 }
 
 /// Verify file integrity

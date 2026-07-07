@@ -499,6 +499,20 @@ impl VsfBuilder {
 
         Ok(result)
     }
+
+    /// Build the document and Ed25519-sign the named section in one step.
+    ///
+    /// Convenience over `build()` followed by `verification::sign_section`: the signature replaces the rolling hash as this section's integrity mechanism, additionally proving authorship.
+    /// `section_name` must be one of the sections added to this builder.
+    #[cfg(feature = "crypto")]
+    pub fn build_signed(
+        self,
+        section_name: &str,
+        signing_key: &[u8; 32],
+    ) -> Result<Vec<u8>, String> {
+        let bytes = self.build()?;
+        crate::verification::sign_section(bytes, section_name, signing_key)
+    }
 }
 
 impl Default for VsfBuilder {

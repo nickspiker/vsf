@@ -1311,6 +1311,64 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
     }
 }
 
+/// Read a VSF document with verification that CANNOT be skipped.
+///
+/// This is the composed entry point every trusting reader should use instead of calling [`VsfHeader::decode`] and then hoping the caller remembers to verify.
+/// It decodes the header, checks provenance self-consistency ([`is_original`]), and then insists on at least one *semantic* guarantee:
+///
+/// - If the header carries a signature (both `ke` pubkey and `ge` signature present) the Ed25519 signature is verified, and — when `expected_signer` is supplied — the signer pubkey must match.
+///   With the `crypto` feature off a signed document cannot be verified, so it is rejected rather than silently trusted.
+/// - Otherwise, if the header carries a rolling hash (`hb`) it is verified via [`verify_file_hash`].
+/// - Otherwise the document carries neither a rolling hash nor a signature, so it is *unverifiable* and rejected.
+///   This is the arm that rejects a bare, self-consistent worker error frame: `hp` self-consistency is provenance, not semantics, so a frame that only carries `hp` gets no free pass.
+///
+/// # Arguments
+/// * `doc` - Complete VSF file bytes
+/// * `expected_signer` - Optional 32-byte Ed25519 pubkey the signature must match (only consulted for signed docs)
+///
+/// # Returns
+/// The decoded `(VsfHeader, header_end)` on success, or an `Err` describing why the document could not be trusted.
+pub fn read_verified(
+    doc: &[u8],
+    expected_signer: Option<[u8; 32]>,
+) -> Result<(crate::file_format::VsfHeader, usize), String> {
+    use crate::file_format::VsfHeader;
+
+    let (header, header_end) = VsfHeader::decode(doc)?;
+
+    // Provenance self-consistency: content matches its claimed identity. Necessary but NOT sufficient — a well-formed frame passes this on structure alone.
+    is_original(doc)?;
+
+    // A signature needs both the pubkey (ke) and the signature bytes (ge) present.
+    let is_signed = header.signature.is_some() && header.signer_pubkey.is_some();
+
+    if is_signed {
+        #[cfg(feature = "crypto")]
+        {
+            if !verify_file_signature(doc)? {
+                return Err("bad signature".into());
+            }
+            if let Some(exp) = expected_signer {
+                if extract_signer_pubkey(doc)? != exp {
+                    return Err("untrusted signer".into());
+                }
+            }
+        }
+        #[cfg(not(feature = "crypto"))]
+        {
+            let _ = expected_signer;
+            return Err("signed doc but crypto feature off".into());
+        }
+    } else if header.rolling_hash.is_some() {
+        verify_file_hash(doc)?;
+    } else {
+        // No rolling hash and no signature: nothing semantic to check against. Reject a bare error frame here.
+        return Err("unverifiable: no rolling hash and no signature".into());
+    }
+
+    Ok((header, header_end))
+}
+
 /// Sign entire VSF file with Ed25519 (header-level signature)
 ///
 /// This function signs the FILE HASH (not the provenance hash directly). The file must already be built with:

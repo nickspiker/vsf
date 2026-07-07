@@ -1,8 +1,8 @@
 //! VSF file format with headers and hierarchical fields
 //!
-//! Binary structure (following basecalc pattern):
+//! Binary structure (authoritative order; see VsfHeader::decode):
 //! ```text
-//! RÅ<                                    Magic + header start b[header_length_bytes]               Header length in BYTES z[version]                           Version number y[backward_compat]                   Backward compatibility version hb[256][hash]                        File integrity hash (BLAKE3) n[field_count]                       Number of header field definitions
+//! RÅ<                                    Magic + header start z[version]                           Version number y[backward_compat]                   Backward compatibility version b[header_len]                         Header length in BYTES l[file_len]?                         Optional total file/wire length e[creation_time]?                    Optional creation timestamp (eu6 default, ef5/ef6 legacy) hp[32B]                              Provenance hash (BLAKE3) — REQUIRED (ke[pubkey] ge[sig] | hb[hash])?           Signature (pubkey + sig) OR rolling integrity hash, mutually exclusive n[field_count]                       Number of header field definitions
 //!
 //!   (d[section_name] h?[hash] g?[sig] k?[key] o[offset] b[size] n[count])  Header field (section pointer) ...
 //! >                                      Header end
@@ -523,9 +523,17 @@ impl VsfHeader {
         let _b_start = ptr;
         ptr += 1; // Skip 'b'
 
-        // Find end of b field (next field marker)
+        // Find end of b (header length) value: stop at the next field marker.
+        // The b value is immediately followed by the l (file length) field on the encode path,
+        // then optionally e (creation time), then hp (provenance) — so l must be a stop too.
+        // Without the l stop the scan overruns and the drain below swallows the whole l field,
+        // leaving update_file_length nothing to patch and VsfHeader::decode reporting file_length = 0.
         let value_start = ptr;
-        while ptr < header_bytes.len() && header_bytes[ptr] != b'e' && header_bytes[ptr] != b'h' {
+        while ptr < header_bytes.len()
+            && header_bytes[ptr] != b'l'
+            && header_bytes[ptr] != b'e'
+            && header_bytes[ptr] != b'h'
+        {
             ptr += 1;
         }
         let placeholder_len = ptr - value_start;
@@ -1167,6 +1175,39 @@ mod tests {
         assert!(encoded.contains(&b'y')); // Backward compat
         assert!(encoded.contains(&b'n')); // Count (was 'c', now 'n')
         assert!(encoded.contains(&b'>')); // Header end
+    }
+
+    /// Regression: update_header_length must NOT strip the l (file length) field.
+    /// Before the fix the b-value scan overran the l marker, drained the whole l field,
+    /// and VsfHeader::decode then reported file_length = 0 on the encode/rebuild path.
+    #[test]
+    fn test_update_header_length_preserves_file_length() {
+        let mut header = VsfHeader::new(crate::VSF_VERSION, crate::VSF_BACKWARD_COMPAT);
+        header.add_field(HeaderField {
+            name: "payload".to_string(),
+            hash: None,
+            signature: None,
+            key: None,
+            offset_bytes: 0,
+            size_bytes: 128,
+            child_count: 0,
+            inline_values: Vec::new(),
+        });
+
+        // Encode via the VsfHeader::encode path, then finalise the lengths in place.
+        let mut bytes = header.encode().unwrap();
+        VsfHeader::update_header_length(&mut bytes).unwrap();
+
+        // Decode the finalised bytes and confirm the file length survived.
+        let (decoded, header_end) = VsfHeader::decode(&bytes).unwrap();
+        assert_ne!(decoded.file_length, 0, "file_length was stripped to 0");
+        assert_eq!(
+            decoded.file_length,
+            bytes.len(),
+            "file_length must equal the finalised document length"
+        );
+        // The whole header must still parse cleanly (no overrun / trailing garbage before '>').
+        assert_eq!(header_end, bytes.len());
     }
 
     #[test]

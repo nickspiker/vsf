@@ -417,14 +417,31 @@ impl SectionBuilder {
     ///
     /// # Validation
     /// - Section name must match schema name
-    /// - Each field value is validated against the schema's type constraints
-    /// - Unknown fields are allowed (schema defines minimum requirements)
+    /// - Each *known* field's values are validated against the schema's type constraints
+    /// - Unknown fields are allowed and ignored (schema defines minimum requirements): their values are still parsed to advance the read pointer but are discarded, so a newer writer's extra field does not brick an older reader
     ///
     /// # Use Cases
     /// - Type-safe applications with defined schemas
     /// - Modifying existing sections and re-encoding
     /// - When validation and type constraints matter
+    ///
+    /// For the strict variant that rejects unknown fields, use [`SectionBuilder::parse_strict`].
     pub fn parse(schema: SectionSchema, section_bytes: &[u8]) -> ValidationResult<Self> {
+        Self::parse_inner(schema, section_bytes, false)
+    }
+
+    /// Strict variant of [`SectionBuilder::parse`] that rejects unknown field names with [`ValidationError::UnknownField`] instead of ignoring them.
+    ///
+    /// Use this only when you deliberately want to forbid forward-compatible extension fields; the default `parse` is forgiving.
+    pub fn parse_strict(schema: SectionSchema, section_bytes: &[u8]) -> ValidationResult<Self> {
+        Self::parse_inner(schema, section_bytes, true)
+    }
+
+    fn parse_inner(
+        schema: SectionSchema,
+        section_bytes: &[u8],
+        strict: bool,
+    ) -> ValidationResult<Self> {
         use crate::decoding::parse::parse;
 
         let mut ptr = 0;
@@ -503,6 +520,17 @@ impl SectionBuilder {
                 ptr += 1;
             }
 
+            // Resolve the field against the schema ONCE. Unknown fields are forward-compat extension: in the default (non-strict) mode we still parse their values to advance the read pointer but discard them and never validate. In strict mode an unknown field is a hard error.
+            let known_field_schema = match schema.validate_field(&field_name) {
+                Ok(fs) => Some(fs),
+                Err(e) => {
+                    if strict {
+                        return Err(e);
+                    }
+                    None // unknown but tolerated — parse-and-discard below
+                }
+            };
+
             let mut values = Vec::new();
 
             // Check for ':' - if present, parse values
@@ -519,11 +547,11 @@ impl SectionBuilder {
                         ))
                     })?;
 
-                    // Validate against schema
-                    let field_schema = schema.validate_field(&field_name)?;
-                    field_schema.validate(&value)?;
-
-                    values.push(value);
+                    // Only validate values of KNOWN fields; unknown-field values are discarded.
+                    if let Some(field_schema) = known_field_schema {
+                        field_schema.validate(&value)?;
+                        values.push(value);
+                    }
 
                     // Skip whitespace
                     while ptr < section_bytes.len() && section_bytes[ptr].is_ascii_whitespace() {
@@ -563,8 +591,10 @@ impl SectionBuilder {
             }
             ptr += 1;
 
-            // Add field to builder
-            builder.fields.push(FieldValue::new(field_name, values));
+            // Add field to builder only if it is a known schema field. Unknown fields (empty or with values) are consistently discarded so the parsed builder stays schema-clean and safe to re-encode.
+            if known_field_schema.is_some() {
+                builder.fields.push(FieldValue::new(field_name, values));
+            }
         }
 
         // Expect ']' to close section
@@ -576,6 +606,63 @@ impl SectionBuilder {
         }
 
         Ok(builder)
+    }
+
+    /// Verify a whole VSF document, then parse the section named by `schema` out of it.
+    ///
+    /// This is the safe, general front door for reading a named section from a document: it makes verification un-skippable.
+    /// It first runs [`crate::verification::read_verified`] over the entire `doc` (which enforces provenance self-consistency plus either a valid signature or a valid rolling hash — a document carrying neither is rejected), then locates the header TOC entry whose name matches `schema.name`, bounds-checks its byte range, and delegates to [`SectionBuilder::parse`].
+    ///
+    /// This generalises the hard-coded `parse_compressed_image` helper (which only ever looked up the `"image"` section) to any schema name, and adds the mandatory verification step that the raw section parsers skip.
+    ///
+    /// # Arguments
+    /// * `schema` - The schema whose `name` selects the section to parse
+    /// * `doc` - Complete VSF file bytes (header + sections)
+    /// * `expected_signer` - Optional 32-byte Ed25519 pubkey the document's signature must match (only consulted for signed docs)
+    ///
+    /// # Errors
+    /// Returns [`ValidationError::Custom`] wrapping the verification error if the document cannot be trusted, if no TOC field matches `schema.name`, or if the field's byte range falls outside `doc`.
+    pub fn parse_document(
+        schema: SectionSchema,
+        doc: &[u8],
+        expected_signer: Option<[u8; 32]>,
+    ) -> ValidationResult<Self> {
+        // Un-skippable verification of the whole document. String error → ValidationError::Custom.
+        let (header, _header_end) =
+            crate::verification::read_verified(doc, expected_signer).map_err(ValidationError::from)?;
+
+        // Find the TOC entry for the requested section by name.
+        let field = header
+            .fields
+            .iter()
+            .find(|f| f.name == schema.name)
+            .ok_or_else(|| {
+                ValidationError::Custom(format!(
+                    "Section '{}' not found in document TOC",
+                    schema.name
+                ))
+            })?;
+
+        // Bounds-check the field's byte range against the document.
+        let start = field.offset_bytes;
+        let end = field.offset_bytes.checked_add(field.size_bytes).ok_or_else(|| {
+            ValidationError::Custom(format!(
+                "Section '{}' byte range overflows (offset {} + size {})",
+                schema.name, field.offset_bytes, field.size_bytes
+            ))
+        })?;
+        if end > doc.len() {
+            return Err(ValidationError::Custom(format!(
+                "Section '{}' byte range {}..{} out of bounds (document is {} bytes)",
+                schema.name,
+                start,
+                end,
+                doc.len()
+            )));
+        }
+
+        let body = &doc[start..end];
+        Self::parse(schema, body)
     }
 }
 
