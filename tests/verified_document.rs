@@ -264,3 +264,18 @@ fn signed_round_trip_checks_signer() {
     let count: u16 = parsed.get_value("count").expect("count present in signed doc");
     assert_eq!(count, 0xBEEF);
 }
+
+/// A pinned-signer read must FAIL on an unsigned (hb-only) document — stripping ke/ge cannot demote the check to integrity-only.
+#[test]
+fn pinned_signer_rejects_unsigned_document() {
+    let doc = vsf::VsfBuilder::new()
+        .creation_time_oscillations(vsf::eagle_time_oscillations())
+        .add_section("data", vec![("x".to_string(), vsf::VsfType::u(7, false))])
+        .build()
+        .unwrap();
+    // Unpinned read: fine (hb verifies).
+    assert!(vsf::verification::read_verified(&doc, None).is_ok());
+    // Pinned read: must refuse the unsigned doc.
+    let err = vsf::verification::read_verified(&doc, Some([0x42; 32])).unwrap_err();
+    assert!(err.contains("unsigned"), "unexpected error: {err}");
+}

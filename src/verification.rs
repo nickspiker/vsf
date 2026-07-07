@@ -1359,6 +1359,9 @@ pub fn read_verified(
             let _ = expected_signer;
             return Err("signed doc but crypto feature off".into());
         }
+    } else if expected_signer.is_some() {
+        // The caller demanded a specific signer but the document is unsigned — an attacker who strips ke/ge must NOT be able to demote a signer-pinned read to integrity-only.
+        return Err("expected a signed document from a pinned signer, got an unsigned one".into());
     } else if header.rolling_hash.is_some() {
         verify_file_hash(doc)?;
     } else {
