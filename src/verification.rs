@@ -1318,9 +1318,10 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
 ///
 /// - If the header carries a signature (both `ke` pubkey and `ge` signature present) the Ed25519 signature is verified, and — when `expected_signer` is supplied — the signer pubkey must match.
 ///   With the `crypto` feature off a signed document cannot be verified, so it is rejected rather than silently trusted.
+/// - Otherwise, if `expected_signer` was supplied the unsigned document is rejected — stripping `ke`/`ge` must not demote a signer-pinned read to integrity-only.
 /// - Otherwise, if the header carries a rolling hash (`hb`) it is verified via [`verify_file_hash`].
-/// - Otherwise the document carries neither a rolling hash nor a signature, so it is *unverifiable* and rejected.
-///   This is the arm that rejects a bare, self-consistent worker error frame: `hp` self-consistency is provenance, not semantics, so a frame that only carries `hp` gets no free pass.
+/// - Otherwise the document verifies on `hp` alone: for an unsigned document `hp` and `hb` are equally self-attesting BLAKE3 anchors, and [`is_original`] already enforced the former.
+///   NOTE: an error frame passes this — error-frame detection is a separate, explicit, FIRST step at every read (`fgtw::client::error_frame`), never `read_verified`'s job.
 ///
 /// # Arguments
 /// * `doc` - Complete VSF file bytes
@@ -1364,10 +1365,8 @@ pub fn read_verified(
         return Err("expected a signed document from a pinned signer, got an unsigned one".into());
     } else if header.rolling_hash.is_some() {
         verify_file_hash(doc)?;
-    } else {
-        // No rolling hash and no signature: nothing semantic to check against. Reject a bare error frame here.
-        return Err("unverifiable: no rolling hash and no signature".into());
     }
+    // No hb and no signature: hp alone carries the integrity check — is_original above already enforced it. For an unsigned document hp and hb are equally self-attesting (both BLAKE3 over the bytes), so requiring hb added compat breakage, not security. Authenticity comes only from a signature; callers who need it pin expected_signer.
 
     Ok((header, header_end))
 }
