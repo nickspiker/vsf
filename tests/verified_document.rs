@@ -74,10 +74,10 @@ fn verified_round_trip_reads_fields_back() {
 }
 
 #[test]
-fn read_verified_rejects_bare_error_frame() {
-    // A worker error frame carries provenance (hp) but NO rolling hash and NO signature — provenance_only() reproduces exactly that shape.
-    // hp self-consistency is not a semantic guarantee, so read_verified must refuse it.
-    let error_frame = VsfBuilder::new()
+fn hp_only_documents_verify_on_provenance_alone() {
+    // An hp-only document (provenance_only shape): for an UNSIGNED doc, hp and hb are equally self-attesting BLAKE3 anchors, so hp alone suffices — is_original is the integrity check.
+    // (Error frames are NOT filtered here — error-frame detection is a separate, explicit, FIRST step at every read; see fgtw::client::error_frame.)
+    let hp_only = VsfBuilder::new()
         .provenance_only()
         .add_section(
             "error",
@@ -90,27 +90,27 @@ fn read_verified_rejects_bare_error_frame() {
             ],
         )
         .build()
-        .expect("error frame must build");
+        .expect("hp-only doc must build");
 
-    // It is a perfectly well-formed VSF file whose provenance self-verifies...
-    is_original(&error_frame).expect("error frame's own provenance is self-consistent");
+    is_original(&hp_only).expect("hp self-consistency");
+    read_verified(&hp_only, None).expect("hp-only doc verifies on provenance alone");
 
-    // ...but it has no integrity or authenticity anchor, so the verified reader rejects it.
-    let err = read_verified(&error_frame, None)
-        .expect_err("bare error frame with no hb and no sig must be rejected");
-    assert!(
-        err.contains("unverifiable"),
-        "rejection must name the reason, got: {err}"
-    );
+    // Tampering must still be caught by the hp check.
+    let mut tampered = hp_only.clone();
+    let last = tampered.len() - 2;
+    tampered[last] ^= 0xFF;
+    read_verified(&tampered, None).expect_err("tampered hp-only doc must be rejected");
 
-    // parse_document rides on read_verified, so it must reject the same frame.
+    // A PINNED-SIGNER read still refuses an unsigned doc — hp cannot substitute for authenticity.
+    read_verified(&hp_only, Some([0x42; 32]))
+        .expect_err("pinned-signer read must refuse an unsigned hp-only doc");
+
+    // parse_document inherits the same acceptance.
     let schema = SectionSchema::new("error").field("reason", TypeConstraint::AnyString);
-    let perr = vsf::schema::SectionBuilder::parse_document(schema, &error_frame, None)
-        .expect_err("parse_document must inherit the rejection");
-    assert!(
-        perr.to_string().contains("unverifiable"),
-        "parse_document must surface the unverifiable reason, got: {perr}"
-    );
+    let sec = vsf::schema::SectionBuilder::parse_document(schema, &hp_only, None)
+        .expect("parse_document accepts an hp-only doc");
+    let reason: String = sec.get_value("reason").expect("reason field");
+    assert_eq!(reason, "worker_failed");
 }
 
 #[test]

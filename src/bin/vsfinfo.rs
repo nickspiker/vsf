@@ -284,7 +284,7 @@ fn show_info(data: &[u8], _detailed: bool, _key_path: Option<&Path>) -> Result<(
 /// - integrity (hb): the rolling hash covers the whole file ([`verify_file_hash`]); absent when the file is signed instead.
 /// - signature (ge): the header-level Ed25519 signature ([`verify_file_signature`]); absent when the file is unsigned, and reported as needing the crypto feature when present but this build lacks it.
 ///
-/// The final line mirrors [`vsf::verification::read_verified`]'s doctrine: a document that carries neither a rolling hash nor a valid signature is UNVERIFIABLE, not merely "hp-clean".
+/// The final line mirrors [`vsf::verification::read_verified`]'s doctrine: hp alone verifies an unsigned document (hp and hb are equally self-attesting BLAKE3 anchors); a signature, when present, must check out; any anchor mismatch is TAMPERED.
 fn print_verification_summary(data: &[u8]) {
     // Decode the header once to know which anchors are even present.
     let header = match VsfHeader::decode(data) {
@@ -329,32 +329,32 @@ fn print_verification_summary(data: &[u8]) {
         print_anchor("signature  (ge)", None);
     }
 
-    // Overall verdict, matching read_verified's un-skippable semantics.
-    let has_semantic_anchor = integrity == Some(true) || {
+    // Overall verdict, matching read_verified's semantics: hp alone verifies an unsigned doc; every PRESENT anchor must pass.
+    let sig_ok: Option<bool> = if is_signed {
         #[cfg(feature = "crypto")]
         {
-            is_signed && vsf::verification::verify_file_signature(data).unwrap_or(false)
+            Some(vsf::verification::verify_file_signature(data).unwrap_or(false))
         }
         #[cfg(not(feature = "crypto"))]
         {
-            // Without crypto we cannot confirm a signature; treat signed-but-unverifiable conservatively.
-            false
+            None // present but uncheckable in this build
         }
+    } else {
+        None
     };
 
     print!(" {} ", "verdict:".cyan());
     if !provenance_ok {
         println!("{}", "TAMPERED (provenance mismatch)".truecolor(255, 0, 0));
-    } else if has_semantic_anchor {
-        println!("{}", "VERIFIED".truecolor(0, 255, 0));
-    } else if is_signed {
+    } else if integrity == Some(false) {
+        println!("{}", "TAMPERED (rolling hash mismatch)".truecolor(255, 0, 0));
+    } else if sig_ok == Some(false) {
+        println!("{}", "TAMPERED (bad signature)".truecolor(255, 0, 0));
+    } else if is_signed && sig_ok.is_none() {
         // Signed doc but this build can't check the signature.
         println!("{}", "UNCHECKED (signed; crypto feature off)".yellow());
     } else {
-        println!(
-            "{}",
-            "UNVERIFIABLE (no rolling hash, no signature)".truecolor(255, 0, 0)
-        );
+        println!("{}", "VERIFIED".truecolor(0, 255, 0));
     }
 }
 
