@@ -284,11 +284,7 @@ impl VsfHeader {
             }
         };
 
-        // ENFORCE the version fields, both directions — same rules as verification::
-        // parse_full_header, applied here too so every consumer that decodes a header (toka
-        // capsule load, worker request routing, activity log) inherits them. Without this, a
-        // version-skewed file sails past the header and misparses downstream into garbage
-        // (e.g. a VM stack underflow) instead of a one-line version error.
+        // ENFORCE the version fields, both directions — same rules as verification::parse_full_header, applied here too so every consumer that decodes a header (toka capsule load, worker request routing, activity log) inherits them. Without this, a version-skewed file sails past the header and misparses downstream into garbage (e.g. a VM stack underflow) instead of a one-line version error.
         if backward_compat > crate::VSF_VERSION {
             return Err(format!(
                 "File requires VSF v{} but this implementation is v{}",
@@ -524,10 +520,8 @@ impl VsfHeader {
         ptr += 1; // Skip 'b'
 
         // Find end of b (header length) value: stop at the next field marker.
-        // The b value is immediately followed by the l (file length) field on the encode path,
-        // then optionally e (creation time), then hp (provenance) — so l must be a stop too.
-        // Without the l stop the scan overruns and the drain below swallows the whole l field,
-        // leaving update_file_length nothing to patch and VsfHeader::decode reporting file_length = 0.
+        // The b value is immediately followed by the l (file length) field on the encode path, then optionally e (creation time), then hp (provenance) — so l must be a stop too.
+        // Without the l stop the scan overruns and the drain below swallows the whole l field, leaving update_file_length nothing to patch and VsfHeader::decode reporting file_length = 0.
         let value_start = ptr;
         while ptr < header_bytes.len()
             && header_bytes[ptr] != b'l'
@@ -1178,8 +1172,7 @@ mod tests {
     }
 
     /// Regression: update_header_length must NOT strip the l (file length) field.
-    /// Before the fix the b-value scan overran the l marker, drained the whole l field,
-    /// and VsfHeader::decode then reported file_length = 0 on the encode/rebuild path.
+    /// Before the fix the b-value scan overran the l marker, drained the whole l field, and VsfHeader::decode then reported file_length = 0 on the encode/rebuild path.
     #[test]
     fn test_update_header_length_preserves_file_length() {
         let mut header = VsfHeader::new(crate::VSF_VERSION, crate::VSF_BACKWARD_COMPAT);

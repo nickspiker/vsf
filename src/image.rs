@@ -1,22 +1,10 @@
-//! Decode the canonical VSF image format into an α + darkness pixel buffer — the
-//! counterpart to the `vsfimg` encoder and [`crate::builders::compressed_image`].
+//! Decode the canonical VSF image format into an α + darkness pixel buffer — the counterpart to the `vsfimg` encoder and [`crate::builders::compressed_image`].
 //!
-//! A VSF image file carries a section labelled `image` whose image field is either an
-//! uncompressed `Tensor<u8>` (`t_u3`, shape `[h, w, 3]`, VSF RGB gamma2) for sources
-//! ≤ 256×256, or a `v(b'a', av1_bytes)` AV1 wrapper for larger sources. Both land in the
-//! same [`DecodedImage`] so callers don't care which path the file took. The field is
-//! matched by *type*, not name, so both the `vsfimg`/orb convention (`data`) and the
-//! [`crate::builders::compressed_image`] convention (`pixels`) decode.
+//! A VSF image file carries a section labelled `image` whose image field is either an uncompressed `Tensor<u8>` (`t_u3`, shape `[h, w, 3]`, VSF RGB gamma2) for sources ≤ 256×256, or a `v(b'a', av1_bytes)` AV1 wrapper for larger sources. Both land in the same [`DecodedImage`] so callers don't care which path the file took. The field is matched by *type*, not name, so both the `vsfimg`/orb convention (`data`) and the [`crate::builders::compressed_image`] convention (`pixels`) decode.
 //!
-//! Output is packed α + darkness `u32` per the fluor/toka pixel convention: α = `0xFF`
-//! (opaque — alpha shaping lives in the rasteriser's mask), darkness = `255 − visible_RGB`
-//! so the buffer drops straight into an `under()` composite with no per-pixel inversion.
-//! Both fluor's `Icon` and toka's `Canvas` use this exact convention, so one decoder feeds
-//! both with no repack.
+//! Output is packed α + darkness `u32` per the fluor/toka pixel convention: α = `0xFF` (opaque — alpha shaping lives in the rasteriser's mask), darkness = `255 − visible_RGB` so the buffer drops straight into an `under()` composite with no per-pixel inversion. Both fluor's `Icon` and toka's `Canvas` use this exact convention, so one decoder feeds both with no repack.
 //!
-//! VSF YCbCr inverse (matches `vsfimg`'s encoder math): `R = Y + 2(Cr − 0.5)`,
-//! `B = Y + 2(Cb − 0.5)`, `G = (4Y − R − B) / 2`. Files are VSF RGB by definition — no
-//! legacy colour tagging.
+//! VSF YCbCr inverse (matches `vsfimg`'s encoder math): `R = Y + 2(Cr − 0.5)`, `B = Y + 2(Cb − 0.5)`, `G = (4Y − R − B) / 2`. Files are VSF RGB by definition — no legacy colour tagging.
 
 use rav1d::include::dav1d::data::Dav1dData;
 use rav1d::include::dav1d::dav1d::{Dav1dContext, Dav1dSettings};
@@ -35,8 +23,7 @@ use crate::types::VsfType;
 pub struct DecodedImage {
     pub width: u32,
     pub height: u32,
-    /// Packed α + darkness pixels, row-major, `width * height` long. α byte = `0xFF`
-    /// (opaque); RGB bytes = `255 − visible_RGB` (VSF RGB gamma2 darkness).
+    /// Packed α + darkness pixels, row-major, `width * height` long. α byte = `0xFF` (opaque); RGB bytes = `255 − visible_RGB` (VSF RGB gamma2 darkness).
     pub pixels: Vec<u32>,
 }
 
@@ -48,8 +35,7 @@ pub enum ImageError {
     MissingImageSection,
     /// `image` section exists but carried no tensor/AV1 image field.
     MissingImageData,
-    /// Image field carried a type this decoder doesn't handle (only `t_u3` tensor and
-    /// `v(b'a', ...)` AV1 are supported).
+    /// Image field carried a type this decoder doesn't handle (only `t_u3` tensor and `v(b'a', ...)` AV1 are supported).
     UnsupportedDataType,
     /// Tensor shape isn't `[h, w, 3]`.
     BadTensorShape(Vec<usize>),
@@ -74,8 +60,7 @@ impl core::fmt::Display for ImageError {
 
 impl std::error::Error for ImageError {}
 
-/// Decode a full VSF image file — header + `image` section + tensor / AV1 payload — into a
-/// ready-to-composite α + darkness buffer.
+/// Decode a full VSF image file — header + `image` section + tensor / AV1 payload — into a ready-to-composite α + darkness buffer.
 pub fn decode(data: &[u8]) -> Result<DecodedImage, ImageError> {
     let (header, _consumed) = VsfHeader::decode(data).map_err(ImageError::Parse)?;
 
@@ -113,8 +98,7 @@ pub fn decode(data: &[u8]) -> Result<DecodedImage, ImageError> {
             parse(data, &mut p).map_err(|e| ImageError::Parse(format!("section b: {:?}", e)))?;
     }
 
-    // Match the image payload by type, not field name: `vsfimg`/orb uses `data`,
-    // `builders::compressed_image` uses `pixels`. Take the first tensor or AV1 wrapper.
+    // Match the image payload by type, not field name: `vsfimg`/orb uses `data`, `builders::compressed_image` uses `pixels`. Take the first tensor or AV1 wrapper.
     let mut image_value: Option<VsfType> = None;
     for _ in 0..img_field.child_count {
         let field = VsfField::parse(data, &mut p)
@@ -156,17 +140,12 @@ fn from_rgb_tensor(shape: Vec<usize>, bytes: Vec<u8>) -> Result<DecodedImage, Im
     Ok(DecodedImage { width: w, height: h, pixels })
 }
 
-/// Decode an AV1 OBU bitstream → YCbCr → VSF RGB gamma2 → α + darkness. YCbCr inverse
-/// mirrors `vsfimg`'s encoder math byte-for-byte. Runs single-threaded (`n_threads` left at
-/// the default, but we only ever feed one frame) — safe for the OS-less wasm target where
-/// thread spawning would panic.
+/// Decode an AV1 OBU bitstream → YCbCr → VSF RGB gamma2 → α + darkness. YCbCr inverse mirrors `vsfimg`'s encoder math byte-for-byte. Runs single-threaded (`n_threads` left at the default, but we only ever feed one frame) — safe for the OS-less wasm target where thread spawning would panic.
 fn from_av1(av1: &[u8]) -> Result<DecodedImage, ImageError> {
     let mut settings = std::mem::MaybeUninit::<Dav1dSettings>::uninit();
     unsafe { dav1d_default_settings(NonNull::new(settings.as_mut_ptr()).unwrap()) };
     let mut settings = unsafe { settings.assume_init() };
-    // Single-threaded, single-frame: the OS-less wasm target can't spawn threads (default
-    // auto-threading would panic at runtime), and an avatar/icon is one keyframe — no worker
-    // pool or frame-delay buffering needed. Also keeps native decode instant for small images.
+    // Single-threaded, single-frame: the OS-less wasm target can't spawn threads (default auto-threading would panic at runtime), and an avatar/icon is one keyframe — no worker pool or frame-delay buffering needed. Also keeps native decode instant for small images.
     settings.n_threads = 1;
     settings.max_frame_delay = 1;
 
