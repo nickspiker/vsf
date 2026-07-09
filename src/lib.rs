@@ -362,9 +362,7 @@ pub mod themes;
 #[cfg(feature = "inspect")]
 pub mod inspect;
 
-// VSF image decode (tensor + rav1d AV1) → α + darkness buffer. Counterpart to the `vsfimg`
-// encoder; feeds fluor's `Icon` and toka's `Canvas` (shared α+darkness convention). Pulls
-// rav1d, so it's opt-in — off for size-critical consumers (the fgtw-bootstrap worker).
+// VSF image decode (tensor + rav1d AV1) → α + darkness buffer. Counterpart to the `vsfimg` encoder; feeds fluor's `Icon` and toka's `Canvas` (shared α+darkness convention). Pulls rav1d, so it's opt-in — off for size-critical consumers (the fgtw-bootstrap worker).
 #[cfg(feature = "image-decode")]
 pub mod image;
 
