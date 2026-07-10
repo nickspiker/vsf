@@ -28,7 +28,7 @@ impl VsfType {
     /// # Panics
     /// This is the infallible façade over [`VsfType::try_flatten`] and is kept for the many internal callers that build fixed, feature-safe types (integers, hashes, lengths).
     /// The only variant that can fail is `x` (Unicode text) when neither the `text` nor `text-encode` feature is enabled, because Huffman compression is unavailable.
-    /// Historically that case panicked; it now surfaces through `try_flatten` as an `Err` and, on this infallible path, encodes an empty `x` field as a non-crashing fallback (a `debug_assert!` fires in debug builds to flag the misuse).
+    /// Historically that case panicked; it now surfaces thru `try_flatten` as an `Err` and, on this infallible path, encodes an empty `x` field as a non-crashing fallback (a `debug_assert!` fires in debug builds to flag the misuse).
     /// Callers that may hold Unicode text without the text feature should call `try_flatten` and handle the error.
     pub fn flatten(&self) -> Vec<u8> {
         match self.try_flatten() {
@@ -64,7 +64,7 @@ impl VsfType {
 
     /// Internal infallible flatten body shared by [`flatten`] and [`try_flatten`].
     ///
-    /// Every arm here is total; the one case that cannot be encoded under the active feature set (`x` without text compression) is routed through the error return of `try_flatten` before reaching this body — see the `x` arm below, which returns early via the enclosing method.
+    /// Every arm here is total; the one case that cannot be encoded under the active feature set (`x` without text compression) is routed thru the error return of `try_flatten` before reaching this body — see the `x` arm below, which returns early via the enclosing method.
     fn flatten_inner(&self) -> Vec<u8> {
         // The `x`-without-feature arm cannot express its failure here (this returns Vec<u8>), so `try_flatten` performs the feature check before delegating. Under default features that arm still needs a value; it emits an empty `x` field, which `try_flatten`'s pre-check has already rejected on the fallible path.
         match self {

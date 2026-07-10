@@ -1,7 +1,7 @@
 //! Committed coverage for the GENERIC verified-document round-trip.
 //!
 //! Phases 1-3 built the pieces (VsfBuilder auto-fills hp+hb, is_original/verify_file_hash verify them, read_verified composes an un-skippable check, and SectionBuilder::parse_document reads a named section only after read_verified passes).
-//! Nothing pinned those guarantees down as tests on a NON-image document, so this module does: it builds a plain "payload" section, verifies both hashes, reads it back through parse_document, and — the load-bearing part — proves that the things that MUST be rejected actually are (a bare error-frame-shaped doc with no integrity, a tampered byte) while the things that MUST be tolerated are (an unknown forward-compat field).
+//! Nothing pinned those guarantees down as tests on a NON-image document, so this module does: it builds a plain "payload" section, verifies both hashes, reads it back thru parse_document, and — the load-bearing part — proves that the things that MUST be rejected actually are (a bare error-frame-shaped doc with no integrity, a tampered byte) while the things that MUST be tolerated are (an unknown forward-compat field).
 
 use vsf::schema::{SectionSchema, TypeConstraint};
 use vsf::verification::{is_original, read_verified, verify_file_hash};
@@ -47,7 +47,7 @@ fn verified_round_trip_reads_fields_back() {
     // read_verified is the composed gate — a rolling-hash doc with no signature passes.
     read_verified(&doc, None).expect("well-formed doc must pass read_verified");
 
-    // Read the section back through the verifying front door.
+    // Read the section back thru the verifying front door.
     let parsed = vsf::schema::SectionBuilder::parse_document(payload_schema(), &doc, None)
         .expect("parse_document must read a verified section");
 
@@ -168,7 +168,7 @@ fn parse_document_tolerates_unknown_field() {
     let parsed = vsf::schema::SectionBuilder::parse_document(payload_schema(), &doc, None)
         .expect("parse_document must tolerate an unknown extra field");
 
-    // Known fields still come through untouched.
+    // Known fields still come thru untouched.
     let count: u16 = parsed.get_value("count").expect("count still present");
     assert_eq!(count, 0xBEEF);
     let label: String = parsed.get_value("label").expect("label still present");
@@ -255,7 +255,7 @@ fn signed_round_trip_checks_signer() {
         "wrong-signer rejection must name the reason, got: {err}"
     );
 
-    // The section still reads back through parse_document under the correct signer.
+    // The section still reads back thru parse_document under the correct signer.
     let schema = SectionSchema::new("payload")
         .field("count", TypeConstraint::AnyUnsigned)
         .field("label", TypeConstraint::AnyString);
