@@ -27,6 +27,8 @@
 
 use crate::prelude::*;
 use core::f64::consts::PI;
+#[cfg(not(feature = "std"))]
+use num_traits::Float;
 
 /// Base for icosahedral coordinate system
 const BASE: u64 = 960_383_883; // floor(sqrt(2^64 / 20))

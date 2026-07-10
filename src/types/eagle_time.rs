@@ -1,4 +1,6 @@
 use chrono::{DateTime, Duration, TimeZone, Utc};
+#[cfg(not(feature = "std"))]
+use num_traits::Float;
 
 /// Oscillations per Eagle second.
 ///

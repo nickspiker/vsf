@@ -6,6 +6,9 @@
 //! - **OETF** (Opto-Electronic Transfer Function): linear → gamma-corrected (encoding)
 //! - **EOTF** (Electro-Optical Transfer Function): gamma-corrected → linear (decoding)
 
+#[cfg(not(feature = "std"))]
+use num_traits::Float;
+
 // ==================== sRGB TRANSFER FUNCTIONS ====================
 
 /// sRGB OETF: Convert linear RGB to gamma-corrected sRGB
