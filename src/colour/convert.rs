@@ -53,6 +53,8 @@
 //!   - Uses proper D65 spectral power distribution, not xy-derived "D65"
 //!   - Transfer function: Rec.709 OETF for encoding
 
+#[cfg(not(feature = "std"))]
+use num_traits::Float;
 #[allow(deprecated)] // Need legacy functions for backward compatibility conversions
 use crate::colour::legacy::{
     delinearize_srgb, encode_bt709, linearize_bt709, linearize_srgb_u16, linearize_srgb_u8,
