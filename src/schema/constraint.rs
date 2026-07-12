@@ -83,6 +83,8 @@ pub enum TypeConstraint {
     // === TENSOR TYPES ===
     /// Any contiguous tensor with element constraint (t_*)
     Tensor(Box<TypeConstraint>),
+    /// Bitpacked tensor (p) — native-bit-depth sample plane. No element-constraint box: the pack width is data, not a VsfType, so there's nothing finer to match.
+    BitPackedTensor,
     /// Any strided tensor with element constraint (q_*)
     StridedTensor(Box<TypeConstraint>),
 
@@ -258,6 +260,8 @@ impl TypeConstraint {
                 )
             }
 
+            TypeConstraint::BitPackedTensor => matches!(value, VsfType::p(_)),
+
             TypeConstraint::StridedTensor(_elem_constraint) => {
                 // Check if it's any q_* variant
                 matches!(
@@ -400,6 +404,7 @@ impl TypeConstraint {
             TypeConstraint::Ed25519Sig => "Ed25519 signature (ge)".into(),
             TypeConstraint::EcdsaP256Sig => "ECDSA P-256 signature (gp)".into(),
             TypeConstraint::Tensor(inner) => format!("tensor of {}", inner.description()),
+            TypeConstraint::BitPackedTensor => "bitpacked tensor (p)".into(),
             TypeConstraint::StridedTensor(inner) => {
                 format!("strided tensor of {}", inner.description())
             }

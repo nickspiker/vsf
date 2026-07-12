@@ -366,6 +366,9 @@ pub mod inspect;
 #[cfg(feature = "image-decode")]
 pub mod image;
 
+// VSF-Image v0 — spectral-first raw image container (K channels of sensor counts + per-channel spectral response + ihi provenance ingredients). Pure VSF types, no heavy deps, so it's unconditional. Consumed by opsin (viewer/converter) and chameleon.
+pub mod spectral_image;
+
 // Re-export main types
 pub use types::{
     datetime_to_eagle_time, BitPackedTensor, EagleTime, EtType, LayoutOrder, NaScheme,

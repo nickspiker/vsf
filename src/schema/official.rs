@@ -110,6 +110,77 @@ pub fn error_schema() -> SectionSchema {
         .field("detail", TypeConstraint::AnyString)
 }
 
+/// VSF-Image primary section: dims, layout, per-channel levels, CFA tile, and the native-depth sample plane. Cross-field invariants (channel_names count, CFA/plane shape) are enforced by the hand-rolled reader in `spectral_image.rs`; this schema polices field types and names the vocabulary.
+pub fn spectral_image_schema() -> SectionSchema {
+    SectionSchema::new("spectral_image")
+        .description("Spectral-first raw image: K channels of sensor counts")
+        .field("width", TypeConstraint::AnyUnsigned)
+        .field("height", TypeConstraint::AnyUnsigned)
+        .field("channel_count", TypeConstraint::AnyUnsigned)
+        .field("black", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyFloat)))
+        .field("white", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyFloat)))
+        .field("channel_names", TypeConstraint::AnyString) // '\n'-joined
+        .field("layout", TypeConstraint::AnyString) // "mosaic" | "planar"
+        .field("cfa", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyUnsigned))) // mosaic only
+        .field("make", TypeConstraint::AnyString)
+        .field("model", TypeConstraint::AnyString)
+        .field("samples", TypeConstraint::BitPackedTensor)
+}
+
+/// VSF-Image per-channel spectral sensitivity curves on self-describing grids. A channel with count 0 is uncharacterized.
+pub fn spectral_response_schema() -> SectionSchema {
+    SectionSchema::new("spectral_response")
+        .description("Per-channel spectral sensitivity curves")
+        .field("curve_start", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyFloat)))
+        .field("curve_step", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyFloat)))
+        .field("curve_counts", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyUnsigned)))
+        .field("curve_values", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyFloat)))
+}
+
+/// VSF-Image ihi provenance ingredients — every field optional; the section is omitted when empty.
+pub fn provenance_schema() -> SectionSchema {
+    SectionSchema::new("provenance")
+        .description("ihi identity ingredients for a spectral image")
+        .field("handle", TypeConstraint::AnyString)
+        .field("calibration_hash", TypeConstraint::AnyHash)
+        .field("camera_ihi", TypeConstraint::AnyHash)
+        .field("identity", TypeConstraint::AnyHash)
+}
+
+/// VSF-Image tiered characterization: parallel-array entries (camera→VSF-RGB matrices best-first) plus the raw questions they answer. `target` v0 = "vsf_rgb".
+pub fn colour_profile_schema() -> SectionSchema {
+    SectionSchema::new("colour_profile")
+        .description("Tiered camera->VSF-RGB characterization")
+        .field("target", TypeConstraint::AnyString)
+        .field("count", TypeConstraint::AnyUnsigned)
+        .field("matrices", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyFloat)))
+        .field("sources", TypeConstraint::AnyString) // '\n'-joined
+        .field("classes", TypeConstraint::AnyString) // absolute|relative|creative|technical
+        .field("grades", TypeConstraint::AnyString) // unit|model|assumed
+        .field("illuminants", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyUnsigned)))
+        .field("transfers", TypeConstraint::AnyString) // linear|srgb|gamma2|gamma22
+        .field("dng_colormatrix1", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyFloat)))
+        .field("dng_illuminant1", TypeConstraint::AnyUnsigned)
+        .field("dng_colormatrix2", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyFloat)))
+        .field("dng_illuminant2", TypeConstraint::AnyUnsigned)
+        .field("patches_camera", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyFloat)))
+        .field("patches_reference", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyFloat)))
+        .field("cal_target_type", TypeConstraint::AnyUnsigned)
+        .field("cal_target_serial", TypeConstraint::AnyUnsigned)
+        .field("cal_timestamp", TypeConstraint::AnyString)
+}
+
+/// VSF-Image translateration log: ordered named view ops with IDT classes and concatenated params. `space` v0 = "vsf_rgb_linear".
+pub fn view_transform_schema() -> SectionSchema {
+    SectionSchema::new("view_transform")
+        .description("Ordered view transformations (translateration log)")
+        .field("space", TypeConstraint::AnyString)
+        .field("ops", TypeConstraint::AnyString) // '\n'-joined, application order
+        .field("classes", TypeConstraint::AnyString) // per-op IDT class
+        .field("param_counts", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyUnsigned)))
+        .field("params", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyFloat)))
+}
+
 /// Register all official schemas. Gated on `registry` because `SchemaRegistry` itself is — see `schema/mod.rs`.
 #[cfg(feature = "registry")]
 pub fn register_official_schemas(registry: &super::registry::SchemaRegistry) {
@@ -120,6 +191,11 @@ pub fn register_official_schemas(registry: &super::registry::SchemaRegistry) {
     registry.register(announce_schema());
     registry.register(pipe_message_schema());
     registry.register(error_schema());
+    registry.register(spectral_image_schema());
+    registry.register(spectral_response_schema());
+    registry.register(provenance_schema());
+    registry.register(colour_profile_schema());
+    registry.register(view_transform_schema());
 }
 
 #[cfg(test)]
