@@ -623,6 +623,36 @@ impl VsfHeader {
 
         Ok(())
     }
+
+    /// Parse the file's PRIMARY section — the one the first TOC entry names — with HEADER-ONLY sections as first-class citizens.
+    ///
+    /// A zero-field section encodes as a name-only TOC entry and NO body: no `[` follows the header, the TOC entry carries no offset/size/count. That shape is deliberate and load-bearing (pings, acks, empty registries — the minimal-bytes message form), but [`VsfSection::parse`] alone can't read it, so every consumer used to hand-roll "if no `[`, the section name lives in the header". This method is that knowledge's home in the library:
+    /// - body present → parse it, resolving the anonymous near-form name from the TOC;
+    /// - no body + TOC entry claims none → a zero-field [`VsfSection`] carrying the TOC name;
+    /// - no body + TOC entry CLAIMS body bytes/children → an error (truncation stays loud, never a silent empty).
+    ///
+    /// `header_end` is the offset [`VsfHeader::decode`] returned. Header-inline values (`(name:v1,v2)` TOC entries) remain accessible on [`VsfHeader::fields`]; they don't materialise as section fields here.
+    pub fn primary_section(&self, data: &[u8], header_end: usize) -> Result<VsfSection, String> {
+        let entry = self
+            .fields
+            .first()
+            .ok_or_else(|| "VsfHeader: no TOC entries — the file names no sections".to_string())?;
+        if header_end >= data.len() || data[header_end] != b'[' {
+            if entry.size_bytes != 0 || entry.child_count != 0 {
+                return Err(format!(
+                    "VsfHeader: TOC names section '{}' with {} bytes / {} children but no body follows the header (truncated?)",
+                    entry.name, entry.size_bytes, entry.child_count
+                ));
+            }
+            return Ok(VsfSection::new(entry.name.clone()));
+        }
+        let mut ptr = header_end;
+        let mut section = VsfSection::parse(data, &mut ptr)?;
+        if section.name.is_empty() {
+            section.name = entry.name.clone();
+        }
+        Ok(section)
+    }
 }
 
 /// Section of structured data (has children)
@@ -1143,6 +1173,41 @@ impl VsfSection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Header-only sections are first-class: a zero-field section builds to a name-only TOC entry with NO body (the ping/ack/empty-registry shape), and primary_section reads it back as a zero-field section carrying the TOC name — while a TOC entry that CLAIMS a body with none present still fails loudly.
+    #[test]
+    fn test_primary_section_reads_header_only_and_body_forms() {
+        // Zero-field section → header-only file.
+        let empty = crate::VsfBuilder::new()
+            .creation_time_oscillations(crate::eagle_time_oscillations())
+            .add_section_direct(VsfSection::new("ping"))
+            .build()
+            .unwrap();
+        let (header, header_end) = VsfHeader::decode(&empty).unwrap();
+        assert_eq!(header_end, empty.len(), "header-only file has no body bytes");
+        let section = header.primary_section(&empty, header_end).unwrap();
+        assert_eq!(section.name, "ping");
+        assert!(section.fields.is_empty());
+
+        // One-field section → anonymous near-form body; the TOC name is resolved onto it.
+        let mut s = VsfSection::new("pong");
+        s.add_field("x", crate::VsfType::u(7, false));
+        let one = crate::VsfBuilder::new()
+            .creation_time_oscillations(crate::eagle_time_oscillations())
+            .add_section_direct(s)
+            .build()
+            .unwrap();
+        let (header, header_end) = VsfHeader::decode(&one).unwrap();
+        let section = header.primary_section(&one, header_end).unwrap();
+        assert_eq!(section.name, "pong");
+        assert_eq!(section.fields.len(), 1);
+
+        // Truncation stays an error: chop the body off the one-field file — the TOC still claims it.
+        let truncated = &one[..header_end];
+        let (header, header_end) = VsfHeader::decode(truncated).unwrap();
+        let err = header.primary_section(truncated, header_end).unwrap_err();
+        assert!(err.contains("truncated"), "claimed-body-missing must fail loudly: {err}");
+    }
 
     #[test]
     fn test_header_encoding() {
