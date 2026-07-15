@@ -653,6 +653,31 @@ impl VsfHeader {
         }
         Ok(section)
     }
+
+    /// Parse EVERY section the TOC names, in TOC order — [`Self::primary_section`]'s plural. Repeated same-name sections are first-class (e.g. one `manifest.photon.dev` section per artefact): each TOC entry resolves to its own [`VsfSection`], anonymous near-form bodies get their names from their TOC entries, and header-only entries (no body bytes, no children) come back as zero-field sections. Bodies are located by each entry's own TOC offset, so section order never matters and a truncated body fails loud.
+    pub fn sections(&self, data: &[u8], header_end: usize) -> Result<Vec<VsfSection>, String> {
+        let mut out = Vec::with_capacity(self.fields.len());
+        for entry in &self.fields {
+            if entry.size_bytes == 0 && entry.child_count == 0 {
+                out.push(VsfSection::new(entry.name.clone()));
+                continue;
+            }
+            // TOC offsets are from file start; fall back to header_end for legacy zero-offset entries (the primary_section shape).
+            let mut ptr = if entry.offset_bytes != 0 { entry.offset_bytes } else { header_end };
+            if ptr >= data.len() || data[ptr] != b'[' {
+                return Err(format!(
+                    "VsfHeader: TOC names section '{}' at offset {} but no body starts there (truncated?)",
+                    entry.name, ptr
+                ));
+            }
+            let mut section = VsfSection::parse(data, &mut ptr)?;
+            if section.name.is_empty() {
+                section.name = entry.name.clone();
+            }
+            out.push(section);
+        }
+        Ok(out)
+    }
 }
 
 /// Section of structured data (has children)
