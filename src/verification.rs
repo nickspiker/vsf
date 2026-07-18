@@ -1665,6 +1665,99 @@ fn find_header_ge(data: &[u8]) -> Result<HeaderFieldInfo, String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Keyed integrity hash (gH): a BLAKE3 keyed MAC appended as a trailer.
+//
+// Semantically a keyed rolling hash — identical to `hb` except the shared session key replaces the "hash the file with the field zeroed" step. Used where two peers share a secret established out of band (e.g. a session nonce) and want cheap tamper/authorship proof on every message without a public-key signature or the header-placeholder stabilization dance. The MAC covers all preceding bytes, so it authenticates a complete VSF message as-is.
+// ---------------------------------------------------------------------------
+
+/// Append a `gH` keyed-MAC trailer over `msg`: `blake3::keyed_hash(key, msg)` wrapped as a `gH` VSF field.
+/// The returned bytes are `msg` followed by the encoded `gH`; verification recomputes the MAC over everything before the trailer.
+pub fn append_keyed_mac(mut msg: Vec<u8>, key: &[u8; 32]) -> Vec<u8> {
+    let mac = blake3::keyed_hash(key, &msg);
+    let field = VsfType::gH(mac.as_bytes().to_vec()).flatten();
+    msg.extend_from_slice(&field);
+    msg
+}
+
+/// Verify a `gH`-trailed message: split off the trailing `gH` field, recompute the keyed MAC over the prefix, and constant-time compare.
+/// Returns the authenticated payload (everything before the trailer) on success. A wrong key, tampered payload, or missing trailer all fail.
+pub fn verify_keyed_mac<'a>(signed: &'a [u8], key: &[u8; 32]) -> Result<&'a [u8], String> {
+    // A gH field is: 'g' 'H' <encoded (len-1)> <32 bytes>. For a 32-byte MAC that is 'g' 'H' <enc(31)> + 32 bytes.
+    let trailer = VsfType::gH(vec![0u8; 32]).flatten();
+    let trailer_len = trailer.len();
+    if signed.len() < trailer_len {
+        return Err("message shorter than keyed-MAC trailer".to_string());
+    }
+    let split = signed.len() - trailer_len;
+    let (payload, tail) = signed.split_at(split);
+
+    let mut pos = 0usize;
+    let parsed = parse(tail, &mut pos).map_err(|e| format!("failed to parse gH trailer: {e}"))?;
+    let stored = match parsed {
+        VsfType::gH(bytes) if bytes.len() == 32 => bytes,
+        VsfType::gH(bytes) => {
+            return Err(format!("gH MAC wrong size: expected 32, found {}", bytes.len()))
+        }
+        _ => return Err("trailer is not a gH keyed MAC".to_string()),
+    };
+
+    let computed = blake3::keyed_hash(key, payload);
+    // BLAKE3's Hash compares in constant time against a &[u8; 32].
+    let expected: [u8; 32] = stored.as_slice().try_into().unwrap();
+    if computed == expected {
+        Ok(payload)
+    } else {
+        Err("keyed MAC verification failed: wrong key or tampered message".to_string())
+    }
+}
+
+#[cfg(test)]
+mod keyed_mac_tests {
+    use super::*;
+
+    #[test]
+    fn roundtrip_authenticates() {
+        let key = [7u8; 32];
+        let msg = b"r 25600".to_vec();
+        let signed = append_keyed_mac(msg.clone(), &key);
+        let payload = verify_keyed_mac(&signed, &key).expect("valid MAC must verify");
+        assert_eq!(payload, &msg[..]);
+    }
+
+    #[test]
+    fn wrong_key_rejected() {
+        let signed = append_keyed_mac(b"g 51200".to_vec(), &[1u8; 32]);
+        assert!(verify_keyed_mac(&signed, &[2u8; 32]).is_err());
+    }
+
+    #[test]
+    fn tampered_payload_rejected() {
+        let key = [9u8; 32];
+        let mut signed = append_keyed_mac(b"r 100".to_vec(), &key);
+        signed[0] ^= 0xFF; // flip a payload byte
+        assert!(verify_keyed_mac(&signed, &key).is_err());
+    }
+
+    #[test]
+    fn truncated_trailer_rejected() {
+        let key = [3u8; 32];
+        let signed = append_keyed_mac(b"hello".to_vec(), &key);
+        assert!(verify_keyed_mac(&signed[..signed.len() - 5], &key).is_err());
+    }
+
+    #[test]
+    fn gh_field_roundtrips_through_codec() {
+        // The gH variant must survive flatten → parse now that it is wired into both.
+        let field = VsfType::gH(vec![0xAB; 32]).flatten();
+        let mut pos = 0;
+        match parse(&field, &mut pos).expect("gH must decode") {
+            VsfType::gH(bytes) => assert_eq!(bytes, vec![0xAB; 32]),
+            other => panic!("expected gH, got {other:?}"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

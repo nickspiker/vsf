@@ -1309,6 +1309,14 @@ impl VsfType {
                 flat
             }
 
+            // Keyed integrity hash (application-specific): a BLAKE3 keyed MAC over the message, same wire shape as a signature but its key is a shared session secret rather than a private key.
+            VsfType::gH(value) => {
+                let mut flat = vec![b'g', b'H'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
             // ==================== KEYS ====================
             VsfType::ke(value) => {
                 let mut flat = vec![b'k', b'e'];
@@ -5008,7 +5016,7 @@ impl VsfType {
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
             }
 
-            VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) => {
+            VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) | VsfType::gH(bytes) => {
                 // prefix + encoded_length + data
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
             }
