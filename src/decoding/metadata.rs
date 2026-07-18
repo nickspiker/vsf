@@ -493,6 +493,7 @@ pub fn parse_signature(data: &[u8], pointer: &mut usize) -> Result<VsfType, Deco
         b'e' => Ok(VsfType::ge(sig)),
         b'p' => Ok(VsfType::gp(sig)),
         b'r' => Ok(VsfType::gr(sig)),
+        b'H' => Ok(VsfType::gH(sig)), // Keyed integrity hash (BLAKE3 keyed MAC)
         _ => Err(DecodeError::InvalidDataMsg(format!(
             "Unknown signature algorithm: {}",
             algo as char
