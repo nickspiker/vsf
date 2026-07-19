@@ -240,6 +240,51 @@ macro_rules! impl_bitpack {
                 // Calculate total bits and bytes needed
                 let total_bits = total_elements * bits_per_sample;
                 let byte_count = (total_bits + 7) / 8;
+
+                // Streaming MSB-first packer: shift each sample into an accumulator, drain whole bytes out — ~bits/8 ops per sample instead of ~6 per BIT, byte-identical output (final partial byte top-aligned, zero-padded). Needs the accumulator to hold a partial byte (≤7 bits) plus one sample, so depths within 7 bits of the work type take the per-bit fallback below.
+                if bits_per_sample <= <$work_t>::BITS as usize - 7 {
+                    let mask: $work_t = ((1 as $work_t) << bits_per_sample) - 1;
+                    // Streams `chunk` into `out`, returning the bytes written. Whole-byte drains except possibly the very last chunk's tail (top-aligned, zero-padded) — identical bytes to the per-bit reference path.
+                    let write = |out: &mut [u8], chunk: &[$t]| -> usize {
+                        let mut acc: $work_t = 0;
+                        let mut nbits: usize = 0;
+                        let mut pos = 0usize;
+                        for &sample in chunk {
+                            acc = (acc << bits_per_sample) | (sample as $work_t & mask);
+                            nbits += bits_per_sample;
+                            while nbits >= 8 {
+                                nbits -= 8;
+                                out[pos] = (acc >> nbits) as u8;
+                                pos += 1;
+                            }
+                        }
+                        if nbits > 0 {
+                            out[pos] = (acc << (8 - nbits)) as u8;
+                            pos += 1;
+                        }
+                        pos
+                    };
+                    let mut data = vec![0u8; byte_count];
+                    // With the rayon feature, split at 4096-sample boundaries: 8 samples always span exactly `bits` bytes, so every multiple-of-8 chunk starts byte-aligned and the chunks pack independently into disjoint output slices (the trailing partial chunk is the only one that can emit a padded final byte, same as serial).
+                    #[cfg(feature = "rayon")]
+                    {
+                        use rayon::prelude::*;
+                        const CHUNK_SAMPLES: usize = 4096;
+                        let chunk_bytes = CHUNK_SAMPLES * bits_per_sample / 8;
+                        data.par_chunks_mut(chunk_bytes)
+                            .zip(samples.par_chunks(CHUNK_SAMPLES))
+                            .for_each(|(out, chunk)| {
+                                write(out, chunk);
+                            });
+                    }
+                    #[cfg(not(feature = "rayon"))]
+                    {
+                        let written = write(&mut data, samples);
+                        debug_assert_eq!(written, byte_count);
+                    }
+                    return BitPackedTensor { bit_depth, shape, data };
+                }
+
                 let mut data = vec![0u8; byte_count];
 
                 // Pack samples MSB-first, big-endian Only low bit_depth bits are read; high bits are ignored
@@ -499,10 +544,10 @@ impl BitPackedTensor {
         let total_elements: usize = self.shape.iter().product();
         let bits = self.bit_depth as usize;
         let mask = if bits >= 16 { u16::MAX } else { ((1u32 << bits) - 1) as u16 };
-        let mut samples = Vec::with_capacity(total_elements);
         let data = &self.data;
-        let mut bit_offset = 0usize;
-        for _ in 0..total_elements {
+        // Every sample's bit offset is computable from its index alone, so with the rayon feature the pass splits across the pool (this is the hot camera-depth path — a 24MP plane per image load).
+        let sample = |i: usize| -> u16 {
+            let bit_offset = i * bits;
             let byte = bit_offset >> 3;
             let intra = bit_offset & 7;
             let window = if byte + 4 <= data.len() {
@@ -516,10 +561,17 @@ impl BitPackedTensor {
                 }
                 u32::from_be_bytes(b)
             };
-            samples.push(((window >> (32 - bits - intra)) as u16) & mask);
-            bit_offset += bits;
+            ((window >> (32 - bits - intra)) as u16) & mask
+        };
+        #[cfg(feature = "rayon")]
+        {
+            use rayon::prelude::*;
+            (0..total_elements).into_par_iter().map(sample).collect()
         }
-        samples
+        #[cfg(not(feature = "rayon"))]
+        {
+            (0..total_elements).map(sample).collect()
+        }
     }
 
     fn unpack_to_u32(&self) -> Vec<u32> {
@@ -595,5 +647,35 @@ impl BitPackedTensor {
     /// Check if tensor is empty
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+#[cfg(test)]
+mod pack_layout_tests {
+    use super::*;
+
+    /// The wire layout is MSB-first with the final partial byte top-aligned and zero-padded — assert exact BYTES, not just round-trip, so the streaming fast path can never drift from the format.
+    #[test]
+    fn streaming_pack_bytes_are_msb_first_with_tail_padding() {
+        // 12-bit [0xABC, 0x123] → AB C1 23 (whole bytes, no padding).
+        assert_eq!(BitPackedTensor::pack_u16(12, vec![2], &[0xABC, 0x123]).data, vec![0xAB, 0xC1, 0x23]);
+        // 14-bit [0x3FFF, 0x0001] → FF FC 00 10 (last byte carries 4 pad zeros).
+        assert_eq!(BitPackedTensor::pack_u16(14, vec![2], &[0x3FFF, 0x0001]).data, vec![0xFF, 0xFC, 0x00, 0x10]);
+        // 10-bit [0x3FF, 0x155] → FF D5 50.
+        assert_eq!(BitPackedTensor::pack_u16(10, vec![2], &[0x3FF, 0x155]).data, vec![0xFF, 0xD5, 0x50]);
+        // High bits above bit_depth are ignored: 0xFABC packs like 0xABC at 12-bit.
+        assert_eq!(BitPackedTensor::pack_u16(12, vec![1], &[0xFABC]).data, vec![0xAB, 0xC0]);
+    }
+
+    #[test]
+    fn per_bit_fallback_depths_still_round_trip() {
+        // 64-bit in a u64 work type exceeds the streaming gate (BITS-7) — exercises the per-bit path.
+        let v = [u64::MAX, 0x0123_4567_89AB_CDEF];
+        let t = BitPackedTensor::pack_u64(64, vec![2], &v);
+        assert_eq!(t.unpack_u64(), v.to_vec());
+        // 61-bit rides the gate boundary region; round-trip through the u64 unpacker.
+        let w = [(1u64 << 61) - 1, 1];
+        let t = BitPackedTensor::pack_u64(61, vec![2], &w);
+        assert_eq!(t.unpack_u64(), w.to_vec());
     }
 }

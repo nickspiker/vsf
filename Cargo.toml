@@ -64,6 +64,10 @@ colored = { version = "2", optional = true }
 num-traits = { version = "0.2.19", default-features = false, features = ["libm"] }
 libm = { version = "0.2" }
 spin = { version = "0.9", default-features = false, features = ["once", "rwlock"], optional = true }
+# rayon: data-parallel bitpack/unpack for big tensors (a 24MP 14-bit sensor plane packs ~10× faster
+# on a many-core desktop). Purely an optional accelerator — the serial paths remain the reference
+# implementation and the wire bytes are identical either way. Off by default: embedded builds never want it.
+rayon = { version = "1", optional = true }
 # unicode-normalization: NFC canonicalization for VsfType::x. Anchored by Unicode's stability
 # policy — the NFC form of an assigned codepoint is guaranteed not to change across Unicode
 # versions. Same byte-determinism guarantee class as blake3/sha2/sha3 (output anchored by an
@@ -105,6 +109,8 @@ std = [
 # Cortex-M0+ lacks atomic CAS, which spin needs; embedded callers omit `registry` and use schema builders/parsers directly.
 registry = ["dep:spin"]
 crypto = ["ed25519-dalek", "x25519-dalek", "rand", "chacha20poly1305", "aes-gcm"]
+# Parallel BitPackedTensor pack/unpack via the rayon thread pool. Byte-identical output to the serial paths.
+rayon = ["std", "dep:rayon"]
 spirix = ["dep:spirix"]
 inspect = ["std", "registry", "dep:colored"]
 text-encode = ["std", "dep:unicode-normalization"]
