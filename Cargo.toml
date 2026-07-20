@@ -34,6 +34,13 @@ name = "vsfinfo"
 path = "src/bin/vsfinfo.rs"
 required-features = ["text"]
 
+# vsflog: decode a verichrome.log.vsf structured log to readable lines (level/grep filter, -f follow).
+# The stack-wide replacement for reading logcat. Only needs std (record codec + chrono display).
+[[bin]]
+name = "vsflog"
+path = "src/bin/vsflog.rs"
+required-features = ["std"]
+
 # vsfimg: convert any image (PNG/JPEG/WebP/TIFF) → canonical VSF image.
 # Up to 256×256 → uncompressed `Tensor<u8>` shape [h, w, 3] in VSF RGB gamma2.
 # Larger → rav1e AV1 encode (matches photon's avatar encoding for >256 sources).
@@ -58,6 +65,8 @@ x25519-dalek = { version = "2", default-features = false, features = ["static_se
 rand = { version = "0.8", default-features = false, features = ["alloc", "getrandom", "std", "std_rng"], optional = true }
 chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"], optional = true }
 aes-gcm = { version = "0.10", default-features = false, features = ["alloc", "aes", "getrandom"], optional = true }
+# `log` crate, only for the optional log-bridge (route dependency `log` macros into the VSF sink).
+log = { version = "0.4", optional = true }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 i256 = { version = "0.2.3", default-features = false }
 colored = { version = "2", optional = true }
@@ -105,6 +114,13 @@ std = [
     "num-traits/std",
     "num-complex/std",
 ]
+# `logging` enables the durable VSF file-log sink (verichrome.log.vsf) — the stack-wide replacement
+# for logcat/println. Implies std (fs, threads, atomics). The record codec + logf! macros compile
+# without it; only the file sink is gated.
+logging = ["std"]
+# `log-bridge` routes the `log` crate into the VSF sink (dependency log macros land in the same
+# file). Pulls the `log` crate; only meaningful alongside `logging`.
+log-bridge = ["logging", "dep:log"]
 # `registry` enables the global SchemaRegistry singleton (spin::Once + spin::RwLock).
 # Cortex-M0+ lacks atomic CAS, which spin needs; embedded callers omit `registry` and use schema builders/parsers directly.
 registry = ["dep:spin"]
