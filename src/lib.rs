@@ -369,6 +369,18 @@ pub mod image;
 // VSF-Image v0 — spectral-first raw image container (K channels of sensor counts + per-channel spectral response + ihi provenance ingredients). Pure VSF types, no heavy deps, so it's unconditional. Consumed by opsin (viewer/converter) and chameleon.
 pub mod spectral_image;
 
+// Structured VSF logging: the ONE durable, adb-pullable, self-describing log for the whole stack
+// (replaces logcat + scattered println!). The `logf!`/`logf_at!` macros and the record codec
+// (parse_log_records) are always available; the FILE SINK is gated behind `logging` (implies std).
+pub mod logging;
+pub use logging::{
+    clear_log, log, log_at, log_size_bytes, log_structured, parse_log_records, read_log_from,
+    render_log_line, set_log_dir, set_log_name, snapshot_log_bytes, Cap, CapDisplay, CapPrim,
+    LogLevel, LogRecord, LogValue,
+};
+#[cfg(all(feature = "logging", feature = "log-bridge"))]
+pub use logging::install_log_bridge;
+
 // Re-export main types
 pub use types::{
     datetime_to_eagle_time, BitPackedTensor, EagleTime, EtType, LayoutOrder, NaScheme,
