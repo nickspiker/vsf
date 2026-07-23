@@ -46,7 +46,7 @@ pub struct Theme {
     /// Scene graph types (vt)
     pub scene_graph: Colour,
 
-    // === Semantic Colors ===
+    // === Semantic Colours ===
     /// Verification passed (✓)
     pub pass: Colour,
 
