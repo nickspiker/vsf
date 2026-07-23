@@ -11,6 +11,7 @@
 //! until the platform data dir is known (Android sets it partway through JNI startup), buffering the
 //! earliest records so nothing before the dir lands is lost.
 
+use crate::prelude::*;
 #[cfg(feature = "logging")]
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 #[cfg(feature = "logging")]

@@ -124,7 +124,9 @@ log-bridge = ["logging", "dep:log"]
 # `registry` enables the global SchemaRegistry singleton (spin::Once + spin::RwLock).
 # Cortex-M0+ lacks atomic CAS, which spin needs; embedded callers omit `registry` and use schema builders/parsers directly.
 registry = ["dep:spin"]
-crypto = ["ed25519-dalek", "x25519-dalek", "rand", "chacha20poly1305", "aes-gcm"]
+# `crypto-verify` is the no_std-friendly subset: Ed25519 signature VERIFICATION only (ed25519-dalek verify needs no RNG). Embedded callers (nRF52840 OTA bootloader/app) build with default-features = false + crypto-verify to run vsf::verification::read_verified on-device. Full `crypto` (signing + encryption) pulls rand/getrandom and is host-only.
+crypto-verify = ["ed25519-dalek"]
+crypto = ["crypto-verify", "x25519-dalek", "rand", "chacha20poly1305", "aes-gcm"]
 # Parallel BitPackedTensor pack/unpack via the rayon thread pool. Byte-identical output to the serial paths.
 rayon = ["std", "dep:rayon"]
 spirix = ["dep:spirix"]

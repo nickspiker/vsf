@@ -1344,7 +1344,7 @@ pub fn read_verified(
     let is_signed = header.signature.is_some() && header.signer_pubkey.is_some();
 
     if is_signed {
-        #[cfg(feature = "crypto")]
+        #[cfg(feature = "crypto-verify")]
         {
             if !verify_file_signature(doc)? {
                 return Err("bad signature".into());
@@ -1355,10 +1355,10 @@ pub fn read_verified(
                 }
             }
         }
-        #[cfg(not(feature = "crypto"))]
+        #[cfg(not(feature = "crypto-verify"))]
         {
             let _ = expected_signer;
-            return Err("signed doc but crypto feature off".into());
+            return Err("signed doc but crypto-verify feature off".into());
         }
     } else if expected_signer.is_some() {
         // The caller demanded a specific signer but the document is unsigned — an attacker who strips ke/ge must NOT be able to demote a signer-pinned read to integrity-only.
@@ -1438,7 +1438,7 @@ pub fn sign_file(mut vsf_bytes: Vec<u8>, signing_key: &[u8; 32]) -> Result<Vec<u
 /// * `vsf_bytes` - Complete VSF file with ke and ge in header
 ///
 /// # Returns `Ok(true)` if signature is valid `Ok(false)` if signature is invalid `Err` if file format is wrong or missing ke/ge
-#[cfg(feature = "crypto")]
+#[cfg(feature = "crypto-verify")]
 pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
@@ -1497,7 +1497,7 @@ pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
 /// * `vsf_bytes` - Complete VSF file with ke in header
 ///
 /// # Returns 32-byte Ed25519 public key
-#[cfg(feature = "crypto")]
+#[cfg(feature = "crypto-verify")]
 pub fn extract_signer_pubkey(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     let ke_info = find_header_ke(vsf_bytes)?;
     if ke_info.value_len != 32 {
