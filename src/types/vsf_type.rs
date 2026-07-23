@@ -1309,7 +1309,7 @@ fn opcode_name(opcode: u16) -> &'static str {
         0x6474 => "draw_text",
         0x7366 => "set_font",
 
-        // Color utilities
+        // Colour utilities
         0x6361 => "rgba",
         0x6362 => "rgb",
         0x6369 => "colour_lerp",
