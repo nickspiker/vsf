@@ -2,6 +2,7 @@
 //!
 //! These schemas define the standard fields for common VSF section types. They are automatically registered in SchemaRegistry::global()
 
+use crate::prelude::*;
 use super::constraint::TypeConstraint;
 use super::section::SectionSchema;
 
