@@ -163,6 +163,7 @@ pub enum VsfType {
     gd(Vec<u8>), // Dilithium/ML-DSA
     gs(Vec<u8>), // Sphincs+
     gf(Vec<u8>), // Falcon
+    gH(Vec<u8>), // Signed integrity hash (application specific)
     #[deprecated(
         since = "0.1.7",
         note = "RSA is legacy - prefer Ed25519 for new applications"
