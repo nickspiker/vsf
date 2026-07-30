@@ -80,8 +80,15 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
         ));
     }
 
-    // Parse ndim or count
-    let (ndim, count) = if data[*pointer] == b'n' {
+    // Parse ndim or count. Which FORMAT we are in is decided by the 'n' marker and recorded here --
+    // never re-derived from the count. An empty 1D vector is legal and the encoder emits it (a
+    // zero-length tensor is how photon's peer rows say "no local_ip"), so a `count > 0` test would
+    // route count==0 into the multi-dim branch and read the following bytes as a shape. That
+    // mis-parsed the byte after the tensor -- typically the ',' field delimiter -- as a size marker,
+    // and because one bad value fails the whole section, a single peer with no LAN address made an
+    // entire gossip batch unreadable.
+    let is_1d_format = data[*pointer] == b'n';
+    let (ndim, count) = if is_1d_format {
         // 1D vector format: [t]['n'][count][elem_type][elem_size][data...]
         *pointer += 1; // Skip 'n'
         let count = decode_usize(data, pointer)?;
@@ -104,7 +111,7 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
     *pointer += 1;
 
     // Parse shape (only for multi-dim; 1D already has count)
-    let (shape, total_elements) = if ndim == 1 && count > 0 {
+    let (shape, total_elements) = if is_1d_format {
         // 1D vector: use count directly
         (vec![count], count)
     } else {
@@ -115,7 +122,7 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
     };
 
     // If this is a 1D vector, dispatch to vector parsers
-    if ndim == 1 && count > 0 {
+    if is_1d_format {
         return match elem_type {
             b'u' => match elem_size {
                 b'0' => parse_vector_data_u0(data, pointer, count),
@@ -4539,4 +4546,39 @@ pub fn parse_strided_tensor_data_c77(
         }
     }
     Ok(VsfType::q_c77(StridedTensor::new(shape, stride, values)))
+}
+
+#[cfg(test)]
+mod empty_tensor_tests {
+    use crate::types::{Tensor, VsfType};
+
+    /// A ZERO-LENGTH 1D tensor must survive the round trip. The encoder has always emitted it, but the
+    /// decoder used to pick its format by `count > 0`, so an empty vector fell into the multi-dim
+    /// branch and read whatever followed as a shape -- corrupting the parse of the NEXT value rather
+    /// than failing locally. Empty is a normal value: photon's peer rows encode "no local_ip" that way.
+    #[test]
+    fn empty_1d_tensor_round_trips() {
+        let flat = VsfType::t_u3(Tensor::new(vec![0], vec![])).flatten();
+        let mut ptr = 1; // skip the leading 't' that parse_tensor expects to be consumed
+        match super::parse_tensor(&flat, &mut ptr).expect("parse empty tensor") {
+            VsfType::t_u3(t) => {
+                assert!(t.data.is_empty(), "no data");
+                assert_eq!(t.shape, vec![0], "shape survives as [0]");
+            }
+            other => panic!("expected t_u3, got {other:?}"),
+        }
+        assert_eq!(ptr, flat.len(), "the parse must consume EXACTLY the tensor and no more -- overrun here is what corrupted the following value");
+    }
+
+    /// The non-empty case must not regress: same format, same routing.
+    #[test]
+    fn populated_1d_tensor_still_round_trips() {
+        let flat = VsfType::t_u3(Tensor::new(vec![4], vec![10, 20, 30, 40])).flatten();
+        let mut ptr = 1;
+        match super::parse_tensor(&flat, &mut ptr).expect("parse") {
+            VsfType::t_u3(t) => assert_eq!(t.data, vec![10, 20, 30, 40]),
+            other => panic!("expected t_u3, got {other:?}"),
+        }
+        assert_eq!(ptr, flat.len());
+    }
 }
