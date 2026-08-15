@@ -3268,7 +3268,7 @@ pub fn hex_dump(data: &[u8]) -> String {
         (data, None, 0)
     };
 
-    let mut format_chunk = |offset: usize, chunk: &[u8]| {
+    let format_chunk = |offset: usize, chunk: &[u8]| {
         let mut line = format!("{:08x}: ", offset);
         for (j, byte) in chunk.iter().enumerate() {
             if j == 8 {
