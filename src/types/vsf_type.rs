@@ -1093,6 +1093,20 @@ impl VsfType {
         }
     }
 
+    /// Extract value as i64
+    ///
+    /// Supports: i3, i4, i5, i6, i (auto-sized), plus any unsigned that fits — a non-negative quantity is legitimately written either signed or unsigned, and the READER must not care which width (or sign form) the encoder chose. The signed sibling of [`as_u64`](Self::as_u64); readers of parsed data use these, never exact-variant matches (auto-sized writes decode as the smallest concrete width, so a `VsfType::i(..)`/`VsfType::u(..)` match never fires on a wire value).
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            VsfType::i3(n) => Some(*n as i64),
+            VsfType::i4(n) => Some(*n as i64),
+            VsfType::i5(n) => Some(*n as i64),
+            VsfType::i6(n) => Some(*n),
+            VsfType::i(n) => i64::try_from(*n as i128).ok(),
+            _ => self.as_u64().and_then(|n| i64::try_from(n).ok()),
+        }
+    }
+
     /// Extract value as u8
     ///
     /// Supports: u0, u3, u4 (with bounds check) Returns None for larger types or overflow
