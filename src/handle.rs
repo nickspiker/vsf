@@ -1,6 +1,6 @@
 //! Handle identity system — thin re-export shim over the canonical [`ihi`] crate.
 //!
-//! The memory-hard handle-proof algorithm lives in the ihi crate (`/mnt/Octopus/Code/ihi`) as the single source of truth — every component in the stack (photon, vsf::handle, toka, fgtw) routes thru it rather than rolling its own pre-hash step.
+//! The memory-hard handle-proof algorithm lives in the ihi crate (`/mnt/Harbor/Code/ihi`) as the single source of truth — every component in the stack (photon, vsf::handle, toka, fgtw) routes thru it rather than rolling its own pre-hash step.
 //!
 //! **Wire format.** `handle_to_hash` encodes the handle via `VsfType::x` (NFC normalization + Huffman codebook covering all 1,112,064 valid Unicode codepoints) and BLAKE3-hashes the resulting bytes. `handle_to_proof` then feeds that hash into the memory-hard PoW. See [`ihi::handle_to_hash`] for the full canonicalization contract.
 
