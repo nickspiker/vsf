@@ -240,27 +240,41 @@ fn decrypt_symmetric(_encrypted: &[u8], _key_hex: &str) -> Result<Vec<u8>, Strin
     Err("Crypto feature not enabled - rebuild with --features crypto".to_string())
 }
 
-/// ChaCha20-Poly1305 decryption helper
+/// ChaCha20-Poly1305 decryption helper — reads the current 24-byte-nonce XChaCha20-Poly1305 first,
+/// then the legacy 12-byte-nonce ChaCha20-Poly1305 (the 2026-08-18 stack-wide migration). The Poly1305
+/// tag disambiguates, so an inspection of either format Just Works.
 #[cfg(feature = "crypto")]
 fn decrypt_chacha20poly1305(encrypted: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
-    use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, KeyInit, Nonce};
+    use chacha20poly1305::{
+        aead::Aead, ChaCha20Poly1305, KeyInit, Nonce, XChaCha20Poly1305, XNonce,
+    };
 
     if encrypted.len() < 12 + 16 {
         return Err("File too short for ChaCha20-Poly1305 (need at least 28 bytes)".to_string());
     }
 
+    // Current: XChaCha20-Poly1305, [nonce:24][ct+tag].
+    if encrypted.len() >= 24 + 16 {
+        if let (Ok(cipher), Ok(nonce)) = (
+            XChaCha20Poly1305::new_from_slice(key),
+            <[u8; 24]>::try_from(&encrypted[..24]),
+        ) {
+            if let Ok(pt) = cipher.decrypt(&XNonce::from(nonce), &encrypted[24..]) {
+                return Ok(pt);
+            }
+        }
+    }
+
+    // Legacy: ChaCha20-Poly1305, [nonce:12][ct+tag].
     let cipher =
         ChaCha20Poly1305::new_from_slice(key).map_err(|e| format!("Key init error: {}", e))?;
-
     let nonce_bytes: [u8; 12] = encrypted[..12]
         .try_into()
         .map_err(|_| "Invalid nonce length")?;
     let nonce: Nonce = nonce_bytes.into();
-    let ciphertext = &encrypted[12..];
-
     cipher
-        .decrypt(&nonce, ciphertext)
-        .map_err(|e| format!("Decryption failed: {} (wrong key?)", e))
+        .decrypt(&nonce, &encrypted[12..])
+        .map_err(|e| format!("Decryption failed under both XChaCha and legacy: {} (wrong key?)", e))
 }
 
 /// Show basic file information in literal VSF format
