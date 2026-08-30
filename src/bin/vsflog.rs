@@ -2,8 +2,7 @@
 //!
 //! The log is a stream of complete VSF records, each `{creation_time (Eagle), section "log"
 //! {lvl, msg, val*}}` (see `vsf::logging`). This walks the records in order and prints
-//! `<eagle-time>  [LEVEL]  <msg>`, rendering the stored template with its typed `val` fields
-//! substituted at read time (numbers live binary in the record).
+//! `<eagle-time>  [LEVEL]  <msg>`, rendering the stored template with its typed `val` fields substituted at read time (numbers live binary in the record).
 //!
 //! Pull the file off a phone with:
 //!   `adb pull /storage/emulated/0/Android/data/<pkg>/files/verichrome.log.vsf`
@@ -51,9 +50,7 @@ struct Filter {
     grep: Option<String>,
 }
 
-/// Decode and print whole records from `buf` (via the shared `vsf::parse_log_records`), applying
-/// the filter. Returns the offset of the last COMPLETE record boundary, so a half-written trailing
-/// record (mid-append) is left for the next pass instead of being mis-decoded.
+/// Decode and print whole records from `buf` (via the shared `vsf::parse_log_records`), applying the filter. Returns the offset of the last COMPLETE record boundary, so a half-written trailing record (mid-append) is left for the next pass instead of being mis-decoded.
 fn print_records(buf: &[u8], filter: &Filter) -> usize {
     let (records, consumed) = vsf::parse_log_records(buf);
     for r in &records {

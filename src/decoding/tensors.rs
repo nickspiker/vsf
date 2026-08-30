@@ -81,12 +81,8 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
     }
 
     // Parse ndim or count. Which FORMAT we are in is decided by the 'n' marker and recorded here --
-    // never re-derived from the count. An empty 1D vector is legal and the encoder emits it (a
-    // zero-length tensor is how photon's peer rows say "no local_ip"), so a `count > 0` test would
-    // route count==0 into the multi-dim branch and read the following bytes as a shape. That
-    // mis-parsed the byte after the tensor -- typically the ',' field delimiter -- as a size marker,
-    // and because one bad value fails the whole section, a single peer with no LAN address made an
-    // entire gossip batch unreadable.
+    // never re-derived from the count. An empty 1D vector is legal and the encoder emits it (a zero-length tensor is how photon's peer rows say "no local_ip"), so a `count > 0` test would route count==0 into the multi-dim branch and read the following bytes as a shape. That mis-parsed the byte after the tensor -- typically the ',' field delimiter -- as a size marker,
+    // and because one bad value fails the whole section, a single peer with no LAN address made an entire gossip batch unreadable.
     let is_1d_format = data[*pointer] == b'n';
     let (ndim, count) = if is_1d_format {
         // 1D vector format: [t]['n'][count][elem_type][elem_size][data...]
@@ -4552,10 +4548,7 @@ pub fn parse_strided_tensor_data_c77(
 mod empty_tensor_tests {
     use crate::types::{Tensor, VsfType};
 
-    /// A ZERO-LENGTH 1D tensor must survive the round trip. The encoder has always emitted it, but the
-    /// decoder used to pick its format by `count > 0`, so an empty vector fell into the multi-dim
-    /// branch and read whatever followed as a shape -- corrupting the parse of the NEXT value rather
-    /// than failing locally. Empty is a normal value: photon's peer rows encode "no local_ip" that way.
+    /// A ZERO-LENGTH 1D tensor must survive the round trip. The encoder has always emitted it, but the decoder used to pick its format by `count > 0`, so an empty vector fell into the multi-dim branch and read whatever followed as a shape -- corrupting the parse of the NEXT value rather than failing locally. Empty is a normal value: photon's peer rows encode "no local_ip" that way.
     #[test]
     fn empty_1d_tensor_round_trips() {
         let flat = VsfType::t_u3(Tensor::new(vec![0], vec![])).flatten();
