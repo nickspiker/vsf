@@ -364,9 +364,11 @@ fn col_wrap() -> (u8, u8, u8) {
 fn col_tensor() -> (u8, u8, u8) {
     THEME.binary
 } // t_*, v_*, q_*, p
+#[cfg(feature = "spirix")] // serves only the spirix-gated ro*/scene-graph arms below — ungated it warned dead for every non-spirix consumer
 fn col_colour() -> (u8, u8, u8) {
     THEME.colour
 } // r*, ra, rw
+#[cfg(feature = "spirix")] // serves only the spirix-gated ro*/scene-graph arms below — ungated it warned dead for every non-spirix consumer
 fn col_ro() -> (u8, u8, u8) {
     THEME.renderable
 } // ro* scene graph types
@@ -438,12 +440,14 @@ const RO_VERT: &str = "│"; // U+2502 Light vertical
 const RO_SPACE: &str = " "; // Continuation indent
 
 // Helper to format a field for ro* display: value first, label as hint
+#[cfg(feature = "spirix")] // serves only the spirix-gated ro*/scene-graph arms below — ungated it warned dead for every non-spirix consumer
 fn ro_field(value: String, label: &str) -> String {
     let (r, g, b) = col_hint();
     format!("  {} {}", value, label.truecolor(r, g, b))
 }
 
 // Helper to add semantic hint for colour types
+#[cfg(feature = "spirix")] // serves only the spirix-gated ro*/scene-graph arms below — ungated it warned dead for every non-spirix consumer
 fn colour_hint(vsf: &VsfType) -> &'static str {
     match vsf {
         VsfType::rcr => " VSF Red",
@@ -508,6 +512,7 @@ fn format_node_compact(node: &crate::types::Node) -> String {
 }
 
 // Helper to format children with proper indentation
+#[cfg(feature = "spirix")] // serves only the spirix-gated ro*/scene-graph arms below — ungated it warned dead for every non-spirix consumer
 fn format_children(children: &[VsfType]) -> String {
     if children.is_empty() {
         return format!("{}{}", trc("(", col_punct()), trc(")", col_punct()));
