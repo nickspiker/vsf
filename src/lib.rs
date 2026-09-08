@@ -274,6 +274,10 @@ pub mod prelude {
     pub use alloc::vec::Vec;
 }
 
+/// `#[derive(Vsf)]` — one struct definition generates both section codec halves (see vsf-derive). Feature-gated: proc-macro deps stay out of minimal/embedded builds.
+#[cfg(feature = "derive")]
+pub use vsf_derive::Vsf;
+
 // VSF format version constants
 /// Current VSF format version v9: spirix payloads (rd/rb/rw/rq and everything nesting them) reinterpreted under spirix 0.1 semantics: implicit-sign Scalar fraction, AMBIG=0 exponent convention, Circle keeps the N1 fraction. Same bytes decode to DIFFERENT values than v8, so this is a wire break for spirix-carrying files even tho non-spirix files are bit-identical. v8: x text codebook remapped to cover the full Unicode codespace (all 1,112,064 codepoints pre-assigned) + NFC canonicalization at the encoder boundary. Changed the Huffman bitstream for every x value — even pure-ASCII strings — so v7 x bytes and v8 x bytes are mutually unintelligible. v7: Added opcodes (op type), literal VSF format, proper bracket notation (⦉⦊ vs {})
 pub const VSF_VERSION: usize = 9;

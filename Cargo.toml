@@ -97,6 +97,10 @@ rav1d = { version = "1.1", default-features = false, features = ["bitdepth_8"], 
 resize = { version = "0.8.8", optional = true }
 rgb = { version = "0.8.52", optional = true }
 
+[dependencies.vsf-derive]
+path = "derive"
+optional = true
+
 [features]
 # `errors-verbose` enables `{:?}` formatting of unexpected VsfType values inside
 # decode/parse error messages. Disabling drops the `core::fmt::Debug` impl for
@@ -104,6 +108,8 @@ rgb = { version = "0.8.52", optional = true }
 # (~10 KB on cortex-m). Embedded callers (e.g. pipe-bridge-rp2040) build with
 # `default-features = false` and don't enable it, getting static-string errors.
 default = ["std", "registry", "errors-verbose"]
+# `#[derive(Vsf)]` — struct ↔ section codegen (proc-macro, compile-time only; wasm targets unaffected).
+derive = ["dep:vsf-derive"]
 errors-verbose = []
 std = [
     "chrono/std",
