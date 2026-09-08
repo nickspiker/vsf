@@ -1193,11 +1193,129 @@ impl VsfSection {
     pub fn get_fields(&self, name: &str) -> Vec<&VsfField> {
         self.fields.iter().filter(|f| f.name == name).collect()
     }
+
+    // ── Semantic accessors (2026-09-08): read a named field by MEANING, not representation. The width/variant rules live HERE, once — `uint` rides as_u64 (an auto-sized write decodes as the smallest concrete width, so exact-variant matches never fire on wire values: the ek parse-death class), `eagle` rides as_eagle (same doctrine for the e-family), `text` takes x/a/d alike. First value of the first matching field — the dominant single-value idiom; multi-value rows keep the manual walk. Absent or wrong-typed reads None: readers stay total, the additive-evolution contract. ──
+
+    /// First value of `name` as UTF-8 text (x/a/d).
+    pub fn text(&self, name: &str) -> Option<&str> {
+        self.first_value(name).and_then(|v| v.as_string())
+    }
+
+    /// First value of `name` as a width-agnostic unsigned integer.
+    pub fn uint(&self, name: &str) -> Option<u64> {
+        self.first_value(name).and_then(|v| v.as_u64())
+    }
+
+    /// First value of `name` as a width-agnostic signed integer (unsigned wire values that fit also answer).
+    pub fn int(&self, name: &str) -> Option<i64> {
+        self.first_value(name).and_then(|v| v.as_i64())
+    }
+
+    /// First value of `name` as eagle-time oscillations, width-agnostic across the e-family.
+    pub fn eagle(&self, name: &str) -> Option<i64> {
+        self.first_value(name).and_then(|v| v.as_eagle())
+    }
+
+    /// First value of `name` as raw bytes (hash family, keys, signatures, wrapped/vector data).
+    pub fn bytes(&self, name: &str) -> Option<&[u8]> {
+        self.first_value(name).and_then(|v| v.as_bytes())
+    }
+
+    /// First value of `name` as exactly 32 bytes — the hash/pubkey convenience (None on any other length).
+    pub fn bytes32(&self, name: &str) -> Option<[u8; 32]> {
+        self.bytes(name).and_then(|b| <[u8; 32]>::try_from(b).ok())
+    }
+
+    /// Is the flag `name` set? True for a present zero-value field OR a truthy unsigned (both flag idioms in the wild).
+    pub fn flag(&self, name: &str) -> bool {
+        match self.get_field(name) {
+            Some(f) if f.values.is_empty() => true,
+            Some(f) => f.values.first().and_then(|v| v.as_u64()).is_some_and(|n| n != 0),
+            None => false,
+        }
+    }
+
+    fn first_value(&self, name: &str) -> Option<&VsfType> {
+        self.get_field(name).and_then(|f| f.values.first())
+    }
+
+    // ── Semantic setters — the writing twins. Auto-sized numerics (EWE: the encoder picks the narrowest width; readers above don't care), e6 for times, x for text. Each `set_*` APPENDS a field; the `_opt` forms are the additive-field idiom (absent Option = absent field = None on read). ──
+
+    /// Append a UTF-8 text field.
+    pub fn set_text(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.add_field(name, VsfType::x(value.into()));
+    }
+
+    /// Append a text field only when Some — the additive-optional idiom.
+    pub fn set_text_opt(&mut self, name: impl Into<String>, value: Option<impl Into<String>>) {
+        if let Some(v) = value {
+            self.set_text(name, v);
+        }
+    }
+
+    /// Append an auto-sized unsigned field.
+    pub fn set_uint(&mut self, name: impl Into<String>, value: u64) {
+        self.add_field(name, VsfType::u(value as usize, false));
+    }
+
+    /// Append an auto-sized signed field.
+    pub fn set_int(&mut self, name: impl Into<String>, value: i64) {
+        self.add_field(name, VsfType::i(value as isize));
+    }
+
+    /// Append an eagle-time field (e6, the standard form).
+    pub fn set_eagle(&mut self, name: impl Into<String>, value: i64) {
+        self.add_field(name, VsfType::e(crate::types::EtType::e6(value)));
+    }
+
+    /// Append an eagle-time field only when Some.
+    pub fn set_eagle_opt(&mut self, name: impl Into<String>, value: Option<i64>) {
+        if let Some(v) = value {
+            self.set_eagle(name, v);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Semantic accessors: meaning over representation. An auto-sized write decodes as the narrowest concrete width and STILL answers `uint`; e5/e6 both answer `eagle`; both flag idioms read true; absent/wrong-typed reads are None (total readers, the additive contract).
+    #[test]
+    fn semantic_accessors_are_width_agnostic_and_total() {
+        let mut s = VsfSection::new("t");
+        // `a` not `x` here: the default test build has no Huffman feature, and the accessor covers both alike.
+        s.add_field("name", VsfType::a("Ada".into()));
+        s.set_uint("small", 7); // auto-sized: decodes u3 on the wire, must still answer uint()
+        s.set_uint("big", 4_000_000_000);
+        s.set_int("neg", -5);
+        s.set_eagle("when", 2_555_000_000_000_000_000);
+        s.add_field("when5", VsfType::e(crate::types::EtType::e5(1234)));
+        s.add_field("h", VsfType::hp(vec![9u8; 32]));
+        s.add_flag("armed");
+        s.add_field("armed_u", VsfType::u0(true));
+        // Round-trip thru the wire so accessors face DECODED variants, not the ones we wrote.
+        let bytes = s.encode();
+        let mut ptr = 0;
+        let d = VsfSection::parse(&bytes, &mut ptr).unwrap();
+        assert_eq!(d.text("name"), Some("Ada"));
+        assert_eq!(d.uint("small"), Some(7));
+        assert_eq!(d.uint("big"), Some(4_000_000_000));
+        assert_eq!(d.int("neg"), Some(-5));
+        assert_eq!(d.eagle("when"), Some(2_555_000_000_000_000_000));
+        assert_eq!(d.eagle("when5"), Some(1234));
+        assert_eq!(d.bytes32("h"), Some([9u8; 32]));
+        assert!(d.flag("armed") && d.flag("armed_u"));
+        // Totality: absent and wrong-typed are None/false, never a panic or error.
+        assert_eq!(d.text("nope"), None);
+        assert_eq!(d.uint("name"), None);
+        assert_eq!(d.eagle("h"), None);
+        assert!(!d.flag("nope"));
+        // The optional-setter idiom: None writes nothing.
+        let mut o = VsfSection::new("o");
+        o.set_eagle_opt("t", None::<i64>);
+        assert!(o.fields.is_empty());
+    }
 
     /// Header-only sections are first-class: a zero-field section builds to a name-only TOC entry with NO body (the ping/ack/empty-registry shape), and primary_section reads it back as a zero-field section carrying the TOC name — while a TOC entry that CLAIMS a body with none present still fails loudly.
     #[test]

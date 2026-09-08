@@ -1128,6 +1128,16 @@ impl VsfType {
     /// Extract as string reference
     ///
     /// Supports: x (UTF-8 text), a (ASCII text), d (dictionary key)
+    /// Extract an eagle time as i64 oscillations — width-agnostic across the e-family (e5 widens, e7 narrows when it fits), the temporal sibling of [`as_u64`](Self::as_u64). Readers use THIS, never an exact `EtType::e6` match: the same doctrine that killed the ek parse-death class for integers applies to times.
+    pub fn as_eagle(&self) -> Option<i64> {
+        match self {
+            VsfType::e(EtType::e5(t)) => Some(*t as i64),
+            VsfType::e(EtType::e6(t)) => Some(*t),
+            VsfType::e(EtType::e7(t)) => i64::try_from(*t).ok(),
+            _ => None,
+        }
+    }
+
     pub fn as_string(&self) -> Option<&str> {
         match self {
             VsfType::x(s) | VsfType::a(s) | VsfType::d(s) => Some(s),
