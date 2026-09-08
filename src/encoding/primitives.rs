@@ -177,19 +177,19 @@ impl EncodeNumber for i128 {
 
 impl EncodeNumber for isize {
     fn encode_number(&self) -> Vec<u8> {
-        // Auto-select smallest size that fits For positive values, use unsigned limits For negative values, use signed limits
+        // Auto-select the smallest SIGNED width that fits — positive values must fit the signed positive range of the slot, never the unsigned one: the old unsigned-limit compare packed 128..=255 into the i8 slot (byte 0x80..), which every signed reader correctly decodes as negative — field 2026-09-08, "ladder 16..-128 kbps" in the call logs (128_000/1000 = 128 stored as i8 −128).
         if *self >= 0 {
-            if *self <= u8::MAX as isize {
+            if *self <= i8::MAX as isize {
                 vec![b'3', *self as u8]
-            } else if *self <= u16::MAX as isize {
+            } else if *self <= i16::MAX as isize {
                 let mut result = vec![b'4'];
                 result.extend_from_slice(&(*self as i16).to_be_bytes());
                 result
-            } else if *self <= u32::MAX as isize {
+            } else if *self <= i32::MAX as isize {
                 let mut result = vec![b'5'];
                 result.extend_from_slice(&(*self as i32).to_be_bytes());
                 result
-            } else if *self <= u64::MAX as isize {
+            } else if *self <= i64::MAX as isize {
                 let mut result = vec![b'6'];
                 result.extend_from_slice(&(*self as i64).to_be_bytes());
                 result
@@ -266,5 +266,21 @@ mod tests {
     #[test]
     fn test_encode_isize_negative() {
         assert_eq!((-42isize).encode_number(), vec![b'3', 0xD6]); // -42 as two's complement
+    }
+
+    #[test]
+    fn test_encode_isize_signed_positive_boundaries() {
+        // The 2026-09-08 wrap: a positive value must fit the SIGNED positive range of its slot. 128 packed as i8 (byte 0x80) decodes as -128 — "ladder 16..-128 kbps" in the field call logs.
+        assert_eq!(127isize.encode_number(), vec![b'3', 127]);
+        assert_eq!(128isize.encode_number(), vec![b'4', 0x00, 0x80]);
+        assert_eq!(255isize.encode_number(), vec![b'4', 0x00, 0xFF]);
+        assert_eq!(32767isize.encode_number(), vec![b'4', 0x7F, 0xFF]);
+        assert_eq!(32768isize.encode_number(), vec![b'5', 0x00, 0x00, 0x80, 0x00]);
+        assert_eq!((i32::MAX as isize).encode_number(), vec![b'5', 0x7F, 0xFF, 0xFF, 0xFF]);
+        assert_eq!(
+            (i32::MAX as isize + 1).encode_number()[0],
+            b'6',
+            "2^31 must widen to the i64 slot"
+        );
     }
 }
