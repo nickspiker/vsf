@@ -233,7 +233,7 @@ impl TypeConstraint {
             TypeConstraint::Curve25519Key => matches!(value, VsfType::kc(_)),
             TypeConstraint::AesKey => matches!(value, VsfType::ka(_)),
 
-            TypeConstraint::AnySignature => matches!(value, VsfType::ge(_) | VsfType::gp(_)),
+            TypeConstraint::AnySignature => matches!(value, VsfType::ge(_) | VsfType::gp(_) | VsfType::gm(_)),
 
             TypeConstraint::Ed25519Sig => matches!(value, VsfType::ge(_)),
             TypeConstraint::EcdsaP256Sig => matches!(value, VsfType::gp(_)),

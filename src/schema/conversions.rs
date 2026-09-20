@@ -451,6 +451,7 @@ impl FromVsfType for Vec<u8> {
             VsfType::ka(bytes) => Ok(bytes.clone()),
             VsfType::ge(bytes) => Ok(bytes.clone()),
             VsfType::gp(bytes) => Ok(bytes.clone()),
+            VsfType::gm(bytes) => Ok(bytes.clone()),
             VsfType::v(_, bytes) => Ok(bytes.clone()),
             _ => Err(ValidationError::Custom(format!(
                 "Cannot convert {} to Vec<u8>",

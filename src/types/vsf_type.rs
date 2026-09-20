@@ -159,6 +159,7 @@ pub enum VsfType {
 
     // Signature algorithms
     ge(Vec<u8>), // Ed25519 signature
+    gm(Vec<u8>), // Multi-scheme egg list (crate::eggs) — several signatures over the same bytes, every one of which must verify
     gp(Vec<u8>), // ECDSA-P256 signature
     gd(Vec<u8>), // Dilithium/ML-DSA
     gs(Vec<u8>), // Sphincs+
@@ -1170,7 +1171,8 @@ impl VsfType {
             | VsfType::kc(bytes)
             | VsfType::ka(bytes)
             | VsfType::ge(bytes)
-            | VsfType::gp(bytes) => Some(bytes),
+            | VsfType::gp(bytes)
+            | VsfType::gm(bytes) => Some(bytes),
             _ => None,
         }
     }

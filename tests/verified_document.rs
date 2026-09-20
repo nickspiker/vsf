@@ -279,3 +279,48 @@ fn pinned_signer_rejects_unsigned_document() {
     let err = vsf::verification::read_verified(&doc, Some([0x42; 32])).unwrap_err();
     assert!(err.contains("unsigned"), "unexpected error: {err}");
 }
+
+/// A multi-scheme header: two eggs reserved, filled by a closure over the file hash, verified through the Ed25519 anchor by `read_verified` and handed up whole by `header_eggs`.
+#[cfg(feature = "crypto")]
+#[test]
+fn multi_scheme_header_round_trips_and_anchors_on_ed25519() {
+    use ed25519_dalek::{Signer, SigningKey};
+    use vsf::eggs::{Egg, SCHEME_ED25519};
+    let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+    let pubkey: [u8; 32] = signing_key.verifying_key().to_bytes();
+    // Slot 0: Ed25519 (64). Slot 1: a stand-in second scheme, 100 bytes — vsf reserves what it is told and verifies only the anchor.
+    let unsigned = VsfBuilder::new()
+        .signed_only_eggs(VsfType::ke(pubkey.to_vec()), &[(SCHEME_ED25519, 64), (1, 100)])
+        .creation_time_oscillations(vsf::eagle_time_oscillations())
+        .add_section("payload", vec![("x".to_string(), VsfType::u(7, false))])
+        .build()
+        .expect("signed_only_eggs doc must build");
+    let signed = vsf::verification::sign_file_with(unsigned, |file_hash| {
+        vec![
+            Egg { scheme: SCHEME_ED25519, sig: signing_key.sign(file_hash).to_bytes().to_vec() },
+            Egg { scheme: 1, sig: vec![0xAB; 100] },
+        ]
+    })
+    .expect("sign_file_with");
+    read_verified(&signed, Some(pubkey)).expect("gm header verifies through its Ed25519 anchor");
+    let (signer, eggs, _hash) = vsf::verification::header_eggs(&signed).expect("header_eggs");
+    assert_eq!(signer, pubkey);
+    assert_eq!(eggs.len(), 2);
+    assert_eq!(eggs[1].sig, vec![0xAB; 100], "non-anchor eggs are handed up untouched for the caller's policy");
+    // Tampering anywhere breaks the anchor.
+    let mut t = signed.clone();
+    let last = t.len() - 1;
+    t[last] ^= 1;
+    assert!(read_verified(&t, Some(pubkey)).is_err());
+    // A wrong-length egg cannot be patched into the reserved slot.
+    let unsigned2 = VsfBuilder::new()
+        .signed_only_eggs(VsfType::ke(pubkey.to_vec()), &[(SCHEME_ED25519, 64), (1, 100)])
+        .add_section("payload", vec![])
+        .build()
+        .unwrap();
+    assert!(vsf::verification::sign_file_with(unsigned2, |h| vec![
+        Egg { scheme: SCHEME_ED25519, sig: signing_key.sign(h).to_bytes().to_vec() },
+        Egg { scheme: 1, sig: vec![0; 99] },
+    ])
+    .is_err());
+}

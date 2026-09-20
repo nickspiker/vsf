@@ -448,11 +448,12 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
 fn zero_all_signatures(vsf_bytes: &mut Vec<u8>) -> Result<(), String> {
     let mut ptr = 0;
     while ptr < vsf_bytes.len() - 1 {
-        // Look for signature markers: ge, gp, gr
+        // Look for signature markers: ge, gp, gr, gm
         if vsf_bytes[ptr] == b'g'
             && (vsf_bytes[ptr + 1] == b'e'
                 || vsf_bytes[ptr + 1] == b'p'
-                || vsf_bytes[ptr + 1] == b'r')
+                || vsf_bytes[ptr + 1] == b'r'
+                || vsf_bytes[ptr + 1] == b'm')
         {
             let sig_position = ptr;
             let sig_type = match parse(vsf_bytes, &mut ptr) {
@@ -464,7 +465,7 @@ fn zero_all_signatures(vsf_bytes: &mut Vec<u8>) -> Result<(), String> {
             };
 
             match sig_type {
-                VsfType::ge(sig_bytes) | VsfType::gp(sig_bytes) | VsfType::gr(sig_bytes) => {
+                VsfType::ge(sig_bytes) | VsfType::gp(sig_bytes) | VsfType::gr(sig_bytes) | VsfType::gm(sig_bytes) => {
                     let sig_len = sig_bytes.len();
                     if let Ok(sig_start) = find_signature_value_position(vsf_bytes, sig_position) {
                         // Zero out signature
@@ -489,12 +490,12 @@ fn find_signature_value_position(data: &[u8], sig_marker_pos: usize) -> Result<u
         parse(data, &mut pos).map_err(|e| format!("Failed to parse signature: {}", e))?;
 
     match sig_type {
-        VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) => {
+        VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) | VsfType::gm(bytes) => {
             // pos now points AFTER the signature Calculate where the signature bytes started
             let sig_start = pos - bytes.len();
             Ok(sig_start)
         }
-        _ => Err("Expected signature type (ge/gp/gr)".to_string()),
+        _ => Err("Expected signature type (ge/gp/gr/gm)".to_string()),
     }
 }
 
@@ -625,11 +626,16 @@ pub fn fill_provenance_hash(vsf_bytes: &mut [u8], hash: &[u8; 32]) -> Result<(),
 /// Ok(()) on success
 ///
 pub fn fill_signature(vsf_bytes: &mut [u8], signature: &[u8]) -> Result<(), String> {
-    if signature.len() != 64 {
-        return Err(format!(
-            "Signature must be 64 bytes, got {}",
-            signature.len()
-        ));
+    // The slot was reserved at build time at exactly the signed length — 64 for an Ed25519 `ge`, the framed egg list's length for a `gm` — so what fills it must match to the byte.
+    {
+        let ge_info = find_header_ge(vsf_bytes)?;
+        if signature.len() != ge_info.value_len {
+            return Err(format!(
+                "Signature must be {} bytes to fill the reserved slot, got {}",
+                ge_info.value_len,
+                signature.len()
+            ));
+        }
     }
 
     // Find ge position (after hp, optionally after ke)
@@ -1426,6 +1432,77 @@ pub fn sign_file(mut vsf_bytes: Vec<u8>, signing_key: &[u8; 32]) -> Result<Vec<u
     Ok(vsf_bytes)
 }
 
+#[cfg(feature = "crypto")]
+/// Sign a document whose header carries a MULTI-SCHEME slot (`gm`, reserved by `VsfBuilder::signed_only_eggs`).
+///
+/// vsf does not hold post-quantum signing code, so the signer is a closure: it receives the 32-byte file hash — computed with `hp` filled and the whole `gm` value zeroed, exactly what a verifier recomputes — and returns the egg list. Every returned egg must match a reserved slot in scheme and length, so the patched file is the same length as the placeholder and the hash still holds. The Ed25519 egg is required: it is the anchor every reader can check.
+pub fn sign_file_with(mut vsf_bytes: Vec<u8>, sign: impl FnOnce(&[u8; 32]) -> Vec<crate::eggs::Egg>) -> Result<Vec<u8>, String> {
+    let hp_info = find_header_hp(&vsf_bytes)?;
+    if hp_info.is_placeholder {
+        let hp_hash = compute_provenance_hash(&vsf_bytes)?;
+        vsf_bytes[hp_info.value_start..hp_info.value_start + 32].copy_from_slice(&hp_hash);
+    }
+    let ge_info = find_header_ge(&vsf_bytes)?;
+    let reserved = crate::eggs::eggs_from_bytes(&vsf_bytes[ge_info.value_start..ge_info.value_start + ge_info.value_len])
+        .map_err(|e| format!("reserved slot is not an egg list: {e}"))?;
+    // "Placeholder" for an egg list means every SIGNATURE is zero — the count, scheme and length bytes are structure, not signature, and are never zero. (`find_header_ge`'s all-bytes-zero notion is the plain-`ge` one.)
+    if reserved.iter().any(|e| e.sig.iter().any(|&b| b != 0)) {
+        return Err("signature slot is already filled - file may already be signed".to_string());
+    }
+    // What every egg signs: the file with the WHOLE slot zeroed — structure bytes included — which is exactly what `header_eggs` recomputes, and what `compute_provenance_hash` zeroes for `hp`.
+    let file_hash = {
+        let mut temp = vsf_bytes.clone();
+        for b in &mut temp[ge_info.value_start..ge_info.value_start + ge_info.value_len] {
+            *b = 0;
+        }
+        *blake3::hash(&temp).as_bytes()
+    };
+    let eggs = sign(&file_hash);
+    if eggs.len() != reserved.len() {
+        return Err(format!("signer returned {} eggs for {} reserved slots", eggs.len(), reserved.len()));
+    }
+    for (got, want) in eggs.iter().zip(reserved.iter()) {
+        if got.scheme != want.scheme || got.sig.len() != want.sig.len() {
+            return Err(format!("egg (scheme {}, {} bytes) does not fit reserved slot (scheme {}, {} bytes)", got.scheme, got.sig.len(), want.scheme, want.sig.len()));
+        }
+    }
+    if !eggs.iter().any(|e| e.scheme == crate::eggs::SCHEME_ED25519) {
+        return Err("egg list must include the Ed25519 anchor".to_string());
+    }
+    let blob = crate::eggs::eggs_to_bytes(&eggs);
+    vsf_bytes[ge_info.value_start..ge_info.value_start + ge_info.value_len].copy_from_slice(&blob);
+    Ok(vsf_bytes)
+}
+
+#[cfg(feature = "crypto-verify")]
+/// The signed content of a document with a `gm` header: `(signer pubkey, eggs, file hash)`, after verifying the ANCHOR — the Ed25519 egg against the header's `ke` over the file hash. The other eggs are returned unverified: which schemes they must cover and what keys verify them is policy that lives above vsf (the signer's declared bundle from a fleet chain, the context's required tier). A caller that stops here has exactly the assurance a plain `ge` gave it; a caller that wants more checks the rest.
+pub fn header_eggs(vsf_bytes: &[u8]) -> Result<([u8; 32], Vec<crate::eggs::Egg>, [u8; 32]), String> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    let ke_info = find_header_ke(vsf_bytes)?;
+    if ke_info.value_len != 32 {
+        return Err(format!("Expected 32-byte Ed25519 pubkey, got {}", ke_info.value_len));
+    }
+    let pubkey: [u8; 32] = vsf_bytes[ke_info.value_start..ke_info.value_start + 32].try_into().map_err(|_| "pubkey")?;
+    let ge_info = find_header_ge(vsf_bytes)?;
+    let slot = &vsf_bytes[ge_info.value_start..ge_info.value_start + ge_info.value_len];
+    let eggs = crate::eggs::eggs_from_bytes(slot).map_err(|e| format!("header eggs: {e}"))?;
+    if eggs.iter().all(|e| e.sig.iter().all(|&b| b == 0)) {
+        return Err("Signature is all zeros - file not signed".to_string());
+    }
+    let mut temp = vsf_bytes.to_vec();
+    for b in &mut temp[ge_info.value_start..ge_info.value_start + ge_info.value_len] {
+        *b = 0;
+    }
+    let file_hash = *blake3::hash(&temp).as_bytes();
+    let anchor = eggs.iter().find(|e| e.scheme == crate::eggs::SCHEME_ED25519).ok_or("header eggs: no Ed25519 anchor")?;
+    let sig: [u8; 64] = anchor.sig.as_slice().try_into().map_err(|_| "header eggs: Ed25519 egg is not 64 bytes")?;
+    let vk = VerifyingKey::from_bytes(&pubkey).map_err(|e| format!("Invalid pubkey: {e}"))?;
+    if vk.verify(&file_hash, &Signature::from_bytes(&sig)).is_err() {
+        return Err("bad signature".to_string());
+    }
+    Ok((pubkey, eggs, file_hash))
+}
+
 /// Verify header-level Ed25519 signature
 ///
 /// # Flow:
@@ -1441,6 +1518,17 @@ pub fn sign_file(mut vsf_bytes: Vec<u8>, signing_key: &[u8; 32]) -> Result<Vec<u
 #[cfg(feature = "crypto-verify")]
 pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    // A multi-scheme slot verifies through its Ed25519 anchor here — the same assurance a plain `ge` gives. Anything beyond that (the other eggs, against the signer's declared keys, at the context's required tier) is the caller's policy via `header_eggs`.
+    if let Ok((header, _)) = crate::file_format::VsfHeader::decode(vsf_bytes) {
+        if matches!(header.signature, Some(VsfType::gm(_))) {
+            return match header_eggs(vsf_bytes) {
+                Ok(_) => Ok(true),
+                Err(e) if e == "bad signature" => Ok(false),
+                Err(e) => Err(e),
+            };
+        }
+    }
 
     // Find ke (public key)
     let ke_info = find_header_ke(vsf_bytes)?;
@@ -1651,7 +1739,8 @@ fn find_header_ge(data: &[u8]) -> Result<HeaderFieldInfo, String> {
 
     let ge_type = parse(data, &mut ptr).map_err(|e| format!("ge: {}", e))?;
     match ge_type {
-        VsfType::ge(bytes) => {
+        // `gm` (a multi-scheme egg list) sits in the same header slot. `is_placeholder` keeps its plain-`ge` meaning of all-bytes-zero; an egg-list placeholder is never all zero (its structure bytes are not), and `sign_file_with` judges that by parsing the eggs instead.
+        VsfType::ge(bytes) | VsfType::gm(bytes) => {
             let value_start = ptr - bytes.len();
             let is_placeholder = bytes.iter().all(|&b| b == 0);
             Ok(HeaderFieldInfo {

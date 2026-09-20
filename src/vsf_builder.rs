@@ -40,7 +40,7 @@ pub struct VsfBuilder {
     include_file_hash: bool,                  // True for rolling hash, false if signed
     custom_provenance: Option<[u8; 32]>,      // Custom provenance hash (immutable identity)
     signer_pubkey: Option<VsfType>, // Signer's Ed25519 pubkey (ke) - for signature verification
-    signature: Option<(VsfType, [u8; 64])>, // (signature type, signature bytes) - replaces hb
+    signature: Option<(VsfType, Vec<u8>)>, // (signature type, signature bytes) - replaces hb. Variable length: an Ed25519 `ge` is 64 bytes, a multi-scheme `gm` is a framed egg list of whatever its slots need
     avatar_hash: Option<[u8; 32]>,  // Optional avatar provenance hash as header field
 }
 
@@ -97,7 +97,7 @@ impl VsfBuilder {
     /// Both pubkey (ke) and signature (ge) are included in the header for verification.
     pub fn signature_ed25519(mut self, pubkey: [u8; 32], signature: [u8; 64]) -> Self {
         self.signer_pubkey = Some(VsfType::ke(pubkey.to_vec()));
-        self.signature = Some((VsfType::ge(signature.to_vec()), signature));
+        self.signature = Some((VsfType::ge(signature.to_vec()), signature.to_vec()));
         self.include_file_hash = false; // Signature replaces rolling hash
         self
     }
@@ -133,7 +133,16 @@ impl VsfBuilder {
         self.include_file_hash = false;
         self.signer_pubkey = Some(pubkey);
         // Signature will be a 64-byte placeholder (zeros) that must be filled externally
-        self.signature = Some((VsfType::ge(vec![0u8; 64]), [0u8; 64]));
+        self.signature = Some((VsfType::ge(vec![0u8; 64]), vec![0u8; 64]));
+        self
+    }
+
+    /// Like [`signed_only`](Self::signed_only), but the header carries a MULTI-SCHEME signature slot (`gm`): a zero-filled egg list with one slot per `(scheme, signature length)`, to be filled by [`crate::verification::sign_file_with`]. The placeholder is byte-for-byte the length of the signed form, which is what makes in-place patching sound. Which schemes and lengths belong in a given context is the caller's policy; vsf only reserves what it is told.
+    pub fn signed_only_eggs(mut self, pubkey: VsfType, slots: &[(u8, usize)]) -> Self {
+        self.include_file_hash = false;
+        self.signer_pubkey = Some(pubkey);
+        let ph = crate::eggs::placeholder_eggs(slots);
+        self.signature = Some((VsfType::gm(ph.clone()), ph));
         self
     }
 

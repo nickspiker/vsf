@@ -491,6 +491,7 @@ pub fn parse_signature(data: &[u8], pointer: &mut usize) -> Result<VsfType, Deco
     // Return appropriate signature type
     match algo {
         b'e' => Ok(VsfType::ge(sig)),
+        b'm' => Ok(VsfType::gm(sig)), // multi-scheme egg list
         b'p' => Ok(VsfType::gp(sig)),
         b'r' => Ok(VsfType::gr(sig)),
         b'H' => Ok(VsfType::gH(sig)), // Keyed integrity hash (BLAKE3 keyed MAC)

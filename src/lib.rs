@@ -265,6 +265,8 @@ macro_rules! type_mismatch_err {
 }
 
 /// no_std-friendly prelude: re-exports of the `alloc` types that std's prelude provides automatically. Individual files import via `use crate::prelude::*;` to stay compatible across `std` and `no_std + alloc` builds.
+/// Multi-scheme signature lists and their single wire form — the shape of every stacked-signature slot in the stack, including the header's `gm`.
+pub mod eggs;
 pub mod prelude {
     pub use alloc::borrow::ToOwned;
     pub use alloc::boxed::Box;

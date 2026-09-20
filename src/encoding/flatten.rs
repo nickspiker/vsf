@@ -1288,6 +1288,13 @@ impl VsfType {
                 flat
             }
 
+            VsfType::gm(value) => {
+                let mut flat = vec![b'g', b'm'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number()); // Store (len-1) in bytes
+                flat.extend_from_slice(value); // The framed egg list, opaque here
+                flat
+            }
+
             VsfType::gd(value) => {
                 let mut flat = vec![b'g', b'd'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number());
@@ -5016,7 +5023,7 @@ impl VsfType {
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
             }
 
-            VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) | VsfType::gH(bytes) => {
+            VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) | VsfType::gH(bytes) | VsfType::gm(bytes) => {
                 // prefix + encoded_length + data
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
             }
