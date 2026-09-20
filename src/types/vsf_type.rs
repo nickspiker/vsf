@@ -162,8 +162,8 @@ pub enum VsfType {
     gm(Vec<u8>), // Multi-scheme egg list (crate::eggs) — several signatures over the same bytes, every one of which must verify
     gp(Vec<u8>), // ECDSA-P256 signature
     gd(Vec<u8>), // Dilithium/ML-DSA
-    gs(Vec<u8>), // Sphincs+
-    gf(Vec<u8>), // Falcon
+    gs(Vec<u8>), // SPHINCS+ / SLH-DSA signature (one egg; the same bytes as scheme 2 inside a `gm`)
+    gf(Vec<u8>), // Falcon signature (one egg; the same bytes as scheme 1 inside a `gm`)
     gH(Vec<u8>), // Signed integrity hash (application specific)
     #[deprecated(
         since = "0.1.7",
@@ -1172,7 +1172,10 @@ impl VsfType {
             | VsfType::ka(bytes)
             | VsfType::ge(bytes)
             | VsfType::gp(bytes)
-            | VsfType::gm(bytes) => Some(bytes),
+            | VsfType::gm(bytes)
+            | VsfType::gf(bytes)
+            | VsfType::gs(bytes)
+            | VsfType::gd(bytes) => Some(bytes),
             _ => None,
         }
     }

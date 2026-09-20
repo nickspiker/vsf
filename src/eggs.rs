@@ -4,6 +4,8 @@
 //!
 //! The wire form is `u8 count`, then per egg `u8 scheme ‖ u32 LE len ‖ sig`. Every element framed, so the blob is safe inside a signing preimage; the same bytes ride the fleet chain's consent, the bindreq registry, the RustDesk handshake, the phonebook egg pointer and the VSF header signature (`gm`), so "egg-list shaped" is one codec everywhere rather than one per site.
 
+use crate::prelude::*;
+
 /// One signature egg: which scheme, and the signature bytes. Scheme tags are wire-stable and append-only; `0` is Ed25519.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Egg {
@@ -13,6 +15,52 @@ pub struct Egg {
 
 /// The Ed25519 scheme tag — the one egg vsf itself can verify, and the one every device holds.
 pub const SCHEME_ED25519: u8 = 0;
+/// Falcon-512 (lattice family). 666-byte signatures.
+pub const SCHEME_FALCON512: u8 = 1;
+/// SPHINCS+ / SLH-DSA-SHA2-128s (hash family). 7856-byte signatures.
+pub const SCHEME_SPHINCS_PLUS: u8 = 2;
+
+/// The single-egg `VsfType` letter for a scheme tag — `ge`, `gf`, `gs` — so a tool that meets an egg inside a `gm` basket names it the same way it would name that signature standing alone in a section. `None` for a tag this build does not know.
+pub fn algo_letter(scheme: u8) -> Option<u8> {
+    match scheme {
+        SCHEME_ED25519 => Some(b'e'),
+        SCHEME_FALCON512 => Some(b'f'),
+        SCHEME_SPHINCS_PLUS => Some(b's'),
+        _ => None,
+    }
+}
+
+/// The scheme tag for a single-egg signature type letter — the inverse of [`algo_letter`].
+pub fn scheme_of_letter(letter: u8) -> Option<u8> {
+    match letter {
+        b'e' => Some(SCHEME_ED25519),
+        b'f' => Some(SCHEME_FALCON512),
+        b's' => Some(SCHEME_SPHINCS_PLUS),
+        _ => None,
+    }
+}
+
+impl Egg {
+    /// This egg as the single-signature `VsfType` it would be on its own: `ge` / `gf` / `gs`. `None` for an unknown scheme.
+    pub fn to_vsf_type(&self) -> Option<crate::VsfType> {
+        Some(match self.scheme {
+            SCHEME_ED25519 => crate::VsfType::ge(self.sig.clone()),
+            SCHEME_FALCON512 => crate::VsfType::gf(self.sig.clone()),
+            SCHEME_SPHINCS_PLUS => crate::VsfType::gs(self.sig.clone()),
+            _ => return None,
+        })
+    }
+
+    /// An egg from a single-signature `VsfType` (`ge` / `gf` / `gs`). `None` for any other type.
+    pub fn from_vsf_type(v: &crate::VsfType) -> Option<Egg> {
+        Some(match v {
+            crate::VsfType::ge(b) => Egg { scheme: SCHEME_ED25519, sig: b.clone() },
+            crate::VsfType::gf(b) => Egg { scheme: SCHEME_FALCON512, sig: b.clone() },
+            crate::VsfType::gs(b) => Egg { scheme: SCHEME_SPHINCS_PLUS, sig: b.clone() },
+            _ => return None,
+        })
+    }
+}
 
 /// Encode an egg list.
 pub fn eggs_to_bytes(eggs: &[Egg]) -> Vec<u8> {
@@ -86,5 +134,32 @@ mod tests {
         let ph = placeholder_eggs(&[(0, 64), (1, 666)]);
         let signed = eggs_to_bytes(&[Egg { scheme: 0, sig: vec![9u8; 64] }, Egg { scheme: 1, sig: vec![9u8; 666] }]);
         assert_eq!(ph.len(), signed.len());
+    }
+}
+
+#[cfg(test)]
+mod single_egg_types {
+    use super::*;
+
+    /// A basket's eggs and the standalone signature types are the same bytes under two spellings: an egg round-trips through its `VsfType`, and each single-egg type round-trips through the codec by its own letter.
+    #[test]
+    fn eggs_and_single_signature_types_are_interchangeable() {
+        let eggs = vec![
+            Egg { scheme: SCHEME_ED25519, sig: vec![1u8; 64] },
+            Egg { scheme: SCHEME_FALCON512, sig: vec![2u8; 666] },
+            Egg { scheme: SCHEME_SPHINCS_PLUS, sig: vec![3u8; 7856] },
+        ];
+        for e in &eggs {
+            let t = e.to_vsf_type().expect("known scheme");
+            assert_eq!(Egg::from_vsf_type(&t).as_ref(), Some(e));
+            let bytes = t.flatten();
+            assert_eq!(bytes[1], algo_letter(e.scheme).unwrap(), "the type letter is the scheme's letter");
+            assert_eq!(scheme_of_letter(bytes[1]), Some(e.scheme));
+            let mut p = 0;
+            assert_eq!(crate::parse(&bytes, &mut p).expect("decodes"), t);
+            assert_eq!(p, bytes.len());
+        }
+        assert!(Egg { scheme: 9, sig: vec![] }.to_vsf_type().is_none(), "an unknown scheme has no letter");
+        assert!(Egg::from_vsf_type(&crate::VsfType::gm(eggs_to_bytes(&eggs))).is_none(), "a basket is not one egg");
     }
 }

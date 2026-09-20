@@ -448,13 +448,8 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
 fn zero_all_signatures(vsf_bytes: &mut Vec<u8>) -> Result<(), String> {
     let mut ptr = 0;
     while ptr < vsf_bytes.len() - 1 {
-        // Look for signature markers: ge, gp, gr, gm
-        if vsf_bytes[ptr] == b'g'
-            && (vsf_bytes[ptr + 1] == b'e'
-                || vsf_bytes[ptr + 1] == b'p'
-                || vsf_bytes[ptr + 1] == b'r'
-                || vsf_bytes[ptr + 1] == b'm')
-        {
+        // Look for signature markers: ge, gp, gr, gm, gf, gs, gd
+        if vsf_bytes[ptr] == b'g' && matches!(vsf_bytes[ptr + 1], b'e' | b'p' | b'r' | b'm' | b'f' | b's' | b'd') {
             let sig_position = ptr;
             let sig_type = match parse(vsf_bytes, &mut ptr) {
                 Ok(t) => t,
@@ -465,7 +460,7 @@ fn zero_all_signatures(vsf_bytes: &mut Vec<u8>) -> Result<(), String> {
             };
 
             match sig_type {
-                VsfType::ge(sig_bytes) | VsfType::gp(sig_bytes) | VsfType::gr(sig_bytes) | VsfType::gm(sig_bytes) => {
+                VsfType::ge(sig_bytes) | VsfType::gp(sig_bytes) | VsfType::gr(sig_bytes) | VsfType::gm(sig_bytes) | VsfType::gf(sig_bytes) | VsfType::gs(sig_bytes) | VsfType::gd(sig_bytes) => {
                     let sig_len = sig_bytes.len();
                     if let Ok(sig_start) = find_signature_value_position(vsf_bytes, sig_position) {
                         // Zero out signature
@@ -490,12 +485,12 @@ fn find_signature_value_position(data: &[u8], sig_marker_pos: usize) -> Result<u
         parse(data, &mut pos).map_err(|e| format!("Failed to parse signature: {}", e))?;
 
     match sig_type {
-        VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) | VsfType::gm(bytes) => {
+        VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) | VsfType::gm(bytes) | VsfType::gf(bytes) | VsfType::gs(bytes) | VsfType::gd(bytes) => {
             // pos now points AFTER the signature Calculate where the signature bytes started
             let sig_start = pos - bytes.len();
             Ok(sig_start)
         }
-        _ => Err("Expected signature type (ge/gp/gr/gm)".to_string()),
+        _ => Err("Expected signature type (ge/gp/gr/gm/gf/gs/gd)".to_string()),
     }
 }
 

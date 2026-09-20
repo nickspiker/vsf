@@ -5023,7 +5023,7 @@ impl VsfType {
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
             }
 
-            VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) | VsfType::gH(bytes) | VsfType::gm(bytes) => {
+            VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) | VsfType::gH(bytes) | VsfType::gm(bytes) | VsfType::gf(bytes) | VsfType::gs(bytes) | VsfType::gd(bytes) => {
                 // prefix + encoded_length + data
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
             }

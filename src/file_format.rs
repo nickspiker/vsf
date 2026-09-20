@@ -408,7 +408,7 @@ impl VsfHeader {
                                 hash = Some(value.clone());
                             }
                             // Signature types
-                            VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) | VsfType::gm(_) => {
+                            VsfType::ge(_) | VsfType::gp(_) | VsfType::gr(_) | VsfType::gm(_) | VsfType::gf(_) | VsfType::gs(_) | VsfType::gd(_) => {
                                 field_signature = Some(value.clone());
                             }
                             // Key types

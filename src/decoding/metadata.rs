@@ -492,6 +492,9 @@ pub fn parse_signature(data: &[u8], pointer: &mut usize) -> Result<VsfType, Deco
     match algo {
         b'e' => Ok(VsfType::ge(sig)),
         b'm' => Ok(VsfType::gm(sig)), // multi-scheme egg list
+        b'f' => Ok(VsfType::gf(sig)), // Falcon
+        b's' => Ok(VsfType::gs(sig)), // SPHINCS+ / SLH-DSA
+        b'd' => Ok(VsfType::gd(sig)), // Dilithium / ML-DSA
         b'p' => Ok(VsfType::gp(sig)),
         b'r' => Ok(VsfType::gr(sig)),
         b'H' => Ok(VsfType::gH(sig)), // Keyed integrity hash (BLAKE3 keyed MAC)
