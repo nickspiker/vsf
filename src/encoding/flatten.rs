@@ -1417,6 +1417,20 @@ impl VsfType {
             }
 
             // ==================== SHARED SECRETS (typed by algorithm) ====================
+            VsfType::kvf(value) => {
+                let mut flat = vec![b'k', b'v', b'f'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::kvs(value) => {
+                let mut flat = vec![b'k', b'v', b's'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
             VsfType::ksx(value) => {
                 let mut flat = vec![b'k', b's', b'x'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number());
@@ -5045,8 +5059,10 @@ impl VsfType {
                 2 + encoded_usize_len(bytes.len()) + bytes.len()
             }
 
-            // Shared secrets have 3-byte prefix (ksx, ksp, etc.)
-            VsfType::ksx(bytes)
+            // Shared secrets and verification keys have 3-byte prefix (ksx, ksp, kvf, …)
+            VsfType::kvf(bytes)
+            | VsfType::kvs(bytes)
+            | VsfType::ksx(bytes)
             | VsfType::ksp(bytes)
             | VsfType::ksk(bytes)
             | VsfType::ksf(bytes)

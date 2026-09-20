@@ -186,6 +186,10 @@ pub enum VsfType {
     kd(Vec<u8>), // Dilithium/ML-DSA public key
     kb(Vec<u8>), // BIKE public key
 
+    // Signature verification keys — `kv` + the signature's letter, for schemes whose two-letter `k` slot is taken (`kf` is FrodoKEM, `ks` is the shared-secret prefix). `ke`/`kd` keep their two-letter forms.
+    kvf(Vec<u8>), // Falcon public key (897B for 512, 1793B for 1024 - size disambiguates); verifies `gf`
+    kvs(Vec<u8>), // SPHINCS+ / SLH-DSA public key (32/48/64B for 128/192/256 - size disambiguates); verifies `gs`
+
     // Shared secrets
     ksx(Vec<u8>), // X25519 shared secret (32B)
     ksp(Vec<u8>), // P-curve ECDH shared secret (32B P-256, 48B P-384 - size disambiguates)
@@ -1170,6 +1174,8 @@ impl VsfType {
             | VsfType::kx(bytes)
             | VsfType::kc(bytes)
             | VsfType::ka(bytes)
+            | VsfType::kvf(bytes)
+            | VsfType::kvs(bytes)
             | VsfType::ge(bytes)
             | VsfType::gp(bytes)
             | VsfType::gm(bytes)

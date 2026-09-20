@@ -520,6 +520,10 @@ pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeErro
         // This is a shared secret - dispatch to parse_shared_secret Note: pointer is now at the third byte (algorithm variant)
         return parse_shared_secret(data, pointer);
     }
+    // Signature verification keys (kv*) — same 3-byte shape, third byte is the signature's letter
+    if algo == b'v' {
+        return parse_verify_key(data, pointer);
+    }
 
     // Read length (stored as len-1) using standard VSF variable-length encoding
     let length = decode_usize(data, pointer)? + 1; // Add 1 back
@@ -550,6 +554,33 @@ pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeErro
         b'b' => Ok(VsfType::kb(key)), // BIKE public key
         _ => Err(DecodeError::InvalidDataMsg(format!(
             "Unknown key algorithm: {}",
+            algo as char
+        ))),
+    }
+}
+
+/// Parse a signature verification key (kv* types - 3-byte prefix; the third byte is the letter of the signature it verifies)
+pub fn parse_verify_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
+    if *pointer >= data.len() {
+        return Err(DecodeError::UnexpectedEofMsg(
+            "Not enough data for verification key algorithm".into(),
+        ));
+    }
+    let algo = data[*pointer];
+    *pointer += 1;
+    let length = decode_usize(data, pointer)? + 1; // stored as len-1
+    if *pointer + length > data.len() {
+        return Err(DecodeError::UnexpectedEofMsg(
+            "Not enough data for verification key".into(),
+        ));
+    }
+    let key = data[*pointer..*pointer + length].to_vec();
+    *pointer += length;
+    match algo {
+        b'f' => Ok(VsfType::kvf(key)), // Falcon
+        b's' => Ok(VsfType::kvs(key)), // SPHINCS+ / SLH-DSA
+        _ => Err(DecodeError::InvalidDataMsg(format!(
+            "Unknown verification key algorithm: {}",
             algo as char
         ))),
     }

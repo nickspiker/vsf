@@ -30,6 +30,26 @@ pub fn algo_letter(scheme: u8) -> Option<u8> {
     }
 }
 
+/// The verification-key `VsfType` for a scheme's public key: `ke` / `kvf` / `kvs`. `None` for a tag this build does not know.
+pub fn key_type(scheme: u8, pubkey: Vec<u8>) -> Option<crate::VsfType> {
+    Some(match scheme {
+        SCHEME_ED25519 => crate::VsfType::ke(pubkey),
+        SCHEME_FALCON512 => crate::VsfType::kvf(pubkey),
+        SCHEME_SPHINCS_PLUS => crate::VsfType::kvs(pubkey),
+        _ => return None,
+    })
+}
+
+/// The scheme a verification-key `VsfType` belongs to — the inverse of [`key_type`]. `None` for any other type.
+pub fn scheme_of_key(v: &crate::VsfType) -> Option<u8> {
+    match v {
+        crate::VsfType::ke(_) => Some(SCHEME_ED25519),
+        crate::VsfType::kvf(_) => Some(SCHEME_FALCON512),
+        crate::VsfType::kvs(_) => Some(SCHEME_SPHINCS_PLUS),
+        _ => None,
+    }
+}
+
 /// The scheme tag for a single-egg signature type letter — the inverse of [`algo_letter`].
 pub fn scheme_of_letter(letter: u8) -> Option<u8> {
     match letter {
@@ -160,6 +180,19 @@ mod single_egg_types {
             assert_eq!(p, bytes.len());
         }
         assert!(Egg { scheme: 9, sig: vec![] }.to_vsf_type().is_none(), "an unknown scheme has no letter");
+
+        // Each scheme's verification key has its own type, round-trips by its letters, and maps back to the scheme.
+        for (scheme, n) in [(SCHEME_ED25519, 32usize), (SCHEME_FALCON512, 897), (SCHEME_SPHINCS_PLUS, 32)] {
+            let k = key_type(scheme, vec![7u8; n]).expect("known scheme");
+            assert_eq!(scheme_of_key(&k), Some(scheme));
+            let bytes = k.flatten();
+            assert_eq!(bytes[0], b'k');
+            let mut p = 0;
+            assert_eq!(crate::parse(&bytes, &mut p).expect("decodes"), k);
+            assert_eq!(p, bytes.len());
+        }
+        assert!(key_type(9, vec![]).is_none());
+        assert_eq!(scheme_of_key(&crate::VsfType::kf(vec![0; 9616])), None, "kf is FrodoKEM, not Falcon");
         assert!(Egg::from_vsf_type(&crate::VsfType::gm(eggs_to_bytes(&eggs))).is_none(), "a basket is not one egg");
     }
 }

@@ -1073,6 +1073,8 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         VsfType::kl(k) => format_crypto_hex("kl", k), // McEliece
         VsfType::kh(k) => format_crypto_hex("kh", k), // HQC
         VsfType::kd(k) => format_crypto_hex("kd", k), // Dilithium/ML-DSA
+        VsfType::kvf(k) => format_crypto_hex("kvf", k), // Falcon verification key
+        VsfType::kvs(k) => format_crypto_hex("kvs", k), // SPHINCS+ verification key
         VsfType::km(k) => format_crypto_hex("km", k), // ML-KEM
         VsfType::kb(k) => format_crypto_hex("kb", k), // BIKE
         // Shared secrets (typed by algorithm)
@@ -1090,6 +1092,7 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         VsfType::gd(s) => format_crypto_hex("gd", s), // Dilithium/ML-DSA
         VsfType::gs(s) => format_crypto_hex("gs", s), // Sphincs+
         VsfType::gf(s) => format_crypto_hex("gf", s), // Falcon
+        VsfType::gm(s) => format_crypto_hex("gm", s), // multi-scheme egg list
         #[allow(deprecated)]
         VsfType::gr(s) => format_crypto_hex("gr", s), // RSA (deprecated)
         // MACs (teal, like hashes)
