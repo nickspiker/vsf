@@ -77,12 +77,13 @@ impl IdtClass {
     }
 }
 
-/// Trust grade of a characterization matrix. `Unit`: measured on THIS camera (a magic-9 target scan). `Model`: factory per-model (a DNG ColorMatrix). `Assumed`: implied by the format convention alone (an sRGB JPEG). This is how "assumed profile, best guess" is first-class rather than a lie.
+/// Trust grade of a characterization matrix. `Unit`: measured on THIS camera (a magic-9 target scan). `Model`: factory per-model (a DNG ColorMatrix). `Assumed`: implied by the format convention alone (an sRGB JPEG). `Native`: not a characterization at all — the samples are ALREADY VSF RGB, so the entry is the identity and there is nothing to be right or wrong about. Untagged data is VSF RGB by specification (Nick 2026-09-22: "it IS VSF RGB if there is no profile attached"), which is a statement, not a guess, and grading it `Assumed` alongside a inferred sRGB JPEG would be the lie this enum exists to avoid. This is how "assumed profile, best guess" is first-class rather than a lie.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProfileGrade {
     Unit,
     Model,
     Assumed,
+    Native,
 }
 
 impl ProfileGrade {
@@ -91,6 +92,7 @@ impl ProfileGrade {
             ProfileGrade::Unit => "unit",
             ProfileGrade::Model => "model",
             ProfileGrade::Assumed => "assumed",
+            ProfileGrade::Native => "native",
         }
     }
     fn parse(s: &str) -> Result<Self, SpectralImageError> {
@@ -98,6 +100,7 @@ impl ProfileGrade {
             "unit" => Ok(ProfileGrade::Unit),
             "model" => Ok(ProfileGrade::Model),
             "assumed" => Ok(ProfileGrade::Assumed),
+            "native" => Ok(ProfileGrade::Native),
             other => Err(SpectralImageError::BadField(format!("unknown profile grade '{}'", other))),
         }
     }
