@@ -31,7 +31,7 @@ spectral_image
 colour_profile   target = vsf_rgb
   entry
     class                    relative
-    grade                    unit
+    tier                    unit
     matrix                   camera → VSF RGB, normalised
     sensitivity[k]           counts at white level, as a fraction of a perfect diffuse
                              reflector under the solved illuminant

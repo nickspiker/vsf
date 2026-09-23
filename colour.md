@@ -247,4 +247,4 @@ VSF RGB uses monochromatic primaries at 703nm/523nm/462nm (derived from AGB geom
 
 ## Input Device Transforms
 
-VSF RGB is where every characterization lands. How a sensor's counts get there — and what class of claim the transform makes about the scene — is specified in [`idt/`](idt/README.md): the four kinds of IDT (Absolute, Relative, Creative, Technical), the grade axis that says how a characterization was arrived at, the rule that a file with no profile *is* VSF RGB, and the field set that lets two different cameras at the same T-stop agree with no adjustment.
+VSF RGB is where every characterization lands. How a sensor's counts get there — and what class of claim the transform makes about the scene — is specified in [`idt/`](idt/README.md): the four kinds of IDT (Absolute, Relative, Creative, Technical), the tier axis that says how a characterization was arrived at, the rule that a file with no profile *is* VSF RGB, and the field set that lets two different cameras at the same T-stop agree with no adjustment.

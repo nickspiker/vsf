@@ -35,7 +35,7 @@ Every field a VSF image carries, by section, with the name it has on the wire. T
 | `entries[i].matrix` | `matrices` | f32 tensor `[n, 3, 3]` | camera → target. **Best first** |
 | `entries[i].source` | `sources` | string, newline-joined | **open** vocabulary: `magic9`, `dng_colormatrix1`, `assumed_srgb`, `no_colormatrix`, … unknown still names a working matrix |
 | `entries[i].class` | `classes` | `absolute` \| `relative` \| `creative` \| `technical` | closed — see [README](README.md#the-four-classes) |
-| `entries[i].grade` | `grades` | `unit` \| `model` \| `assumed` | closed — see [grades.md](grades.md) |
+| `entries[i].tier` | `tiers` | `unit` \| `model` \| `assumed` | closed — see [tiers.md](tiers.md). Read also accepts the legacy `grades` (pre-2026-09-22); write emits `tiers` only |
 | `entries[i].illuminant` | `illuminants` | u16 tensor `[n]` | EXIF LightSource code, 0 = unknown. Today: display exposure scalar only, never adaptation |
 | `entries[i].transfer` | `transfers` | `linear` \| `srgb` \| `gamma2` \| `gamma22` | **vestigial** — see below |
 | `dng_colormatrix[0..2]` | `dng_colormatrix1`, `dng_colormatrix2` + `dng_illuminant1`, `dng_illuminant2` | f32 `[3,3]` + unsigned | verbatim XYZ→camera and its illuminant code, untouched — the question the entries answer |
@@ -59,9 +59,9 @@ opsin writes `orientation` (EXIF 274 code), `crop` (x, y, w, h), `exposure` (sto
 
 Absence is a specification, not a gap. Every field below has a defined reading when it is missing.
 
-0. **No `colour_profile`** — the samples **are VSF RGB**. Not "uncharacterized": a reader renders thru the identity camera matrix with Illuminant E as the white, which XYZ→VSF RGB maps to exactly (1, 1, 1). There is nothing to grade because nothing is claimed beyond what the format guarantees. *Implemented in opsin, 2026-09-22.* A RAW with no matrix is **not** this case — sensor counts are not VSF RGB — and it carries the identity at `assumed`, source `no_colormatrix`.
+0. **No `colour_profile`** — the samples **are VSF RGB**. Not "uncharacterized": a reader renders thru the identity camera matrix with Illuminant E as the white, which XYZ→VSF RGB maps to exactly (1, 1, 1). There is nothing to tier because nothing is claimed beyond what the format guarantees. *Implemented in opsin, 2026-09-22.* A RAW with no matrix is **not** this case — sensor counts are not VSF RGB — and it carries the identity at `assumed`, source `no_colormatrix`.
 1. **No `view_transform`** — no ops. Display as characterized.
-2. **No `curve`** — the entry's matrix is the characterization, bounded to its fit set. See [grades.md](grades.md#what-a-grade-is-not).
+2. **No `curve`** — the entry's matrix is the characterization, bounded to its fit set. See [tiers.md](tiers.md#what-a-tier-is-not).
 3. **Sample encoding** — integer planes are **gamma 2**, encoded with the square root and decoded with the square, per [`colour.md`](../colour.md) and the reference implementation. Float planes are linear. (There are no float planes yet; `samples` is integer-only.)
 
 > **Note on direction.** The reference implementation in `src/colour/convert.rs` encodes with `sqrt` and decodes with the square — `let encoded = linear.sqrt()` — and lumis and opsin do the same. The prose in `colour.md` currently states the reverse (`encoded = linear*linear`). The implementation is authoritative; the prose is a known discrepancy as of 2026-09-22.

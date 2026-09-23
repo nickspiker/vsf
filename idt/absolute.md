@@ -33,7 +33,7 @@ spectral_image
 colour_profile   target = vsf_rgb
   entry
     class                    absolute
-    grade                    unit
+    tier                    unit
     matrix                   camera → VSF RGB, normalised — scale factored OUT
     sensitivity[k]           sensor-plane exposure at white level, per channel
                              J·m⁻², monochromatic-equivalent at the curve's peak

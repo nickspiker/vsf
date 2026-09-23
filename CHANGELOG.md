@@ -5,6 +5,16 @@ All notable changes to VSF will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`ProfileGrade` is `ProfileTier`; the `colour_profile` wire field `grades` is `tiers`.** The values (`unit`, `model`, `assumed`) are unchanged. "Grade" is this format's audience's word for the *creative* colour pass, so the characterization's trust axis was named with the industry's word for Creative — the exact opposite of what it means. "Tiered characterization" was already the docs' phrase. Readers accept the legacy `grades` from files written before 2026-09-22; writers emit only `tiers`. The Rust rename is an API break for anyone matching on the enum or naming the field.
+
+### Added
+
+- `idt/` — the Input Device Transform specification: one page per class (Absolute, Relative, Creative, Technical), the tier axis, and the full image field set with the defaults absence implies and the proposed additions. `colour.md` and `README.md` link it.
+
 ## [0.9.1] - 2026-07-04
 
 ### Fixed

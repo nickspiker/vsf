@@ -24,17 +24,17 @@ This directory is the specification of how VSF records them. It sits on top of [
 
 Absolute and Relative are the two *characterizations* — the entries in a file's `colour_profile`. Creative and Technical are mostly *layers* — ops in the `view_transform` log, applied in order after characterization. The one crossover is the Technical sensitivity scalar, which belongs inside the characterization because without it a characterization is incomplete: a matrix fixes ratios, so chromaticity, and says nothing about magnitude.
 
-## Class and grade are orthogonal
+## Class and tier are orthogonal
 
-Every entry carries two independent facts. Its **class** says what kind of relationship it claims to the scene — one of the four above. Its **[grade](grades.md)** says how that claim was arrived at: measured on this unit, given by the manufacturer for the model, or implied by a format's convention. A DNG matrix is Absolute at Model grade. A chameleon target scan is Relative at Unit grade. An untagged JPEG read as sRGB is Absolute at Assumed grade.
+Every entry carries two independent facts. Its **class** says what kind of relationship it claims to the scene — one of the four above. Its **[tier](tiers.md)** says how that claim was arrived at: measured on this unit, given by the manufacturer for the model, or implied by a format's convention. A DNG matrix is Absolute at Model tier. A chameleon target scan is Relative at Unit tier. An untagged JPEG read as sRGB is Absolute at Assumed tier.
 
-They are kept apart on purpose. Grade exists so a guess can never silently read as a measurement. Class exists so a look can never silently read as a characterization. Both are the same principle — a weaker claim must not pass as a stronger one — pointed at two different axes.
+They are kept apart on purpose. Tier exists so a guess can never silently read as a measurement. Class exists so a look can never silently read as a characterization. Both are the same principle — a weaker claim must not pass as a stronger one — pointed at two different axes.
 
 ## Absence is a statement
 
-A `spectral_image` with no `colour_profile` is not uncharacterized. Its samples **are** VSF RGB, by specification. There is nothing to grade because nothing is being claimed beyond what the format already guarantees, and any reader that meets no profile renders thru the identity with Illuminant E as the white. See [`fields.md`](fields.md) for the defaults that absence implies, including the sample encoding.
+A `spectral_image` with no `colour_profile` is not uncharacterized. Its samples **are** VSF RGB, by specification. There is nothing to tier because nothing is being claimed beyond what the format already guarantees, and any reader that meets no profile renders thru the identity with Illuminant E as the white. See [`fields.md`](fields.md) for the defaults that absence implies, including the sample encoding.
 
-This is not a convenience. It closes a hole: the alternative is an identity entry that must carry *some* grade, and every available grade misdescribes it — `Assumed` calls a definite fact a guess, `Unit` calls it a measurement. Absence is the only honest representation, and the format was designed so that it is also the default one.
+This is not a convenience. It closes a hole: the alternative is an identity entry that must carry *some* tier, and every available tier misdescribes it — `Assumed` calls a definite fact a guess, `Unit` calls it a measurement. Absence is the only honest representation, and the format was designed so that it is also the default one.
 
 ## Why not ACES
 
@@ -42,7 +42,7 @@ ACES has a single, undifferentiated IDT slot — camera-native to ACES2065-1 —
 
 Then its Reference Rendering Transform is a fixed, mandatory, opinionated film-like rendering that every image passes thru on the way to a display — a Creative transform living in the slot marked Reference. Its documented 1.x artefacts (saturated reds skewing orange, blue lights going purple) come from exactly that: a per-channel tone curve applied where a measurement should have been left alone. ACES 2.0 rewrote the output transform to fix them, which is a tacit admission the reference rendering was wrong for a decade.
 
-ACES also has no grade axis, so a magic-9 scan and a guess are the same kind of object, and it is tristimulus all the way down, so the 1931 observer is baked into the encoding and cannot be updated after the fact — the problem [`colour.md`](../colour.md) exists to solve.
+ACES also has no tier axis, so a magic-9 scan and a guess are the same kind of object, and it is tristimulus all the way down, so the 1931 observer is baked into the encoding and cannot be updated after the fact — the problem [`colour.md`](../colour.md) exists to solve.
 
 The four classes are not a variant of the ACES model. They are what ACES has one slot for.
 
@@ -52,5 +52,5 @@ The four classes are not a variant of the ACES model. They are what ACES has one
 - [relative.md](relative.md) — the Relative IDT: the DSR spectral solve, where its scale comes from, and what the lens has to do with it
 - [creative.md](creative.md) — Creative layers: white balance as the naive DSR, camera looks, curves, and the rule for a second exposure scalar
 - [technical.md](technical.md) — Technical ops: value-preserving mechanics, instrument remaps, and the line between them and Creative
-- [grades.md](grades.md) — Unit, Model, Assumed: the trust axis, and the grade that was added and removed
+- [tiers.md](tiers.md) — Unit, Model, Assumed: the trust axis, and the tier that was added and removed
 - [fields.md](fields.md) — every field a VSF image carries today, the wire names, the defaults absence implies, and the proposed additions with their status

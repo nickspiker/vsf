@@ -77,28 +77,28 @@ impl IdtClass {
     }
 }
 
-/// Trust grade of a characterization matrix. `Unit`: measured on THIS camera (a magic-9 target scan). `Model`: factory per-model (a DNG ColorMatrix). `Assumed`: implied by the format convention alone (an sRGB JPEG). This is how "assumed profile, best guess" is first-class rather than a lie.
+/// Trust tier of a characterization matrix. `Unit`: measured on THIS camera (a magic-9 target scan). `Model`: factory per-model (a DNG ColorMatrix). `Assumed`: implied by the format convention alone (an sRGB JPEG). This is how "assumed profile, best guess" is first-class rather than a lie. Ordered — `Unit` > `Model` > `Assumed` — which is why it is a TIER and not a grade: "grade" is this format's audience's word for the CREATIVE colour pass, so `ProfileGrade` read as "the profile's look", the exact opposite of a measurement's trust level (renamed 2026-09-22; the wire field was `grades`, read as a legacy alias). "Tiered characterization" was already the docs' own phrase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProfileGrade {
+pub enum ProfileTier {
     Unit,
     Model,
     Assumed,
 }
 
-impl ProfileGrade {
+impl ProfileTier {
     pub fn as_str(self) -> &'static str {
         match self {
-            ProfileGrade::Unit => "unit",
-            ProfileGrade::Model => "model",
-            ProfileGrade::Assumed => "assumed",
+            ProfileTier::Unit => "unit",
+            ProfileTier::Model => "model",
+            ProfileTier::Assumed => "assumed",
         }
     }
     fn parse(s: &str) -> Result<Self, SpectralImageError> {
         match s {
-            "unit" => Ok(ProfileGrade::Unit),
-            "model" => Ok(ProfileGrade::Model),
-            "assumed" => Ok(ProfileGrade::Assumed),
-            other => Err(SpectralImageError::BadField(format!("unknown profile grade '{}'", other))),
+            "unit" => Ok(ProfileTier::Unit),
+            "model" => Ok(ProfileTier::Model),
+            "assumed" => Ok(ProfileTier::Assumed),
+            other => Err(SpectralImageError::BadField(format!("unknown profile tier '{}'", other))),
         }
     }
 }
@@ -139,13 +139,13 @@ pub struct ProfileEntry {
     /// Free-form derivation token (`magic9`, `dng_colormatrix1`, `assumed_srgb`, …) — open vocabulary; an unknown token still names a working matrix, it just reads opaque.
     pub source: String,
     pub class: IdtClass,
-    pub grade: ProfileGrade,
+    pub tier: ProfileTier,
     /// EXIF LightSource code of the characterization illuminant; 0 = unknown. For deriving a display exposure scalar only — never chromatic adaptation.
     pub illuminant: u16,
     pub transfer: Transfer,
 }
 
-/// magic-9 calibration provenance carried alongside a `unit`-grade entry: which target produced it.
+/// magic-9 calibration provenance carried alongside a `unit`-tier entry: which target produced it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CalProvenance {
     pub target_type: u32,
@@ -239,6 +239,11 @@ impl SpectralImage {
 
 /// Serialize to a complete VSF file (header + sections + BLAKE3 integrity, all handled by [`VsfBuilder`]).
 pub fn write(img: &SpectralImage) -> Result<Vec<u8>, String> {
+    write_named(img, "tiers")
+}
+
+/// [`write`] with the tier field's wire name chosen by the caller. Only `write` and the legacy-read test call it: it is how a file exactly like one written before 2026-09-22 — `grades`, thru the same builder and integrity hash — is produced without keeping an old binary around.
+fn write_named(img: &SpectralImage, tier_field: &str) -> Result<Vec<u8>, String> {
     let k = img.channels.len();
     if img.black.len() != k || img.white.len() != k {
         return Err(format!("black/white length {}/{} != channel count {}", img.black.len(), img.white.len(), k));
@@ -336,14 +341,14 @@ pub fn write(img: &SpectralImage) -> Result<Vec<u8>, String> {
         let mut matrices: Vec<f32> = Vec::with_capacity(n * 9);
         let mut sources: Vec<&str> = Vec::with_capacity(n);
         let mut classes: Vec<&str> = Vec::with_capacity(n);
-        let mut grades: Vec<&str> = Vec::with_capacity(n);
+        let mut tiers: Vec<&str> = Vec::with_capacity(n);
         let mut illuminants: Vec<u16> = Vec::with_capacity(n);
         let mut transfers: Vec<&str> = Vec::with_capacity(n);
         for e in &profile.entries {
             matrices.extend_from_slice(&e.matrix);
             sources.push(&e.source);
             classes.push(e.class.as_str());
-            grades.push(e.grade.as_str());
+            tiers.push(e.tier.as_str());
             illuminants.push(e.illuminant);
             transfers.push(e.transfer.as_str());
         }
@@ -353,7 +358,7 @@ pub fn write(img: &SpectralImage) -> Result<Vec<u8>, String> {
             ("matrices".to_string(), VsfType::t_f5(Tensor::new(vec![n, 3, 3], matrices))),
             ("sources".to_string(), VsfType::a(sources.join("\n"))),
             ("classes".to_string(), VsfType::a(classes.join("\n"))),
-            ("grades".to_string(), VsfType::a(grades.join("\n"))),
+            (tier_field.to_string(), VsfType::a(tiers.join("\n"))),
             ("illuminants".to_string(), VsfType::t_u4(Tensor::new(vec![n], illuminants))),
             ("transfers".to_string(), VsfType::a(transfers.join("\n"))),
         ];
@@ -513,7 +518,8 @@ fn read_colour_profile(data: &[u8], header: &VsfHeader) -> Result<Option<ColourP
     }
     let sources = split_n(&take_string(&sec, "sources")?, n, "colour_profile sources")?;
     let classes = split_n(&take_string(&sec, "classes")?, n, "colour_profile classes")?;
-    let grades = split_n(&take_string(&sec, "grades")?, n, "colour_profile grades")?;
+    // `tiers`; files written before 2026-09-22 say `grades` — same values, same meaning, the word was wrong. Read both, write only the new one.
+    let tiers = split_n(&take_tiers(&sec)?, n, "colour_profile tiers")?;
     let transfers = split_n(&take_string(&sec, "transfers")?, n, "colour_profile transfers")?;
     let illuminants = take_u32_vec(&sec, "illuminants")?;
     if illuminants.len() != n {
@@ -527,7 +533,7 @@ fn read_colour_profile(data: &[u8], header: &VsfHeader) -> Result<Option<ColourP
             matrix,
             source: sources[i].clone(),
             class: IdtClass::parse(&classes[i])?,
-            grade: ProfileGrade::parse(&grades[i])?,
+            tier: ProfileTier::parse(&tiers[i])?,
             illuminant: illuminants[i] as u16,
             transfer: Transfer::parse(&transfers[i])?,
         });
@@ -647,6 +653,11 @@ fn take_string(fields: &[VsfField], name: &'static str) -> Result<String, Spectr
     take_string_opt(fields, name).ok_or(SpectralImageError::MissingField(name))
 }
 
+/// The entries' tiers, by their current name or the legacy one (`grades`, pre-2026-09-22). `MissingField("tiers")` when neither is present.
+fn take_tiers(fields: &[VsfField]) -> Result<String, SpectralImageError> {
+    take_string_opt(fields, "tiers").or_else(|| take_string_opt(fields, "grades")).ok_or(SpectralImageError::MissingField("tiers"))
+}
+
 fn take_string_opt(fields: &[VsfField], name: &str) -> Option<String> {
     match find(fields, name) {
         Some(VsfType::a(s)) | Some(VsfType::x(s)) => Some(s.clone()),
@@ -688,6 +699,48 @@ fn take_hash32(fields: &[VsfField], name: &str) -> Option<[u8; 32]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The wire field was `grades` until 2026-09-22; a reader takes either name and prefers the new one. Neither present is the same missing-field error a reader has always given.
+    /// A whole file, not just the field lookup: written with the pre-rename `grades` name thru the real builder and integrity hash, read back by the current reader, tier intact. And the current writer never emits the old name.
+    #[test]
+    fn a_file_written_with_the_legacy_grades_field_reads_back() {
+        let has = |bytes: &[u8], word: &[u8]| bytes.windows(word.len()).any(|w| w == word);
+        let img = SpectralImage {
+            width: 1,
+            height: 1,
+            channels: ["r", "g", "b"].iter().map(|n| SpectralChannel { name: n.to_string(), curve: None }).collect(),
+            layout: PlaneLayout::Planar,
+            samples: BitPackedTensor::pack(16, vec![3, 1, 1], &[1u16, 2, 3]),
+            black: vec![0.; 3],
+            white: vec![65535.; 3],
+            make: String::new(),
+            model: String::new(),
+            provenance: Provenance::default(),
+            profile: Some(ColourProfile {
+                target: "vsf_rgb".into(),
+                entries: vec![ProfileEntry { matrix: [1., 0., 0., 0., 1., 0., 0., 0., 1.], source: "legacy".into(), class: IdtClass::Absolute, tier: ProfileTier::Model, illuminant: 21, transfer: Transfer::Linear }],
+                dng_colormatrix: [None, None],
+                patches: None,
+                cal: None,
+            }),
+            view: None,
+        };
+        let legacy = write_named(&img, "grades").unwrap();
+        assert!(has(&legacy, b"grades") && !has(&legacy, b"tiers"), "the fixture is a genuine pre-rename file");
+        let back = read(&legacy).unwrap();
+        assert_eq!(back.profile.unwrap().entries[0].tier, ProfileTier::Model, "a pre-rename file reads back with its tier intact");
+        let current = write(&img).unwrap();
+        assert!(has(&current, b"tiers") && !has(&current, b"grades"), "the current writer emits only the new name");
+    }
+
+    #[test]
+    fn tiers_reads_by_its_name_or_the_legacy_one() {
+        let f = |name: &str, v: &str| VsfField { name: name.to_string(), values: vec![VsfType::a(v.to_string())] };
+        assert_eq!(take_tiers(&[f("tiers", "unit\nmodel")]).unwrap(), "unit\nmodel");
+        assert_eq!(take_tiers(&[f("grades", "assumed")]).unwrap(), "assumed", "a pre-rename file still reads");
+        assert_eq!(take_tiers(&[f("grades", "old"), f("tiers", "new")]).unwrap(), "new", "the current name wins when both are present");
+        assert!(matches!(take_tiers(&[f("sources", "x")]), Err(SpectralImageError::MissingField("tiers"))));
+    }
 
     fn bayer_test_image() -> SpectralImage {
         // 4×4 RGGB mosaic, 12-bit counts.
@@ -758,7 +811,7 @@ mod tests {
                     matrix: [1.1, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 1.2],
                     source: "magic9".into(),
                     class: IdtClass::Relative,
-                    grade: ProfileGrade::Unit,
+                    tier: ProfileTier::Unit,
                     illuminant: 21,
                     transfer: Transfer::Linear,
                 },
@@ -766,7 +819,7 @@ mod tests {
                     matrix: [0.8, 0.1, 0.05, 0.02, 0.95, 0.03, 0.01, 0.04, 1.1],
                     source: "dng_colormatrix1".into(),
                     class: IdtClass::Absolute,
-                    grade: ProfileGrade::Model,
+                    tier: ProfileTier::Model,
                     illuminant: 23,
                     transfer: Transfer::Linear,
                 },
