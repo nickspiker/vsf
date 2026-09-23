@@ -10,6 +10,8 @@ VSF addresses a fundamental challenge in binary formats: how to efficiently enco
 
 **📚 [Full Documentation & Examples](https://holdmyoscilloscope.com/vsf/)**
 
+**In this repository:** [`colour.md`](colour.md) — the VSF RGB colourspace standard · [`idt/`](idt/README.md) — Input Device Transforms: the four classes, grades, and the image field set · [`units.md`](units.md) — the base-unit system
+
 ---
 
 ## Core Innovation: Exponential-Width Integer Encoding
