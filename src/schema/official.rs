@@ -158,7 +158,6 @@ pub fn colour_profile_schema() -> SectionSchema {
         .field("sources", TypeConstraint::AnyString) // '\n'-joined
         .field("classes", TypeConstraint::AnyString) // absolute|relative|creative|technical
         .field("tiers", TypeConstraint::AnyString) // unit|model|assumed
-        .field("grades", TypeConstraint::AnyString) // legacy name for `tiers` (pre-2026-09-22): read, never written
         .field("illuminants", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyUnsigned)))
         .field("transfers", TypeConstraint::AnyString) // linear|srgb|gamma2|gamma22
         .field("dng_colormatrix1", TypeConstraint::Tensor(Box::new(TypeConstraint::AnyFloat)))

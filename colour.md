@@ -16,9 +16,9 @@ The 1931 xy coordinates ARE the specification. You cannot update to better obser
 
 xy coordinates describe a perceptual response, not a physical stimulus. Multiple spectral power distributions can produce the same xy coordinate (metamerism). When a standard says "primary at xy (0.64, 0.33)", this doesn't uniquely specify which wavelengths to use.
 
-### 2. Accumulated Transformation Errors
+### 2. The Observer Is Not Yours to Choose
 
-Converting between colourspaces requires chaining transformations thru XYZ tristimulus space, each step accumulating floating-point error and observer model inconsistencies. Rec.2020 kind of solves this by listing xy coordinates and wavelengths (630nm, 532nm, 467nm) - likely specified for hardware implementation reasons. However, their published xy coordinates don't match those wavelengths using the 2006 standard observer. Now you have two specifications that define different colours. Which one is "correct"? Nobody knows. VSF uses their wavelengths and ignores the xy coordinates.
+A matrix between two xy-defined spaces has to be evaluated under the 1931 observer, because the primaries exist only as 1931 chromaticities. There is no better observer to switch to; the definition carries no spectrum to re-evaluate. Rec.2020 is the one standard that also publishes wavelengths (630nm, 532nm, 467nm), likely for hardware reasons. Wavelengths can be evaluated under any observer. Its xy coordinates were derived from those wavelengths under 1931, so the two agree under 1931 and disagree under anything newer. VSF treats the wavelengths as the specification.
 
 ## The Spectral Solution
 
@@ -120,13 +120,13 @@ VSF's ×256 truncation has the SAME asymmetry (128 represents [0.5, 0.50390625) 
 
 No branches. No rounding. No arbitrary division. Just bitshifts and truncation.
 
-## Observer Model: CIE 2006 2° Standard Observer
+## Observer Model: Stockman & Sharpe 2000 10° Cone Fundamentals
 
-VSF RGB currently uses the **CIE 2006 2° Standard Observer** (cone fundamentals) for all colourspace conversions.
+VSF RGB uses the **Stockman & Sharpe (2000) 10° cone fundamentals** for everything spectral: placing its own primaries, placing any other wavelength-defined primary, chromatic adaptation, and sensor characterisation. Earlier versions used the 2° set.
 
 ### Why This Matters
 
-The observer model is used to establish perceptual equivalence between colourspaces: "What mixture of 703/523/462nm primaries produces the same L/M/S cone response as this input colour?"
+The observer model establishes perceptual equivalence between colourspaces: "What mixture of 703/523/462nm primaries produces the same L/M/S cone response as this input colour?"
 
 **Key advantage of spectral definition:** When better observer models are published, VSF RGB can adopt them immediately. The primaries (703nm, 523nm, 462nm) never change. Only the transformation matrices get recalculated with improved cone fundamentals, yielding better perceptual accuracy.
 
@@ -134,45 +134,46 @@ Legacy standards specified in xy coordinates cannot do this - their primaries AR
 
 ## Converting Between Colourspaces
 
-All conversions go thru LMS cone space using the most recent observer model:
+**VSF RGB is the connection space.** Every conversion is:
 
 ```
-Source RGB → Linear → LMS → Linear → Target RGB
+Source RGB → Linear → VSF RGB → Linear → Target RGB
 ```
+
+There is no XYZ or LMS hub. Each supported space has one matrix into VSF RGB and one out, derived once at build time; converting between two other spaces composes them. VSF RGB can be the hub because its primaries are physical: it is the monitor you would build if you could, three spectral lines and equal-energy white.
+
+How a space's entry matrix is derived depends on how the space defines itself.
+
+**Wavelength-defined primaries (VSF RGB, Rec.2020):** evaluate each primary's L, M, S response under the SS2000 10° cone fundamentals, build the matrix in LMS, and solve into VSF RGB. 1931 never appears.
+
+**xy-defined primaries (sRGB/Rec.709, Adobe RGB, DCI-P3, ...):** an xy pair is a 1931 chromaticity and nothing else. There is no spectrum to re-evaluate under a better observer, so these matrices are built the only way they can be: xy → 1931 XYZ, with VSF's primaries placed in 1931 XYZ by the same colour matching functions, so both sides of the matrix share one observer. This is the one place 1931 is unavoidable, and it is confined to the entry matrix of the legacy space.
+
+**Chromatic adaptation:** VSF RGB's white is Illuminant E; every legacy standard's is D65. The entry matrix includes a von Kries adaptation in SS2000 10° LMS from the source white to E, so a neutral in the source is a neutral (R = G = B) in VSF RGB and back. Without it, D65 white lands off the R = G = B axis, and VSF's YCbCr pays for that in chroma on every frame.
+
+ICC profiles hand over D50-relative XYZ (the profile connection space illuminant), so the ICC path enters thru its own D50 → E adapted matrix, `XYZ_D50_2VSF_RGB`, rather than the colorimetric `XYZ2VSF_RGB`.
+
+All conversions operate in **floating-point linear light**. Integer inputs are linearized. Integer outputs are gamma-encoded.
 
 ### Example: Rec.2020 → VSF RGB
 
 **Step 1: Rec.2020 RGB → LMS**
-- Calculate how much each Rec.2020 primary (630nm, 532nm, 467nm) excites L, M, S cones using CIE 2006 cone fundamentals
-- Build transformation matrix from Rec.2020 primaries to LMS
+- Calculate how much each Rec.2020 primary (630nm, 532nm, 467nm) excites L, M, S cones using the SS2000 10° cone fundamentals
+- Scale the primaries so Rec.2020 (1, 1, 1) produces D65 in LMS
 - Apply to input colour
 
-**Step 2: LMS → VSF RGB**  
-- Calculate how much each VSF primary (703nm, 523nm, 462nm) excites L, M, S cones using CIE 2006 cone fundamentals
-- Build transformation matrix from LMS to VSF primaries
+**Step 2: adapt D65 → E**
+- Von Kries scaling in LMS: divide by the D65 cone response, multiply by the E cone response
+
+**Step 3: LMS → VSF RGB**
+- Calculate how much each VSF primary (703nm, 523nm, 462nm) excites L, M, S cones using the same cone fundamentals
+- Invert to get LMS → VSF RGB
 - Apply to get VSF RGB output
 
-This approach:
-- Uses wavelengths directly (no xy coordinate ambiguity)
-- Applies a single observer model consistently
-- Produces reproducible transformation matrices
-- Avoids accumulated errors from chaining thru 1931 tristimulus space
+The three steps fold into one 3×3 matrix at build time.
 
-### Why We Ignore Rec.2020's xy Coordinates
+### Why We Use Rec.2020's Wavelengths, Not Its xy Coordinates
 
-Rec.2020 publishes both wavelengths (630/532/467nm) and xy chromaticity coordinates for its primaries. **These specify different colours.** When you calculate xy coordinates from their published wavelengths using the 2006 Standard Observer, the results don't match their published xy values.
-
-We use their wavelengths and ignore their xy coordinates. Wavelengths are unambiguous. xy coordinates lie.
-
-### Converting to Legacy xy-Coordinate Standards
-
-For standards specified only in xy coordinates (sRGB, Adobe RGB, DCI-P3, etc.), VSF conversions:
-- Go thru LMS space to avoid xy coordinate inconsistencies
-- Use published transformation matrices when no spectral definition exists
-- Apply the current observer model (CIE 2006 2°) consistently
-- Handle gamma conversion properly (including those baroque piecewise curves)
-
-All conversions operate in **floating-point linear light**. Integer inputs are linearized. Integer outputs are gamma-encoded.
+Rec.2020 publishes both. Under the 1931 observer they agree, because the xy values were derived from the wavelengths under 1931. Under any newer observer they describe different colours. The wavelengths are a physical stimulus and can be re-evaluated as observer models improve; the xy coordinates are frozen to 1931 forever. We use the wavelengths.
 
 ## Laboratory Reproducibility
 
@@ -221,9 +222,9 @@ Equal energy white point (Illuminant E) is mathematically defined and laboratory
 
 The VSF Rust library provides:
 - Conversion functions between VSF RGB and common colourspaces
-- Illuminant scaling (D65 ↔ Illuminant E when converting to/from legacy standards)
+- Chromatic adaptation (D65 ↔ Illuminant E, von Kries in LMS, folded into every legacy entry matrix)
 - Gamma conversion (including proper handling of sRGB/Rec.709/Rec.2020 piecewise curves)
-- Transformation matrices derived from CIE 2006 2° cone fundamentals
+- Transformation matrices derived from Stockman & Sharpe 2000 10° cone fundamentals
 
 ## If You Want xy Coordinates
 
@@ -242,7 +243,7 @@ Calculate them yourself using your preferred observer. Different observers produ
 
 ## TL;DR
 
-VSF RGB uses monochromatic primaries at 703nm/523nm/462nm (derived from AGB geometric mean model of cone perception), Illuminant E white point, and gamma 2 encoding. Primaries are specified by wavelengths (physics), not xy coordinates (perception). Conversions use CIE 2006 2° cone fundamentals and can be updated as better observer models are published. This makes VSF RGB objectively reproducible in any laboratory and eliminates the accumulated errors, ambiguities, and frozen limitations of legacy colour standards.
+VSF RGB uses monochromatic primaries at 703nm/523nm/462nm (derived from AGB geometric mean model of cone perception), Illuminant E white point, and gamma 2 encoding. Primaries are specified by wavelengths (physics), not xy coordinates (perception). VSF RGB is the connection space for all conversions. Spectral matrices use the Stockman & Sharpe 2000 10° cone fundamentals and can be recalculated as better observer models are published; xy-defined legacy spaces enter thru 1931 XYZ because that is the only observer their definition supports. This makes VSF RGB objectively reproducible in any laboratory and free of the ambiguities and frozen limitations of legacy colour standards.
 ---
 
 ## Input Device Transforms

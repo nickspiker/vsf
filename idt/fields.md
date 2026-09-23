@@ -35,7 +35,7 @@ Every field a VSF image carries, by section, with the name it has on the wire. T
 | `entries[i].matrix` | `matrices` | f32 tensor `[n, 3, 3]` | camera → target. **Best first** |
 | `entries[i].source` | `sources` | string, newline-joined | **open** vocabulary: `magic9`, `dng_colormatrix1`, `assumed_srgb`, `no_colormatrix`, … unknown still names a working matrix |
 | `entries[i].class` | `classes` | `absolute` \| `relative` \| `creative` \| `technical` | closed — see [README](README.md#the-four-classes) |
-| `entries[i].tier` | `tiers` | `unit` \| `model` \| `assumed` | closed — see [tiers.md](tiers.md). Read also accepts the legacy `grades` (pre-2026-09-22); write emits `tiers` only |
+| `entries[i].tier` | `tiers` | `unit` \| `model` \| `assumed` | closed — see [tiers.md](tiers.md). |
 | `entries[i].illuminant` | `illuminants` | u16 tensor `[n]` | EXIF LightSource code, 0 = unknown. Today: display exposure scalar only, never adaptation |
 | `entries[i].transfer` | `transfers` | `linear` \| `srgb` \| `gamma2` \| `gamma22` | **vestigial** — see below |
 | `dng_colormatrix[0..2]` | `dng_colormatrix1`, `dng_colormatrix2` + `dng_illuminant1`, `dng_illuminant2` | f32 `[3,3]` + unsigned | verbatim XYZ→camera and its illuminant code, untouched — the question the entries answer |

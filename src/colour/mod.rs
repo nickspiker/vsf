@@ -7,7 +7,7 @@
 //! VSF RGB and other spectrally-defined colourspaces specify primaries by wavelengths rather than xy chromaticity coordinates. This provides:
 //! - Physical reproducibility (703nm means 703nm in any laboratory)
 //! - Observer model independence (primaries don't change when observer models improve)
-//! - No accumulated transformation errors
+//! - Matrices recomputable under any observer, so conversion accuracy improves without the colourspace changing
 //!
 //! ## Legacy Colourspaces
 //!

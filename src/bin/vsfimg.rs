@@ -257,7 +257,7 @@ enum TrcCurve {
     Parametric { function_type: u16, vals: Vec<f32> },
 }
 
-/// Pre-parsed ICC converter for fast per-pixel use. Stores the ICC RGB → XYZ matrix + the static XYZ → VSF RGB matrix, plus the three TRC curves.
+/// Pre-parsed ICC converter for fast per-pixel use. Stores the ICC RGB → XYZ matrix + the static D50-PCS XYZ → VSF RGB matrix (ICC colorant tags are adapted to the D50 connection-space illuminant, so the entry matrix carries D50 → Illuminant E), plus the three TRC curves.
 struct IccColourConverter {
     icc_to_xyz: [f32; 9],
     xyz_to_vsf: [f32; 9],
@@ -268,7 +268,7 @@ struct IccColourConverter {
 
 fn parse_icc_converter(icc_profile: &[u8]) -> Result<IccColourConverter, String> {
     use icc_profile::{Data, DecodedICCProfile, ICCNumber};
-    use vsf::colour::XYZ2VSF_RGB;
+    use vsf::colour::XYZ_D50_2VSF_RGB;
 
     let icc_vec = icc_profile.to_vec();
     let profile =
@@ -292,7 +292,7 @@ fn parse_icc_converter(icc_profile: &[u8]) -> Result<IccColourConverter, String>
     let icc_to_xyz = [
         r_xyz[0], r_xyz[1], r_xyz[2], g_xyz[0], g_xyz[1], g_xyz[2], b_xyz[0], b_xyz[1], b_xyz[2],
     ];
-    let xyz_to_vsf = XYZ2VSF_RGB;
+    let xyz_to_vsf = XYZ_D50_2VSF_RGB;
     let r_trc = parse_trc_curve(profile.tags.get("rTRC"))?;
     let g_trc = parse_trc_curve(profile.tags.get("gTRC"))?;
     let b_trc = parse_trc_curve(profile.tags.get("bTRC"))?;

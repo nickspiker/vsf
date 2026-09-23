@@ -17,7 +17,7 @@
 //!
 //! ## Conversions
 //!
-//! Conversions between legacy colourspaces use published transformation matrices and go thru XYZ tristimulus space when necessary. Conversions to/from spectrally-defined spaces go thru LMS cone space using the CIE 2006 2° Standard Observer to maintain perceptual equivalence.
+//! Each legacy space has one matrix into VSF RGB, built from its xy primaries under the 1931 observer (the only observer an xy definition supports) with VSF's primaries placed under the same observer. Conversions between legacy spaces compose thru VSF RGB, never thru a shared XYZ hub. Spectrally defined spaces use the Stockman & Sharpe 2000 10° cone fundamentals instead; see `colour.md`.
 
 pub mod constants;
 

@@ -14,11 +14,11 @@
 //!
 //! ## Rec.2020
 //!
-//! Rec.2020 specifies wavelength primaries at 630nm, 532nm, and 467nm. We use these wavelength specifications and ignore the published xy coordinates, which don't match the wavelengths using any standard observer.
+//! Rec.2020 specifies wavelength primaries at 630nm, 532nm, and 467nm. We use the wavelengths. The published xy coordinates were derived from them under the 1931 observer and disagree with them under any newer one; the wavelengths are the physical stimulus.
 //!
-//! ## LMS2006
+//! ## LMS (Stockman & Sharpe 2000 10°)
 //!
-//! CIE 2006 2° cone fundamentals provide the transformation between wavelengths and human perception. These represent the spectral sensitivity of L (long), M (medium), and S (short) wavelength cone types in the human retina.
+//! The Stockman & Sharpe 2000 10° cone fundamentals provide the transformation between wavelengths and human perception. These represent the spectral sensitivity of L (long), M (medium), and S (short) wavelength cone types in the human retina.
 
 pub mod constants;
 pub use constants::*;

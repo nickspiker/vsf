@@ -34,7 +34,7 @@ Two kinds of string live in a profile, and they fail differently on purpose.
 
 This axis was called `grade` until 2026-09-22. In this format's own industry, "grade" is the creative colour pass — the thing a colourist does in Resolve. So `ProfileGrade` read as "the profile's look," which is the precise opposite of what it is: the trust level of a *measurement*. A taxonomy whose whole job is keeping Creative from being mistaken for characterization had named the characterization's trust axis with the industry's word for Creative.
 
-"Tier" was already the docs' word for the concept — "tiered characterization," "best entry first" — and it is ordinal, which the axis is. The values `unit`, `model`, `assumed` were never the problem and did not change. The wire field is `tiers`; a reader still accepts `grades` from files written before the rename.
+"Tier" was already the docs' word for the concept — "tiered characterization," "best entry first" — and it is ordinal, which the axis is. The values `unit`, `model`, `assumed` were never the problem and did not change. The wire field is `tiers`. No file was ever written with the old name, so there is no alias: a reader that meets `grades` fails loud, as it does for any unknown field.
 
 ## What a tier is not
 

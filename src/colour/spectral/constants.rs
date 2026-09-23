@@ -11,6 +11,7 @@ use crate::colour::spectrum::ConstSpectrum;
 /// Raw spectral data for Stockman & Sharpe (2000) 10° cone fundamentals at 1nm spacing
 ///
 /// Linear interpolation from 5nm data, normalized so each channel sums to 1.0. Data spans 390nm to 830nm (441 samples × 3 channels = 1323 values). Format: [L390, M390, S390, L391, M391, S391, ..., L830, M830, S830]
+#[rustfmt::skip]
 const LMS_2000_10DEG_1NM_DATA: [f32; 1323] = [
     0.000_004_874_716_f32,
     0.000_004_809_929_f32,
@@ -1339,7 +1340,9 @@ const LMS_2000_10DEG_1NM_DATA: [f32; 1323] = [
 
 /// Stockman & Sharpe (2000) 10° cone fundamentals at 1nm spacing
 ///
-/// Linear interpolation from 5nm data, normalized so each channel sums to 1.0. Data spans 390nm to 830nm with 1nm spacing (441 wavelength samples). 3-channel interleaved format: [L, M, S] at each wavelength.
+/// Linear interpolation from 5nm data, normalized so each channel sums to 1.0.
+/// Data spans 390nm to 830nm with 1nm spacing (441 wavelength samples).
+/// 3-channel interleaved format: [L, M, S] at each wavelength.
 pub const LMS_2000_10DEG_1NM: ConstSpectrum = ConstSpectrum {
     start_nm: 390.0,
     stop_nm: 830.0,
@@ -1385,13 +1388,15 @@ pub const LMS2VSF_RGB: [f32; 9] = [
 
 /// lms → Photopic luminance weights
 ///
-/// CIE 170-2 / Stockman & Sharpe 10° luminous efficiency V*₁₀(λ) = 0.692839·l̄(λ) + 0.349676·m̄(λ) (defined on unit-peak energy fundamentals), converted to VSF's sum-normalized basis via w = coefficient/max(channel), then rescaled to sum to 1.
-/// The weights read as the L and M SHARES of photopic luminance; only the ratio (2.332) affects output — PHOTOPIC_WHITE_NORM divides out any absolute scale, and the sum-to-1 scale makes E-white's raw luminance ≈ 1 before normalization.
+/// CIE 170-2 / Stockman & Sharpe 10° luminous efficiency V*₁₀(λ) = 0.692839·l̄(λ) + 0.349676·m̄(λ) (unit-peak energy fundamentals), converted to VSF's sum-normalized basis via w = coefficient/max(channel), then rescaled to sum to 1.
+/// The weights read as the L and M SHARES of photopic luminance; only the ratio affects output — downstream white normalization (PHOTOPIC_WHITE_NORM) divides out any absolute scale. S-cones contribute zero to photopic luminance by definition.
 pub const LMS2PHOTOPIC: [f32; 3] = [
-    0.699_893_16_f32, // l cone share
-    0.300_106_84_f32, // m cone share
+    0.699_893_2_f32,  // l cone share
+    0.300_106_85_f32, // m cone share
     0.0,              // s cone share (S-cones don't contribute to photopic luminance)
 ];
+
+// Rec.2020 transformation matrices are now in the rec2020 module See: src/colour/rec2020/constants.rs
 
 #[cfg(feature = "spirix")]
 pub use s44_consts::*;
@@ -1424,6 +1429,5 @@ mod s44_consts {
         sf!(1.023_017_9_f32),
     ];
 
-    pub const LMS2PHOTOPIC_S44: [S44; 3] =
-        [sf!(0.699_893_16_f32), sf!(0.300_106_84_f32), S44::ZERO];
+    pub const LMS2PHOTOPIC_S44: [S44; 3] = [sf!(0.699_893_2_f32), sf!(0.300_106_85_f32), S44::ZERO];
 }
