@@ -323,6 +323,8 @@ const _: () = assert!(
 pub mod types;
 /// The audio grid (LOCK): samples named by their index since the Eagle epoch at 48 kHz.
 pub mod grid;
+/// Tukutahi: rate declaration, exact naming and the Manawa marking grid for video and audio streams (photon docs/tukutahi.md).
+pub mod tukutahi;
 
 // Binary encoding
 pub mod encoding;
