@@ -18,7 +18,12 @@ pub mod world_coord;
 pub mod toka_tree;
 
 // Re-export main types
-pub use eagle_time::{datetime_to_eagle_time, EagleTime, EtType, OSCILLATIONS_PER_SECOND};
+pub use eagle_time::{
+    datetime_to_eagle_time, from_tai_ns, from_unix_ns, legacy_to_lock, lock_eagle_now, tai_minus_utc, to_tai_ns, to_unix_ns, EagleTime, EtType, GpsTai, PtpTai, TaiSource, EAGLE_EPOCH_TAI_SECS,
+    EAGLE_EPOCH_UNIX_SECS, LEAP_TABLE, LOCK_MINUS_LEGACY_SECS, OSCILLATIONS_PER_SECOND,
+};
+#[cfg(feature = "std")]
+pub use eagle_time::{set_leap_table, NtpTai};
 #[cfg(feature = "std")]
 pub use eagle_time::{eagle_time_nanos, eagle_time_oscillations};
 pub use network::{NaScheme, WaAddress};

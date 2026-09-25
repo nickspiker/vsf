@@ -321,6 +321,8 @@ const _: () = assert!(
 
 // Core type system
 pub mod types;
+/// The audio grid (LOCK): samples named by their index since the Eagle epoch at 48 kHz.
+pub mod grid;
 
 // Binary encoding
 pub mod encoding;
