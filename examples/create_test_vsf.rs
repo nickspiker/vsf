@@ -14,8 +14,8 @@ fn main() {
     // Create metadata
     let metadata = RawMetadata {
         cfa_pattern: Some(CfaPattern::new(vec![b'R', b'G', b'G', b'B']).unwrap()), // RGGB Bayer pattern
-        black_level: Some(BlackLevel::new(64.0).unwrap()),
-        white_level: Some(WhiteLevel::new(255.0).unwrap()),
+        black_level: Some(BlackLevel::new(64).unwrap()),
+        white_level: Some(WhiteLevel::new(255).unwrap()),
         dark_frame_hash: None,
         flat_field_hash: None,
         bias_frame_hash: None,
@@ -29,12 +29,12 @@ fn main() {
         make: None,
         model: None,
         serial_number: None,
-        iso_speed: Some(IsoSpeed::new(800.0).unwrap()),
-        shutter_time_s: Some(ShutterTime::new(1.0 / 60.0).unwrap()), // 1/60 second
-        aperture_f_number: Some(Aperture::new(2.8).unwrap()),
-        focal_length_m: Some(FocalLength::new(0.050).unwrap()), // 50mm
-        exposure_compensation: None,
-        focus_distance_m: Some(FocusDistance::new(3.5).unwrap()),
+        iso_speed: Some(IsoSpeed::new(800, 1).unwrap()),
+        exposure_osc: Some(ShutterTime::from_seconds(1, 60).unwrap()), // 1/60 second
+        aperture_f_number: Some(Aperture::new(28, 10).unwrap()),
+        focal_length_m: Some(FocalLength::from_millimetres(50).unwrap()), // 50mm
+        exposure_bias_twelfths: None,
+        focus_distance_m: Some(FocusDistance::new(7, 2).unwrap()),
         flash_fired: Some(FlashFired::new(false).unwrap()),
         metering_mode: Some(MeteringMode::new("matrix".to_string()).unwrap()),
     };

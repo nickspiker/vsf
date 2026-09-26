@@ -70,53 +70,63 @@ impl CfaPattern {
     }
 }
 
-/// Sensor black level (digital zero point)
-#[derive(Debug, Clone)]
-pub struct BlackLevel(VsfType);
+/// Sensor black level (digital zero point), in raw sample units (DN)
+/// WHY integer: a black level is a sample value, and samples are integers; an f32 here was a float at rest for a count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlackLevel(u64);
 
 impl BlackLevel {
-    pub fn new(level: f32) -> Result<Self, String> {
-        if level < 0.0 {
-            return Err("Black level cannot be negative".to_string());
-        }
-        Ok(BlackLevel(VsfType::f5(level)))
+    pub fn new(level: u64) -> Result<Self, String> {
+        Ok(BlackLevel(level))
     }
 
-    pub fn to_vsf_type(self) -> VsfType {
+    pub fn dn(self) -> u64 {
         self.0
     }
 
-    pub fn from_vsf_type(vsf: VsfType) -> Result<Self, String> {
-        match vsf {
-            VsfType::f5(v) if v >= 0.0 => Ok(BlackLevel(vsf)),
-            VsfType::f5(_) => Err("Black level cannot be negative".to_string()),
-            _ => Err("Expected f5 type for black level".to_string()),
-        }
+    pub fn to_values(self) -> Vec<VsfType> {
+        vec![uint(self.0)]
+    }
+
+    pub fn from_values(values: &[VsfType]) -> Result<Self, String> {
+        Self::new(one_u64(values, "black level")?)
     }
 }
 
-/// Sensor white level (saturation point)
-#[derive(Debug, Clone)]
-pub struct WhiteLevel(VsfType);
+/// Sensor white level (saturation point), in raw sample units (DN)
+/// A white level of zero is refused: it would leave no range above black, and "unknown" is an absent field, never 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WhiteLevel(u64);
 
 impl WhiteLevel {
-    pub fn new(level: f32) -> Result<Self, String> {
-        if level <= 0.0 {
+    pub fn new(level: u64) -> Result<Self, String> {
+        if level == 0 {
             return Err("White level must be positive".to_string());
         }
-        Ok(WhiteLevel(VsfType::f5(level)))
+        Ok(WhiteLevel(level))
     }
 
-    pub fn to_vsf_type(self) -> VsfType {
+    pub fn dn(self) -> u64 {
         self.0
     }
 
-    pub fn from_vsf_type(vsf: VsfType) -> Result<Self, String> {
-        match vsf {
-            VsfType::f5(v) if v > 0.0 => Ok(WhiteLevel(vsf)),
-            VsfType::f5(_) => Err("White level must be positive".to_string()),
-            _ => Err("Expected f5 type for white level".to_string()),
-        }
+    pub fn to_values(self) -> Vec<VsfType> {
+        vec![uint(self.0)]
+    }
+
+    pub fn from_values(values: &[VsfType]) -> Result<Self, String> {
+        Self::new(one_u64(values, "white level")?)
+    }
+}
+
+/// Black must sit strictly below white when both are known, or the sensor has no usable range.
+fn check_levels(black: Option<BlackLevel>, white: Option<WhiteLevel>) -> Result<(), String> {
+    match (black, white) {
+        (Some(b), Some(w)) if b.0 >= w.0 => Err(format!(
+            "Black level {} must be below white level {}",
+            b.0, w.0
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -194,149 +204,328 @@ impl Magic9 {
     }
 }
 
-/// ISO speed (sensitivity)
-#[derive(Debug, Clone)]
-pub struct IsoSpeed(VsfType);
+// ==================== INTEGER EXPOSURE METADATA ====================
+//
+// Doctrine (Nick, 2026-09-26): exposure metadata is LINEAR INTEGERS at rest, never floats, never logs, never reciprocals.
+// Durations are Eagle oscillations; gain, f-number and lens lengths are reduced integer fractions; an exposure SETTING (bias) is signed twelfths of a stop.
+// Stops and "1/250" are display forms, derived exactly from the stored integers.
+// All maths is 64-bit and checked: overflow-checks are off in every profile, so plain `*` or `+` would wrap silently.
+// Every overflow or inexact conversion comes back as Err; nothing here panics on input.
+
+/// Write a u64 as an auto-sized (EWE) unsigned.
+/// PROOF: on a 32-bit target usize cannot hold every u64, so a value past usize::MAX goes out as a fixed u6 rather than being truncated by `as usize`.
+fn uint(n: u64) -> VsfType {
+    match usize::try_from(n) {
+        Ok(v) => VsfType::u(v, false),
+        Err(_) => VsfType::u6(n),
+    }
+}
+
+/// Write an i64 as an auto-sized (EWE) signed, with the same 32-bit guard as [`uint`].
+fn sint(n: i64) -> VsfType {
+    match isize::try_from(n) {
+        Ok(v) => VsfType::i(v),
+        Err(_) => VsfType::i6(n),
+    }
+}
+
+/// Read a field that must carry exactly one unsigned value, at any width.
+fn one_u64(values: &[VsfType], what: &str) -> Result<u64, String> {
+    match values {
+        [v] => v
+            .as_u64()
+            .ok_or_else(|| format!("{} must be an unsigned integer", what)),
+        _ => Err(format!("{} must carry exactly one value, got {}", what, values.len())),
+    }
+}
+
+/// Read a field that must carry exactly one signed value, at any width.
+fn one_i64(values: &[VsfType], what: &str) -> Result<i64, String> {
+    match values {
+        [v] => v
+            .as_i64()
+            .ok_or_else(|| format!("{} must be a signed integer", what)),
+        _ => Err(format!("{} must carry exactly one value, got {}", what, values.len())),
+    }
+}
+
+fn gcd(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        let r = a % b;
+        a = b;
+        b = r;
+    }
+    a
+}
+
+/// A non-negative integer fraction with a positive denominator, always reduced to lowest terms.
+/// WHY reduced: one value gets one encoding at rest, so two files holding f/2.8 are byte-identical in that field and a reader can refuse any other spelling.
+/// WHY a fraction: cameras report f-numbers, gains and lens lengths as fractions (EXIF RATIONAL); keeping the fraction is exact where a float or a fixed unit would round.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ratio {
+    num: u64,
+    den: u64,
+}
+
+impl Ratio {
+    /// Any fraction with a nonzero denominator; reduced on the way in.
+    pub fn new(num: u64, den: u64) -> Result<Self, String> {
+        if den == 0 {
+            return Err("Fraction denominator cannot be zero".to_string());
+        }
+        // PROOF: den > 0, so g >= 1 and neither division can trap; num == 0 reduces to 0/1.
+        let g = gcd(num, den);
+        Ok(Ratio {
+            num: num / g,
+            den: den / g,
+        })
+    }
+
+    /// A strictly positive fraction; `what` names the quantity in the error.
+    pub fn positive(num: u64, den: u64, what: &str) -> Result<Self, String> {
+        if num == 0 {
+            return Err(format!("{} must be positive", what));
+        }
+        Self::new(num, den)
+    }
+
+    pub fn num(self) -> u64 {
+        self.num
+    }
+
+    pub fn den(self) -> u64 {
+        self.den
+    }
+
+    /// Two values: numerator then denominator, each auto-sized.
+    pub fn to_values(self) -> Vec<VsfType> {
+        vec![uint(self.num), uint(self.den)]
+    }
+
+    /// Read `[num, den]`, refusing a zero denominator and any unreduced spelling.
+    pub fn from_values(values: &[VsfType], what: &str) -> Result<Self, String> {
+        let (num, den) = match values {
+            [n, d] => (
+                n.as_u64()
+                    .ok_or_else(|| format!("{} numerator must be an unsigned integer", what))?,
+                d.as_u64()
+                    .ok_or_else(|| format!("{} denominator must be an unsigned integer", what))?,
+            ),
+            _ => {
+                return Err(format!(
+                    "{} must carry [numerator, denominator], got {} values",
+                    what,
+                    values.len()
+                ))
+            }
+        };
+        let r = Self::new(num, den)?;
+        if r.num != num || r.den != den {
+            return Err(format!("{} {}/{} is not in lowest terms", what, num, den));
+        }
+        Ok(r)
+    }
+}
+
+/// ISO speed as a reduced positive fraction (ISO 100 = 100/1; a sub-unit ISO like 0.8 = 4/5 stays exact).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IsoSpeed(Ratio);
 
 impl IsoSpeed {
-    pub fn new(iso: f32) -> Result<Self, String> {
-        if iso <= 0.0 {
-            return Err("ISO speed must be positive".to_string());
-        }
-        Ok(IsoSpeed(VsfType::f5(iso)))
+    pub fn new(num: u64, den: u64) -> Result<Self, String> {
+        Ok(IsoSpeed(Ratio::positive(num, den, "ISO speed")?))
     }
 
-    pub fn to_vsf_type(self) -> VsfType {
+    pub fn ratio(self) -> Ratio {
         self.0
     }
 
-    pub fn from_vsf_type(vsf: VsfType) -> Result<Self, String> {
-        match vsf {
-            VsfType::f5(v) if v > 0.0 => Ok(IsoSpeed(vsf)),
-            VsfType::f5(_) => Err("ISO speed must be positive".to_string()),
-            _ => Err("Expected f5 type for ISO speed".to_string()),
-        }
+    pub fn to_values(self) -> Vec<VsfType> {
+        self.0.to_values()
+    }
+
+    pub fn from_values(values: &[VsfType]) -> Result<Self, String> {
+        let r = Ratio::from_values(values, "ISO speed")?;
+        Self::new(r.num, r.den)
     }
 }
 
-/// Shutter time in seconds
-#[derive(Debug, Clone)]
-pub struct ShutterTime(VsfType);
+/// Exposure duration in Eagle oscillations, strictly positive.
+/// One oscillation is about 704 ps: every consumer shutter, strobe and high-speed cinema exposure resolves to a millionth or better, and a u64 spans about 412 years.
+/// Zero is refused: a zero-length exposure is not a thing, and "unknown" is an absent field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShutterTime(u64);
 
 impl ShutterTime {
-    pub fn new(seconds: f32) -> Result<Self, String> {
-        if seconds <= 0.0 {
-            return Err("Shutter time must be positive".to_string());
+    pub fn new(oscillations: u64) -> Result<Self, String> {
+        if oscillations == 0 {
+            return Err("Exposure time must be positive".to_string());
         }
-        Ok(ShutterTime(VsfType::f5(seconds)))
+        Ok(ShutterTime(oscillations))
     }
 
-    pub fn to_vsf_type(self) -> VsfType {
+    /// From a camera's nominal seconds as a fraction (1/250 s = `from_seconds(1, 250)`).
+    /// Floors to whole oscillations, the Euclidean way: the stored count is the whole oscillations elapsed, never rounded up into one that was not.
+    /// Err on overflow, a zero denominator, or an exposure shorter than one oscillation.
+    pub fn from_seconds(num: u64, den: u64) -> Result<Self, String> {
+        if den == 0 {
+            return Err("Exposure time denominator cannot be zero".to_string());
+        }
+        const OPS: u64 = crate::types::eagle_time::OSCILLATIONS_PER_SECOND;
+        // Split num = q·den + r so the product only overflows when the answer itself would.
+        // PROOF: r < den, so r·OPS/den < OPS and the second term adds less than one second.
+        let (q, r) = (num / den, num % den);
+        let whole = q
+            .checked_mul(OPS)
+            .ok_or("Exposure time overflows 64 bits of oscillations")?;
+        let frac = r
+            .checked_mul(OPS)
+            .ok_or("Exposure time denominator too large for 64-bit maths")?
+            / den;
+        let osc = whole
+            .checked_add(frac)
+            .ok_or("Exposure time overflows 64 bits of oscillations")?;
+        if osc == 0 {
+            return Err("Exposure time is shorter than one Eagle oscillation".to_string());
+        }
+        Ok(ShutterTime(osc))
+    }
+
+    pub fn oscillations(self) -> u64 {
         self.0
     }
 
-    pub fn from_vsf_type(vsf: VsfType) -> Result<Self, String> {
-        match vsf {
-            VsfType::f5(v) if v > 0.0 => Ok(ShutterTime(vsf)),
-            VsfType::f5(_) => Err("Shutter time must be positive".to_string()),
-            _ => Err("Expected f5 type for shutter time".to_string()),
-        }
+    /// The duration in seconds as an exact reduced fraction (oscillations / OPS), for display.
+    pub fn seconds(self) -> Ratio {
+        // PROOF: OPS is a nonzero constant, so new() cannot fail here.
+        Ratio::new(self.0, crate::types::eagle_time::OSCILLATIONS_PER_SECOND)
+            .expect("OPS is nonzero")
+    }
+
+    pub fn to_values(self) -> Vec<VsfType> {
+        vec![uint(self.0)]
+    }
+
+    pub fn from_values(values: &[VsfType]) -> Result<Self, String> {
+        Self::new(one_u64(values, "exposure time")?)
     }
 }
 
-/// Aperture (f-number)
-#[derive(Debug, Clone)]
-pub struct Aperture(VsfType);
+/// Aperture f-number as a reduced positive fraction (f/2.8 = 14/5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Aperture(Ratio);
 
 impl Aperture {
-    pub fn new(f_number: f32) -> Result<Self, String> {
-        if f_number <= 0.0 {
-            return Err("Aperture f-number must be positive".to_string());
-        }
-        Ok(Aperture(VsfType::f5(f_number)))
+    pub fn new(num: u64, den: u64) -> Result<Self, String> {
+        Ok(Aperture(Ratio::positive(num, den, "Aperture f-number")?))
     }
 
-    pub fn to_vsf_type(self) -> VsfType {
+    pub fn ratio(self) -> Ratio {
         self.0
     }
 
-    pub fn from_vsf_type(vsf: VsfType) -> Result<Self, String> {
-        match vsf {
-            VsfType::f5(v) if v > 0.0 => Ok(Aperture(vsf)),
-            VsfType::f5(_) => Err("Aperture f-number must be positive".to_string()),
-            _ => Err("Expected f5 type for aperture".to_string()),
-        }
+    pub fn to_values(self) -> Vec<VsfType> {
+        self.0.to_values()
+    }
+
+    pub fn from_values(values: &[VsfType]) -> Result<Self, String> {
+        let r = Ratio::from_values(values, "Aperture f-number")?;
+        Self::new(r.num, r.den)
     }
 }
 
-/// Focal length in meters
-#[derive(Debug, Clone)]
-pub struct FocalLength(VsfType);
+/// Focal length in metres as a reduced positive fraction (50 mm = 1/20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FocalLength(Ratio);
 
 impl FocalLength {
-    pub fn new(meters: f32) -> Result<Self, String> {
-        if meters <= 0.0 {
-            return Err("Focal length must be positive".to_string());
-        }
-        Ok(FocalLength(VsfType::f5(meters)))
+    pub fn new(num: u64, den: u64) -> Result<Self, String> {
+        Ok(FocalLength(Ratio::positive(num, den, "Focal length")?))
     }
 
-    pub fn to_vsf_type(self) -> VsfType {
+    pub fn from_millimetres(mm: u64) -> Result<Self, String> {
+        Self::new(mm, 1000)
+    }
+
+    pub fn metres(self) -> Ratio {
         self.0
     }
 
-    pub fn from_vsf_type(vsf: VsfType) -> Result<Self, String> {
-        match vsf {
-            VsfType::f5(v) if v > 0.0 => Ok(FocalLength(vsf)),
-            VsfType::f5(_) => Err("Focal length must be positive".to_string()),
-            _ => Err("Expected f5 type for focal length".to_string()),
-        }
+    pub fn to_values(self) -> Vec<VsfType> {
+        self.0.to_values()
+    }
+
+    pub fn from_values(values: &[VsfType]) -> Result<Self, String> {
+        let r = Ratio::from_values(values, "Focal length")?;
+        Self::new(r.num, r.den)
     }
 }
 
-/// Exposure compensation in EV
-#[derive(Debug, Clone)]
-pub struct ExposureCompensation(VsfType);
+/// Exposure bias (the compensation SETTING) in signed twelfths of a stop.
+/// WHY twelfths: 12 divides by 2, 3, 4 and 6, so half-, third- and quarter-stop cameras all land exactly (−1⅓ stops = −16).
+/// Zero is a real setting (no bias), not a sentinel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExposureCompensation(i64);
 
 impl ExposureCompensation {
-    pub fn new(ev: f32) -> Result<Self, String> {
-        Ok(ExposureCompensation(VsfType::f5(ev))) // Can be negative
+    pub fn new(twelfths: i64) -> Result<Self, String> {
+        Ok(ExposureCompensation(twelfths))
     }
 
-    pub fn to_vsf_type(self) -> VsfType {
+    /// From stops as a fraction (−1/3 stop = `from_stops(-1, 3)`).
+    /// Err unless it is a whole number of twelfths: a setting is a step, and a step that does not land is refused rather than rounded.
+    pub fn from_stops(num: i64, den: u64) -> Result<Self, String> {
+        let d = i64::try_from(den).map_err(|_| "Exposure bias denominator too large")?;
+        if d == 0 {
+            return Err("Exposure bias denominator cannot be zero".to_string());
+        }
+        let t = num
+            .checked_mul(12)
+            .ok_or("Exposure bias overflows 64 bits of twelfths")?;
+        // PROOF: d >= 1, so neither % nor / can trap (only a divisor of −1 overflows i64::MIN).
+        if t % d != 0 {
+            return Err(format!(
+                "Exposure bias {}/{} stop is not a whole number of twelfths",
+                num, den
+            ));
+        }
+        Ok(ExposureCompensation(t / d))
+    }
+
+    pub fn twelfths(self) -> i64 {
         self.0
     }
 
-    pub fn from_vsf_type(vsf: VsfType) -> Result<Self, String> {
-        match vsf {
-            VsfType::f5(_) => Ok(ExposureCompensation(vsf)),
-            _ => Err("Expected f5 type for exposure compensation".to_string()),
-        }
+    pub fn to_values(self) -> Vec<VsfType> {
+        vec![sint(self.0)]
+    }
+
+    pub fn from_values(values: &[VsfType]) -> Result<Self, String> {
+        Self::new(one_i64(values, "exposure bias")?)
     }
 }
 
-/// Focus distance in meters
-#[derive(Debug, Clone)]
-pub struct FocusDistance(VsfType);
+/// Focus distance in metres as a reduced positive fraction.
+/// Zero is refused (nothing focuses at the lens plane) and "unknown" is an absent field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FocusDistance(Ratio);
 
 impl FocusDistance {
-    pub fn new(meters: f32) -> Result<Self, String> {
-        if meters < 0.0 {
-            return Err("Focus distance cannot be negative".to_string());
-        }
-        Ok(FocusDistance(VsfType::f5(meters)))
+    pub fn new(num: u64, den: u64) -> Result<Self, String> {
+        Ok(FocusDistance(Ratio::positive(num, den, "Focus distance")?))
     }
 
-    pub fn to_vsf_type(self) -> VsfType {
+    pub fn metres(self) -> Ratio {
         self.0
     }
 
-    pub fn from_vsf_type(vsf: VsfType) -> Result<Self, String> {
-        match vsf {
-            VsfType::f5(v) if v >= 0.0 => Ok(FocusDistance(vsf)),
-            VsfType::f5(_) => Err("Focus distance cannot be negative".to_string()),
-            _ => Err("Expected f5 type for focus distance".to_string()),
-        }
+    pub fn to_values(self) -> Vec<VsfType> {
+        self.0.to_values()
+    }
+
+    pub fn from_values(values: &[VsfType]) -> Result<Self, String> {
+        let r = Ratio::from_values(values, "Focus distance")?;
+        Self::new(r.num, r.den)
     }
 }
 
@@ -489,10 +678,10 @@ pub struct CameraSettings {
     pub model: Option<ModelName>,
     pub serial_number: Option<SerialNumber>,
     pub iso_speed: Option<IsoSpeed>,
-    pub shutter_time_s: Option<ShutterTime>,
+    pub exposure_osc: Option<ShutterTime>,
     pub aperture_f_number: Option<Aperture>,
     pub focal_length_m: Option<FocalLength>,
-    pub exposure_compensation: Option<ExposureCompensation>,
+    pub exposure_bias_twelfths: Option<ExposureCompensation>,
     pub focus_distance_m: Option<FocusDistance>,
     pub flash_fired: Option<FlashFired>,
     pub metering_mode: Option<MeteringMode>,
@@ -517,8 +706,8 @@ pub struct LensInfo {
 #[derive(Debug, Clone, Default)]
 pub struct RawMetadataBuilder {
     pub cfa_pattern: Option<Vec<u8>>,
-    pub black_level: Option<f32>,
-    pub white_level: Option<f32>,
+    pub black_level: Option<u64>,
+    pub white_level: Option<u64>,
     pub dark_frame_hash: Option<(u8, Vec<u8>)>,
     pub flat_field_hash: Option<(u8, Vec<u8>)>,
     pub bias_frame_hash: Option<(u8, Vec<u8>)>,
@@ -543,10 +732,13 @@ impl RawMetadataBuilder {
             return Ok(None);
         }
 
+        let black_level = self.black_level.map(BlackLevel::new).transpose()?;
+        let white_level = self.white_level.map(WhiteLevel::new).transpose()?;
+        check_levels(black_level, white_level)?;
         Ok(Some(RawMetadata {
             cfa_pattern: self.cfa_pattern.map(CfaPattern::new).transpose()?,
-            black_level: self.black_level.map(BlackLevel::new).transpose()?,
-            white_level: self.white_level.map(WhiteLevel::new).transpose()?,
+            black_level,
+            white_level,
             dark_frame_hash: self
                 .dark_frame_hash
                 .map(|(alg, hash)| CalibrationHash::new(alg, hash))
@@ -578,12 +770,18 @@ pub struct CameraBuilder {
     pub make: Option<String>,
     pub model: Option<String>,
     pub serial_number: Option<String>,
-    pub iso_speed: Option<f32>,
-    pub shutter_time_s: Option<f32>,
-    pub aperture_f_number: Option<f32>,
-    pub focal_length_m: Option<f32>,
-    pub exposure_compensation: Option<f32>,
-    pub focus_distance_m: Option<f32>,
+    /// (num, den), e.g. `(800, 1)`
+    pub iso_speed: Option<(u64, u64)>,
+    /// Eagle oscillations; see [`ShutterTime::from_seconds`] to convert a nominal "1/250"
+    pub exposure_osc: Option<u64>,
+    /// (num, den), e.g. f/2.8 = `(28, 10)`
+    pub aperture_f_number: Option<(u64, u64)>,
+    /// metres as (num, den), e.g. 50 mm = `(50, 1000)`
+    pub focal_length_m: Option<(u64, u64)>,
+    /// signed twelfths of a stop, e.g. −½ stop = `-6`
+    pub exposure_bias_twelfths: Option<i64>,
+    /// metres as (num, den)
+    pub focus_distance_m: Option<(u64, u64)>,
     pub flash_fired: Option<bool>,
     pub metering_mode: Option<String>,
 }
@@ -595,10 +793,10 @@ impl CameraBuilder {
             && self.model.is_none()
             && self.serial_number.is_none()
             && self.iso_speed.is_none()
-            && self.shutter_time_s.is_none()
+            && self.exposure_osc.is_none()
             && self.aperture_f_number.is_none()
             && self.focal_length_m.is_none()
-            && self.exposure_compensation.is_none()
+            && self.exposure_bias_twelfths.is_none()
             && self.focus_distance_m.is_none()
             && self.flash_fired.is_none()
             && self.metering_mode.is_none()
@@ -610,15 +808,24 @@ impl CameraBuilder {
             make: self.make.map(Manufacturer::new).transpose()?,
             model: self.model.map(ModelName::new).transpose()?,
             serial_number: self.serial_number.map(SerialNumber::new).transpose()?,
-            iso_speed: self.iso_speed.map(IsoSpeed::new).transpose()?,
-            shutter_time_s: self.shutter_time_s.map(ShutterTime::new).transpose()?,
-            aperture_f_number: self.aperture_f_number.map(Aperture::new).transpose()?,
-            focal_length_m: self.focal_length_m.map(FocalLength::new).transpose()?,
-            exposure_compensation: self
-                .exposure_compensation
+            iso_speed: self.iso_speed.map(|(n, d)| IsoSpeed::new(n, d)).transpose()?,
+            exposure_osc: self.exposure_osc.map(ShutterTime::new).transpose()?,
+            aperture_f_number: self
+                .aperture_f_number
+                .map(|(n, d)| Aperture::new(n, d))
+                .transpose()?,
+            focal_length_m: self
+                .focal_length_m
+                .map(|(n, d)| FocalLength::new(n, d))
+                .transpose()?,
+            exposure_bias_twelfths: self
+                .exposure_bias_twelfths
                 .map(ExposureCompensation::new)
                 .transpose()?,
-            focus_distance_m: self.focus_distance_m.map(FocusDistance::new).transpose()?,
+            focus_distance_m: self
+                .focus_distance_m
+                .map(|(n, d)| FocusDistance::new(n, d))
+                .transpose()?,
             flash_fired: self.flash_fired.map(FlashFired::new).transpose()?,
             metering_mode: self.metering_mode.map(MeteringMode::new).transpose()?,
         }))
@@ -631,10 +838,12 @@ pub struct LensBuilder {
     pub make: Option<String>,
     pub model: Option<String>,
     pub serial_number: Option<String>,
-    pub min_focal_length_m: Option<f32>,
-    pub max_focal_length_m: Option<f32>,
-    pub min_aperture_f: Option<f32>,
-    pub max_aperture_f: Option<f32>,
+    /// metres as (num, den)
+    pub min_focal_length_m: Option<(u64, u64)>,
+    pub max_focal_length_m: Option<(u64, u64)>,
+    /// f-numbers as (num, den)
+    pub min_aperture_f: Option<(u64, u64)>,
+    pub max_aperture_f: Option<(u64, u64)>,
 }
 
 impl LensBuilder {
@@ -655,10 +864,22 @@ impl LensBuilder {
             make: self.make.map(Manufacturer::new).transpose()?,
             model: self.model.map(ModelName::new).transpose()?,
             serial_number: self.serial_number.map(SerialNumber::new).transpose()?,
-            min_focal_length_m: self.min_focal_length_m.map(FocalLength::new).transpose()?,
-            max_focal_length_m: self.max_focal_length_m.map(FocalLength::new).transpose()?,
-            min_aperture_f: self.min_aperture_f.map(Aperture::new).transpose()?,
-            max_aperture_f: self.max_aperture_f.map(Aperture::new).transpose()?,
+            min_focal_length_m: self
+                .min_focal_length_m
+                .map(|(n, d)| FocalLength::new(n, d))
+                .transpose()?,
+            max_focal_length_m: self
+                .max_focal_length_m
+                .map(|(n, d)| FocalLength::new(n, d))
+                .transpose()?,
+            min_aperture_f: self
+                .min_aperture_f
+                .map(|(n, d)| Aperture::new(n, d))
+                .transpose()?,
+            max_aperture_f: self
+                .max_aperture_f
+                .map(|(n, d)| Aperture::new(n, d))
+                .transpose()?,
         }))
     }
 }
@@ -671,7 +892,7 @@ impl LensBuilder {
 ///
 /// let samples: Vec<u64> = vec![2048; 4096 * 3072]; let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
 ///
-/// let mut raw = RawImageBuilder::new(image); raw.camera.iso_speed = Some(800.0); raw.camera.shutter_time_s = Some(1.0 / 60.0); raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']); raw.lens.make = Some("Sony".to_string());
+/// let mut raw = RawImageBuilder::new(image); raw.camera.iso_speed = Some((800, 1)); raw.camera.exposure_osc = Some(ShutterTime::from_seconds(1, 60)?.oscillations()); raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']); raw.lens.make = Some("Sony".to_string());
 ///
 /// let bytes = raw.build()?;
 /// ```
@@ -781,7 +1002,7 @@ pub fn geotagged_photo(
 ///
 /// # VSF Structure Created
 /// ```text
-/// RÅ<...n1 or n2 labels...> [(dimage:p[bitdepth, shape, pixels])    ← Image is FIRST field (self-describing!) (diso speed:u...)                      ← Optional metadata follows (dshutter time ns:u...) (dcfa pattern:t_u3['R','G','G','B'])   ← ASCII characters for readability (dcolour matrix:t_f6[...])]
+/// RÅ<...n1 or n2 labels...> [(dimage:p[bitdepth, shape, pixels])    ← Image is FIRST field (self-describing!) (diso speed:u...)                      ← Optional metadata follows (dexposure_osc:u...) (dcfa pattern:t_u3['R','G','G','B'])   ← ASCII characters for readability (dcolour matrix:t_f6[...])]
 /// ```
 ///
 /// If TOKEN auth is provided, creates TWO labels: "token auth" and "raw" If no TOKEN auth, creates ONE label: "raw" only
@@ -806,128 +1027,133 @@ pub fn build_raw_image(
     let mut builder = VsfBuilder::new();
 
     // Build raw section - start with the image (p type has width, height, bit_depth)
-    let mut raw_items = vec![("image".to_string(), VsfType::p(image))];
+    // Each item is (field name, values): the integer fractions ride as two values in one field.
+    let mut raw_items: Vec<(String, Vec<VsfType>)> = vec![("image".to_string(), vec![VsfType::p(image)])];
 
     // Add optional metadata
     if let Some(meta) = metadata {
         if let Some(cfa) = meta.cfa_pattern {
-            raw_items.push(("cfa_pattern".to_string(), cfa.to_vsf_type()));
+            raw_items.push(("cfa_pattern".to_string(), vec![cfa.to_vsf_type()]));
         }
 
         if let Some(black) = meta.black_level {
-            raw_items.push(("black_level".to_string(), black.to_vsf_type()));
+            raw_items.push(("black_level".to_string(), black.to_values()));
         }
 
         if let Some(white) = meta.white_level {
-            raw_items.push(("white_level".to_string(), white.to_vsf_type()));
+            raw_items.push(("white_level".to_string(), white.to_values()));
         }
 
         // Calibration hashes (algorithm + hash bytes)
         if let Some(hash) = meta.dark_frame_hash {
-            raw_items.push(("dark_frame_hash".to_string(), hash.to_vsf_type()));
+            raw_items.push(("dark_frame_hash".to_string(), vec![hash.to_vsf_type()]));
         }
 
         if let Some(hash) = meta.flat_field_hash {
-            raw_items.push(("flat_field_hash".to_string(), hash.to_vsf_type()));
+            raw_items.push(("flat_field_hash".to_string(), vec![hash.to_vsf_type()]));
         }
 
         if let Some(hash) = meta.bias_frame_hash {
-            raw_items.push(("bias_frame_hash".to_string(), hash.to_vsf_type()));
+            raw_items.push(("bias_frame_hash".to_string(), vec![hash.to_vsf_type()]));
         }
 
         if let Some(hash) = meta.vignette_correction_hash {
-            raw_items.push(("vignette_correction_hash".to_string(), hash.to_vsf_type()));
+            raw_items.push(("vignette_correction_hash".to_string(), vec![hash.to_vsf_type()]));
         }
 
         if let Some(hash) = meta.distortion_correction_hash {
-            raw_items.push(("distortion_correction_hash".to_string(), hash.to_vsf_type()));
+            raw_items.push(("distortion_correction_hash".to_string(), vec![hash.to_vsf_type()]));
         }
 
         // Magic 9 (3×3 colour matrix: Sensor RGB → LMS)
         if let Some(matrix) = meta.magic_9 {
-            raw_items.push(("magic_9".to_string(), matrix.to_vsf_type()));
+            raw_items.push(("magic_9".to_string(), vec![matrix.to_vsf_type()]));
         }
     }
 
     // Camera settings
     if let Some(cam) = camera {
         if let Some(make) = cam.make {
-            raw_items.push(("camera_make".to_string(), make.to_vsf_type()));
+            raw_items.push(("camera_make".to_string(), vec![make.to_vsf_type()]));
         }
 
         if let Some(model) = cam.model {
-            raw_items.push(("camera_model".to_string(), model.to_vsf_type()));
+            raw_items.push(("camera_model".to_string(), vec![model.to_vsf_type()]));
         }
 
         if let Some(serial) = cam.serial_number {
-            raw_items.push(("camera_serial".to_string(), serial.to_vsf_type()));
+            raw_items.push(("camera_serial".to_string(), vec![serial.to_vsf_type()]));
         }
 
         if let Some(iso) = cam.iso_speed {
-            raw_items.push(("iso_speed".to_string(), iso.to_vsf_type()));
+            raw_items.push(("iso_speed".to_string(), iso.to_values()));
         }
 
-        if let Some(shutter) = cam.shutter_time_s {
-            raw_items.push(("shutter_time_s".to_string(), shutter.to_vsf_type()));
+        if let Some(shutter) = cam.exposure_osc {
+            raw_items.push(("exposure_osc".to_string(), shutter.to_values()));
         }
 
         if let Some(aperture) = cam.aperture_f_number {
-            raw_items.push(("aperture_f_number".to_string(), aperture.to_vsf_type()));
+            raw_items.push(("aperture_f_number".to_string(), aperture.to_values()));
         }
 
         if let Some(focal) = cam.focal_length_m {
-            raw_items.push(("focal_length_m".to_string(), focal.to_vsf_type()));
+            raw_items.push(("focal_length_m".to_string(), focal.to_values()));
         }
 
-        if let Some(comp) = cam.exposure_compensation {
-            raw_items.push(("exposure_compensation".to_string(), comp.to_vsf_type()));
+        if let Some(comp) = cam.exposure_bias_twelfths {
+            raw_items.push(("exposure_bias_twelfths".to_string(), comp.to_values()));
         }
 
         if let Some(focus) = cam.focus_distance_m {
-            raw_items.push(("focus_distance_m".to_string(), focus.to_vsf_type()));
+            raw_items.push(("focus_distance_m".to_string(), focus.to_values()));
         }
 
         if let Some(flash) = cam.flash_fired {
-            raw_items.push(("flash_fired".to_string(), flash.to_vsf_type()));
+            raw_items.push(("flash_fired".to_string(), vec![flash.to_vsf_type()]));
         }
 
         if let Some(metering) = cam.metering_mode {
-            raw_items.push(("metering_mode".to_string(), metering.to_vsf_type()));
+            raw_items.push(("metering_mode".to_string(), vec![metering.to_vsf_type()]));
         }
     }
 
     // Lens info
     if let Some(l) = lens {
         if let Some(make) = l.make {
-            raw_items.push(("lens_make".to_string(), make.to_vsf_type()));
+            raw_items.push(("lens_make".to_string(), vec![make.to_vsf_type()]));
         }
 
         if let Some(model) = l.model {
-            raw_items.push(("lens_model".to_string(), model.to_vsf_type()));
+            raw_items.push(("lens_model".to_string(), vec![model.to_vsf_type()]));
         }
 
         if let Some(serial) = l.serial_number {
-            raw_items.push(("lens_serial".to_string(), serial.to_vsf_type()));
+            raw_items.push(("lens_serial".to_string(), vec![serial.to_vsf_type()]));
         }
 
         if let Some(min_focal) = l.min_focal_length_m {
-            raw_items.push(("lens_min_focal_m".to_string(), min_focal.to_vsf_type()));
+            raw_items.push(("lens_min_focal_m".to_string(), min_focal.to_values()));
         }
 
         if let Some(max_focal) = l.max_focal_length_m {
-            raw_items.push(("lens_max_focal_m".to_string(), max_focal.to_vsf_type()));
+            raw_items.push(("lens_max_focal_m".to_string(), max_focal.to_values()));
         }
 
         if let Some(min_ap) = l.min_aperture_f {
-            raw_items.push(("lens_min_aperture".to_string(), min_ap.to_vsf_type()));
+            raw_items.push(("lens_min_aperture".to_string(), min_ap.to_values()));
         }
 
         if let Some(max_ap) = l.max_aperture_f {
-            raw_items.push(("lens_max_aperture".to_string(), max_ap.to_vsf_type()));
+            raw_items.push(("lens_max_aperture".to_string(), max_ap.to_values()));
         }
     }
 
-    builder = builder.add_section("raw", raw_items);
+    let mut section = crate::file_format::VsfSection::new("raw");
+    for (name, values) in raw_items {
+        section.add_field_multi(name, values);
+    }
+    builder = builder.add_section_direct(section);
 
     builder.build()
 }
@@ -952,8 +1178,8 @@ pub fn build_raw_image(
 /// - No separate sample data section (p has the bitpacked bytes)
 ///
 /// # Arguments
-/// * `samples` - RAW sensor sample values as u64 (0-4095 for 12-bit), will be bitpacked * `iso` - ISO speed (e.g., 100, 200, 400, 800, 1600, 3200) * `shutter_s` - Shutter time in seconds (e.g., 1./60. = 0.0167 for 1/60 second)
-pub fn lumis_raw_capture(samples: Vec<u64>, iso: f32, shutter_s: f32) -> Result<Vec<u8>, String> {
+/// * `samples` - RAW sensor sample values as u64 (0-4095 for 12-bit), will be bitpacked * `iso` - whole ISO speed (e.g., 100, 200, 400, 800, 1600, 3200) * `exposure_osc` - exposure time in Eagle oscillations (`ShutterTime::from_seconds(1, 60)?.oscillations()` for 1/60 second)
+pub fn lumis_raw_capture(samples: Vec<u64>, iso: u64, exposure_osc: u64) -> Result<Vec<u8>, String> {
     // Create BitPackedTensor for 12-bit Lumis sensor
     let image = BitPackedTensor::pack(12, vec![4096, 3072], &samples);
 
@@ -961,8 +1187,8 @@ pub fn lumis_raw_capture(samples: Vec<u64>, iso: f32, shutter_s: f32) -> Result<
         image,
         Some(RawMetadata {
             cfa_pattern: Some(CfaPattern::new(vec![b'R', b'G', b'G', b'B'])?), // RGGB Bayer pattern
-            black_level: Some(BlackLevel::new(64.0)?),
-            white_level: Some(WhiteLevel::new(4095.0)?),
+            black_level: Some(BlackLevel::new(64)?),
+            white_level: Some(WhiteLevel::new(4095)?),
             dark_frame_hash: None,
             flat_field_hash: None,
             bias_frame_hash: None,
@@ -974,11 +1200,11 @@ pub fn lumis_raw_capture(samples: Vec<u64>, iso: f32, shutter_s: f32) -> Result<
             make: None,
             model: None,
             serial_number: None,
-            iso_speed: Some(IsoSpeed::new(iso)?),
-            shutter_time_s: Some(ShutterTime::new(shutter_s)?),
+            iso_speed: Some(IsoSpeed::new(iso, 1)?),
+            exposure_osc: Some(ShutterTime::new(exposure_osc)?),
             aperture_f_number: None,
             focal_length_m: None,
-            exposure_compensation: None,
+            exposure_bias_twelfths: None,
             focus_distance_m: None,
             flash_fired: Some(FlashFired::new(false)?),
             metering_mode: None,
@@ -1076,20 +1302,6 @@ pub struct ParsedRawImage {
     pub lens: Option<LensInfo>,
 }
 
-// Helper to convert any VsfType unsigned variant to Rust usize
-fn to_usize(vsf_type: &VsfType) -> Option<usize> {
-    match vsf_type {
-        VsfType::u(v, _) => Some(*v),        // usize → usize (no conversion)
-        VsfType::u0(b) => Some(*b as usize), // bool → usize
-        VsfType::u3(v) => Some(*v as usize), // u8 → usize (widening)
-        VsfType::u4(v) => Some(*v as usize), // u16 → usize (widening)
-        VsfType::u5(v) => Some(*v as usize), // u32 → usize (safe on 64-bit)
-        VsfType::u6(v) => Some(*v as usize), // u64 → usize (safe on 64-bit)
-        VsfType::u7(v) => Some(*v as usize), // u128 → usize (truncates!)
-        _ => None,
-    }
-}
-
 /// Parse a VSF RAW image file
 ///
 /// Extracts the image BitPackedTensor and all metadata fields from a VSF RAW file.
@@ -1100,7 +1312,6 @@ fn to_usize(vsf_type: &VsfType) -> Option<usize> {
 /// # Returns
 /// ParsedRawImage containing the image and optional metadata, or an error
 pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
-    use crate::crypto_algorithms::{HASH_BLAKE3, HASH_SHA256, HASH_SHA512};
     use crate::file_format::{VsfHeader, VsfSection};
 
     // Parse header using library function
@@ -1129,179 +1340,90 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     };
 
     // Initialize metadata fields
-    let mut cfa_pattern: Option<Vec<u8>> = None;
-    let mut black_level: Option<f32> = None;
-    let mut white_level: Option<f32> = None;
-    let mut dark_frame_hash: Option<(u8, Vec<u8>)> = None;
-    let mut flat_field_hash: Option<(u8, Vec<u8>)> = None;
-    let mut bias_frame_hash: Option<(u8, Vec<u8>)> = None;
-    let mut vignette_correction_hash: Option<(u8, Vec<u8>)> = None;
-    let mut distortion_correction_hash: Option<(u8, Vec<u8>)> = None;
-    let mut magic_9: Option<Vec<f32>> = None;
+    let mut cfa_pattern: Option<CfaPattern> = None;
+    let mut black_level: Option<BlackLevel> = None;
+    let mut white_level: Option<WhiteLevel> = None;
+    let mut dark_frame_hash: Option<CalibrationHash> = None;
+    let mut flat_field_hash: Option<CalibrationHash> = None;
+    let mut bias_frame_hash: Option<CalibrationHash> = None;
+    let mut vignette_correction_hash: Option<CalibrationHash> = None;
+    let mut distortion_correction_hash: Option<CalibrationHash> = None;
+    let mut magic_9: Option<Magic9> = None;
 
-    let mut camera_make: Option<String> = None;
-    let mut camera_model: Option<String> = None;
-    let mut camera_serial: Option<String> = None;
-    let mut iso_speed: Option<f32> = None;
-    let mut shutter_time_s: Option<f32> = None;
-    let mut aperture_f_number: Option<f32> = None;
-    let mut focal_length_m: Option<f32> = None;
-    let mut exposure_compensation: Option<f32> = None;
-    let mut focus_distance_m: Option<f32> = None;
-    let mut flash_fired: Option<bool> = None;
-    let mut metering_mode: Option<String> = None;
+    let mut camera_make: Option<Manufacturer> = None;
+    let mut camera_model: Option<ModelName> = None;
+    let mut camera_serial: Option<SerialNumber> = None;
+    let mut iso_speed: Option<IsoSpeed> = None;
+    let mut exposure_osc: Option<ShutterTime> = None;
+    let mut aperture_f_number: Option<Aperture> = None;
+    let mut focal_length_m: Option<FocalLength> = None;
+    let mut exposure_bias_twelfths: Option<ExposureCompensation> = None;
+    let mut focus_distance_m: Option<FocusDistance> = None;
+    let mut flash_fired: Option<FlashFired> = None;
+    let mut metering_mode: Option<MeteringMode> = None;
 
-    let mut lens_make: Option<String> = None;
-    let mut lens_model: Option<String> = None;
-    let mut lens_serial: Option<String> = None;
-    let mut lens_min_focal_m: Option<f32> = None;
-    let mut lens_max_focal_m: Option<f32> = None;
-    let mut lens_min_aperture: Option<f32> = None;
-    let mut lens_max_aperture: Option<f32> = None;
+    let mut lens_make: Option<Manufacturer> = None;
+    let mut lens_model: Option<ModelName> = None;
+    let mut lens_serial: Option<SerialNumber> = None;
+    let mut lens_min_focal_m: Option<FocalLength> = None;
+    let mut lens_max_focal_m: Option<FocalLength> = None;
+    let mut lens_min_aperture: Option<Aperture> = None;
+    let mut lens_max_aperture: Option<Aperture> = None;
 
-    // Helper to parse hash fields
-    fn parse_hash(value: &VsfType) -> Option<(u8, Vec<u8>)> {
-        match value {
-            VsfType::hb(v) => Some((HASH_BLAKE3, v.clone())),
-            VsfType::hs(v) => {
-                let algo = if v.len() == 32 {
-                    HASH_SHA256
-                } else {
-                    HASH_SHA512
-                };
-                Some((algo, v.clone()))
-            }
-            _ => None,
-        }
+    // A single-value field's first value; the integer metadata reads the whole value list.
+    fn first(values: &[VsfType], name: &str) -> Result<VsfType, String> {
+        values
+            .first()
+            .cloned()
+            .ok_or_else(|| format!("Field '{}' has no value", name))
     }
 
-    // Extract optional fields from section
+    // Every known field that is present must be well-formed: a malformed one refuses the file rather than being skipped.
     for field in &section.fields {
-        let value = match field.values.first() {
-            Some(v) => v,
-            None => continue,
-        };
-
-        match field.name.as_str() {
+        let v = &field.values[..];
+        let name = field.name.as_str();
+        match name {
             // Raw metadata
-            "cfa_pattern" => {
-                if let VsfType::t_u3(tensor) = value {
-                    cfa_pattern = Some(tensor.data.clone());
-                }
+            "cfa_pattern" => cfa_pattern = Some(CfaPattern::from_vsf_type(first(v, name)?)?),
+            "black_level" => black_level = Some(BlackLevel::from_values(v)?),
+            "white_level" => white_level = Some(WhiteLevel::from_values(v)?),
+            "dark_frame_hash" => dark_frame_hash = Some(CalibrationHash::from_vsf_type(first(v, name)?)?),
+            "flat_field_hash" => flat_field_hash = Some(CalibrationHash::from_vsf_type(first(v, name)?)?),
+            "bias_frame_hash" => bias_frame_hash = Some(CalibrationHash::from_vsf_type(first(v, name)?)?),
+            "vignette_correction_hash" => {
+                vignette_correction_hash = Some(CalibrationHash::from_vsf_type(first(v, name)?)?)
             }
-            "black_level" => {
-                if let VsfType::f5(v) = value {
-                    black_level = Some(*v);
-                }
+            "distortion_correction_hash" => {
+                distortion_correction_hash = Some(CalibrationHash::from_vsf_type(first(v, name)?)?)
             }
-            "white_level" => {
-                if let VsfType::f5(v) = value {
-                    white_level = Some(*v);
-                }
-            }
-            "dark_frame_hash" => dark_frame_hash = parse_hash(value),
-            "flat_field_hash" => flat_field_hash = parse_hash(value),
-            "bias_frame_hash" => bias_frame_hash = parse_hash(value),
-            "vignette_correction_hash" => vignette_correction_hash = parse_hash(value),
-            "distortion_correction_hash" => distortion_correction_hash = parse_hash(value),
-            "magic_9" => {
-                if let VsfType::t_f5(tensor) = value {
-                    magic_9 = Some(tensor.data.clone());
-                }
-            }
+            "magic_9" => magic_9 = Some(Magic9::from_vsf_type(first(v, name)?)?),
             // Camera settings
-            "camera_make" => {
-                if let VsfType::x(v) = value {
-                    camera_make = Some(v.clone());
-                }
+            "camera_make" => camera_make = Some(Manufacturer::from_vsf_type(first(v, name)?)?),
+            "camera_model" => camera_model = Some(ModelName::from_vsf_type(first(v, name)?)?),
+            "camera_serial" => camera_serial = Some(SerialNumber::from_vsf_type(first(v, name)?)?),
+            "iso_speed" => iso_speed = Some(IsoSpeed::from_values(v)?),
+            "exposure_osc" => exposure_osc = Some(ShutterTime::from_values(v)?),
+            "aperture_f_number" => aperture_f_number = Some(Aperture::from_values(v)?),
+            "focal_length_m" => focal_length_m = Some(FocalLength::from_values(v)?),
+            "exposure_bias_twelfths" => {
+                exposure_bias_twelfths = Some(ExposureCompensation::from_values(v)?)
             }
-            "camera_model" => {
-                if let VsfType::x(v) = value {
-                    camera_model = Some(v.clone());
-                }
-            }
-            "camera_serial" => {
-                if let VsfType::x(v) = value {
-                    camera_serial = Some(v.clone());
-                }
-            }
-            "iso_speed" => {
-                if let VsfType::f5(v) = value {
-                    iso_speed = Some(*v);
-                }
-            }
-            "shutter_time_s" => {
-                if let VsfType::f5(v) = value {
-                    shutter_time_s = Some(*v);
-                }
-            }
-            "aperture_f_number" => {
-                if let VsfType::f5(v) = value {
-                    aperture_f_number = Some(*v);
-                }
-            }
-            "focal_length_m" => {
-                if let VsfType::f5(v) = value {
-                    focal_length_m = Some(*v);
-                }
-            }
-            "exposure_compensation" => {
-                if let VsfType::f5(v) = value {
-                    exposure_compensation = Some(*v);
-                }
-            }
-            "focus_distance_m" => {
-                if let VsfType::f5(v) = value {
-                    focus_distance_m = Some(*v);
-                }
-            }
-            "flash_fired" => flash_fired = to_usize(value).map(|v| v != 0),
-            "metering_mode" => {
-                if let VsfType::x(v) = value {
-                    metering_mode = Some(v.clone());
-                }
-            }
+            "focus_distance_m" => focus_distance_m = Some(FocusDistance::from_values(v)?),
+            "flash_fired" => flash_fired = Some(FlashFired::from_vsf_type(first(v, name)?)?),
+            "metering_mode" => metering_mode = Some(MeteringMode::from_vsf_type(first(v, name)?)?),
             // Lens info
-            "lens_make" => {
-                if let VsfType::x(v) = value {
-                    lens_make = Some(v.clone());
-                }
-            }
-            "lens_model" => {
-                if let VsfType::x(v) = value {
-                    lens_model = Some(v.clone());
-                }
-            }
-            "lens_serial" => {
-                if let VsfType::x(v) = value {
-                    lens_serial = Some(v.clone());
-                }
-            }
-            "lens_min_focal_m" => {
-                if let VsfType::f5(v) = value {
-                    lens_min_focal_m = Some(*v);
-                }
-            }
-            "lens_max_focal_m" => {
-                if let VsfType::f5(v) = value {
-                    lens_max_focal_m = Some(*v);
-                }
-            }
-            "lens_min_aperture" => {
-                if let VsfType::f5(v) = value {
-                    lens_min_aperture = Some(*v);
-                }
-            }
-            "lens_max_aperture" => {
-                if let VsfType::f5(v) = value {
-                    lens_max_aperture = Some(*v);
-                }
-            }
+            "lens_make" => lens_make = Some(Manufacturer::from_vsf_type(first(v, name)?)?),
+            "lens_model" => lens_model = Some(ModelName::from_vsf_type(first(v, name)?)?),
+            "lens_serial" => lens_serial = Some(SerialNumber::from_vsf_type(first(v, name)?)?),
+            "lens_min_focal_m" => lens_min_focal_m = Some(FocalLength::from_values(v)?),
+            "lens_max_focal_m" => lens_max_focal_m = Some(FocalLength::from_values(v)?),
+            "lens_min_aperture" => lens_min_aperture = Some(Aperture::from_values(v)?),
+            "lens_max_aperture" => lens_max_aperture = Some(Aperture::from_values(v)?),
             _ => {} // Unknown field, skip
         }
     }
+    check_levels(black_level, white_level)?;
 
-    // Build metadata structs from parsed fields (converting to newtypes)
     let raw_metadata = if cfa_pattern.is_some()
         || black_level.is_some()
         || white_level.is_some()
@@ -1313,25 +1435,15 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         || magic_9.is_some()
     {
         Some(RawMetadata {
-            cfa_pattern: cfa_pattern.map(CfaPattern::new).transpose()?,
-            black_level: black_level.map(BlackLevel::new).transpose()?,
-            white_level: white_level.map(WhiteLevel::new).transpose()?,
-            dark_frame_hash: dark_frame_hash
-                .map(|(alg, hash)| CalibrationHash::new(alg, hash))
-                .transpose()?,
-            flat_field_hash: flat_field_hash
-                .map(|(alg, hash)| CalibrationHash::new(alg, hash))
-                .transpose()?,
-            bias_frame_hash: bias_frame_hash
-                .map(|(alg, hash)| CalibrationHash::new(alg, hash))
-                .transpose()?,
-            vignette_correction_hash: vignette_correction_hash
-                .map(|(alg, hash)| CalibrationHash::new(alg, hash))
-                .transpose()?,
-            distortion_correction_hash: distortion_correction_hash
-                .map(|(alg, hash)| CalibrationHash::new(alg, hash))
-                .transpose()?,
-            magic_9: magic_9.map(Magic9::new).transpose()?,
+            cfa_pattern,
+            black_level,
+            white_level,
+            dark_frame_hash,
+            flat_field_hash,
+            bias_frame_hash,
+            vignette_correction_hash,
+            distortion_correction_hash,
+            magic_9,
         })
     } else {
         None
@@ -1341,28 +1453,26 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         || camera_model.is_some()
         || camera_serial.is_some()
         || iso_speed.is_some()
-        || shutter_time_s.is_some()
+        || exposure_osc.is_some()
         || aperture_f_number.is_some()
         || focal_length_m.is_some()
-        || exposure_compensation.is_some()
+        || exposure_bias_twelfths.is_some()
         || focus_distance_m.is_some()
         || flash_fired.is_some()
         || metering_mode.is_some()
     {
         Some(CameraSettings {
-            make: camera_make.map(Manufacturer::new).transpose()?,
-            model: camera_model.map(ModelName::new).transpose()?,
-            serial_number: camera_serial.map(SerialNumber::new).transpose()?,
-            iso_speed: iso_speed.map(IsoSpeed::new).transpose()?,
-            shutter_time_s: shutter_time_s.map(ShutterTime::new).transpose()?,
-            aperture_f_number: aperture_f_number.map(Aperture::new).transpose()?,
-            focal_length_m: focal_length_m.map(FocalLength::new).transpose()?,
-            exposure_compensation: exposure_compensation
-                .map(ExposureCompensation::new)
-                .transpose()?,
-            focus_distance_m: focus_distance_m.map(FocusDistance::new).transpose()?,
-            flash_fired: flash_fired.map(FlashFired::new).transpose()?,
-            metering_mode: metering_mode.map(MeteringMode::new).transpose()?,
+            make: camera_make,
+            model: camera_model,
+            serial_number: camera_serial,
+            iso_speed,
+            exposure_osc,
+            aperture_f_number,
+            focal_length_m,
+            exposure_bias_twelfths,
+            focus_distance_m,
+            flash_fired,
+            metering_mode,
         })
     } else {
         None
@@ -1377,13 +1487,13 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         || lens_max_aperture.is_some()
     {
         Some(LensInfo {
-            make: lens_make.map(Manufacturer::new).transpose()?,
-            model: lens_model.map(ModelName::new).transpose()?,
-            serial_number: lens_serial.map(SerialNumber::new).transpose()?,
-            min_focal_length_m: lens_min_focal_m.map(FocalLength::new).transpose()?,
-            max_focal_length_m: lens_max_focal_m.map(FocalLength::new).transpose()?,
-            min_aperture_f: lens_min_aperture.map(Aperture::new).transpose()?,
-            max_aperture_f: lens_max_aperture.map(Aperture::new).transpose()?,
+            make: lens_make,
+            model: lens_model,
+            serial_number: lens_serial,
+            min_focal_length_m: lens_min_focal_m,
+            max_focal_length_m: lens_max_focal_m,
+            min_aperture_f: lens_min_aperture,
+            max_aperture_f: lens_max_aperture,
         })
     } else {
         None
@@ -1521,8 +1631,8 @@ mod tests {
             image,
             Some(RawMetadata {
                 cfa_pattern: Some(CfaPattern::new(vec![b'R', b'G', b'G', b'B']).unwrap()),
-                black_level: Some(BlackLevel::new(64.0).unwrap()),
-                white_level: Some(WhiteLevel::new(255.0).unwrap()),
+                black_level: Some(BlackLevel::new(64).unwrap()),
+                white_level: Some(WhiteLevel::new(255).unwrap()),
                 dark_frame_hash: Some(CalibrationHash::new(HASH_BLAKE3, vec![0xAB; 32]).unwrap()),
                 flat_field_hash: None,
                 bias_frame_hash: None,
@@ -1536,11 +1646,11 @@ mod tests {
                 make: None,
                 model: None,
                 serial_number: None,
-                iso_speed: Some(IsoSpeed::new(800.0).unwrap()),
-                shutter_time_s: Some(ShutterTime::new(1. / 60.).unwrap()), // 1/60 second
-                aperture_f_number: Some(Aperture::new(2.8).unwrap()),
-                focal_length_m: Some(FocalLength::new(0.024).unwrap()), // 24mm = 0.024m
-                exposure_compensation: None,
+                iso_speed: Some(IsoSpeed::new(800, 1).unwrap()),
+                exposure_osc: Some(ShutterTime::from_seconds(1, 60).unwrap()), // 1/60 second
+                aperture_f_number: Some(Aperture::new(28, 10).unwrap()),
+                focal_length_m: Some(FocalLength::from_millimetres(24).unwrap()),
+                exposure_bias_twelfths: None,
                 focus_distance_m: None,
                 flash_fired: Some(FlashFired::new(false).unwrap()),
                 metering_mode: Some(MeteringMode::new("matrix".to_string()).unwrap()),
@@ -1571,8 +1681,8 @@ mod tests {
 
         let result = lumis_raw_capture(
             samples,
-            800.0,
-            1. / 60., // 1/60 second shutter
+            800,
+            ShutterTime::from_seconds(1, 60).unwrap().oscillations(),
         );
 
         assert!(result.is_ok());
@@ -1625,8 +1735,8 @@ mod tests {
 
         let original_metadata = RawMetadata {
             cfa_pattern: Some(CfaPattern::new(vec![b'R', b'G', b'G', b'B']).unwrap()), // RGGB Bayer pattern
-            black_level: Some(BlackLevel::new(64.0).unwrap()),
-            white_level: Some(WhiteLevel::new(255.0).unwrap()),
+            black_level: Some(BlackLevel::new(64).unwrap()),
+            white_level: Some(WhiteLevel::new(255).unwrap()),
             dark_frame_hash: Some(CalibrationHash::new(HASH_BLAKE3, vec![0xAB; 32]).unwrap()),
             flat_field_hash: Some(CalibrationHash::new(HASH_BLAKE3, vec![0xCD; 32]).unwrap()),
             bias_frame_hash: None,
@@ -1639,12 +1749,12 @@ mod tests {
             make: Some(Manufacturer::new("TestCam".to_string()).unwrap()),
             model: Some(ModelName::new("Model X".to_string()).unwrap()),
             serial_number: Some(SerialNumber::new("CAM123456".to_string()).unwrap()),
-            iso_speed: Some(IsoSpeed::new(800.0).unwrap()),
-            shutter_time_s: Some(ShutterTime::new(1. / 60.).unwrap()), // 1/60 sec
-            aperture_f_number: Some(Aperture::new(2.8).unwrap()),
-            focal_length_m: Some(FocalLength::new(0.050).unwrap()), // 50mm = 0.050m
-            exposure_compensation: Some(ExposureCompensation::new(-0.5).unwrap()),
-            focus_distance_m: Some(FocusDistance::new(3.5).unwrap()),
+            iso_speed: Some(IsoSpeed::new(800, 1).unwrap()),
+            exposure_osc: Some(ShutterTime::from_seconds(1, 60).unwrap()), // 1/60 sec
+            aperture_f_number: Some(Aperture::new(28, 10).unwrap()),
+            focal_length_m: Some(FocalLength::from_millimetres(50).unwrap()),
+            exposure_bias_twelfths: Some(ExposureCompensation::from_stops(-1, 2).unwrap()),
+            focus_distance_m: Some(FocusDistance::new(7, 2).unwrap()),
             flash_fired: Some(FlashFired::new(false).unwrap()),
             metering_mode: Some(MeteringMode::new("matrix".to_string()).unwrap()),
         };
@@ -1674,6 +1784,12 @@ mod tests {
 
         // Verify camera settings round-tripped successfully
         assert!(parsed.camera.is_some());
+        let cam = parsed.camera.as_ref().unwrap();
+        assert_eq!(cam.iso_speed, Some(IsoSpeed::new(800, 1).unwrap()));
+        assert_eq!(cam.exposure_osc, Some(ShutterTime::from_seconds(1, 60).unwrap()));
+        assert_eq!(cam.aperture_f_number, Some(Aperture::new(14, 5).unwrap()));
+        assert_eq!(cam.exposure_bias_twelfths.map(|c| c.twelfths()), Some(-6));
+        assert_eq!(cam.focus_distance_m, Some(FocusDistance::new(7, 2).unwrap()));
         let _cam = parsed.camera.unwrap();
         // Note: Can't use assert_eq on newtypes (no PartialEq), but successful parsing validates data
 
@@ -1691,8 +1807,8 @@ mod tests {
             image,
             Some(RawMetadata {
                 cfa_pattern: Some(CfaPattern::new(vec![b'R', b'G', b'G', b'B']).unwrap()),
-                black_level: Some(BlackLevel::new(64.0).unwrap()),
-                white_level: Some(WhiteLevel::new(255.0).unwrap()),
+                black_level: Some(BlackLevel::new(64).unwrap()),
+                white_level: Some(WhiteLevel::new(255).unwrap()),
                 dark_frame_hash: None,
                 flat_field_hash: None,
                 bias_frame_hash: None,
@@ -1752,9 +1868,9 @@ mod tests {
         let image = BitPackedTensor::pack(8, vec![8, 8], &samples);
 
         let mut raw = RawImageBuilder::new(image);
-        raw.camera.iso_speed = Some(800.0);
-        raw.camera.shutter_time_s = Some(1.0 / 60.0);
-        raw.camera.aperture_f_number = Some(2.8);
+        raw.camera.iso_speed = Some((800, 1));
+        raw.camera.exposure_osc = Some(ShutterTime::from_seconds(1, 60).unwrap().oscillations());
+        raw.camera.aperture_f_number = Some((28, 10));
         raw.camera.flash_fired = Some(false);
         raw.camera.metering_mode = Some("matrix".to_string());
 
@@ -1776,8 +1892,8 @@ mod tests {
 
         let mut raw = RawImageBuilder::new(image);
         raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']);
-        raw.raw.black_level = Some(64.0);
-        raw.raw.white_level = Some(4095.0);
+        raw.raw.black_level = Some(64);
+        raw.raw.white_level = Some(4095);
         raw.raw.dark_frame_hash = Some((HASH_BLAKE3, vec![0xAB; 32]));
 
         let result = raw.build();
@@ -1801,10 +1917,10 @@ mod tests {
         raw.lens.make = Some("Sony".to_string());
         raw.lens.model = Some("FE 24-70mm F2.8 GM II".to_string());
         raw.lens.serial_number = Some("ABC123456".to_string());
-        raw.lens.min_focal_length_m = Some(0.024); // 24mm
-        raw.lens.max_focal_length_m = Some(0.070); // 70mm
-        raw.lens.min_aperture_f = Some(22.0);
-        raw.lens.max_aperture_f = Some(2.8);
+        raw.lens.min_focal_length_m = Some((24, 1000));
+        raw.lens.max_focal_length_m = Some((70, 1000));
+        raw.lens.min_aperture_f = Some((22, 1));
+        raw.lens.max_aperture_f = Some((28, 10));
 
         let result = raw.build();
         assert!(result.is_ok());
@@ -1827,17 +1943,17 @@ mod tests {
 
         // Raw metadata
         raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']);
-        raw.raw.black_level = Some(64.0);
-        raw.raw.white_level = Some(4095.0);
+        raw.raw.black_level = Some(64);
+        raw.raw.white_level = Some(4095);
         raw.raw.magic_9 = Some(vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
 
         // Camera settings
-        raw.camera.iso_speed = Some(800.0);
-        raw.camera.shutter_time_s = Some(1.0 / 125.0);
-        raw.camera.aperture_f_number = Some(2.8);
-        raw.camera.focal_length_m = Some(0.050); // 50mm
-        raw.camera.exposure_compensation = Some(-0.5);
-        raw.camera.focus_distance_m = Some(3.5);
+        raw.camera.iso_speed = Some((800, 1));
+        raw.camera.exposure_osc = Some(ShutterTime::from_seconds(1, 125).unwrap().oscillations());
+        raw.camera.aperture_f_number = Some((28, 10));
+        raw.camera.focal_length_m = Some((50, 1000));
+        raw.camera.exposure_bias_twelfths = Some(-6);
+        raw.camera.focus_distance_m = Some((7, 2));
         raw.camera.flash_fired = Some(false);
         raw.camera.metering_mode = Some("spot".to_string());
 
@@ -1917,5 +2033,66 @@ mod tests {
                 cfa
             );
         }
+    }
+
+    #[test]
+    fn exposure_integers_are_exact_and_checked() {
+        let ops = crate::types::eagle_time::OSCILLATIONS_PER_SECOND;
+        // Whole seconds are exact; a fraction floors to whole oscillations and never rounds up.
+        assert_eq!(ShutterTime::from_seconds(2, 1).unwrap().oscillations(), 2 * ops);
+        assert_eq!(ShutterTime::from_seconds(1, 250).unwrap().oscillations(), ops / 250);
+        assert_eq!(ShutterTime::from_seconds(3, 2).unwrap().oscillations(), ops + ops / 2);
+        // The display form is exact: oscillations over OPS, reduced.
+        let s = ShutterTime::new(ops / 2).unwrap().seconds();
+        assert_eq!((s.num(), s.den()), (1, 2));
+        // Zero, sub-oscillation, zero denominator and overflow are refused, never wrapped.
+        assert!(ShutterTime::new(0).is_err());
+        assert!(ShutterTime::from_seconds(1, ops + 1).is_err());
+        assert!(ShutterTime::from_seconds(1, 0).is_err());
+        assert!(ShutterTime::from_seconds(u64::MAX, 1).is_err());
+        assert!(ShutterTime::from_seconds(1, u64::MAX).is_err());
+
+        // Twelfths land exactly for half, third and quarter stops; anything else is refused.
+        assert_eq!(ExposureCompensation::from_stops(-4, 3).unwrap().twelfths(), -16);
+        assert_eq!(ExposureCompensation::from_stops(1, 4).unwrap().twelfths(), 3);
+        assert!(ExposureCompensation::from_stops(1, 5).is_err());
+        assert!(ExposureCompensation::from_stops(i64::MAX, 1).is_err());
+        assert!(ExposureCompensation::from_stops(1, 0).is_err());
+        assert!(ExposureCompensation::from_stops(1, u64::MAX).is_err());
+
+        // Fractions reduce on the way in and refuse zero where the quantity must be positive.
+        let f = Aperture::new(28, 10).unwrap().ratio();
+        assert_eq!((f.num(), f.den()), (14, 5));
+        assert!(Aperture::new(0, 1).is_err());
+        assert!(IsoSpeed::new(100, 0).is_err());
+        assert!(FocusDistance::new(0, 1).is_err());
+        assert!(WhiteLevel::new(0).is_err());
+    }
+
+    #[test]
+    fn exposure_readers_refuse_malformed_values() {
+        // An unreduced fraction on disk is a second spelling of one value: refused.
+        assert!(Ratio::from_values(&[VsfType::u(28, false), VsfType::u(10, false)], "f").is_err());
+        assert!(Ratio::from_values(&[VsfType::u(14, false), VsfType::u(5, false)], "f").is_ok());
+        assert!(Ratio::from_values(&[VsfType::u(1, false)], "f").is_err());
+        assert!(Ratio::from_values(&[VsfType::u(1, false), VsfType::u(0, false)], "f").is_err());
+        assert!(ShutterTime::from_values(&[VsfType::u(0, false)]).is_err());
+        assert!(ShutterTime::from_values(&[VsfType::f5(0.5)]).is_err());
+        // Width-agnostic: a fixed-width u6 reads the same as an auto-sized value.
+        assert_eq!(
+            ShutterTime::from_values(&[VsfType::u6(u64::MAX)]).unwrap().oscillations(),
+            u64::MAX
+        );
+        assert_eq!(
+            ExposureCompensation::from_values(&[VsfType::i3(-16)]).unwrap().twelfths(),
+            -16
+        );
+
+        // Black at or above white is refused at build time.
+        let samples = vec![0u64; 4];
+        let mut raw = RawImageBuilder::new(BitPackedTensor::pack(8, vec![2, 2], &samples));
+        raw.raw.black_level = Some(255);
+        raw.raw.white_level = Some(255);
+        assert!(raw.build().is_err());
     }
 }

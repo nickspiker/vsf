@@ -45,8 +45,8 @@ fn main() -> Result<(), String> {
 
     // Set RAW metadata (sensor characteristics) Builder fields accept simple types - they get validated and wrapped when you call build()
     raw.raw.cfa_pattern = Some(cfa);
-    raw.raw.black_level = Some(blackpoint as f32);
-    raw.raw.white_level = Some(whitepoint as f32);
+    raw.raw.black_level = Some(blackpoint as u64);
+    raw.raw.white_level = Some(whitepoint as u64);
     raw.raw.magic_9 = Some(vec![
         1.5, -0.3, -0.2, // Sensor RGB → LMS colour matrix (3×3)
         -0.4, 1.6, -0.2, -0.1, -0.5, 1.6,
@@ -56,12 +56,12 @@ fn main() -> Result<(), String> {
     raw.camera.make = Some("Sony".to_string());
     raw.camera.model = Some("α7 IV".to_string());
     raw.camera.serial_number = Some("87654321".to_string());
-    raw.camera.iso_speed = Some(800.);
-    raw.camera.shutter_time_s = Some(1. / 60.); // 1/60 second
-    raw.camera.aperture_f_number = Some(2.8);
-    raw.camera.focal_length_m = Some(0.024); // 24mm = 0.024m
-    raw.camera.exposure_compensation = Some(0.);
-    raw.camera.focus_distance_m = Some(5.);
+    raw.camera.iso_speed = Some((800, 1));
+    raw.camera.exposure_osc = Some(vsf::builders::ShutterTime::from_seconds(1, 60)?.oscillations()); // 1/60 second
+    raw.camera.aperture_f_number = Some((28, 10));
+    raw.camera.focal_length_m = Some((24, 1000)); // 24mm
+    raw.camera.exposure_bias_twelfths = Some(0);
+    raw.camera.focus_distance_m = Some((5, 1));
     raw.camera.flash_fired = Some(false);
     raw.camera.metering_mode = Some("matrix".to_string());
 
@@ -69,10 +69,10 @@ fn main() -> Result<(), String> {
     raw.lens.make = Some("Sony".to_string());
     raw.lens.model = Some("FE 24mm F2.8 G".to_string());
     raw.lens.serial_number = Some("12345678".to_string());
-    raw.lens.min_focal_length_m = Some(0.024); // Prime lens
-    raw.lens.max_focal_length_m = Some(0.024);
-    raw.lens.min_aperture_f = Some(2.8);
-    raw.lens.max_aperture_f = Some(22.);
+    raw.lens.min_focal_length_m = Some((24, 1000)); // Prime lens
+    raw.lens.max_focal_length_m = Some((24, 1000));
+    raw.lens.min_aperture_f = Some((28, 10));
+    raw.lens.max_aperture_f = Some((22, 1));
 
     // Build validates all fields and wraps them in type-safe newtypes This is where validation errors would surface (e.g., invalid CFA colour codes)
     let raw_bytes = raw.build()?;

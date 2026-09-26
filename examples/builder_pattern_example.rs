@@ -2,7 +2,7 @@
 //!
 //! This shows the ergonomic dot notation for incrementally setting fields, which is especially useful when fields are conditional or optional.
 
-use vsf::builders::RawImageBuilder;
+use vsf::builders::{RawImageBuilder, ShutterTime};
 use vsf::types::BitPackedTensor;
 
 fn main() {
@@ -15,24 +15,24 @@ fn main() {
 
     // Set RAW metadata fields using dot notation
     raw.raw.cfa_pattern = Some(vec![b'R', b'G', b'G', b'B']); // RGGB Bayer pattern
-    raw.raw.black_level = Some(64.0);
-    raw.raw.white_level = Some(255.0);
+    raw.raw.black_level = Some(64);
+    raw.raw.white_level = Some(255);
 
     // Set camera settings using dot notation
-    raw.camera.iso_speed = Some(800.0);
-    raw.camera.shutter_time_s = Some(1.0 / 60.0); // 1/60 second
-    raw.camera.aperture_f_number = Some(2.8);
-    raw.camera.focal_length_m = Some(0.050); // 50mm
-    raw.camera.focus_distance_m = Some(3.5);
+    raw.camera.iso_speed = Some((800, 1));
+    raw.camera.exposure_osc = Some(ShutterTime::from_seconds(1, 60).unwrap().oscillations()); // 1/60 second
+    raw.camera.aperture_f_number = Some((28, 10));
+    raw.camera.focal_length_m = Some((50, 1000)); // 50mm
+    raw.camera.focus_distance_m = Some((7, 2));
     raw.camera.flash_fired = Some(false);
     raw.camera.metering_mode = Some("matrix".to_string());
 
     // Set lens info using dot notation
     raw.lens.make = Some("Sony".to_string());
     raw.lens.model = Some("FE 50mm F1.2 GM".to_string());
-    raw.lens.min_focal_length_m = Some(0.050); // 50mm prime
-    raw.lens.max_focal_length_m = Some(0.050);
-    raw.lens.max_aperture_f = Some(1.2); // f/1.2 maximum aperture
+    raw.lens.min_focal_length_m = Some((50, 1000)); // 50mm prime
+    raw.lens.max_focal_length_m = Some((50, 1000));
+    raw.lens.max_aperture_f = Some((12, 10)); // f/1.2 maximum aperture
 
     // Build the VSF file
     let bytes = raw.build().expect("Failed to build VSF file");
