@@ -43,10 +43,26 @@ impl EncodeNumber for u128 {
 
 impl EncodeNumber for usize {
     fn encode_number(&self) -> Vec<u8> {
-        // Narrowest marker that fits — see crate::ewe
-        let mut result = Vec::new();
-        crate::ewe::write_uint(*self, &mut result);
-        result
+        // Auto-select smallest size that fits
+        if *self <= u8::MAX as usize {
+            vec![b'3', *self as u8]
+        } else if *self <= u16::MAX as usize {
+            let mut result = vec![b'4'];
+            result.extend_from_slice(&(*self as u16).to_be_bytes());
+            result
+        } else if *self <= u32::MAX as usize {
+            let mut result = vec![b'5'];
+            result.extend_from_slice(&(*self as u32).to_be_bytes());
+            result
+        } else if *self <= u64::MAX as usize {
+            let mut result = vec![b'6'];
+            result.extend_from_slice(&(*self as u64).to_be_bytes());
+            result
+        } else {
+            let mut result = vec![b'7'];
+            result.extend_from_slice(&(*self as u128).to_be_bytes());
+            result
+        }
     }
 }
 
@@ -161,10 +177,46 @@ impl EncodeNumber for i128 {
 
 impl EncodeNumber for isize {
     fn encode_number(&self) -> Vec<u8> {
-        // Narrowest SIGNED width that fits — positive values must fit the signed positive range of the slot, never the unsigned one: the old unsigned-limit compare packed 128..=255 into the i8 slot (byte 0x80..), which every signed reader correctly decodes as negative — field 2026-09-08, "ladder 16..-128 kbps" in the call logs (128_000/1000 = 128 stored as i8 −128). See crate::ewe.
-        let mut result = Vec::new();
-        crate::ewe::write_int(*self, &mut result);
-        result
+        // Auto-select the smallest SIGNED width that fits — positive values must fit the signed positive range of the slot, never the unsigned one: the old unsigned-limit compare packed 128..=255 into the i8 slot (byte 0x80..), which every signed reader correctly decodes as negative — field 2026-09-08, "ladder 16..-128 kbps" in the call logs (128_000/1000 = 128 stored as i8 −128).
+        if *self >= 0 {
+            if *self <= i8::MAX as isize {
+                vec![b'3', *self as u8]
+            } else if *self <= i16::MAX as isize {
+                let mut result = vec![b'4'];
+                result.extend_from_slice(&(*self as i16).to_be_bytes());
+                result
+            } else if *self <= i32::MAX as isize {
+                let mut result = vec![b'5'];
+                result.extend_from_slice(&(*self as i32).to_be_bytes());
+                result
+            } else if *self <= i64::MAX as isize {
+                let mut result = vec![b'6'];
+                result.extend_from_slice(&(*self as i64).to_be_bytes());
+                result
+            } else {
+                let mut result = vec![b'7'];
+                result.extend_from_slice(&(*self as i128).to_be_bytes());
+                result
+            }
+        } else if *self >= i8::MIN as isize {
+            vec![b'3', *self as u8]
+        } else if *self >= i16::MIN as isize {
+            let mut result = vec![b'4'];
+            result.extend_from_slice(&(*self as i16).to_be_bytes());
+            result
+        } else if *self >= i32::MIN as isize {
+            let mut result = vec![b'5'];
+            result.extend_from_slice(&(*self as i32).to_be_bytes());
+            result
+        } else if *self >= i64::MIN as isize {
+            let mut result = vec![b'6'];
+            result.extend_from_slice(&(*self as i64).to_be_bytes());
+            result
+        } else {
+            let mut result = vec![b'7'];
+            result.extend_from_slice(&(*self as i128).to_be_bytes());
+            result
+        }
     }
 }
 

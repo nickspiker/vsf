@@ -326,9 +326,6 @@ pub mod grid;
 /// Tukutahi: rate declaration, exact naming and the Manawa marking grid for video and audio streams (photon docs/tukutahi.md).
 pub mod tukutahi;
 
-// EWE integer reader/writer: canonical (narrowest-marker) size-marked integers, the one place bare integers cross the wire
-pub mod ewe;
-
 // Binary encoding
 pub mod encoding;
 
