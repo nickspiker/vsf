@@ -32,10 +32,10 @@ fn main() {
         iso_speed: Some(IsoSpeed::new(800, 1).unwrap()),
         exposure_osc: Some(ShutterTime::from_seconds(1, 60).unwrap()), // 1/60 second
         aperture_n2: Some(Aperture::from_marking(28, 10).unwrap()),
-        aperture_setting_twelfths: None,
-        iso_setting_twelfths: None,
+        aperture_setting_stops: None,
+        iso_setting_stops: None,
         focal_length_m: Some(FocalLength::from_millimetres(50).unwrap()), // 50mm
-        exposure_bias_twelfths: None,
+        exposure_bias_stops: None,
         focus_distance_m: Some(FocusDistance::new(7, 2).unwrap()),
         flash_fired: Some(FlashFired::new(false).unwrap()),
         metering_mode: Some(MeteringMode::new("matrix".to_string()).unwrap()),

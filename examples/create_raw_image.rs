@@ -60,7 +60,7 @@ fn main() -> Result<(), String> {
     raw.camera.exposure_osc = Some(vsf::builders::ShutterTime::from_seconds(1, 60)?.oscillations()); // 1/60 second
     raw.camera.aperture_n2 = Some(Aperture::from_marking(28, 10)?);
     raw.camera.focal_length_m = Some((24, 1000)); // 24mm
-    raw.camera.exposure_bias_twelfths = Some(0);
+    raw.camera.exposure_bias_stops = Some((0, 1));
     raw.camera.focus_distance_m = Some((5, 1));
     raw.camera.flash_fired = Some(false);
     raw.camera.metering_mode = Some("matrix".to_string());

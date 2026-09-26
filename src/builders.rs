@@ -207,7 +207,7 @@ impl Magic9 {
 // ==================== INTEGER EXPOSURE METADATA ====================
 //
 // Doctrine (Nick, 2026-09-26): exposure metadata is LINEAR INTEGERS at rest, never floats, never logs, never reciprocals.
-// Durations are Eagle oscillations; gain, f-number and lens lengths are reduced integer fractions; an exposure SETTING (bias) is signed twelfths of a stop.
+// Durations are Eagle oscillations; gain, f-number and lens lengths are reduced integer fractions; an exposure SETTING (bias, aperture, ISO) is a signed rational count of stops, shown in twelfths.
 // Stops and "1/250" are display forms, derived exactly from the stored integers.
 // All maths is 64-bit and checked: overflow-checks are off in every profile, so plain `*` or `+` would wrap silently.
 // Every overflow or inexact conversion comes back as Err; nothing here panics on input.
@@ -235,16 +235,6 @@ fn one_u64(values: &[VsfType], what: &str) -> Result<u64, String> {
         [v] => v
             .as_u64()
             .ok_or_else(|| format!("{} must be an unsigned integer", what)),
-        _ => Err(format!("{} must carry exactly one value, got {}", what, values.len())),
-    }
-}
-
-/// Read a field that must carry exactly one signed value, at any width.
-fn one_i64(values: &[VsfType], what: &str) -> Result<i64, String> {
-    match values {
-        [v] => v
-            .as_i64()
-            .ok_or_else(|| format!("{} must be a signed integer", what)),
         _ => Err(format!("{} must carry exactly one value, got {}", what, values.len())),
     }
 }
@@ -409,7 +399,7 @@ impl ShutterTime {
 
 /// Aperture as N², the f-number SQUARED, a reduced positive fraction.
 /// WHY squared: exposure goes as t × ISO / N², so N² is the linear quantity the photometry multiplies, and the full-stop series lands on exact powers of two (f/1.4 → 2, f/2.8 → 8, f/11 → 128) where N itself (2√2, 8√2) is irrational and no fraction holds it.
-/// Third-, half- and quarter-stop steps are irrational in every linear space; their exact home is [`StopSetting`] in twelfths, stored beside this.
+/// Third-, half- and quarter-stop steps are irrational in every linear space; their exact home is [`StopSetting`], a rational count of stops stored beside this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Aperture(Ratio);
 
@@ -487,51 +477,87 @@ impl FocalLength {
     }
 }
 
-/// A camera SETTING on the stop grid, in signed twelfths of a stop from a stated reference.
-/// WHY twelfths: 12 divides by 2, 3, 4 and 6, so every manufacturer's grid — half, third and quarter stops — lands exactly (−1⅓ stops = −16), where those steps are irrational in any linear space.
-/// Used for exposure bias (reference: no bias), aperture setting (reference: f/1, so f/2.8 = 36, f/3.2 = 40) and ISO setting (reference: ISO 100, so ISO 125 = 4, ISO 200 = 12).
+/// A camera SETTING in log space: a signed count of stops from a stated reference, as an exact reduced fraction (num/den stops, den > 0).
+/// WHY a fraction of stops: grid positions are powers of 2^(1/den), irrational in every linear space, but exact as a rational exponent; any grid (half, third, quarter, or one nobody has built yet) lands without rounding.
+/// Display in twelfths: 12 divides by 2, 3, 4 and 6, so every real camera grid shows as whole twelfths (−1⅓ stops = −16); [`twelfths`](Self::twelfths) is None only for a grid twelfths cannot show.
+/// Used for exposure bias (reference: no bias), aperture setting (reference: f/1, so f/2.8 = 3 stops) and ISO setting (reference: ISO 100, so ISO 50 = −1 stop, ISO 125 = 1/3).
+/// Durations never use this: they stay linear oscillations, since exposure maths and row timing need them linear.
 /// Zero is a real setting (the reference itself), not a sentinel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StopSetting(i64);
+pub struct StopSetting {
+    num: i64,
+    den: u64,
+}
 
 /// The exposure bias is a [`StopSetting`] from no bias.
 pub type ExposureCompensation = StopSetting;
 
 impl StopSetting {
-    pub fn new(twelfths: i64) -> Result<Self, String> {
-        Ok(StopSetting(twelfths))
-    }
-
-    /// From stops as a fraction (−1/3 stop = `from_stops(-1, 3)`).
-    /// Err unless it is a whole number of twelfths: a setting is a step, and a step that does not land is refused rather than rounded.
+    /// `num/den` stops, reduced on the way in so one setting has one encoding at rest.
     pub fn from_stops(num: i64, den: u64) -> Result<Self, String> {
-        let d = i64::try_from(den).map_err(|_| "Stop setting denominator too large")?;
-        if d == 0 {
+        if den == 0 {
             return Err("Stop setting denominator cannot be zero".to_string());
         }
-        let t = num
-            .checked_mul(12)
-            .ok_or("Stop setting overflows 64 bits of twelfths")?;
-        // PROOF: d >= 1, so neither % nor / can trap (only a divisor of −1 overflows i64::MIN).
-        if t % d != 0 {
-            return Err(format!(
-                "Stop setting {}/{} stop is not a whole number of twelfths",
-                num, den
-            ));
+        // PROOF: den > 0 so g >= 1; g divides |num|, so the reduced magnitude is at most 2^63, which is only reached when num == i64::MIN and g == 1.
+        let g = gcd(num.unsigned_abs(), den);
+        let mag = num.unsigned_abs() / g;
+        let num = if num >= 0 {
+            // PROOF: num >= 0 means mag <= i64::MAX.
+            mag as i64
+        } else if mag == 1u64 << 63 {
+            i64::MIN
+        } else {
+            -(mag as i64)
+        };
+        Ok(StopSetting { num, den: den / g })
+    }
+
+    /// Whole twelfths of a stop (f/3.2 from f/1 = `from_twelfths(40)`).
+    pub fn from_twelfths(twelfths: i64) -> Result<Self, String> {
+        Self::from_stops(twelfths, 12)
+    }
+
+    pub fn num(self) -> i64 {
+        self.num
+    }
+
+    pub fn den(self) -> u64 {
+        self.den
+    }
+
+    /// The setting in whole twelfths for display, or None when its grid does not divide 12 (fifths, sevenths) or the count would not fit 64 bits.
+    pub fn twelfths(self) -> Option<i64> {
+        if 12 % self.den != 0 {
+            return None;
         }
-        Ok(StopSetting(t / d))
+        // PROOF: den divides 12, so den is 1, 2, 3, 4, 6 or 12 and 12/den is a small positive integer.
+        self.num.checked_mul((12 / self.den) as i64)
     }
 
-    pub fn twelfths(self) -> i64 {
-        self.0
-    }
-
+    /// Two values: signed numerator then unsigned denominator, each auto-sized.
     pub fn to_values(self) -> Vec<VsfType> {
-        vec![sint(self.0)]
+        vec![sint(self.num), uint(self.den)]
     }
 
+    /// Read `[num, den]`, refusing a zero denominator and any unreduced spelling.
     pub fn from_values(values: &[VsfType]) -> Result<Self, String> {
-        Self::new(one_i64(values, "stop setting")?)
+        let (num, den) = match values {
+            [n, d] => (
+                n.as_i64().ok_or("Stop setting numerator must be a signed integer")?,
+                d.as_u64().ok_or("Stop setting denominator must be an unsigned integer")?,
+            ),
+            _ => {
+                return Err(format!(
+                    "Stop setting must carry [numerator, denominator], got {} values",
+                    values.len()
+                ))
+            }
+        };
+        let s = Self::from_stops(num, den)?;
+        if s.num != num || s.den != den {
+            return Err(format!("Stop setting {}/{} is not in lowest terms", num, den));
+        }
+        Ok(s)
     }
 }
 
@@ -710,12 +736,12 @@ pub struct CameraSettings {
     pub iso_speed: Option<IsoSpeed>,
     pub exposure_osc: Option<ShutterTime>,
     pub aperture_n2: Option<Aperture>,
-    /// Stop-grid setting from f/1, when the camera works on one.
-    pub aperture_setting_twelfths: Option<StopSetting>,
-    /// Stop-grid setting from ISO 100, when the camera works on one.
-    pub iso_setting_twelfths: Option<StopSetting>,
+    /// Stop setting from f/1, when the camera works on a grid.
+    pub aperture_setting_stops: Option<StopSetting>,
+    /// Stop setting from ISO 100, when the camera works on a grid.
+    pub iso_setting_stops: Option<StopSetting>,
     pub focal_length_m: Option<FocalLength>,
-    pub exposure_bias_twelfths: Option<ExposureCompensation>,
+    pub exposure_bias_stops: Option<ExposureCompensation>,
     pub focus_distance_m: Option<FocusDistance>,
     pub flash_fired: Option<FlashFired>,
     pub metering_mode: Option<MeteringMode>,
@@ -810,14 +836,14 @@ pub struct CameraBuilder {
     pub exposure_osc: Option<u64>,
     /// e.g. f/2.8 = `Aperture::from_marking(28, 10)?` (stored as N² = 8)
     pub aperture_n2: Option<Aperture>,
-    /// twelfths of a stop from f/1, e.g. f/3.2 = `40`
-    pub aperture_setting_twelfths: Option<i64>,
-    /// twelfths of a stop from ISO 100, e.g. ISO 125 = `4`
-    pub iso_setting_twelfths: Option<i64>,
+    /// stops from f/1 as (num, den), e.g. f/3.2 = `(10, 3)`
+    pub aperture_setting_stops: Option<(i64, u64)>,
+    /// stops from ISO 100 as (num, den), e.g. ISO 125 = `(1, 3)`
+    pub iso_setting_stops: Option<(i64, u64)>,
     /// metres as (num, den), e.g. 50 mm = `(50, 1000)`
     pub focal_length_m: Option<(u64, u64)>,
-    /// signed twelfths of a stop, e.g. −½ stop = `-6`
-    pub exposure_bias_twelfths: Option<i64>,
+    /// stops as (num, den), e.g. −½ stop = `(-1, 2)`
+    pub exposure_bias_stops: Option<(i64, u64)>,
     /// metres as (num, den)
     pub focus_distance_m: Option<(u64, u64)>,
     pub flash_fired: Option<bool>,
@@ -833,10 +859,10 @@ impl CameraBuilder {
             && self.iso_speed.is_none()
             && self.exposure_osc.is_none()
             && self.aperture_n2.is_none()
-            && self.aperture_setting_twelfths.is_none()
-            && self.iso_setting_twelfths.is_none()
+            && self.aperture_setting_stops.is_none()
+            && self.iso_setting_stops.is_none()
             && self.focal_length_m.is_none()
-            && self.exposure_bias_twelfths.is_none()
+            && self.exposure_bias_stops.is_none()
             && self.focus_distance_m.is_none()
             && self.flash_fired.is_none()
             && self.metering_mode.is_none()
@@ -851,18 +877,21 @@ impl CameraBuilder {
             iso_speed: self.iso_speed.map(|(n, d)| IsoSpeed::new(n, d)).transpose()?,
             exposure_osc: self.exposure_osc.map(ShutterTime::new).transpose()?,
             aperture_n2: self.aperture_n2,
-            aperture_setting_twelfths: self
-                .aperture_setting_twelfths
-                .map(StopSetting::new)
+            aperture_setting_stops: self
+                .aperture_setting_stops
+                .map(|(n, d)| StopSetting::from_stops(n, d))
                 .transpose()?,
-            iso_setting_twelfths: self.iso_setting_twelfths.map(StopSetting::new).transpose()?,
+            iso_setting_stops: self
+                .iso_setting_stops
+                .map(|(n, d)| StopSetting::from_stops(n, d))
+                .transpose()?,
             focal_length_m: self
                 .focal_length_m
                 .map(|(n, d)| FocalLength::new(n, d))
                 .transpose()?,
-            exposure_bias_twelfths: self
-                .exposure_bias_twelfths
-                .map(ExposureCompensation::new)
+            exposure_bias_stops: self
+                .exposure_bias_stops
+                .map(|(n, d)| ExposureCompensation::from_stops(n, d))
                 .transpose()?,
             focus_distance_m: self
                 .focus_distance_m
@@ -1133,20 +1162,20 @@ pub fn build_raw_image(
             raw_items.push(("aperture_n2".to_string(), aperture.to_values()));
         }
 
-        if let Some(setting) = cam.aperture_setting_twelfths {
-            raw_items.push(("aperture_setting_twelfths".to_string(), setting.to_values()));
+        if let Some(setting) = cam.aperture_setting_stops {
+            raw_items.push(("aperture_setting_stops".to_string(), setting.to_values()));
         }
 
-        if let Some(setting) = cam.iso_setting_twelfths {
-            raw_items.push(("iso_setting_twelfths".to_string(), setting.to_values()));
+        if let Some(setting) = cam.iso_setting_stops {
+            raw_items.push(("iso_setting_stops".to_string(), setting.to_values()));
         }
 
         if let Some(focal) = cam.focal_length_m {
             raw_items.push(("focal_length_m".to_string(), focal.to_values()));
         }
 
-        if let Some(comp) = cam.exposure_bias_twelfths {
-            raw_items.push(("exposure_bias_twelfths".to_string(), comp.to_values()));
+        if let Some(comp) = cam.exposure_bias_stops {
+            raw_items.push(("exposure_bias_stops".to_string(), comp.to_values()));
         }
 
         if let Some(focus) = cam.focus_distance_m {
@@ -1247,10 +1276,10 @@ pub fn lumis_raw_capture(samples: Vec<u64>, iso: u64, exposure_osc: u64) -> Resu
             iso_speed: Some(IsoSpeed::new(iso, 1)?),
             exposure_osc: Some(ShutterTime::new(exposure_osc)?),
             aperture_n2: None,
-            aperture_setting_twelfths: None,
-            iso_setting_twelfths: None,
+            aperture_setting_stops: None,
+            iso_setting_stops: None,
             focal_length_m: None,
-            exposure_bias_twelfths: None,
+            exposure_bias_stops: None,
             focus_distance_m: None,
             flash_fired: Some(FlashFired::new(false)?),
             metering_mode: None,
@@ -1402,10 +1431,10 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
     let mut iso_speed: Option<IsoSpeed> = None;
     let mut exposure_osc: Option<ShutterTime> = None;
     let mut aperture_n2: Option<Aperture> = None;
-    let mut aperture_setting_twelfths: Option<StopSetting> = None;
-    let mut iso_setting_twelfths: Option<StopSetting> = None;
+    let mut aperture_setting_stops: Option<StopSetting> = None;
+    let mut iso_setting_stops: Option<StopSetting> = None;
     let mut focal_length_m: Option<FocalLength> = None;
-    let mut exposure_bias_twelfths: Option<ExposureCompensation> = None;
+    let mut exposure_bias_stops: Option<ExposureCompensation> = None;
     let mut focus_distance_m: Option<FocusDistance> = None;
     let mut flash_fired: Option<FlashFired> = None;
     let mut metering_mode: Option<MeteringMode> = None;
@@ -1452,13 +1481,13 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
             "iso_speed" => iso_speed = Some(IsoSpeed::from_values(v)?),
             "exposure_osc" => exposure_osc = Some(ShutterTime::from_values(v)?),
             "aperture_n2" => aperture_n2 = Some(Aperture::from_values(v)?),
-            "aperture_setting_twelfths" => {
-                aperture_setting_twelfths = Some(StopSetting::from_values(v)?)
+            "aperture_setting_stops" => {
+                aperture_setting_stops = Some(StopSetting::from_values(v)?)
             }
-            "iso_setting_twelfths" => iso_setting_twelfths = Some(StopSetting::from_values(v)?),
+            "iso_setting_stops" => iso_setting_stops = Some(StopSetting::from_values(v)?),
             "focal_length_m" => focal_length_m = Some(FocalLength::from_values(v)?),
-            "exposure_bias_twelfths" => {
-                exposure_bias_twelfths = Some(ExposureCompensation::from_values(v)?)
+            "exposure_bias_stops" => {
+                exposure_bias_stops = Some(ExposureCompensation::from_values(v)?)
             }
             "focus_distance_m" => focus_distance_m = Some(FocusDistance::from_values(v)?),
             "flash_fired" => flash_fired = Some(FlashFired::from_vsf_type(first(v, name)?)?),
@@ -1507,10 +1536,10 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
         || iso_speed.is_some()
         || exposure_osc.is_some()
         || aperture_n2.is_some()
-        || aperture_setting_twelfths.is_some()
-        || iso_setting_twelfths.is_some()
+        || aperture_setting_stops.is_some()
+        || iso_setting_stops.is_some()
         || focal_length_m.is_some()
-        || exposure_bias_twelfths.is_some()
+        || exposure_bias_stops.is_some()
         || focus_distance_m.is_some()
         || flash_fired.is_some()
         || metering_mode.is_some()
@@ -1522,10 +1551,10 @@ pub fn parse_raw_image(data: &[u8]) -> Result<ParsedRawImage, String> {
             iso_speed,
             exposure_osc,
             aperture_n2,
-            aperture_setting_twelfths,
-            iso_setting_twelfths,
+            aperture_setting_stops,
+            iso_setting_stops,
             focal_length_m,
-            exposure_bias_twelfths,
+            exposure_bias_stops,
             focus_distance_m,
             flash_fired,
             metering_mode,
@@ -1705,10 +1734,10 @@ mod tests {
                 iso_speed: Some(IsoSpeed::new(800, 1).unwrap()),
                 exposure_osc: Some(ShutterTime::from_seconds(1, 60).unwrap()), // 1/60 second
                 aperture_n2: Some(Aperture::from_marking(28, 10).unwrap()),
-                aperture_setting_twelfths: None,
-                iso_setting_twelfths: None,
+                aperture_setting_stops: None,
+                iso_setting_stops: None,
                 focal_length_m: Some(FocalLength::from_millimetres(24).unwrap()),
-                exposure_bias_twelfths: None,
+                exposure_bias_stops: None,
                 focus_distance_m: None,
                 flash_fired: Some(FlashFired::new(false).unwrap()),
                 metering_mode: Some(MeteringMode::new("matrix".to_string()).unwrap()),
@@ -1810,10 +1839,10 @@ mod tests {
             iso_speed: Some(IsoSpeed::new(800, 1).unwrap()),
             exposure_osc: Some(ShutterTime::from_seconds(1, 60).unwrap()), // 1/60 sec
             aperture_n2: Some(Aperture::from_marking(28, 10).unwrap()),
-            aperture_setting_twelfths: Some(StopSetting::new(36).unwrap()),
-            iso_setting_twelfths: Some(StopSetting::from_stops(3, 1).unwrap()),
+            aperture_setting_stops: Some(StopSetting::from_twelfths(36).unwrap()),
+            iso_setting_stops: Some(StopSetting::from_stops(3, 1).unwrap()),
             focal_length_m: Some(FocalLength::from_millimetres(50).unwrap()),
-            exposure_bias_twelfths: Some(ExposureCompensation::from_stops(-1, 2).unwrap()),
+            exposure_bias_stops: Some(ExposureCompensation::from_stops(-1, 2).unwrap()),
             focus_distance_m: Some(FocusDistance::new(7, 2).unwrap()),
             flash_fired: Some(FlashFired::new(false).unwrap()),
             metering_mode: Some(MeteringMode::new("matrix".to_string()).unwrap()),
@@ -1848,9 +1877,9 @@ mod tests {
         assert_eq!(cam.iso_speed, Some(IsoSpeed::new(800, 1).unwrap()));
         assert_eq!(cam.exposure_osc, Some(ShutterTime::from_seconds(1, 60).unwrap()));
         assert_eq!(cam.aperture_n2, Some(Aperture::from_n_squared(8, 1).unwrap()));
-        assert_eq!(cam.aperture_setting_twelfths.map(|a| a.twelfths()), Some(36));
-        assert_eq!(cam.iso_setting_twelfths.map(|a| a.twelfths()), Some(36));
-        assert_eq!(cam.exposure_bias_twelfths.map(|c| c.twelfths()), Some(-6));
+        assert_eq!(cam.aperture_setting_stops.and_then(|a| a.twelfths()), Some(36));
+        assert_eq!(cam.iso_setting_stops.and_then(|a| a.twelfths()), Some(36));
+        assert_eq!(cam.exposure_bias_stops.and_then(|c| c.twelfths()), Some(-6));
         assert_eq!(cam.focus_distance_m, Some(FocusDistance::new(7, 2).unwrap()));
         let _cam = parsed.camera.unwrap();
         // Note: Can't use assert_eq on newtypes (no PartialEq), but successful parsing validates data
@@ -2014,7 +2043,7 @@ mod tests {
         raw.camera.exposure_osc = Some(ShutterTime::from_seconds(1, 125).unwrap().oscillations());
         raw.camera.aperture_n2 = Some(Aperture::from_marking(28, 10).unwrap());
         raw.camera.focal_length_m = Some((50, 1000));
-        raw.camera.exposure_bias_twelfths = Some(-6);
+        raw.camera.exposure_bias_stops = Some((-1, 2));
         raw.camera.focus_distance_m = Some((7, 2));
         raw.camera.flash_fired = Some(false);
         raw.camera.metering_mode = Some("spot".to_string());
@@ -2119,12 +2148,20 @@ mod tests {
         assert!(ShutterTime::from_seconds(u64::MAX - 1, u64::MAX).is_err());
 
         // Twelfths land exactly for half, third and quarter stops; anything else is refused.
-        assert_eq!(ExposureCompensation::from_stops(-4, 3).unwrap().twelfths(), -16);
-        assert_eq!(ExposureCompensation::from_stops(1, 4).unwrap().twelfths(), 3);
-        assert!(ExposureCompensation::from_stops(1, 5).is_err());
-        assert!(ExposureCompensation::from_stops(i64::MAX, 1).is_err());
+        assert_eq!(ExposureCompensation::from_stops(-4, 3).unwrap().twelfths(), Some(-16));
+        assert_eq!(ExposureCompensation::from_stops(1, 4).unwrap().twelfths(), Some(3));
+        // A grid twelfths cannot show is still stored exactly; display just has no twelfths for it.
+        let fifth = ExposureCompensation::from_stops(1, 5).unwrap();
+        assert_eq!((fifth.num(), fifth.den(), fifth.twelfths()), (1, 5, None));
+        // An unreduced setting on disk is refused.
+        assert!(StopSetting::from_values(&[VsfType::i3(-8), VsfType::u3(12)]).is_err());
+        // Reduced on the way in; the extremes neither trap nor wrap.
+        let r = StopSetting::from_stops(-8, 12).unwrap();
+        assert_eq!((r.num(), r.den(), r.twelfths()), (-2, 3, Some(-8)));
+        assert_eq!(StopSetting::from_stops(i64::MIN, 1).unwrap().num(), i64::MIN);
+        assert_eq!(StopSetting::from_stops(i64::MIN, 1u64 << 63).unwrap().num(), -1);
+        assert_eq!(StopSetting::from_stops(i64::MAX, 1).unwrap().twelfths(), None);
         assert!(ExposureCompensation::from_stops(1, 0).is_err());
-        assert!(ExposureCompensation::from_stops(1, u64::MAX).is_err());
 
         // Fractions reduce on the way in and refuse zero where the quantity must be positive.
         // Full-stop markings land on exact powers of two in N²; other markings square as written.
@@ -2143,9 +2180,9 @@ mod tests {
         assert!(Aperture::from_marking(0, 1).is_err());
         assert!(Aperture::from_marking(u64::MAX, 1).is_err());
         // Every manufacturer's stop grid lands exactly in twelfths.
-        assert_eq!(StopSetting::from_stops(1, 3).unwrap().twelfths(), 4);
-        assert_eq!(StopSetting::from_stops(1, 2).unwrap().twelfths(), 6);
-        assert_eq!(StopSetting::from_stops(3, 4).unwrap().twelfths(), 9);
+        assert_eq!(StopSetting::from_stops(1, 3).unwrap().twelfths(), Some(4));
+        assert_eq!(StopSetting::from_stops(1, 2).unwrap().twelfths(), Some(6));
+        assert_eq!(StopSetting::from_stops(3, 4).unwrap().twelfths(), Some(9));
         assert!(IsoSpeed::new(100, 0).is_err());
         assert!(FocusDistance::new(0, 1).is_err());
         assert!(WhiteLevel::new(0).is_err());
@@ -2166,8 +2203,8 @@ mod tests {
             u64::MAX
         );
         assert_eq!(
-            ExposureCompensation::from_values(&[VsfType::i3(-16)]).unwrap().twelfths(),
-            -16
+            ExposureCompensation::from_values(&[VsfType::i3(-4), VsfType::u3(3)]).unwrap().twelfths(),
+            Some(-16)
         );
 
         // Black at or above white is refused at build time.
