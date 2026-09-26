@@ -58,7 +58,7 @@ fn main() -> Result<(), String> {
     raw.camera.serial_number = Some("87654321".to_string());
     raw.camera.iso_speed = Some((800, 1));
     raw.camera.exposure_osc = Some(vsf::builders::ShutterTime::from_seconds(1, 60)?.oscillations()); // 1/60 second
-    raw.camera.aperture_f_number = Some((28, 10));
+    raw.camera.aperture_n2 = Some(Aperture::from_marking(28, 10)?);
     raw.camera.focal_length_m = Some((24, 1000)); // 24mm
     raw.camera.exposure_bias_twelfths = Some(0);
     raw.camera.focus_distance_m = Some((5, 1));
@@ -71,8 +71,8 @@ fn main() -> Result<(), String> {
     raw.lens.serial_number = Some("12345678".to_string());
     raw.lens.min_focal_length_m = Some((24, 1000)); // Prime lens
     raw.lens.max_focal_length_m = Some((24, 1000));
-    raw.lens.min_aperture_f = Some((28, 10));
-    raw.lens.max_aperture_f = Some((22, 1));
+    raw.lens.min_aperture_n2 = Some(Aperture::from_marking(28, 10)?);
+    raw.lens.max_aperture_n2 = Some(Aperture::from_marking(22, 1)?);
 
     // Build validates all fields and wraps them in type-safe newtypes This is where validation errors would surface (e.g., invalid CFA colour codes)
     let raw_bytes = raw.build()?;

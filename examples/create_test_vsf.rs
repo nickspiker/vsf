@@ -31,7 +31,9 @@ fn main() {
         serial_number: None,
         iso_speed: Some(IsoSpeed::new(800, 1).unwrap()),
         exposure_osc: Some(ShutterTime::from_seconds(1, 60).unwrap()), // 1/60 second
-        aperture_f_number: Some(Aperture::new(28, 10).unwrap()),
+        aperture_n2: Some(Aperture::from_marking(28, 10).unwrap()),
+        aperture_setting_twelfths: None,
+        iso_setting_twelfths: None,
         focal_length_m: Some(FocalLength::from_millimetres(50).unwrap()), // 50mm
         exposure_bias_twelfths: None,
         focus_distance_m: Some(FocusDistance::new(7, 2).unwrap()),

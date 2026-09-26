@@ -2,7 +2,7 @@
 //!
 //! This shows the ergonomic dot notation for incrementally setting fields, which is especially useful when fields are conditional or optional.
 
-use vsf::builders::{RawImageBuilder, ShutterTime};
+use vsf::builders::{Aperture, RawImageBuilder, ShutterTime};
 use vsf::types::BitPackedTensor;
 
 fn main() {
@@ -21,7 +21,7 @@ fn main() {
     // Set camera settings using dot notation
     raw.camera.iso_speed = Some((800, 1));
     raw.camera.exposure_osc = Some(ShutterTime::from_seconds(1, 60).unwrap().oscillations()); // 1/60 second
-    raw.camera.aperture_f_number = Some((28, 10));
+    raw.camera.aperture_n2 = Some(Aperture::from_marking(28, 10).unwrap());
     raw.camera.focal_length_m = Some((50, 1000)); // 50mm
     raw.camera.focus_distance_m = Some((7, 2));
     raw.camera.flash_fired = Some(false);
@@ -32,7 +32,7 @@ fn main() {
     raw.lens.model = Some("FE 50mm F1.2 GM".to_string());
     raw.lens.min_focal_length_m = Some((50, 1000)); // 50mm prime
     raw.lens.max_focal_length_m = Some((50, 1000));
-    raw.lens.max_aperture_f = Some((12, 10)); // f/1.2 maximum aperture
+    raw.lens.max_aperture_n2 = Some(Aperture::from_marking(12, 10).unwrap()); // f/1.2 maximum aperture
 
     // Build the VSF file
     let bytes = raw.build().expect("Failed to build VSF file");
