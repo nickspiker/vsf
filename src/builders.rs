@@ -350,23 +350,22 @@ impl IsoSpeed {
     }
 }
 
-/// Exposure duration in Eagle oscillations, strictly positive.
+/// Exposure duration in WHOLE Eagle oscillations, floored like every other Eagle count.
 /// One oscillation is about 704 ps: every consumer shutter, strobe and high-speed cinema exposure resolves to a millionth or better, and a u64 spans about 412 years.
-/// Zero is refused: a zero-length exposure is not a thing, and "unknown" is an absent field.
+/// Zero is a real reading, not a sentinel: it means the exposure was under one oscillation (a gated-ICCD corner), exactly as `end − start` of two floored instants inside one oscillation is 0.
+/// "Unknown" is an absent field; a finer remainder, if ever needed, is a separate optional field beside this count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShutterTime(u64);
 
 impl ShutterTime {
     pub fn new(oscillations: u64) -> Result<Self, String> {
-        if oscillations == 0 {
-            return Err("Exposure time must be positive".to_string());
-        }
         Ok(ShutterTime(oscillations))
     }
 
     /// From a camera's nominal seconds as a fraction (1/250 s = `from_seconds(1, 250)`).
     /// Floors to whole oscillations, the Euclidean way: the stored count is the whole oscillations elapsed, never rounded up into one that was not.
-    /// Err on overflow, a zero denominator, or an exposure shorter than one oscillation.
+    /// An exposure under one oscillation floors to 0, which is stored, not refused.
+    /// Err only on a zero denominator or a value 64-bit maths cannot hold (never a wrap).
     pub fn from_seconds(num: u64, den: u64) -> Result<Self, String> {
         if den == 0 {
             return Err("Exposure time denominator cannot be zero".to_string());
@@ -385,9 +384,6 @@ impl ShutterTime {
         let osc = whole
             .checked_add(frac)
             .ok_or("Exposure time overflows 64 bits of oscillations")?;
-        if osc == 0 {
-            return Err("Exposure time is shorter than one Eagle oscillation".to_string());
-        }
         Ok(ShutterTime(osc))
     }
 
@@ -2045,12 +2041,16 @@ mod tests {
         // The display form is exact: oscillations over OPS, reduced.
         let s = ShutterTime::new(ops / 2).unwrap().seconds();
         assert_eq!((s.num(), s.den()), (1, 2));
-        // Zero, sub-oscillation, zero denominator and overflow are refused, never wrapped.
-        assert!(ShutterTime::new(0).is_err());
-        assert!(ShutterTime::from_seconds(1, ops + 1).is_err());
+        // A sub-oscillation exposure floors to 0 and is kept: 0 means "under one oscillation", not "unknown".
+        assert_eq!(ShutterTime::new(0).unwrap().oscillations(), 0);
+        assert_eq!(ShutterTime::from_seconds(1, ops + 1).unwrap().oscillations(), 0);
+        assert_eq!(ShutterTime::from_seconds(1, ops).unwrap().oscillations(), 1);
+        // A zero denominator and overflow are refused, never wrapped.
         assert!(ShutterTime::from_seconds(1, 0).is_err());
         assert!(ShutterTime::from_seconds(u64::MAX, 1).is_err());
-        assert!(ShutterTime::from_seconds(1, u64::MAX).is_err());
+        assert_eq!(ShutterTime::from_seconds(1, u64::MAX).unwrap().oscillations(), 0);
+        // A huge denominator with a huge remainder cannot be held in 64 bits: refused, not wrapped.
+        assert!(ShutterTime::from_seconds(u64::MAX - 1, u64::MAX).is_err());
 
         // Twelfths land exactly for half, third and quarter stops; anything else is refused.
         assert_eq!(ExposureCompensation::from_stops(-4, 3).unwrap().twelfths(), -16);
@@ -2076,7 +2076,7 @@ mod tests {
         assert!(Ratio::from_values(&[VsfType::u(14, false), VsfType::u(5, false)], "f").is_ok());
         assert!(Ratio::from_values(&[VsfType::u(1, false)], "f").is_err());
         assert!(Ratio::from_values(&[VsfType::u(1, false), VsfType::u(0, false)], "f").is_err());
-        assert!(ShutterTime::from_values(&[VsfType::u(0, false)]).is_err());
+        assert_eq!(ShutterTime::from_values(&[VsfType::u(0, false)]).unwrap().oscillations(), 0);
         assert!(ShutterTime::from_values(&[VsfType::f5(0.5)]).is_err());
         // Width-agnostic: a fixed-width u6 reads the same as an auto-sized value.
         assert_eq!(
