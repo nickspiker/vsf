@@ -109,6 +109,8 @@ pub enum DeclError {
     ZeroManawa,
     NativeRateNotAllowed,
     ZeroSensorRows,
+    /// A field is missing or has the wrong type (the named field).
+    Malformed(&'static str),
 }
 
 impl Decl {
@@ -221,8 +223,8 @@ pub struct Mark {
     pub rate_ppm: i32,
     /// Merkle root of the per-frame hashes since the previous mark.
     pub root: [u8; 32],
-    /// Hash of the previous mark (all zero bytes for a stream's first mark — there is no previous).
-    pub prev: [u8; 32],
+    /// Hash of the previous mark; absent on a stream's first mark — there is no previous (never a zero-filled stand-in).
+    pub prev: Option<[u8; 32]>,
     /// Signature by the declaration's `source` over all of the above — optional; never required by this module.
     pub sig: Option<Vec<u8>>,
 }
@@ -238,7 +240,15 @@ impl Mark {
         h.update(&[self.lock as u8]);
         h.update(&self.rate_ppm.to_le_bytes());
         h.update(&self.root);
-        h.update(&self.prev);
+        match self.prev.as_ref() {
+            Some(p) => {
+                h.update(&[1]);
+                h.update(p);
+            }
+            None => {
+                h.update(&[0]);
+            }
+        }
         *h.finalize().as_bytes()
     }
 }
@@ -277,6 +287,8 @@ pub fn merkle_root(leaves: &[[u8; 32]]) -> [u8; 32] {
 /// A frame (or audio packet) between marks (§6): the index step when it is not 1 (a DECLARED gap), and the payload hash that feeds the next mark's root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameRecord {
+    /// The stream's FIRST frame carries its absolute index — a stream may begin mid-cadence, before any mark, and a reader must be able to name it (the draft's §6 left the first index unstated). Absent on every later frame.
+    pub start: Option<i64>,
     /// `index − previous index`; `None` = 1.
     pub delta: Option<i64>,
     pub hash: [u8; 32],
@@ -297,12 +309,12 @@ pub struct Marker {
     pub decl: Decl,
     last: Option<i64>,
     span: Vec<[u8; 32]>,
-    prev: [u8; 32],
+    prev: Option<[u8; 32]>,
 }
 
 impl Marker {
     pub fn new(decl: Decl) -> Marker {
-        Marker { decl, last: None, span: Vec::new(), prev: [0u8; 32] }
+        Marker { decl, last: None, span: Vec::new(), prev: None }
     }
 
     /// Close the span at marked index `index` (stamped as measured). Call BEFORE [`Self::frame`] for that index.
@@ -314,21 +326,21 @@ impl Marker {
             return Err(WriteError::NotAfter);
         }
         let m = Mark { index, stamp, unc_ns, lock, rate_ppm, root: merkle_root(&self.span), prev: self.prev, sig: None };
-        self.prev = m.hash();
+        self.prev = Some(m.hash());
         self.span.clear();
         Ok(m)
     }
 
     /// Record frame `index` with its payload hash. A skipped index is a declared gap (`delta`), never a silent one.
     pub fn frame(&mut self, index: i64, hash: [u8; 32], geometry: Option<Geometry>) -> Result<FrameRecord, WriteError> {
-        let delta = match self.last {
+        let (start, delta) = match self.last {
             Some(l) if index <= l => return Err(WriteError::NotAfter),
-            Some(l) => index - l,
-            None => 1,
+            Some(l) => (None, index - l),
+            None => (Some(index), 1),
         };
         self.last = Some(index);
         self.span.push(hash);
-        Ok(FrameRecord { delta: (delta != 1).then_some(delta), hash, geometry })
+        Ok(FrameRecord { start, delta: (delta != 1).then_some(delta), hash, geometry })
     }
 }
 
@@ -351,6 +363,8 @@ pub enum Flag {
     DuplicateMark(i64),
     /// §6: a mark whose index disagrees with the running frame count (an undeclared discontinuity).
     Discontinuity(i64),
+    /// A stream's first frame without its absolute index — nothing names it.
+    Unnamed,
 }
 
 /// The validating reader (§14). Feed it frames and marks in stream order; it names every frame, reports declared gaps, and flags the first breach.
@@ -375,10 +389,11 @@ impl Reader {
         if step <= 0 {
             return Err(Flag::BadDelta);
         }
-        let index = match (self.last, self.prev_mark.as_ref()) {
+        let index = match (self.last, rec.start) {
             (Some(l), _) => l + step,
-            (None, Some(m)) => m.index,
-            (None, None) => 0,
+            (None, Some(s)) => s,
+            // No running count and no absolute index: this frame cannot be named.
+            (None, None) => return Err(Flag::Unnamed),
         };
         if step > 1 {
             self.gaps.push((index - step + 1, step - 1));
@@ -397,9 +412,12 @@ impl Reader {
             if p.index == m.index {
                 return Err(Flag::DuplicateMark(m.index));
             }
-            if m.prev != p.hash() {
+            if m.prev != Some(p.hash()) {
                 return Err(Flag::ChainBreak(m.index));
             }
+        }
+        if self.prev_mark.is_none() && m.prev.is_some() {
+            return Err(Flag::ChainBreak(m.index)); // a stream's first mark names no previous one
         }
         if let Some(l) = self.last {
             if m.index <= l {
@@ -513,8 +531,10 @@ pub fn mark_fields(m: &Mark) -> Vec<(String, VsfType)> {
         ("lock".to_string(), uint(m.lock as u64)),
         ("rate_ppm".to_string(), VsfType::i(m.rate_ppm as isize)),
         ("root".to_string(), VsfType::hb(m.root.to_vec())),
-        ("prev".to_string(), VsfType::hb(m.prev.to_vec())),
     ];
+    if let Some(p) = m.prev.as_ref() {
+        f.push(("prev".to_string(), VsfType::hb(p.to_vec())));
+    }
     if let Some(s) = m.sig.as_ref() {
         f.push(("sig".to_string(), VsfType::ge(s.clone())));
     }
@@ -528,22 +548,22 @@ fn first<'a>(fields: &'a [(String, VsfType)], name: &str) -> Option<&'a VsfType>
 /// Read a declaration back from its fields — width-agnostic integer reads; refuses a float wherever one appears (§14 item 2) and validates (§14 item 1).
 pub fn decl_from_fields(fields: &[(String, VsfType)]) -> Result<Decl, Flag> {
     let u = |name: &str| -> Option<u32> { first(fields, name)?.as_u64().and_then(|v| u32::try_from(v).ok()) };
-    let bad = Flag::Declaration(DeclError::ZeroRate);
+    let bad = |field: &'static str| Flag::Declaration(DeclError::Malformed(field));
     let d = Decl {
         kind: match u("kind") {
             Some(0) => Kind::Video,
             Some(1) => Kind::Audio,
-            _ => return Err(bad),
+            _ => return Err(bad("kind")),
         },
-        rate_num: u("rate_num").ok_or(bad.clone())?,
-        rate_den: u("rate_den").ok_or(bad.clone())?,
+        rate_num: u("rate_num").ok_or(bad("rate_num"))?,
+        rate_den: u("rate_den").ok_or(bad("rate_den"))?,
         phase_num: u("phase_num").unwrap_or(0),
         phase_den: u("phase_den").unwrap_or(1),
-        manawa_period: u("manawa_period").ok_or(bad.clone())?,
+        manawa_period: u("manawa_period").ok_or(bad("manawa_period"))?,
         level: match u("level") {
             Some(1) => Level::Commodity,
             Some(2) => Level::SingleClock,
-            _ => return Err(bad),
+            _ => return Err(bad("level")),
         },
         source: match first(fields, "source") {
             Some(VsfType::hR(b)) => b.clone(),
@@ -574,7 +594,7 @@ pub fn mark_from_fields(fields: &[(String, VsfType)]) -> Option<Mark> {
         lock: Lock::from_u8(u8::try_from(first(fields, "lock")?.as_u64()?).ok()?)?,
         rate_ppm: i32::try_from(first(fields, "rate_ppm")?.as_i64()?).ok()?,
         root: h32("root")?,
-        prev: h32("prev")?,
+        prev: h32("prev"),
         sig: match first(fields, "sig") {
             Some(VsfType::ge(s)) => Some(s.clone()),
             _ => None,
@@ -718,7 +738,7 @@ mod tests {
         let mut b = w.mark(48_000, d.eagle_of(48_000), 1, Lock::Gnss, 0).unwrap();
         let mut r = Reader::new(d).unwrap();
         r.mark(&a, None, i64::MAX).unwrap();
-        b.prev[3] ^= 1;
+        b.prev.as_mut().unwrap()[3] ^= 1;
         assert_eq!(r.mark(&b, None, i64::MAX), Err(Flag::ChainBreak(48_000)));
         assert_eq!(r.mark(&a, None, i64::MAX), Err(Flag::DuplicateMark(0)));
     }
@@ -731,7 +751,7 @@ mod tests {
         let d = Decl::video(25, Vec::new(), 1);
         assert!(d.is_mark(50) && !d.is_mark(51));
         assert_eq!(Marker::new(d.clone()).mark(51, 0, 0, Lock::Free, 0), Err(WriteError::OffCadence));
-        let bad = Mark { index: 51, stamp: 0, unc_ns: 0, lock: Lock::Free, rate_ppm: 0, root: [0; 32], prev: [0; 32], sig: None };
+        let bad = Mark { index: 51, stamp: 0, unc_ns: 0, lock: Lock::Free, rate_ppm: 0, root: [0; 32], prev: None, sig: None };
         assert_eq!(Reader::new(d).unwrap().mark(&bad, None, i64::MAX), Err(Flag::MarkOffCadence(51)));
     }
 
@@ -758,6 +778,21 @@ mod tests {
         assert_eq!(timecode(&df, 1799).to_string(), "00:00:59;29");
         assert_eq!(timecode(&df, 1800).to_string(), "00:01:00;02", "labels ;00 and ;01 are skipped at minute one");
         assert_eq!(timecode(&df, 17_982).to_string(), "00:10:00;00", "the tenth minute keeps its labels");
+    }
+
+    /// A stream may begin mid-second: its first frame carries its absolute index, so the reader names it before any mark; a first frame without one cannot be named.
+    #[test]
+    fn a_stream_starting_mid_cadence_is_named_by_its_first_frame() {
+        let d = Decl::video(30, Vec::new(), 1);
+        let mut w = Marker::new(d.clone());
+        let mut r = Reader::new(d.clone()).unwrap();
+        let f = w.frame(17, [1; 32], None).unwrap();
+        assert_eq!(f.start, Some(17));
+        assert_eq!(r.frame(&f), Ok(17));
+        let g = w.frame(18, [2; 32], None).unwrap();
+        assert_eq!((g.start, r.frame(&g)), (None, Ok(18)));
+        let orphan = FrameRecord { start: None, delta: None, hash: [0; 32], geometry: None };
+        assert_eq!(Reader::new(d).unwrap().frame(&orphan), Err(Flag::Unnamed));
     }
 
     /// LOCK's audio grid (vsf::grid, photon's wave frame names) IS a Tukutahi native audio stream: the same names at the same instants.
@@ -789,8 +824,11 @@ mod tests {
         let d = Decl::video(60, alloc::vec![7; 32], 1080);
         assert_eq!(decl_from_fields(&decl_fields(&d)).unwrap(), d);
         let mut w = Marker::new(d.clone());
+        let first = w.mark(-60, d.eagle_of(-60), 1_000, Lock::Ntp, 0).unwrap();
+        assert_eq!(mark_from_fields(&mark_fields(&first)).unwrap(), first, "a first mark round-trips with no prev");
         w.frame(-1, [1; 32], None).unwrap();
         let mut m = w.mark(0, d.eagle_of(0) + 12_345, 800_000, Lock::Holdover, -37).unwrap();
+        assert!(m.prev.is_some());
         assert_eq!(mark_from_fields(&mark_fields(&m)).unwrap(), m);
         m.sig = Some(alloc::vec![9; 64]);
         assert_eq!(mark_from_fields(&mark_fields(&m)).unwrap(), m);

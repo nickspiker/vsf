@@ -395,7 +395,7 @@ pub fn legacy_to_lock(legacy_osc: i64) -> i64 {
     legacy_osc + (tai_minus_utc(secs) as i64 - 8) * OSCILLATIONS_PER_SECOND as i64
 }
 
-/// Where TAI comes from. `eagle_time_now` never reads one of these yet (the epoch flip is its own decision); LOCK's TrueClock will.
+/// Where TAI comes from — for conversions and diagnostics. Minted stamps stay on the legacy scale (`eagle_time_now`, POSIX seconds from 20:17:40 UTC): moving them onto TAI (+29 s) was decided against, 2026-09-26.
 pub trait TaiSource {
     /// Now as (seconds since 1970-01-01 TAI, nanoseconds), or None when this source has nothing.
     fn tai_now(&self) -> Option<(i64, u32)>;
