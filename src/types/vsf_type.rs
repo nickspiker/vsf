@@ -278,6 +278,7 @@ pub enum VsfType {
     /// **Standard encoding identifiers** (lowercase, VSF spec):
     /// - `b` = Binary blob (raw bytes, no encoding, vb#⦉size of blob⦊ where # represents the 2^# bits in the blob size)
     /// - `a` = AV1 video codec (image/video compression)
+    /// - `o` = Opus audio packet (one packet per value; an empty value is a declared hole, so a stream keeps its timing)
     /// - `z` = zstd compression
     /// - `r` = Reed-Solomon error correction
     /// - `x` = XZ/LZMA compression
