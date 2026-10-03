@@ -33,51 +33,54 @@ use num_traits::Float;
 /// Base for icosahedral coordinate system
 const BASE: u64 = 960_383_883; // floor(sqrt(2^64 / 20))
 
-/// Icosahedral geometry constants
-const A: f64 = 0.618033988749895; // 1 / PHI
-const B: f64 = 1.;
-
-/// 12 vertices of the icosahedron (golden-ratio coordinates, uniform length —
-/// unnormalized; the gnomonic math never needs unit vertices). Verified
-/// tables from the reference `icosahedron` codec: every face edge below has
-/// vertex distance 2A, enforced by `tests::face_table_is_a_real_icosahedron`.
+/// 12 vertices of the icosahedron, unit length, pole-vertex orientation
+/// (locked 2026-10-03, shared with mahere-coord): vertex 0 = north pole,
+/// 1–5 the upper ring at lat atan(1/2) ≈ 26.565° (lons 0°, 72°, …), 6–10
+/// the lower ring at −atan(1/2) (lons 36°, 108°, …), 11 = south pole.
+/// Chosen on symmetry grounds: the polar axis is a 5-fold axis, so lat/lon's
+/// rotational symmetry shares its largest cyclic subgroup with the solid and
+/// the polar degeneracy coincides with the two degree-5 grid points. Every
+/// face edge is a true icosahedron edge (adjacent-vertex dot = 1/√5),
+/// enforced by `tests::face_table_is_a_real_icosahedron`.
 const VERTICES: [[f64; 3]; 12] = [
-    [-A, B, 0.],
-    [A, B, 0.],
-    [-A, -B, 0.],
-    [A, -B, 0.],
-    [0., -A, B],
-    [0., A, B],
-    [0., -A, -B],
-    [0., A, -B],
-    [B, 0., -A],
-    [B, 0., A],
-    [-B, 0., -A],
-    [-B, 0., A],
+    [0., 0., 1.0],
+    [0.8944271909999159, 0., 0.4472135954999579],
+    [0.27639320225002106, 0.8506508083520399, 0.4472135954999579],
+    [-0.7236067977499788, 0.5257311121191337, 0.4472135954999579],
+    [-0.723606797749979, -0.5257311121191335, 0.4472135954999579],
+    [0.27639320225002084, -0.85065080835204, 0.4472135954999579],
+    [0.7236067977499789, 0.5257311121191336, -0.4472135954999579],
+    [-0.27639320225002095, 0.85065080835204, -0.4472135954999579],
+    [-0.8944271909999159, 0., -0.4472135954999579],
+    [-0.2763932022500211, -0.8506508083520399, -0.4472135954999579],
+    [0.7236067977499788, -0.5257311121191338, -0.4472135954999579],
+    [0., 0., -1.0],
 ];
 
-/// 20 triangular faces of the icosahedron (vertex indices)
+/// 20 triangular faces of the icosahedron (vertex indices): 5 north cap,
+/// 5 upper-equatorial, 5 lower-equatorial, 5 south cap, each band ordered
+/// by longitude.
 const FACES: [[usize; 3]; 20] = [
-    [0, 11, 5],
-    [0, 5, 1],
-    [0, 1, 7],
-    [0, 7, 10],
-    [0, 10, 11],
-    [1, 5, 9],
-    [5, 11, 4],
-    [11, 10, 2],
-    [10, 7, 6],
-    [7, 1, 8],
-    [3, 9, 4],
-    [3, 4, 2],
-    [3, 2, 6],
-    [3, 6, 8],
-    [3, 8, 9],
-    [4, 9, 5],
-    [2, 4, 11],
-    [6, 2, 10],
-    [8, 6, 7],
-    [9, 8, 1],
+    [0, 1, 2],
+    [0, 2, 3],
+    [0, 3, 4],
+    [0, 4, 5],
+    [0, 1, 5],
+    [1, 2, 6],
+    [2, 3, 7],
+    [3, 4, 8],
+    [4, 5, 9],
+    [1, 5, 10],
+    [2, 6, 7],
+    [3, 7, 8],
+    [4, 8, 9],
+    [5, 9, 10],
+    [1, 6, 10],
+    [6, 7, 11],
+    [7, 8, 11],
+    [8, 9, 11],
+    [9, 10, 11],
+    [6, 10, 11],
 ];
 
 /// Word encoding constants for human-readable coordinates
@@ -3821,7 +3824,9 @@ mod tests {
     /// vertex must appear in exactly 5 faces.
     #[test]
     fn face_table_is_a_real_icosahedron() {
-        let edge2 = (2.0 * A) * (2.0 * A);
+        // Unit-radius icosahedron: adjacent vertices have dot 1/sqrt(5),
+        // so the chord length squared is 2 - 2/sqrt(5).
+        let edge2 = 2.0 - 2.0 / 5f64.sqrt();
         let mut vertex_use = [0usize; 12];
         for (fi, f) in FACES.iter().enumerate() {
             for (a, b) in [(f[0], f[1]), (f[1], f[2]), (f[2], f[0])] {
