@@ -37,44 +37,47 @@ const BASE: u64 = 960_383_883; // floor(sqrt(2^64 / 20))
 const A: f64 = 0.618033988749895; // 1 / PHI
 const B: f64 = 1.;
 
-/// 12 vertices of the icosahedron (normalized)
+/// 12 vertices of the icosahedron (golden-ratio coordinates, uniform length —
+/// unnormalized; the gnomonic math never needs unit vertices). Verified
+/// tables from the reference `icosahedron` codec: every face edge below has
+/// vertex distance 2A, enforced by `tests::face_table_is_a_real_icosahedron`.
 const VERTICES: [[f64; 3]; 12] = [
-    [0., B, A],
-    [0., B, -A],
-    [0., -B, A],
-    [0., -B, -A],
-    [B, A, 0.],
-    [B, -A, 0.],
-    [-B, A, 0.],
-    [-B, -A, 0.],
-    [A, 0., B],
-    [-A, 0., B],
-    [A, 0., -B],
-    [-A, 0., -B],
+    [-A, B, 0.],
+    [A, B, 0.],
+    [-A, -B, 0.],
+    [A, -B, 0.],
+    [0., -A, B],
+    [0., A, B],
+    [0., -A, -B],
+    [0., A, -B],
+    [B, 0., -A],
+    [B, 0., A],
+    [-B, 0., -A],
+    [-B, 0., A],
 ];
 
 /// 20 triangular faces of the icosahedron (vertex indices)
 const FACES: [[usize; 3]; 20] = [
-    [0, 8, 4],
-    [0, 4, 6],
-    [0, 6, 9],
-    [0, 9, 8],
-    [1, 10, 4],
-    [1, 6, 11],
-    [1, 11, 10],
-    [1, 4, 6],
-    [2, 5, 8],
-    [2, 8, 9],
-    [2, 9, 7],
-    [2, 7, 5],
-    [3, 10, 5],
-    [3, 5, 7],
-    [3, 7, 11],
-    [3, 11, 10],
-    [4, 8, 5],
-    [4, 5, 10],
-    [6, 4, 10],
-    [6, 10, 11],
+    [0, 11, 5],
+    [0, 5, 1],
+    [0, 1, 7],
+    [0, 7, 10],
+    [0, 10, 11],
+    [1, 5, 9],
+    [5, 11, 4],
+    [11, 10, 2],
+    [10, 7, 6],
+    [7, 1, 8],
+    [3, 9, 4],
+    [3, 4, 2],
+    [3, 2, 6],
+    [3, 6, 8],
+    [3, 8, 9],
+    [4, 9, 5],
+    [2, 4, 11],
+    [6, 2, 10],
+    [8, 6, 7],
+    [9, 8, 1],
 ];
 
 /// Word encoding constants for human-readable coordinates
@@ -128,11 +131,17 @@ impl WorldCoord {
         decode_to_u64(words).map(WorldCoord)
     }
 
-    /// Encode at a specific wire resolution (w3..w7).
+    /// Encode at a specific wire width (w3..w7).
     ///
-    /// `size_byte` is the ASCII digit after `w` on the wire: `'3'`=8-bit (1B, ~5000km), `'4'`=16-bit (2B, ~600km), `'5'`=32-bit (4B, ~10km), `'6'`=64-bit (8B, ~2mm), `'7'`=128-bit (16B, sub-mm headroom).
+    /// `size_byte` is the ASCII digit after `w` on the wire: `'3'`=8-bit (1B), `'4'`=16-bit (2B), `'5'`=32-bit (4B), `'6'`=64-bit (8B, full precision ~2mm), `'7'`=128-bit (16B, low 64 bits reserved for future sub-mm precision).
     ///
-    /// Coarser resolutions truncate low bits; w7 zero-extends — values remain a strict prefix subset of the full u64 ordering.
+    /// Caution: widths below `'6'` are NUMERIC truncation, not spatial
+    /// coarsening. The divmod packing `(x*BASE + y)*20 + face` is chosen for
+    /// maximum density, so its high bits approximate only the barycentric x
+    /// axis — a truncated value names a strip across the face grid, not an
+    /// enclosing region. Use `'6'`/`'7'` for round-trippable coordinates; a
+    /// planned Morton-coded companion type will carry true prefix-truncation
+    /// (truncate = enclosing cell) semantics.
     pub fn flatten_at(&self, size_byte: u8) -> Vec<u8> {
         let mut out = vec![b'w', size_byte];
         let raw = self.0;
@@ -244,7 +253,8 @@ fn intersect_line_plane(
     (t * x, t * y, t * z)
 }
 
-/// Compute barycentric coordinates (u, v, w) of point P in triangle (v0, v1, v2)
+/// Compute edge-basis barycentric coordinates (u, v) of point P in triangle
+/// (v0, v1, v2): P = v0 + u*(v1-v0) + v*(v2-v0). The v0 weight is 1-u-v.
 fn barycentric_coordinates(
     px: f64,
     py: f64,
@@ -252,8 +262,7 @@ fn barycentric_coordinates(
     v0: [f64; 3],
     v1: [f64; 3],
     v2: [f64; 3],
-) -> (f64, f64, f64) {
-    // Using the robust method with edge vectors
+) -> (f64, f64) {
     let v0p = [px - v0[0], py - v0[1], pz - v0[2]];
     let v0v1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
     let v0v2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
@@ -265,14 +274,23 @@ fn barycentric_coordinates(
     let d21 = v0p[0] * v0v2[0] + v0p[1] * v0v2[1] + v0p[2] * v0v2[2];
 
     let denom = d00 * d11 - d01 * d01;
-    let v = (d11 * d20 - d01 * d21) / denom;
-    let w = (d00 * d21 - d01 * d20) / denom;
-    let u = 1.0 - v - w;
+    let u = (d11 * d20 - d01 * d21) / denom;
+    let v = (d00 * d21 - d01 * d20) / denom;
 
-    (u, v, w)
+    (u, v)
 }
 
-/// Convert XYZ to icosahedral u64 encoding
+/// Convert XYZ to icosahedral u64 encoding.
+///
+/// Arithmetic divmod packing from the reference `icosahedron` codec:
+/// `(x_cell * BASE + y_cell) * 20 + face`, where (x_cell, y_cell) quantize
+/// the face-plane barycentric (u, v) to BASE steps each. The triangle only
+/// fills the u + v <= 1 half of the BASE x BASE grid, so the *fold* reclaims
+/// the empty half: a point whose sub-cell fraction lands in the upper half
+/// of its grid cell is stored mirrored at (BASE-1-x, BASE-1-y), doubling
+/// sample density (~5.2 mm steps, ~2.1 mm average error). Bit fields cannot
+/// hold this (5 + 30 + 30 = 65 bits); the multiply packing uses the full
+/// u64 range (20 * BASE^2 ~ 2^63.996).
 fn xyz_to_icosahedral_coordinates(x: f64, y: f64, z: f64) -> u64 {
     // Normalize to unit sphere
     let mag = (x * x + y * y + z * z).sqrt();
@@ -290,42 +308,76 @@ fn xyz_to_icosahedral_coordinates(x: f64, y: f64, z: f64) -> u64 {
     // Intersect with face plane
     let (px, py, pz) = intersect_line_plane(x, y, z, v0, v1, v2);
 
-    // Get barycentric coordinates
-    let (u, v, _w) = barycentric_coordinates(px, py, pz, v0, v1, v2);
+    // Get barycentric coordinates (edge basis: P = v0 + u*(v1-v0) + v*(v2-v0))
+    let (u, v) = barycentric_coordinates(px, py, pz, v0, v1, v2);
 
-    // Clamp to [0, 1]
-    let u = u.max(0.0).min(1.0);
-    let v = v.max(0.0).min(1.0);
+    // Clamp into the closed lower triangle: face-edge points (and float
+    // noise on them) can give u + v marginally above 1, which would alias
+    // into the folded range below and decode reflected across the
+    // hypotenuse (multi-thousand-km error — see the antimeridian test).
+    let mut u = u.max(0.0).min(1.0);
+    let mut v = v.max(0.0).min(1.0);
+    let excess = (u + v - 1.0).max(0.0) * 0.5;
+    u -= excess;
+    v -= excess;
 
-    // Encode as u64: face (5 bits) + u (29 bits) + v (30 bits)
-    let face_bits = (face as u64) << 59;
-    let u_bits = ((u * (BASE as f64)) as u64) << 30;
-    let v_bits = (v * (BASE as f64)) as u64;
+    // Quantize to the BASE grid, folding upper-half sub-cell fractions into
+    // the mirrored (unused) half of the grid for double density. Diagonal
+    // cells (x + y == BASE-1) never fold: their upper halves lie outside
+    // the triangle, and folding an exact-boundary point there would collide
+    // with the unfolded diagonal range.
+    let x_float = u * (BASE as f64);
+    let y_float = v * (BASE as f64);
+    let x_floor = x_float.floor();
+    let y_floor = y_float.floor();
+    let x_frac = x_float - x_floor;
+    let y_frac = y_float - y_floor;
+    let mut x_cell = (x_floor as u64).min(BASE - 1);
+    let mut y_cell = (y_floor as u64).min(BASE - 1);
+    if x_frac + y_frac >= 1.0 && x_cell + y_cell + 1 < BASE {
+        x_cell = BASE - x_cell - 1;
+        y_cell = BASE - y_cell - 1;
+    }
 
-    face_bits | u_bits | v_bits
+    (x_cell * BASE + y_cell) * FACES.len() as u64 + face as u64
 }
 
-/// Convert icosahedral u64 encoding to XYZ
+/// Convert icosahedral u64 encoding to XYZ (inverse of the divmod + fold
+/// packing; reconstructs the centroid of the stored half-cell).
 fn icosahedral_coordinates_to_xyz(dymaxion: u64) -> (f64, f64, f64) {
-    // Decode: face (5 bits) + u (29 bits) + v (30 bits)
-    let face = ((dymaxion >> 59) & 0x1F) as usize;
-    let u_int = (dymaxion >> 30) & 0x1FFFFFFF;
-    let v_int = dymaxion & 0x3FFFFFFF;
+    let face = (dymaxion % FACES.len() as u64) as usize;
+    let remainder = dymaxion / FACES.len() as u64;
+    let mut x_cell = remainder / BASE;
+    let mut y_cell = remainder % BASE;
 
-    let u = (u_int as f64) / (BASE as f64);
-    let v = (v_int as f64) / (BASE as f64);
-    let w = 1.0 - u - v;
+    // Each grid cell holds two half-cell triangles; the fold stored the
+    // upper one mirrored. Reconstruct the centroid of whichever half this
+    // code names: lower-half centroid sits at +1/3, upper at +2/3.
+    let centroid_offset = 1.0 / 3.0;
+    let (u, v) = if x_cell + y_cell >= BASE {
+        // Upper half-cell (folded): unmirror, then offset by 2/3.
+        x_cell = BASE - 1 - x_cell;
+        y_cell = BASE - 1 - y_cell;
+        (
+            (x_cell as f64 + centroid_offset * 2.0) / BASE as f64,
+            (y_cell as f64 + centroid_offset * 2.0) / BASE as f64,
+        )
+    } else {
+        (
+            (x_cell as f64 + centroid_offset) / BASE as f64,
+            (y_cell as f64 + centroid_offset) / BASE as f64,
+        )
+    };
 
-    // Get triangle vertices
+    // Reconstruct on the face plane: P = v0 + u*(v1-v0) + v*(v2-v0)
     let triangle = FACES[face];
     let v0 = VERTICES[triangle[0]];
     let v1 = VERTICES[triangle[1]];
     let v2 = VERTICES[triangle[2]];
-
-    // Reconstruct point from barycentric coordinates
-    let x = u * v0[0] + v * v1[0] + w * v2[0];
-    let y = u * v0[1] + v * v1[1] + w * v2[1];
-    let z = u * v0[2] + v * v1[2] + w * v2[2];
+    let w0 = 1.0 - u - v;
+    let x = w0 * v0[0] + u * v1[0] + v * v2[0];
+    let y = w0 * v0[1] + u * v1[1] + v * v2[1];
+    let z = w0 * v0[2] + u * v1[2] + v * v2[2];
 
     // Normalize to unit sphere
     let mag = (x * x + y * y + z * z).sqrt();
@@ -3747,3 +3799,128 @@ pub static WORD_LIST: [&str; 3177] = [
     "electromagnetic",
     "telecommunications",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EARTH_RADIUS_M: f64 = 6_371_000.0;
+
+    /// Chord-distance ground error in meters. Chord, not acos(dot): acos has
+    /// a ~1.5e-8 rad (~10 cm) precision floor near zero angle, far above the
+    /// codec's resolution.
+    fn ground_error_m(lat: f64, lon: f64, coord: WorldCoord) -> f64 {
+        let (px, py, pz) = lat_lon_to_xyz(lat, lon);
+        let (qx, qy, qz) = coord.to_xyz();
+        let (dx, dy, dz) = (px - qx, py - qy, pz - qz);
+        (dx * dx + dy * dy + dz * dz).sqrt() * EARTH_RADIUS_M
+    }
+
+    /// Regression for the corrupted FACES table: every edge of every face
+    /// must be a true icosahedron edge (vertex distance 2A), and every
+    /// vertex must appear in exactly 5 faces.
+    #[test]
+    fn face_table_is_a_real_icosahedron() {
+        let edge2 = (2.0 * A) * (2.0 * A);
+        let mut vertex_use = [0usize; 12];
+        for (fi, f) in FACES.iter().enumerate() {
+            for (a, b) in [(f[0], f[1]), (f[1], f[2]), (f[2], f[0])] {
+                let (va, vb) = (VERTICES[a], VERTICES[b]);
+                let d2 = (va[0] - vb[0]) * (va[0] - vb[0])
+                    + (va[1] - vb[1]) * (va[1] - vb[1])
+                    + (va[2] - vb[2]) * (va[2] - vb[2]);
+                assert!(
+                    (d2 - edge2).abs() < 1e-9,
+                    "face {fi} edge {a}-{b} has length^2 {d2}, expected {edge2}"
+                );
+            }
+            for &v in f {
+                vertex_use[v] += 1;
+            }
+        }
+        for (v, &n) in vertex_use.iter().enumerate() {
+            assert_eq!(n, 5, "vertex {v} appears in {n} faces, expected 5");
+        }
+    }
+
+    /// Regression for the 29-bit field overflow: the old packing corrupted
+    /// every point with v0-weight > 0.559 (~19% of each face, near v0).
+    /// Sample tightly around all 12 vertices and along spokes toward them.
+    #[test]
+    fn near_vertex_round_trips() {
+        for v in VERTICES {
+            let mag = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            let (vx, vy, vz) = (v[0] / mag, v[1] / mag, v[2] / mag);
+            for t in [0.0, 1e-6, 1e-3, 0.02, 0.1, 0.3] {
+                // Walk from the vertex toward a fixed off-axis direction.
+                let (px, py, pz) = (vx + t * 0.21, vy + t * 0.47, vz + t * 0.33);
+                let c = WorldCoord::from_xyz(px, py, pz);
+                let (lat, lon) = xyz_to_lat_lon(px, py, pz);
+                let err = ground_error_m(lat, lon, c);
+                assert!(err < 0.01, "vertex spoke t={t}: error {err} m");
+            }
+        }
+    }
+
+    #[test]
+    fn global_grid_round_trips_under_a_centimeter() {
+        let mut worst: f64 = 0.0;
+        let mut lat = -89.5;
+        while lat <= 89.5 {
+            let mut lon = -180.0;
+            while lon < 180.0 {
+                let c = WorldCoord::from_lat_lon(lat, lon);
+                worst = worst.max(ground_error_m(lat, lon, c));
+                lon += 3.7;
+            }
+            lat += 2.9;
+        }
+        assert!(worst < 0.01, "worst round-trip error {worst} m");
+    }
+
+    /// Encoding is idempotent after the first quantization: decode then
+    /// re-encode returns the identical u64.
+    #[test]
+    fn reencode_is_stable() {
+        for (lat, lon) in [
+            (47.6062, -122.3321),
+            (-41.3, 174.8),
+            (0.0, 0.0),
+            (89.9, 45.0),
+            (-89.9, -135.0),
+            (26.57, 100.0),
+        ] {
+            let c = WorldCoord::from_lat_lon(lat, lon);
+            let (x, y, z) = c.to_xyz();
+            let c2 = WorldCoord::from_xyz(x, y, z);
+            assert_eq!(c.raw(), c2.raw(), "re-encode drifted at ({lat}, {lon})");
+        }
+    }
+
+    /// Every face is reachable and every raw value is inside 20 * BASE^2.
+    #[test]
+    fn faces_cover_and_raw_in_range() {
+        let limit = 20u64 * BASE * BASE;
+        let mut seen = [false; 20];
+        let mut lat = -88.0;
+        while lat <= 88.0 {
+            let mut lon = -180.0;
+            while lon < 180.0 {
+                let raw = WorldCoord::from_lat_lon(lat, lon).raw();
+                assert!(raw < limit, "raw {raw} out of range at ({lat}, {lon})");
+                seen[(raw % 20) as usize] = true;
+                lon += 2.0;
+            }
+            lat += 2.0;
+        }
+        assert!(seen.iter().all(|&s| s), "unreached faces: {seen:?}");
+    }
+
+    #[test]
+    fn words_round_trip() {
+        let c = WorldCoord::from_lat_lon(47.6062, -122.3321);
+        let words = c.to_words();
+        let back = WorldCoord::from_words(&words).expect("words should decode");
+        assert_eq!(c.raw(), back.raw());
+    }
+}
