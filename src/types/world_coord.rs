@@ -33,6 +33,13 @@ use num_traits::Float;
 /// Base for icosahedral coordinate system
 const BASE: u64 = 960_383_883; // floor(sqrt(2^64 / 20))
 
+/// Coarse dense-encode bases for narrower wire widths, same divmod + fold
+/// scheme at floor(sqrt(2^bits / 20)) steps per axis. Not nested in the
+/// 64-bit encoding — each width is an independent re-encode via xyz.
+const BASE32: u64 = 14_654; // ~481 m steps, ~140 m mean error
+const BASE16: u64 = 57; //     ~124 km steps
+const BASE8: u64 = 3; //       ~2,350 km steps (face + coarse third)
+
 /// 12 vertices of the icosahedron, unit length, pole-vertex orientation
 /// (locked 2026-10-03, shared with mahere-coord): vertex 0 = north pole,
 /// 1–5 the upper ring at lat atan(1/2) ≈ 26.565° (lons 0°, 72°, …), 6–10
@@ -134,24 +141,46 @@ impl WorldCoord {
         decode_to_u64(words).map(WorldCoord)
     }
 
+    /// The coarse 32-bit dense encoding: same divmod + fold scheme at
+    /// BASE32 = floor(sqrt(2^32 / 20)) steps per axis (~481 m steps,
+    /// ~140 m mean error). An independent re-encode, NOT a truncation of
+    /// the 64-bit value — the two widths are not nested.
+    pub fn coarse32(&self) -> u32 {
+        let (x, y, z) = self.to_xyz();
+        xyz_to_dymaxion(x, y, z, BASE32) as u32
+    }
+
+    /// Reconstruct from a coarse 32-bit encoding (the coarse cell's center
+    /// at full resolution).
+    pub fn from_coarse32(coarse: u32) -> Self {
+        let (x, y, z) = dymaxion_to_xyz(coarse as u64, BASE32);
+        Self::from_xyz(x, y, z)
+    }
+
     /// Encode at a specific wire width (w3..w7).
     ///
-    /// `size_byte` is the ASCII digit after `w` on the wire: `'3'`=8-bit (1B), `'4'`=16-bit (2B), `'5'`=32-bit (4B), `'6'`=64-bit (8B, full precision ~2mm), `'7'`=128-bit (16B, low 64 bits reserved for future sub-mm precision).
+    /// `size_byte` is the ASCII digit after `w` on the wire: `'3'`=8-bit
+    /// (1B, ~2,350 km cells), `'4'`=16-bit (2B, ~124 km), `'5'`=32-bit
+    /// (4B, ~481 m — [`Self::coarse32`]), `'6'`=64-bit (8B, full precision
+    /// ~2 mm), `'7'`=128-bit (16B, low 64 bits reserved for future sub-mm
+    /// precision).
     ///
-    /// Caution: widths below `'6'` are NUMERIC truncation, not spatial
-    /// coarsening. The divmod packing `(x*BASE + y)*20 + face` is chosen for
-    /// maximum density, so its high bits approximate only the barycentric x
-    /// axis — a truncated value names a strip across the face grid, not an
-    /// enclosing region. Use `'6'`/`'7'` for round-trippable coordinates; a
-    /// planned Morton-coded companion type will carry true prefix-truncation
-    /// (truncate = enclosing cell) semantics.
+    /// Each width below `'6'` is a spatial RE-ENCODE of the same divmod +
+    /// fold scheme at base floor(sqrt(2^bits / 20)) — a coarse value names
+    /// the enclosing coarse cell, and [`Self::from_wire`] reconstructs its
+    /// center. Widths are not bit-nested; conversion always goes through
+    /// the sphere.
     pub fn flatten_at(&self, size_byte: u8) -> Vec<u8> {
         let mut out = vec![b'w', size_byte];
         let raw = self.0;
+        let recode = |base: u64| -> u64 {
+            let (x, y, z) = self.to_xyz();
+            xyz_to_dymaxion(x, y, z, base)
+        };
         match size_byte {
-            b'3' => out.push((raw >> 56) as u8),
-            b'4' => out.extend_from_slice(&((raw >> 48) as u16).to_be_bytes()),
-            b'5' => out.extend_from_slice(&((raw >> 32) as u32).to_be_bytes()),
+            b'3' => out.push(recode(BASE8) as u8),
+            b'4' => out.extend_from_slice(&(recode(BASE16) as u16).to_be_bytes()),
+            b'5' => out.extend_from_slice(&(recode(BASE32) as u32).to_be_bytes()),
             b'6' => out.extend_from_slice(&raw.to_be_bytes()),
             b'7' => {
                 out.extend_from_slice(&raw.to_be_bytes());
@@ -165,16 +194,24 @@ impl WorldCoord {
         out
     }
 
-    /// Decode from wire bytes at a specific resolution.
+    /// Decode from wire bytes at a specific width. Coarse widths reconstruct
+    /// the coarse cell's center at full resolution.
     ///
     /// Returns `None` if `bytes` is too short for the indicated `size_byte`.
     pub fn from_wire(size_byte: u8, bytes: &[u8]) -> Option<Self> {
+        let coarse = |code: u64, base: u64| -> u64 {
+            let (x, y, z) = dymaxion_to_xyz(code, base);
+            xyz_to_icosahedral_coordinates(x, y, z)
+        };
         let raw = match size_byte {
-            b'3' if bytes.len() >= 1 => (bytes[0] as u64) << 56,
-            b'4' if bytes.len() >= 2 => (u16::from_be_bytes([bytes[0], bytes[1]]) as u64) << 48,
-            b'5' if bytes.len() >= 4 => {
-                (u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64) << 32
+            b'3' if !bytes.is_empty() => coarse(bytes[0] as u64, BASE8),
+            b'4' if bytes.len() >= 2 => {
+                coarse(u16::from_be_bytes([bytes[0], bytes[1]]) as u64, BASE16)
             }
+            b'5' if bytes.len() >= 4 => coarse(
+                u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64,
+                BASE32,
+            ),
             b'6' if bytes.len() >= 8 => u64::from_be_bytes([
                 bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
             ]),
@@ -295,6 +332,12 @@ fn barycentric_coordinates(
 /// hold this (5 + 30 + 30 = 65 bits); the multiply packing uses the full
 /// u64 range (20 * BASE^2 ~ 2^63.996).
 fn xyz_to_icosahedral_coordinates(x: f64, y: f64, z: f64) -> u64 {
+    xyz_to_dymaxion(x, y, z, BASE)
+}
+
+/// The same encoding at an arbitrary base (`BASE` for u64, `BASE32`/`BASE16`/
+/// `BASE8` for the coarse wire widths).
+fn xyz_to_dymaxion(x: f64, y: f64, z: f64, base: u64) -> u64 {
     // Normalize to unit sphere
     let mag = (x * x + y * y + z * z).sqrt();
     let x = x / mag;
@@ -329,46 +372,51 @@ fn xyz_to_icosahedral_coordinates(x: f64, y: f64, z: f64) -> u64 {
     // cells (x + y == BASE-1) never fold: their upper halves lie outside
     // the triangle, and folding an exact-boundary point there would collide
     // with the unfolded diagonal range.
-    let x_float = u * (BASE as f64);
-    let y_float = v * (BASE as f64);
+    let x_float = u * (base as f64);
+    let y_float = v * (base as f64);
     let x_floor = x_float.floor();
     let y_floor = y_float.floor();
     let x_frac = x_float - x_floor;
     let y_frac = y_float - y_floor;
-    let mut x_cell = (x_floor as u64).min(BASE - 1);
-    let mut y_cell = (y_floor as u64).min(BASE - 1);
-    if x_frac + y_frac >= 1.0 && x_cell + y_cell + 1 < BASE {
-        x_cell = BASE - x_cell - 1;
-        y_cell = BASE - y_cell - 1;
+    let mut x_cell = (x_floor as u64).min(base - 1);
+    let mut y_cell = (y_floor as u64).min(base - 1);
+    if x_frac + y_frac >= 1.0 && x_cell + y_cell + 1 < base {
+        x_cell = base - x_cell - 1;
+        y_cell = base - y_cell - 1;
     }
 
-    (x_cell * BASE + y_cell) * FACES.len() as u64 + face as u64
+    (x_cell * base + y_cell) * FACES.len() as u64 + face as u64
 }
 
 /// Convert icosahedral u64 encoding to XYZ (inverse of the divmod + fold
 /// packing; reconstructs the centroid of the stored half-cell).
 fn icosahedral_coordinates_to_xyz(dymaxion: u64) -> (f64, f64, f64) {
+    dymaxion_to_xyz(dymaxion, BASE)
+}
+
+/// Inverse of [`xyz_to_dymaxion`] at an arbitrary base.
+fn dymaxion_to_xyz(dymaxion: u64, base: u64) -> (f64, f64, f64) {
     let face = (dymaxion % FACES.len() as u64) as usize;
     let remainder = dymaxion / FACES.len() as u64;
-    let mut x_cell = remainder / BASE;
-    let mut y_cell = remainder % BASE;
+    let mut x_cell = remainder / base;
+    let mut y_cell = remainder % base;
 
     // Each grid cell holds two half-cell triangles; the fold stored the
     // upper one mirrored. Reconstruct the centroid of whichever half this
     // code names: lower-half centroid sits at +1/3, upper at +2/3.
     let centroid_offset = 1.0 / 3.0;
-    let (u, v) = if x_cell + y_cell >= BASE {
+    let (u, v) = if x_cell + y_cell >= base {
         // Upper half-cell (folded): unmirror, then offset by 2/3.
-        x_cell = BASE - 1 - x_cell;
-        y_cell = BASE - 1 - y_cell;
+        x_cell = base - 1 - x_cell;
+        y_cell = base - 1 - y_cell;
         (
-            (x_cell as f64 + centroid_offset * 2.0) / BASE as f64,
-            (y_cell as f64 + centroid_offset * 2.0) / BASE as f64,
+            (x_cell as f64 + centroid_offset * 2.0) / base as f64,
+            (y_cell as f64 + centroid_offset * 2.0) / base as f64,
         )
     } else {
         (
-            (x_cell as f64 + centroid_offset) / BASE as f64,
-            (y_cell as f64 + centroid_offset) / BASE as f64,
+            (x_cell as f64 + centroid_offset) / base as f64,
+            (y_cell as f64 + centroid_offset) / base as f64,
         )
     };
 
@@ -3919,6 +3967,50 @@ mod tests {
             lat += 2.0;
         }
         assert!(seen.iter().all(|&s| s), "unreached faces: {seen:?}");
+    }
+
+    /// The coarse 32-bit dense encode round-trips within its cell size
+    /// (~481 m steps; allow stretch at face corners), globally.
+    #[test]
+    fn coarse32_round_trips_within_cell() {
+        let mut worst: f64 = 0.0;
+        let mut lat = -89.5;
+        while lat <= 89.5 {
+            let mut lon = -180.0;
+            while lon < 180.0 {
+                let c = WorldCoord::from_lat_lon(lat, lon);
+                let back = WorldCoord::from_coarse32(c.coarse32());
+                let (px, py, pz) = c.to_xyz();
+                let (qx, qy, qz) = back.to_xyz();
+                let d = ((px - qx) * (px - qx) + (py - qy) * (py - qy) + (pz - qz) * (pz - qz))
+                    .sqrt()
+                    * EARTH_RADIUS_M;
+                worst = worst.max(d);
+                lon += 3.7;
+            }
+            lat += 2.9;
+        }
+        assert!(worst < 600.0, "worst coarse32 error {worst} m");
+    }
+
+    /// Wire widths are spatial: every coarse width round-trips within its
+    /// own cell scale, and w6 is exact.
+    #[test]
+    fn wire_widths_are_spatial() {
+        let c = WorldCoord::from_lat_lon(47.6062, -122.3321);
+        for (size, tol_m) in [(b'3', 2_600_000.0), (b'4', 140_000.0), (b'5', 600.0)] {
+            let wire = c.flatten_at(size);
+            assert_eq!(&wire[..2], &[b'w', size]);
+            let back = WorldCoord::from_wire(size, &wire[2..]).unwrap();
+            let (px, py, pz) = c.to_xyz();
+            let (qx, qy, qz) = back.to_xyz();
+            let d = ((px - qx) * (px - qx) + (py - qy) * (py - qy) + (pz - qz) * (pz - qz))
+                .sqrt()
+                * EARTH_RADIUS_M;
+            assert!(d < tol_m, "w{} error {} m", size as char, d);
+        }
+        let wire = c.flatten_at(b'6');
+        assert_eq!(WorldCoord::from_wire(b'6', &wire[2..]).unwrap().raw(), c.raw());
     }
 
     #[test]
