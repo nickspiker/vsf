@@ -10,7 +10,7 @@ use super::helpers::decode_usize;
 use super::metadata::{
     parse_ascii, parse_backward_version, parse_colour_array, parse_colour_constant, parse_count,
     parse_dtype, parse_eagle_time, parse_hash, parse_key, parse_l_length, parse_length, parse_mac,
-    parse_offset, parse_signature, parse_string, parse_version, parse_world_coord, parse_wrapped,
+    parse_offset, parse_signature, parse_string, parse_version, parse_world_cell, parse_world_coord, parse_wrapped,
 };
 use super::primitives::{parse_complex, parse_float, parse_signed, parse_unsigned};
 #[cfg(feature = "spirix")]
@@ -73,7 +73,8 @@ pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
             *pointer += 1;
             match next {
                 b'3' | b'4' | b'5' | b'6' | b'7' => parse_world_coord(next, data, pointer),
-                b if b.is_ascii_lowercase() => parse_world_address(data, pointer),
+                b'a' => parse_world_address(data, pointer),
+                b'm' => parse_world_cell(data, pointer),
                 _ => Err(DecodeError::InvalidDataMsg(format!(
                     "Unknown world subtype: w{}",
                     next as char

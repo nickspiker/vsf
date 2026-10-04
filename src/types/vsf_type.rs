@@ -60,6 +60,7 @@ use spirix::{
 use super::eagle_time::EtType;
 use super::network::WaAddress;
 use super::tensor::{BitPackedTensor, StridedTensor, Tensor, Vector};
+use super::world_cell::WorldCell;
 use super::world_coord::WorldCoord;
 
 #[cfg(feature = "spirix")]
@@ -236,6 +237,7 @@ pub enum VsfType {
     a(String),     // ASCII text (user-facing, ASCII-only alternative to x)
     e(EtType),     // Eagle Time
     w(WorldCoord), // World coordinate (Dymaxion icosahedral) — wire: w[3-7] + 2^N bytes
+    wm(WorldCell), // World cell (Morton-coded Dymaxion) — wire: wm[3-7] + 2^(N-3) bytes, truncation-nested: prefix = enclosing cell
 
     // ==================== WORLD ADDRESS FAMILY (w + lowercase) ==================== w + digit (w3..w7) = WorldCoord at 2^N-bit resolution w + lowercase letter = other world types (wa = postal address)
     wa(WaAddress), // World address: structured postal address (all fields optional)

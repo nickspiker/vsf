@@ -49,7 +49,7 @@ const BASE8: u64 = 3; //       ~2,350 km steps (face + coarse third)
 /// the polar degeneracy coincides with the two degree-5 grid points. Every
 /// face edge is a true icosahedron edge (adjacent-vertex dot = 1/√5),
 /// enforced by `tests::face_table_is_a_real_icosahedron`.
-const VERTICES: [[f64; 3]; 12] = [
+pub(crate) const VERTICES: [[f64; 3]; 12] = [
     [0., 0., 1.0],
     [0.8944271909999159, 0., 0.4472135954999579],
     [0.27639320225002106, 0.8506508083520399, 0.4472135954999579],
@@ -227,7 +227,7 @@ impl WorldCoord {
 // ==================== GEOMETRY HELPERS ====================
 
 /// Convert lat/lon (degrees) to unit sphere XYZ
-fn lat_lon_to_xyz(lat: f64, lon: f64) -> (f64, f64, f64) {
+pub(crate) fn lat_lon_to_xyz(lat: f64, lon: f64) -> (f64, f64, f64) {
     let lat_rad = lat * PI / 180.0;
     let lon_rad = lon * PI / 180.0;
     let x = lat_rad.cos() * lon_rad.cos();
@@ -237,7 +237,7 @@ fn lat_lon_to_xyz(lat: f64, lon: f64) -> (f64, f64, f64) {
 }
 
 /// Convert unit sphere XYZ to lat/lon (degrees)
-fn xyz_to_lat_lon(x: f64, y: f64, z: f64) -> (f64, f64) {
+pub(crate) fn xyz_to_lat_lon(x: f64, y: f64, z: f64) -> (f64, f64) {
     let lat = (z.atan2((x * x + y * y).sqrt())) * 180.0 / PI;
     let lon = y.atan2(x) * 180.0 / PI;
     (lat, lon)

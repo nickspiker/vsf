@@ -397,7 +397,7 @@ pub use logging::install_log_bridge;
 // Re-export main types
 pub use types::{
     datetime_to_eagle_time, BitPackedTensor, EagleTime, EtType, LayoutOrder, NaScheme,
-    StridedTensor, Tensor, VsfType, WaAddress, WorldCoord, OSCILLATIONS_PER_SECOND,
+    StridedTensor, Tensor, VsfType, WaAddress, WorldCell, WorldCoord, OSCILLATIONS_PER_SECOND,
 };
 #[cfg(feature = "std")]
 pub use types::{eagle_time_nanos, eagle_time_oscillations};
@@ -1191,6 +1191,27 @@ mod tests {
         // Unpack should give masked value: 4096 & 0xFFF = 0
         let unpacked = tensor.unpack().into_u64();
         assert_eq!(unpacked[0], 0); // Low 12 bits of 4096 (0x1000) = 0
+    }
+
+    #[test]
+    fn test_roundtrip_world_cell_wire() {
+        use crate::types::WorldCell;
+
+        let cell = WorldCell::from_lat_lon(47.6062, -122.3321);
+        let val = VsfType::wm(cell);
+        let flat = val.flatten();
+
+        assert_eq!(&flat[..3], &[b'w', b'm', b'6']);
+        assert_eq!(flat.len(), 11); // "wm6" + 8 bytes
+
+        let mut ptr = 0;
+        let parsed = parse(&flat, &mut ptr).unwrap();
+        assert_eq!(ptr, flat.len());
+        if let VsfType::wm(decoded) = parsed {
+            assert_eq!(decoded.raw(), cell.raw());
+        } else {
+            panic!("expected VsfType::wm, got {:?}", parsed);
+        }
     }
 
     #[test]

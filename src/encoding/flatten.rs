@@ -248,6 +248,14 @@ impl VsfType {
                 flat
             }
 
+            VsfType::wm(cell) => {
+                // Wire: "wm6" + 8 bytes big-endian u64. Morton-coded: coarser
+                // widths (wm3/wm4/wm5) are bit truncations; wm7 zero-extends.
+                let mut flat = vec![b'w', b'm', b'6'];
+                flat.extend_from_slice(&cell.raw().to_be_bytes());
+                flat
+            }
+
             VsfType::wa(addr) => {
                 let mut flat = vec![b'w', b'a'];
                 flat.extend_from_slice(&addr.to_wire());

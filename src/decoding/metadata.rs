@@ -3,7 +3,7 @@
 use super::helpers::{decode_i64, decode_u64, decode_usize};
 use crate::decoding::traits::DecodeError;
 use crate::prelude::*;
-use crate::types::{EtType, VsfType, WorldCoord};
+use crate::types::{EtType, VsfType, WorldCell, WorldCoord};
 
 // ==================== METADATA ====================
 
@@ -216,6 +216,40 @@ pub fn parse_world_coord(
     })?;
     *pointer += bytes_needed;
     Ok(VsfType::w(coord))
+}
+
+/// Parse a Morton-coded world cell: size digit then 2^(N-3) bytes.
+/// Coarse widths re-center to the transmitted cell's center.
+pub fn parse_world_cell(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
+    if *pointer >= data.len() {
+        return Err(DecodeError::UnexpectedEofMsg("Expected wm size digit".into()));
+    }
+    let size_byte = data[*pointer];
+    *pointer += 1;
+    let bytes_needed = match size_byte {
+        b'3' => 1,
+        b'4' => 2,
+        b'5' => 4,
+        b'6' => 8,
+        b'7' => 16,
+        _ => {
+            return Err(DecodeError::InvalidDataMsg(format!(
+                "Invalid world cell size: wm{}",
+                size_byte as char
+            )))
+        }
+    };
+    if *pointer + bytes_needed > data.len() {
+        return Err(DecodeError::UnexpectedEofMsg(format!(
+            "Not enough data for wm{}",
+            size_byte as char
+        )));
+    }
+    let cell = WorldCell::from_wire(size_byte, &data[*pointer..]).ok_or_else(|| {
+        DecodeError::InvalidDataMsg("WorldCell::from_wire rejected input".into())
+    })?;
+    *pointer += bytes_needed;
+    Ok(VsfType::wm(cell))
 }
 
 pub fn parse_dtype(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
