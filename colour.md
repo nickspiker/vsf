@@ -79,8 +79,8 @@ Human vision is logarithmic response all the way to zero. Power functions are co
 
 Gamma 2 encoding/decoding provides roughly **10-20× performance improvement** over gamma 2.2/2.4 power functions while remaining mathematically continuous to zero.
 
-**Linearization:** `linear = encoded^0.5` (square root)
-**Encoding:** `encoded = linear*linear` (square)
+**Linearization:** `linear = encoded*encoded` (square)
+**Encoding:** `encoded = linear^0.5` (square root)
 
 ### Quantization: ×256 Truncation (Not 255 and Rounding)
 
@@ -115,8 +115,8 @@ VSF's ×256 truncation has the SAME asymmetry (128 represents [0.5, 0.50390625) 
 
 **Performance difference:** 10-50× faster quantization, especially critical in video processing where you're quantizing millions of pixels per frame.
 
-**Encoding:** `u8_value = (linear_squared * 256.) as u8`
-**Decoding:** `linear = ((u8_value as f32 / 256.).sqrt())`
+**Encoding:** `u8_value = (linear.sqrt() * 256.) as u8`
+**Decoding:** `linear = (u8_value as f32 / 256.).powi(2)`
 
 No branches. No rounding. No arbitrary division. Just bitshifts and truncation.
 
