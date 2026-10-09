@@ -1,12 +1,8 @@
-//! Structured VSF logging sink — the ONE durable, self-describing, adb-pullable log for the whole
-//! VERICHROME stack (lumis/chameleon/opsin/limbus), replacing logcat and scattered `println!`.
+//! Structured VSF logging sink — the ONE durable, self-describing, adb-pullable log for the whole VERICHROME stack (lumis/chameleon/opsin/limbus), replacing logcat and scattered `println!`.
 //!
-//! Each record is a COMPLETE VSF document — `{creation_time (Eagle), section "log" {lvl, msg, val*}}`
-//! — appended to `<dir>/verichrome.log.vsf`. The message stores as a pure-text TEMPLATE and every interpolated value rides as its own TYPED `val` field: numbers-binary-at-rest, so `vsflog` /
-//! `vsfinfo` pick the display base at READ time and a number never stringifies into storage.
+//! Each record is a COMPLETE VSF document — `{creation_time (Eagle), section "log" {lvl, msg, val*}}` — appended to `<dir>/verichrome.log.vsf`. The message stores as a pure-text TEMPLATE and every interpolated value rides as its own TYPED `val` field: numbers-binary-at-rest, so `vsflog` / `vsfinfo` pick the display base at READ time and a number never stringifies into storage.
 //!
-//! Ported from photon's proven sink (2026-07). Gated behind the `logging` feature (which implies
-//! `std`); compiles to nothing otherwise. Single-process design — the file opens lazily and RETRIES until the platform data dir is known (Android sets it partway through JNI startup), buffering the earliest records so nothing before the dir lands is lost.
+//! Ported from photon's proven sink (2026-07). Gated behind the `logging` feature (which implies `std`); compiles to nothing otherwise. Single-process design — the file opens lazily and RETRIES until the platform data dir is known (Android sets it partway through JNI startup), buffering the earliest records so nothing before the dir lands is lost.
 
 use crate::prelude::*;
 #[cfg(feature = "logging")]
@@ -33,8 +29,7 @@ pub enum LogValue {
     T(String),
 }
 
-/// Capture wrapper for `logf!` args. Inherent impls (numerics, bools) outrank the [`CapDisplay`]
-/// blanket at method resolution, so typed capture is automatic and everything else degrades to text — the autoref-free inherent-priority specialization photon proved out.
+/// Capture wrapper for `logf!` args. Inherent impls (numerics, bools) outrank the [`CapDisplay`] blanket at method resolution, so typed capture is automatic and everything else degrades to text — the autoref-free inherent-priority specialization photon proved out.
 pub struct Cap<T>(pub T);
 
 /// Lowest-priority capture: anything Display becomes text (prose, hex labels, hashes). Implemented on `&Cap<T>` so the typed inherent impls on `Cap<X>` win the method probe without ambiguity.
@@ -74,8 +69,7 @@ impl<T: CapPrim> Cap<&T> {
     }
 }
 
-/// Render a template + captured values for a terminal/console surface (`vsflog` shares this walk).
-/// Slots `{}`/`{spec}` substitute values in order (spec is a rendering hint only). `{{`/`}}` are literal braces.
+/// Render a template + captured values for a terminal/console surface (`vsflog` shares this walk). Slots `{}`/`{spec}` substitute values in order (spec is a rendering hint only). `{{`/`}}` are literal braces.
 pub fn render_log_line(template: &str, vals: &[LogValue]) -> String {
     let mut out = String::with_capacity(template.len() + vals.len() * 8);
     let mut chars = template.chars().peekable();
@@ -122,13 +116,11 @@ pub struct LogRecord {
     pub level: u64,
     /// The rendered message: the stored template with its typed `val` fields substituted at READ time (numbers live binary in the record; this is the display edge).
     pub msg: String,
-    /// The record's raw bytes — one complete VSF document, so a viewer can hand it to
-    /// `inspect_vsf` for the coloured structural view. `vsflog` ignores it.
+    /// The record's raw bytes — one complete VSF document, so a viewer can hand it to `inspect_vsf` for the coloured structural view. `vsflog` ignores it.
     pub raw: Vec<u8>,
 }
 
-/// Decode complete records from a `verichrome.log.vsf` byte stream. Returns the records plus the byte offset of the last COMPLETE record boundary — a half-written trailing record (mid-append)
-/// is left for the next pass instead of being mis-decoded. Shared by the `vsflog` bin and any in-app viewer so the two surfaces can never drift. Available without the `logging` feature so pure readers (desktop tooling) don't drag in the file sink.
+/// Decode complete records from a `verichrome.log.vsf` byte stream. Returns the records plus the byte offset of the last COMPLETE record boundary — a half-written trailing record (mid-append) is left for the next pass instead of being mis-decoded. Shared by the `vsflog` bin and any in-app viewer so the two surfaces can never drift. Available without the `logging` feature so pure readers (desktop tooling) don't drag in the file sink.
 pub fn parse_log_records(buf: &[u8]) -> (Vec<LogRecord>, usize) {
     use crate::file_format::{VsfHeader, VsfSection};
     use crate::types::EtType;
@@ -233,8 +225,7 @@ static LOG_AGE_TRIGGER_OSC: AtomicI64 = AtomicI64::new(LOG_AGE_TRIGGER_BASE_OSC)
 #[cfg(feature = "logging")]
 static LOG_OLDEST_OSC: AtomicI64 = AtomicI64::new(i64::MAX);
 
-// Explicit log-dir override, set once at startup. On Android, JNI passes the EXTERNAL files dir
-// (adb-readable on a non-debuggable release dev APK where internal files/ is not); desktop passes its config/data dir.
+// Explicit log-dir override, set once at startup. On Android, JNI passes the EXTERNAL files dir (adb-readable on a non-debuggable release dev APK where internal files/ is not); desktop passes its config/data dir.
 #[cfg(feature = "logging")]
 static LOG_DIR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
@@ -249,8 +240,7 @@ pub fn set_log_dir(dir: String) {
 #[inline(always)]
 pub fn set_log_dir(_dir: String) {}
 
-// The log filename. Defaults to LOG_FILENAME; override per-process so multiple processes of one app
-// (e.g. lumis UI + camera) never interleave appends into a single file. First call wins.
+// The log filename. Defaults to LOG_FILENAME; override per-process so multiple processes of one app (e.g. lumis UI + camera) never interleave appends into a single file. First call wins.
 #[cfg(feature = "logging")]
 static LOG_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
@@ -275,8 +265,7 @@ fn log_dir() -> Option<std::path::PathBuf> {
     LOG_DIR.get().map(std::path::PathBuf::from)
 }
 
-// Dependency-free jitter: a fresh xorshift seeded from the clock, scaling `base` by [0.5, 1.0].
-// A fixed interval makes every subsystem trim on the same tick; jittering spreads it. Log timing never needs an exact deadline, so this cheap PRNG (no `rand` dep pulled into `logging`) suffices.
+// Dependency-free jitter: a fresh xorshift seeded from the clock, scaling `base` by [0.5, 1.0]. A fixed interval makes every subsystem trim on the same tick; jittering spreads it. Log timing never needs an exact deadline, so this cheap PRNG (no `rand` dep pulled into `logging`) suffices.
 #[cfg(feature = "logging")]
 fn jitter(base: i64) -> i64 {
     let mut x = crate::eagle_time_oscillations() as u64 ^ 0x9E3779B97F4A7C15;
@@ -389,8 +378,7 @@ fn trim_log_file(now_osc: i64) -> Option<(std::fs::File, u64, i64)> {
     Some((appender, kept.len() as u64, new_oldest))
 }
 
-// Pure boundary finder: the first whole-record boundary to keep so that `bytes[offset..]` is both within `trim_to_size` bytes AND free of records older than `age_cutoff_osc`. Records are appended in time order, so drop from the front while a record is EITHER before the size-drop point OR older than the cutoff, stopping at the first satisfying both. Returns (keep_offset,
-// oldest_kept_time). Stops early on any decode error so a corrupt tail never causes a mid-record cut.
+// Pure boundary finder: the first whole-record boundary to keep so that `bytes[offset..]` is both within `trim_to_size` bytes AND free of records older than `age_cutoff_osc`. Records are appended in time order, so drop from the front while a record is EITHER before the size-drop point OR older than the cutoff, stopping at the first satisfying both. Returns (keep_offset, oldest_kept_time). Stops early on any decode error so a corrupt tail never causes a mid-record cut.
 #[cfg(feature = "logging")]
 fn log_keep_offset(bytes: &[u8], trim_to_size: u64, age_cutoff_osc: i64) -> (usize, i64) {
     let total = bytes.len();
@@ -529,9 +517,7 @@ pub fn log_at(level: LogLevel, msg: &str) {
 
 // ─────────────────────────── `log` crate bridge (feature = "log-bridge") ───────────────────────────
 
-/// Route the `log` crate into the VSF sink so records from dependencies that use `log` macros
-/// (fluor, the JNI platform layer, reqwest, …) land in the SAME durable file. Debug+ globally,
-/// known-noisy crates only at Warn+. Call once at startup; a repeat call is a harmless no-op.
+/// Route the `log` crate into the VSF sink so records from dependencies that use `log` macros (fluor, the JNI platform layer, reqwest, …) land in the SAME durable file. Debug+ globally, known-noisy crates only at Warn+. Call once at startup; a repeat call is a harmless no-op.
 #[cfg(all(feature = "logging", feature = "log-bridge"))]
 pub fn install_log_bridge() {
     struct VsfLogBridge;

@@ -82,9 +82,7 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
         ));
     }
 
-    // Parse ndim or count. Which FORMAT we are in is decided by the 'n' marker and recorded here --
-    // never re-derived from the count. An empty 1D vector is legal and the encoder emits it (a zero-length tensor is how photon's peer rows say "no local_ip"), so a `count > 0` test would route count==0 into the multi-dim branch and read the following bytes as a shape. That mis-parsed the byte after the tensor -- typically the ',' field delimiter -- as a size marker,
-    // and because one bad value fails the whole section, a single peer with no LAN address made an entire gossip batch unreadable.
+    // Parse ndim or count. Which FORMAT we are in is decided by the 'n' marker and recorded here -- never re-derived from the count. An empty 1D vector is legal and the encoder emits it (a zero-length tensor is how photon's peer rows say "no local_ip"), so a `count > 0` test would route count==0 into the multi-dim branch and read the following bytes as a shape. That mis-parsed the byte after the tensor -- typically the ',' field delimiter -- as a size marker, and because one bad value fails the whole section, a single peer with no LAN address made an entire gossip batch unreadable.
     let is_1d_format = data[*pointer] == b'n';
     let (ndim, count) = if is_1d_format {
         // 1D vector format: [t]['n'][count][elem_type][elem_size][data...]

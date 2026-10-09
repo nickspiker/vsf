@@ -264,9 +264,9 @@ macro_rules! type_mismatch_err {
     }};
 }
 
-/// no_std-friendly prelude: re-exports of the `alloc` types that std's prelude provides automatically. Individual files import via `use crate::prelude::*;` to stay compatible across `std` and `no_std + alloc` builds.
 /// Multi-scheme signature lists and their single wire form — the shape of every stacked-signature slot in the stack, including the header's `gm`.
 pub mod eggs;
+/// no_std-friendly prelude: re-exports of the `alloc` types that std's prelude provides automatically. Individual files import via `use crate::prelude::*;` to stay compatible across `std` and `no_std + alloc` builds.
 pub mod prelude {
     pub use alloc::borrow::ToOwned;
     pub use alloc::boxed::Box;
@@ -287,10 +287,7 @@ pub const VSF_VERSION: usize = 9;
 /// Oldest format version this BUILD can read — the floor is build-time chosen, cargo-style. Default is the current version only: wire breaks are never silently bridged, and a too-old file is rejected by name at the header. The plan for honoring old archives: a `compat-v*` feature per legacy dialect lowers this floor AND compiles in that era's decode paths, dispatched on the file's z at parse time; when none is enabled, old files get the loud version error (never a wrong parse). No compat feature may ship as a floor-only no-op — lowering the floor without the era's real readers recreates silent misinterpretation. None exist yet: a true `compat-v8` needs spirix 0.0.x payload decode vendored (the old Scalar bit semantics), and a true `compat-v7` needs the pre-remap x codebook vendored from git (c12c7e2~1) plus the l-as-ASCII-label mapping, and v7 sub-dialects (l→a marker remap ~0.3.5, x codebook remap 0.4.0) shipped without z bumps, so "v7" in the field is ambiguous anyway — per-archive forensics if real v7 data ever needs recovering.
 pub const VSF_BACKWARD_COMPAT: usize = 9;
 
-// THE GATE: the crate's semver-breaking number IS the format version, enforced at compile time.
-// While vsf is 0.x the breaking number is the MINOR (0.9.z ⇒ format v9); at 1.0+ it becomes the MAJOR.
-// cargo publish runs a verify build, so a stale VSF_VERSION cannot reach crates.io — it fails right here first.
-// Four VSF releases (plus one spirix) have been yanked because a human forgot this bump; no human step remains.
+// THE GATE: the crate's semver-breaking number IS the format version, enforced at compile time. While vsf is 0.x the breaking number is the MINOR (0.9.z ⇒ format v9); at 1.0+ it becomes the MAJOR. cargo publish runs a verify build, so a stale VSF_VERSION cannot reach crates.io — it fails right here first. Four VSF releases (plus one spirix) have been yanked because a human forgot this bump; no human step remains.
 const fn semver_breaking_number(version: &str) -> usize {
     let b = version.as_bytes();
     let mut i = 0;
@@ -388,9 +385,7 @@ pub mod spectral_image;
 /// VSF visual data: tracks, spans, planes, capture, characterization, graph, view — the container for stills, video, audio, layers and provenance. See [`visual::Visual`].
 pub mod visual;
 
-// Structured VSF logging: the ONE durable, adb-pullable, self-describing log for the whole stack
-// (replaces logcat + scattered println!). The `logf!`/`logf_at!` macros and the record codec
-// (parse_log_records) are always available; the FILE SINK is gated behind `logging` (implies std).
+// Structured VSF logging: the ONE durable, adb-pullable, self-describing log for the whole stack (replaces logcat + scattered println!). The `logf!`/`logf_at!` macros and the record codec (parse_log_records) are always available; the FILE SINK is gated behind `logging` (implies std).
 pub mod logging;
 pub use logging::{
     clear_log, log, log_at, log_size_bytes, log_structured, parse_log_records, read_log_from,

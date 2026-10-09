@@ -236,8 +236,7 @@ fn from_av1(av1: &[u8]) -> Result<DecodedImage, ImageError> {
     Ok(DecodedImage { width: width as u32, height: height as u32, pixels })
 }
 
-/// Pack VSF RGB gamma2 u8 triples into α + darkness u32: α=0xFF, darkness = 255 − visible.
-/// The buffer length must be `w * h * 3` (caller guarantees from a verified `[h, w, 3]` shape).
+/// Pack VSF RGB gamma2 u8 triples into α + darkness u32: α=0xFF, darkness = 255 − visible. The buffer length must be `w * h * 3` (caller guarantees from a verified `[h, w, 3]` shape).
 fn pack_alpha_darkness(rgb: &[u8], w: u32, h: u32) -> Vec<u32> {
     let count = (w as usize) * (h as usize);
     let mut pixels = Vec::with_capacity(count);

@@ -1,17 +1,12 @@
 //! vsflog — decode a `verichrome.log.vsf` structured log into human-readable lines.
 //!
-//! The log is a stream of complete VSF records, each `{creation_time (Eagle), section "log"
-//! {lvl, msg, val*}}` (see `vsf::logging`). This walks the records in order and prints
-//! `<eagle-time>  [LEVEL]  <msg>`, rendering the stored template with its typed `val` fields substituted at read time (numbers live binary in the record).
+//! The log is a stream of complete VSF records, each `{creation_time (Eagle), section "log" {lvl, msg, val*}}` (see `vsf::logging`). This walks the records in order and prints `<eagle-time>  [LEVEL]  <msg>`, rendering the stored template with its typed `val` fields substituted at read time (numbers live binary in the record).
 //!
 //! Pull the file off a phone with:
 //!   `adb pull /storage/emulated/0/Android/data/<pkg>/files/verichrome.log.vsf`
 //! (the external files dir — adb-readable on a non-debuggable release dev APK).
 //!
-//! Usage: `vsflog [PATH] [flags]` (PATH defaults to ./verichrome.log.vsf)
-//!   -l, --level LEVEL   only records at this severity or higher (TRACE|DEBUG|INFO|WARN|ERROR, 0..4)
-//!   -g, --grep SUBSTR   only records whose message contains SUBSTR (case-insensitive)
-//!   -f, --follow        keep reading as new records are appended (tail -f); survives rotation
+//! Usage: `vsflog [PATH] [flags]` (PATH defaults to ./verichrome.log.vsf) -l, --level LEVEL   only records at this severity or higher (TRACE|DEBUG|INFO|WARN|ERROR, 0..4) -g, --grep SUBSTR   only records whose message contains SUBSTR (case-insensitive) -f, --follow        keep reading as new records are appended (tail -f); survives rotation
 
 use std::io::Read;
 

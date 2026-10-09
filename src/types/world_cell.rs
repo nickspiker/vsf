@@ -1,28 +1,17 @@
 //! WorldCell: Morton-coded Dymaxion coordinate — the hierarchical sibling of
 //! [`WorldCoord`](super::world_coord::WorldCoord).
 //!
-//! Layout (MSB first): `[4 bits diamond 0–9][60 bits Morton(u, v)]`. The
-//! icosahedron's 20 faces are paired into 10 rhombic diamonds; face-local
-//! (u, v) is quantized to 2^30 steps per axis (~6.6 mm of ground) and
-//! interleaved from the MSBs down, u in the higher bit of each pair.
+//! Layout (MSB first): `[4 bits diamond 0–9][60 bits Morton(u, v)]`. The icosahedron's 20 faces are paired into 10 rhombic diamonds; face-local (u, v) is quantized to 2^30 steps per axis (~6.6 mm of ground) and interleaved from the MSBs down, u in the higher bit of each pair.
 //!
 //! The two families trade differently:
 //! - **WorldCoord** (dense divmod): maximum precision per bit (~5.2 mm at
 //!   64 bits), but widths are independent re-encodes — nothing nests.
-//! - **WorldCell** (Morton): ~26% coarser (~6.6 mm at 64 bits), but every
-//!   width nests by TRUNCATION: dropping 2k low bits yields the enclosing
-//!   cell 2^k coarser, a tile address is a bit prefix, containment is a
-//!   shift-and-compare, and the 128-bit extension's top 64 bits ARE the
+//! - **WorldCell** (Morton): ~26% coarser (~6.6 mm at 64 bits), but every width nests by TRUNCATION: dropping 2k low bits yields the enclosing cell 2^k coarser, a tile address is a bit prefix, containment is a shift-and-compare, and the 128-bit extension's top 64 bits ARE the
 //!   64-bit value.
 //!
-//! Wire: `wm` + size digit `3`–`7` + 2^(N-3) bytes, truncation-based.
-//! Coarse widths carry the top bits; decode re-centers (sets the next bit
-//! of each axis) so a degraded point reads as its cell's center rather
-//! than biased to the corner.
+//! Wire: `wm` + size digit `3`–`7` + 2^(N-3) bytes, truncation-based. Coarse widths carry the top bits; decode re-centers (sets the next bit of each axis) so a degraded point reads as its cell's center rather than biased to the corner.
 //!
-//! Orientation, datum and vertex tables are shared verbatim with
-//! `WorldCoord` and mahere-coord (pole-vertex, Greenwich-aligned, geodetic
-//! lat/lon treated as spherical).
+//! Orientation, datum and vertex tables are shared verbatim with `WorldCoord` and mahere-coord (pole-vertex, Greenwich-aligned, geodetic lat/lon treated as spherical).
 
 use crate::prelude::*;
 
@@ -31,10 +20,7 @@ use num_traits::Float;
 
 use super::world_coord::{lat_lon_to_xyz, xyz_to_lat_lon, VERTICES};
 
-/// The 10 diamonds as vertex indices `[a0, q, r, b0]`: lower triangle
-/// (a0, q, r) and upper triangle (b0, q, r) share edge q–r. UV basis:
-/// origin a0, u along a0→q, v along a0→r; b0 at (1, 1). Identical to
-/// mahere-coord's table.
+/// The 10 diamonds as vertex indices `[a0, q, r, b0]`: lower triangle (a0, q, r) and upper triangle (b0, q, r) share edge q–r. UV basis: origin a0, u along a0→q, v along a0→r; b0 at (1, 1). Identical to mahere-coord's table.
 const DIAMONDS: [[usize; 4]; 10] = [
     [0, 1, 2, 6],
     [0, 2, 3, 7],
@@ -67,15 +53,13 @@ impl WorldCell {
         self.0
     }
 
-    /// Encode WGS84 geodetic latitude/longitude (degrees), treated as
-    /// spherical (same datum rule as `WorldCoord`).
+    /// Encode WGS84 geodetic latitude/longitude (degrees), treated as spherical (same datum rule as `WorldCoord`).
     pub fn from_lat_lon(lat: f64, lon: f64) -> Self {
         let (x, y, z) = lat_lon_to_xyz(lat, lon);
         Self::from_xyz(x, y, z)
     }
 
-    /// Decode to WGS84 geodetic (latitude, longitude) in degrees — the
-    /// center of the finest cell.
+    /// Decode to WGS84 geodetic (latitude, longitude) in degrees — the center of the finest cell.
     pub fn to_lat_lon(&self) -> (f64, f64) {
         let (x, y, z) = self.to_xyz();
         xyz_to_lat_lon(x, y, z)
@@ -107,15 +91,12 @@ impl WorldCell {
         (compact(self.0 >> 1), compact(self.0))
     }
 
-    /// The enclosing cell at `depth` (0..=30), corner-anchored: the low
-    /// bits are zeroed. Truncation IS spatial coarsening.
+    /// The enclosing cell at `depth` (0..=30), corner-anchored: the low bits are zeroed. Truncation IS spatial coarsening.
     pub fn truncate(&self, depth: u8) -> WorldCell {
         WorldCell(self.0 & prefix_mask(depth))
     }
 
-    /// The enclosing cell's center at full resolution: truncate, then set
-    /// the next bit of each axis — the re-centering rule for degraded
-    /// points (uniform ±half-cell error instead of corner bias).
+    /// The enclosing cell's center at full resolution: truncate, then set the next bit of each axis — the re-centering rule for degraded points (uniform ±half-cell error instead of corner bias).
     pub fn center_at(&self, depth: u8) -> WorldCell {
         if depth >= MAX_DEPTH {
             return *self;
@@ -125,17 +106,12 @@ impl WorldCell {
         )
     }
 
-    /// True if both coordinates lie in the same cell at `depth`: one mask
-    /// and compare.
+    /// True if both coordinates lie in the same cell at `depth`: one mask and compare.
     pub fn same_cell(&self, other: &WorldCell, depth: u8) -> bool {
         (self.0 ^ other.0) & prefix_mask(depth) == 0
     }
 
-    /// Wire bytes: `wm` tag is added by the flattener; this returns the
-    /// size digit's payload. Width `'6'` is the full value; `'3'`/`'4'`/
-    /// `'5'` truncate to the top 8/16/32 bits (cells of ~1,760 km /
-    /// ~110 km / ~430 m); `'7'` zero-extends to 128 bits (low bits
-    /// reserved for [`encode128`]-precision inputs).
+    /// Wire bytes: `wm` tag is added by the flattener; this returns the size digit's payload. Width `'6'` is the full value; `'3'`/`'4'`/ `'5'` truncate to the top 8/16/32 bits (cells of ~1,760 km / ~110 km / ~430 m); `'7'` zero-extends to 128 bits (low bits reserved for [`encode128`]-precision inputs).
     pub fn wire_bytes(&self, size_byte: u8) -> Option<Vec<u8>> {
         let raw = self.0;
         Some(match size_byte {
@@ -148,8 +124,7 @@ impl WorldCell {
         })
     }
 
-    /// Decode wire bytes at a width. Coarse widths re-center: the result is
-    /// the transmitted cell's center at full resolution.
+    /// Decode wire bytes at a width. Coarse widths re-center: the result is the transmitted cell's center at full resolution.
     pub fn from_wire(size_byte: u8, bytes: &[u8]) -> Option<Self> {
         let (raw, depth) = match size_byte {
             b'3' if !bytes.is_empty() => ((bytes[0] as u64) << 56, 2u8),
@@ -182,10 +157,7 @@ impl WorldCell {
 }
 
 /// 128-bit encode: `[4 bits diamond][124 bits Morton]`, 62 bits per axis.
-/// The top 64 bits are EXACTLY the [`WorldCell`] encoding (power-of-two
-/// quantization commutes with truncation). Note f64 inputs carry ~52
-/// significant bits, so depths beyond ~52 quantize rounding noise; the
-/// layout is exact, the geometry is input-limited.
+/// The top 64 bits are EXACTLY the [`WorldCell`] encoding (power-of-two quantization commutes with truncation). Note f64 inputs carry ~52 significant bits, so depths beyond ~52 quantize rounding noise; the layout is exact, the geometry is input-limited.
 pub fn encode128(lat: f64, lon: f64) -> u128 {
     let (x, y, z) = lat_lon_to_xyz(lat, lon);
     let (diamond, u, v) = xyz_to_diamond_uv(x, y, z);
@@ -207,8 +179,7 @@ pub fn decode128(code: u128) -> (f64, f64) {
 
 // ==================== GEOMETRY ====================
 
-/// Project a direction onto its containing diamond: (diamond, u, v) with
-/// u, v in [0, 1] — lower triangle u + v <= 1, upper above.
+/// Project a direction onto its containing diamond: (diamond, u, v) with u, v in [0, 1] — lower triangle u + v <= 1, upper above.
 fn xyz_to_diamond_uv(x: f64, y: f64, z: f64) -> (u8, f64, f64) {
     let mag = (x * x + y * y + z * z).sqrt();
     let p = [x / mag, y / mag, z / mag];
@@ -234,8 +205,7 @@ fn xyz_to_diamond_uv(x: f64, y: f64, z: f64) -> (u8, f64, f64) {
     let [a0, q, r, b0] = DIAMONDS[di];
     let f0 = if upper { b0 } else { a0 };
     let (s, t) = gnomonic_barycentric(p, VERTICES[f0], VERTICES[q], VERTICES[r]);
-    // Lower: UV = (s, t). Upper (b0, q, r): u = 1 - t, v = 1 - s keeps the
-    // parametrization continuous across the shared diagonal.
+    // Lower: UV = (s, t). Upper (b0, q, r): u = 1 - t, v = 1 - s keeps the parametrization continuous across the shared diagonal.
     let (u, v) = if upper { (1.0 - t, 1.0 - s) } else { (s, t) };
     (di as u8, u, v)
 }
@@ -256,8 +226,7 @@ fn diamond_uv_to_xyz(diamond: u8, u: f64, v: f64) -> (f64, f64, f64) {
     (x / mag, y / mag, z / mag)
 }
 
-/// Gnomonic projection of `p` onto the triangle's plane, as edge-basis
-/// barycentric (s, t): fp = A + s·(B−A) + t·(C−A).
+/// Gnomonic projection of `p` onto the triangle's plane, as edge-basis barycentric (s, t): fp = A + s·(B−A) + t·(C−A).
 fn gnomonic_barycentric(p: [f64; 3], a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> (f64, f64) {
     let v0 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
     let v1 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
@@ -318,9 +287,7 @@ fn compact(x: u64) -> u64 {
     x & 0x3FFF_FFFF
 }
 
-/// Spread up to 62 bits into the even positions of a u128, by spreading
-/// each 31-bit half through the standard 32-bit spreader (positional, so
-/// the halves combine by shift: bit 62 is even, continuing the pattern).
+/// Spread up to 62 bits into the even positions of a u128, by spreading each 31-bit half through the standard 32-bit spreader (positional, so the halves combine by shift: bit 62 is even, continuing the pattern).
 fn spread128(x: u64) -> u128 {
     let low = spread32(x & 0x7FFF_FFFF);
     let high = spread32((x >> 31) & 0x7FFF_FFFF);
@@ -408,8 +375,7 @@ mod tests {
         }
     }
 
-    /// The 128-bit encoding's top 64 bits are exactly the 64-bit encoding
-    /// (power-of-two quantization commutes with truncation).
+    /// The 128-bit encoding's top 64 bits are exactly the 64-bit encoding (power-of-two quantization commutes with truncation).
     #[test]
     fn u128_top_bits_are_the_u64_encoding() {
         for (lat, lon) in [
@@ -452,8 +418,7 @@ mod tests {
         assert_eq!(WorldCell::from_wire(b'7', &wire).unwrap().raw(), c.raw());
     }
 
-    /// WorldCell and WorldCoord agree on the ground: converting through the
-    /// sphere lands within the sum of their quantization radii.
+    /// WorldCell and WorldCoord agree on the ground: converting through the sphere lands within the sum of their quantization radii.
     #[test]
     fn agrees_with_dense_worldcoord() {
         use super::super::world_coord::WorldCoord;

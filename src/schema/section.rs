@@ -610,8 +610,7 @@ impl SectionBuilder {
 
     /// Verify a whole VSF document, then parse the section named by `schema` out of it.
     ///
-    /// This is the safe, general front door for reading a named section from a document: it makes verification un-skippable.
-    /// It first runs [`crate::verification::read_verified`] over the entire `doc` (which enforces provenance self-consistency plus either a valid signature or a valid rolling hash — a document carrying neither is rejected), then locates the header TOC entry whose name matches `schema.name`, bounds-checks its byte range, and delegates to [`SectionBuilder::parse`].
+    /// This is the safe, general front door for reading a named section from a document: it makes verification un-skippable. It first runs [`crate::verification::read_verified`] over the entire `doc` (which enforces provenance self-consistency plus either a valid signature or a valid rolling hash — a document carrying neither is rejected), then locates the header TOC entry whose name matches `schema.name`, bounds-checks its byte range, and delegates to [`SectionBuilder::parse`].
     ///
     /// This generalises the hard-coded `parse_compressed_image` helper (which only ever looked up the `"image"` section) to any schema name, and adds the mandatory verification step that the raw section parsers skip.
     ///

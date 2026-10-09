@@ -295,8 +295,7 @@ pub enum VsfType {
     ///
     /// **Application-specific encodings** (uppercase, NOT for standard file storage):
     /// - `B` = Application-specific internal binary format
-    /// - `A`-`Z` = Custom encodings defined per-application
-    /// These are not standardized by VSF and should not be used for general file storage.
+    /// - `A`-`Z` = Custom encodings defined per-application. These are not standardized by VSF and should not be used for general file storage.
     ///
     /// Example usage:
     /// ```ignore
@@ -1086,8 +1085,7 @@ impl VsfType {
 
     /// Extract value as u128
     ///
-    /// Supports: u0, u3, u4, u5, u6, u7, u, o, n — the widest unsigned accessor, and the only one that reaches u7 (u128), which no other accessor covers.
-    /// Never overflows: every supported variant widens losslessly into u128.
+    /// Supports: u0, u3, u4, u5, u6, u7, u, o, n — the widest unsigned accessor, and the only one that reaches u7 (u128), which no other accessor covers. Never overflows: every supported variant widens losslessly into u128.
     pub fn as_u128(&self) -> Option<u128> {
         match self {
             VsfType::u0(b) => Some(*b as u128),
@@ -1135,8 +1133,7 @@ impl VsfType {
 
     /// Extract as string reference
     ///
-    /// Supports: x (UTF-8 text), a (ASCII text), d (dictionary key)
-    /// Extract an eagle time as i64 oscillations — width-agnostic across the e-family (e5 widens, e7 narrows when it fits), the temporal sibling of [`as_u64`](Self::as_u64). Readers use THIS, never an exact `EtType::e6` match: the same doctrine that killed the ek parse-death class for integers applies to times.
+    /// Supports: x (UTF-8 text), a (ASCII text), d (dictionary key) Extract an eagle time as i64 oscillations — width-agnostic across the e-family (e5 widens, e7 narrows when it fits), the temporal sibling of [`as_u64`](Self::as_u64). Readers use THIS, never an exact `EtType::e6` match: the same doctrine that killed the ek parse-death class for integers applies to times.
     pub fn as_eagle(&self) -> Option<i64> {
         match self {
             VsfType::e(EtType::e5(t)) => Some(*t as i64),
@@ -1155,8 +1152,7 @@ impl VsfType {
 
     /// Extract as byte slice
     ///
-    /// Supports: v (wrapped bytes), v_u3 (vector), t_u3 (tensor), the standard hash family (hp/hb/hs/hm/hg/hc/hk), the application-specific Photon hashes (hP/hR/hI/hV), public/symmetric keys (ke/kx/kc/ka), and signatures (ge/gp).
-    /// Photon reads handle-proofs as `hP` and blobs as `ge`, so those two must be covered here.
+    /// Supports: v (wrapped bytes), v_u3 (vector), t_u3 (tensor), the standard hash family (hp/hb/hs/hm/hg/hc/hk), the application-specific Photon hashes (hP/hR/hI/hV), public/symmetric keys (ke/kx/kc/ka), and signatures (ge/gp). Photon reads handle-proofs as `hP` and blobs as `ge`, so those two must be covered here.
     pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             VsfType::v(_, bytes) => Some(bytes),

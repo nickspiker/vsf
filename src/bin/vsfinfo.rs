@@ -262,9 +262,7 @@ fn decrypt_symmetric(_encrypted: &[u8], _key_hex: &str) -> Result<Vec<u8>, Strin
     Err("Crypto feature not enabled - rebuild with --features crypto".to_string())
 }
 
-/// ChaCha20-Poly1305 decryption helper — reads the current 24-byte-nonce XChaCha20-Poly1305 first,
-/// then the legacy 12-byte-nonce ChaCha20-Poly1305 (the 2026-08-18 stack-wide migration). The Poly1305
-/// tag disambiguates, so an inspection of either format Just Works.
+/// ChaCha20-Poly1305 decryption helper — reads the current 24-byte-nonce XChaCha20-Poly1305 first, then the legacy 12-byte-nonce ChaCha20-Poly1305 (the 2026-08-18 stack-wide migration). The Poly1305 tag disambiguates, so an inspection of either format Just Works.
 #[cfg(feature = "crypto")]
 fn decrypt_chacha20poly1305(encrypted: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
     use chacha20poly1305::{
@@ -305,8 +303,7 @@ fn show_info(data: &[u8], _detailed: bool, _key_path: Option<&Path>) -> Result<(
     let formatted = vsf::inspect::inspect_vsf(data)?;
     println!("{}", formatted);
 
-    // The inspect view SHOWS the crypto fields but only re-computes the rolling hash.
-    // A file inspector must actually VERIFY every anchor it displays, so run the library verify functions and report an unambiguous per-anchor result.
+    // The inspect view SHOWS the crypto fields but only re-computes the rolling hash. A file inspector must actually VERIFY every anchor it displays, so run the library verify functions and report an unambiguous per-anchor result.
     print_verification_summary(data);
 
     Ok(())
@@ -314,8 +311,7 @@ fn show_info(data: &[u8], _detailed: bool, _key_path: Option<&Path>) -> Result<(
 
 /// Verify every integrity/authenticity anchor the header carries and print a per-anchor PASS/FAIL/absent line.
 ///
-/// This is the acceptance gate: parsing a document is not the same as trusting it.
-/// We report three anchors independently:
+/// This is the acceptance gate: parsing a document is not the same as trusting it. We report three anchors independently:
 /// - provenance (hp): content matches its claimed immutable identity ([`is_original`]).
 /// - integrity (hb): the rolling hash covers the whole file ([`verify_file_hash`]); absent when the file is signed instead.
 /// - signature (ge): the header-level Ed25519 signature ([`verify_file_signature`]); absent when the file is unsigned, and reported as needing the crypto feature when present but this build lacks it.

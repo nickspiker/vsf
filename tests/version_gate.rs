@@ -1,6 +1,4 @@
-//! Version-gate tests: z (format version) and y (backward-compat floor) are the wire contract, and `parse_full_header` is the enforcement point.
-//! The builder's `.version()` override lets us forge files from other eras, so every gate direction is exercised on real bytes, not mocked values.
-//! Companion to the compile-time gate in lib.rs (VSF_VERSION must equal the semver-breaking number) — that one guards the WRITER's constants, these guard the READER's behavior.
+//! Version-gate tests: z (format version) and y (backward-compat floor) are the wire contract, and `parse_full_header` is the enforcement point. The builder's `.version()` override lets us forge files from other eras, so every gate direction is exercised on real bytes, not mocked values. Companion to the compile-time gate in lib.rs (VSF_VERSION must equal the semver-breaking number) — that one guards the WRITER's constants, these guard the READER's behavior.
 
 use vsf::verification::parse_full_header;
 use vsf::vsf_builder::VsfBuilder;

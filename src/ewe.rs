@@ -2,8 +2,7 @@
 //!
 //! The Rust type is the caller's choice and the byte width is the format's, and the two never mix: [`write_uint`]/[`write_int`] always emit the narrowest marker that holds the value (`5u32` and `5u128` both write `3 05`), and [`read_uint`]/[`read_int`] accept any marker but reject a value a narrower marker would have held, then narrow into the requested type or return [`DecodeError::ValueOutOfRange`].
 //!
-//! Canonical form is what makes byte-exact matching and signatures meaningful: one value has exactly one valid byte form, so two distinct byte strings can never decode to the same number.
-//! Every marker is exactly twice the width of the one below it, so "a narrower marker would hold this" is just "the upper half of the bytes is empty" (unsigned) or "the upper half is only the sign extension of the lower half" (signed).
+//! Canonical form is what makes byte-exact matching and signatures meaningful: one value has exactly one valid byte form, so two distinct byte strings can never decode to the same number. Every marker is exactly twice the width of the one below it, so "a narrower marker would hold this" is just "the upper half of the bytes is empty" (unsigned) or "the upper half is only the sign extension of the lower half" (signed).
 //!
 //! Markers above `7` are valid EWE (the spec runs to `Z`) but exceed every native Rust integer, so these readers refuse them; a big-integer reader belongs beside these if something ever needs one.
 

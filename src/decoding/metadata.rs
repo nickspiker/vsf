@@ -218,8 +218,7 @@ pub fn parse_world_coord(
     Ok(VsfType::w(coord))
 }
 
-/// Parse a Morton-coded world cell: size digit then 2^(N-3) bytes.
-/// Coarse widths re-center to the transmitted cell's center.
+/// Parse a Morton-coded world cell: size digit then 2^(N-3) bytes. Coarse widths re-center to the transmitted cell's center.
 pub fn parse_world_cell(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     if *pointer >= data.len() {
         return Err(DecodeError::UnexpectedEofMsg("Expected wm size digit".into()));

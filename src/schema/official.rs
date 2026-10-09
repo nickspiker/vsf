@@ -103,8 +103,7 @@ pub fn pipe_message_schema() -> SectionSchema {
 
 /// Create error schema — the standard shape for a worker/protocol error frame.
 ///
-/// `reason` is the short machine-readable cause; `detail` is an optional human-readable elaboration.
-/// Both are free-form strings so any subsystem can populate the envelope without a bespoke schema.
+/// `reason` is the short machine-readable cause; `detail` is an optional human-readable elaboration. Both are free-form strings so any subsystem can populate the envelope without a bespoke schema.
 pub fn error_schema() -> SectionSchema {
     SectionSchema::new("error")
         .field("reason", TypeConstraint::AnyString)

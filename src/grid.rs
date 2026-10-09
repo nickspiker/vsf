@@ -1,7 +1,6 @@
 //! The audio grid (LOCK spec §1.2, §3): every sample Photon captures has a globally unique integer name.
 //!
-//! `SampleIndex` = samples since the Eagle epoch at a fixed 48 kHz, so sample `k` sits nominally at `k / 48000` seconds after the epoch, exact in rationals. A packet is 960 samples (20 ms) and packet boundaries fall on multiples of 960 counted from the top of each Eagle second — 50 packets a second, and because 48000 is a multiple of 960, the first sample of every Eagle second is a packet start.
-//! Grid names are exact; an Eagle stamp is a MEASUREMENT of where a named sample actually was, and the difference is phase error. Integers name things; the one float here lives inside an estimator (`phase_error_samples`).
+//! `SampleIndex` = samples since the Eagle epoch at a fixed 48 kHz, so sample `k` sits nominally at `k / 48000` seconds after the epoch, exact in rationals. A packet is 960 samples (20 ms) and packet boundaries fall on multiples of 960 counted from the top of each Eagle second — 50 packets a second, and because 48000 is a multiple of 960, the first sample of every Eagle second is a packet start. Grid names are exact; an Eagle stamp is a MEASUREMENT of where a named sample actually was, and the difference is phase error. Integers name things; the one float here lives inside an estimator (`phase_error_samples`).
 
 use crate::types::eagle_time::OSCILLATIONS_PER_SECOND;
 

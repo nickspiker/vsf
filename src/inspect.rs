@@ -555,8 +555,7 @@ fn format_vsf_universal(vsf: &VsfType, indent_level: usize, label: Option<&str>)
 /// Bytes per line in hex display (default 32 — future: user configurable)
 const HEX_BYTES_PER_LINE: usize = 32;
 
-/// Default bytes shown at the head/tail of a large binary blob before eliding the middle.
-/// Small enough to keep logs readable (a 16+16 fingerprint distinguishes distinct payloads and confirms presence + size) yet recoverable for spot-checks. The old default was 1024/1024, which dumped up to 2KB of hex PER FIELD — readable for one packet, ruinous for whole-session logs.
+/// Default bytes shown at the head/tail of a large binary blob before eliding the middle. Small enough to keep logs readable (a 16+16 fingerprint distinguishes distinct payloads and confirms presence + size) yet recoverable for spot-checks. The old default was 1024/1024, which dumped up to 2KB of hex PER FIELD — readable for one packet, ruinous for whole-session logs.
 const HEX_HEAD_DEFAULT: usize = 32;
 const HEX_TAIL_DEFAULT: usize = 32;
 

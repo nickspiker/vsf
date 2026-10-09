@@ -33,8 +33,7 @@ use num_traits::Float;
 /// Base for icosahedral coordinate system
 const BASE: u64 = 960_383_883; // floor(sqrt(2^64 / 20))
 
-/// Coarse dense-encode bases for narrower wire widths, same divmod + fold
-/// scheme at floor(sqrt(2^bits / 20)) steps per axis. Not nested in the
+/// Coarse dense-encode bases for narrower wire widths, same divmod + fold scheme at floor(sqrt(2^bits / 20)) steps per axis. Not nested in the
 /// 64-bit encoding — each width is an independent re-encode via xyz.
 const BASE32: u64 = 14_654; // ~481 m steps, ~140 m mean error
 const BASE16: u64 = 57; //     ~124 km steps
@@ -43,12 +42,7 @@ const BASE8: u64 = 3; //       ~2,350 km steps (face + coarse third)
 /// 12 vertices of the icosahedron, unit length, pole-vertex orientation
 /// (locked 2026-10-03, shared with mahere-coord): vertex 0 = north pole,
 /// 1–5 the upper ring at lat atan(1/2) ≈ 26.565° (lons 0°, 72°, …), 6–10
-/// the lower ring at −atan(1/2) (lons 36°, 108°, …), 11 = south pole.
-/// Chosen on symmetry grounds: the polar axis is a 5-fold axis, so lat/lon's
-/// rotational symmetry shares its largest cyclic subgroup with the solid and
-/// the polar degeneracy coincides with the two degree-5 grid points. Every
-/// face edge is a true icosahedron edge (adjacent-vertex dot = 1/√5),
-/// enforced by `tests::face_table_is_a_real_icosahedron`.
+/// the lower ring at −atan(1/2) (lons 36°, 108°, …), 11 = south pole. Chosen on symmetry grounds: the polar axis is a 5-fold axis, so lat/lon's rotational symmetry shares its largest cyclic subgroup with the solid and the polar degeneracy coincides with the two degree-5 grid points. Every face edge is a true icosahedron edge (adjacent-vertex dot = 1/√5), enforced by `tests::face_table_is_a_real_icosahedron`.
 pub(crate) const VERTICES: [[f64; 3]; 12] = [
     [0., 0., 1.0],
     [0.8944271909999159, 0., 0.4472135954999579],
@@ -143,15 +137,13 @@ impl WorldCoord {
 
     /// The coarse 32-bit dense encoding: same divmod + fold scheme at
     /// BASE32 = floor(sqrt(2^32 / 20)) steps per axis (~481 m steps,
-    /// ~140 m mean error). An independent re-encode, NOT a truncation of
-    /// the 64-bit value — the two widths are not nested.
+    /// ~140 m mean error). An independent re-encode, NOT a truncation of the 64-bit value — the two widths are not nested.
     pub fn coarse32(&self) -> u32 {
         let (x, y, z) = self.to_xyz();
         xyz_to_dymaxion(x, y, z, BASE32) as u32
     }
 
-    /// Reconstruct from a coarse 32-bit encoding (the coarse cell's center
-    /// at full resolution).
+    /// Reconstruct from a coarse 32-bit encoding (the coarse cell's center at full resolution).
     pub fn from_coarse32(coarse: u32) -> Self {
         let (x, y, z) = dymaxion_to_xyz(coarse as u64, BASE32);
         Self::from_xyz(x, y, z)
@@ -159,17 +151,10 @@ impl WorldCoord {
 
     /// Encode at a specific wire width (w3..w7).
     ///
-    /// `size_byte` is the ASCII digit after `w` on the wire: `'3'`=8-bit
-    /// (1B, ~2,350 km cells), `'4'`=16-bit (2B, ~124 km), `'5'`=32-bit
-    /// (4B, ~481 m — [`Self::coarse32`]), `'6'`=64-bit (8B, full precision
-    /// ~2 mm), `'7'`=128-bit (16B, low 64 bits reserved for future sub-mm
+    /// `size_byte` is the ASCII digit after `w` on the wire: `'3'`=8-bit (1B, ~2,350 km cells), `'4'`=16-bit (2B, ~124 km), `'5'`=32-bit (4B, ~481 m — [`Self::coarse32`]), `'6'`=64-bit (8B, full precision ~2 mm), `'7'`=128-bit (16B, low 64 bits reserved for future sub-mm
     /// precision).
     ///
-    /// Each width below `'6'` is a spatial RE-ENCODE of the same divmod +
-    /// fold scheme at base floor(sqrt(2^bits / 20)) — a coarse value names
-    /// the enclosing coarse cell, and [`Self::from_wire`] reconstructs its
-    /// center. Widths are not bit-nested; conversion always goes through
-    /// the sphere.
+    /// Each width below `'6'` is a spatial RE-ENCODE of the same divmod + fold scheme at base floor(sqrt(2^bits / 20)) — a coarse value names the enclosing coarse cell, and [`Self::from_wire`] reconstructs its center. Widths are not bit-nested; conversion always goes through the sphere.
     pub fn flatten_at(&self, size_byte: u8) -> Vec<u8> {
         let mut out = vec![b'w', size_byte];
         let raw = self.0;
@@ -194,8 +179,7 @@ impl WorldCoord {
         out
     }
 
-    /// Decode from wire bytes at a specific width. Coarse widths reconstruct
-    /// the coarse cell's center at full resolution.
+    /// Decode from wire bytes at a specific width. Coarse widths reconstruct the coarse cell's center at full resolution.
     ///
     /// Returns `None` if `bytes` is too short for the indicated `size_byte`.
     pub fn from_wire(size_byte: u8, bytes: &[u8]) -> Option<Self> {
@@ -293,8 +277,7 @@ fn intersect_line_plane(
     (t * x, t * y, t * z)
 }
 
-/// Compute edge-basis barycentric coordinates (u, v) of point P in triangle
-/// (v0, v1, v2): P = v0 + u*(v1-v0) + v*(v2-v0). The v0 weight is 1-u-v.
+/// Compute edge-basis barycentric coordinates (u, v) of point P in triangle (v0, v1, v2): P = v0 + u*(v1-v0) + v*(v2-v0). The v0 weight is 1-u-v.
 fn barycentric_coordinates(
     px: f64,
     py: f64,
@@ -322,21 +305,12 @@ fn barycentric_coordinates(
 
 /// Convert XYZ to icosahedral u64 encoding.
 ///
-/// Arithmetic divmod packing from the reference `icosahedron` codec:
-/// `(x_cell * BASE + y_cell) * 20 + face`, where (x_cell, y_cell) quantize
-/// the face-plane barycentric (u, v) to BASE steps each. The triangle only
-/// fills the u + v <= 1 half of the BASE x BASE grid, so the *fold* reclaims
-/// the empty half: a point whose sub-cell fraction lands in the upper half
-/// of its grid cell is stored mirrored at (BASE-1-x, BASE-1-y), doubling
-/// sample density (~5.2 mm steps, ~2.1 mm average error). Bit fields cannot
-/// hold this (5 + 30 + 30 = 65 bits); the multiply packing uses the full
-/// u64 range (20 * BASE^2 ~ 2^63.996).
+/// Arithmetic divmod packing from the reference `icosahedron` codec: `(x_cell * BASE + y_cell) * 20 + face`, where (x_cell, y_cell) quantize the face-plane barycentric (u, v) to BASE steps each. The triangle only fills the u + v <= 1 half of the BASE x BASE grid, so the *fold* reclaims the empty half: a point whose sub-cell fraction lands in the upper half of its grid cell is stored mirrored at (BASE-1-x, BASE-1-y), doubling sample density (~5.2 mm steps, ~2.1 mm average error). Bit fields cannot hold this (5 + 30 + 30 = 65 bits); the multiply packing uses the full u64 range (20 * BASE^2 ~ 2^63.996).
 fn xyz_to_icosahedral_coordinates(x: f64, y: f64, z: f64) -> u64 {
     xyz_to_dymaxion(x, y, z, BASE)
 }
 
-/// The same encoding at an arbitrary base (`BASE` for u64, `BASE32`/`BASE16`/
-/// `BASE8` for the coarse wire widths).
+/// The same encoding at an arbitrary base (`BASE` for u64, `BASE32`/`BASE16`/ `BASE8` for the coarse wire widths).
 fn xyz_to_dymaxion(x: f64, y: f64, z: f64, base: u64) -> u64 {
     // Normalize to unit sphere
     let mag = (x * x + y * y + z * z).sqrt();
@@ -357,21 +331,14 @@ fn xyz_to_dymaxion(x: f64, y: f64, z: f64, base: u64) -> u64 {
     // Get barycentric coordinates (edge basis: P = v0 + u*(v1-v0) + v*(v2-v0))
     let (u, v) = barycentric_coordinates(px, py, pz, v0, v1, v2);
 
-    // Clamp into the closed lower triangle: face-edge points (and float
-    // noise on them) can give u + v marginally above 1, which would alias
-    // into the folded range below and decode reflected across the
-    // hypotenuse (multi-thousand-km error — see the antimeridian test).
+    // Clamp into the closed lower triangle: face-edge points (and float noise on them) can give u + v marginally above 1, which would alias into the folded range below and decode reflected across the hypotenuse (multi-thousand-km error — see the antimeridian test).
     let mut u = u.max(0.0).min(1.0);
     let mut v = v.max(0.0).min(1.0);
     let excess = (u + v - 1.0).max(0.0) * 0.5;
     u -= excess;
     v -= excess;
 
-    // Quantize to the BASE grid, folding upper-half sub-cell fractions into
-    // the mirrored (unused) half of the grid for double density. Diagonal
-    // cells (x + y == BASE-1) never fold: their upper halves lie outside
-    // the triangle, and folding an exact-boundary point there would collide
-    // with the unfolded diagonal range.
+    // Quantize to the BASE grid, folding upper-half sub-cell fractions into the mirrored (unused) half of the grid for double density. Diagonal cells (x + y == BASE-1) never fold: their upper halves lie outside the triangle, and folding an exact-boundary point there would collide with the unfolded diagonal range.
     let x_float = u * (base as f64);
     let y_float = v * (base as f64);
     let x_floor = x_float.floor();
@@ -388,8 +355,7 @@ fn xyz_to_dymaxion(x: f64, y: f64, z: f64, base: u64) -> u64 {
     (x_cell * base + y_cell) * FACES.len() as u64 + face as u64
 }
 
-/// Convert icosahedral u64 encoding to XYZ (inverse of the divmod + fold
-/// packing; reconstructs the centroid of the stored half-cell).
+/// Convert icosahedral u64 encoding to XYZ (inverse of the divmod + fold packing; reconstructs the centroid of the stored half-cell).
 fn icosahedral_coordinates_to_xyz(dymaxion: u64) -> (f64, f64, f64) {
     dymaxion_to_xyz(dymaxion, BASE)
 }
@@ -401,9 +367,7 @@ fn dymaxion_to_xyz(dymaxion: u64, base: u64) -> (f64, f64, f64) {
     let mut x_cell = remainder / base;
     let mut y_cell = remainder % base;
 
-    // Each grid cell holds two half-cell triangles; the fold stored the
-    // upper one mirrored. Reconstruct the centroid of whichever half this
-    // code names: lower-half centroid sits at +1/3, upper at +2/3.
+    // Each grid cell holds two half-cell triangles; the fold stored the upper one mirrored. Reconstruct the centroid of whichever half this code names: lower-half centroid sits at +1/3, upper at +2/3.
     let centroid_offset = 1.0 / 3.0;
     let (u, v) = if x_cell + y_cell >= base {
         // Upper half-cell (folded): unmirror, then offset by 2/3.
@@ -3857,9 +3821,7 @@ mod tests {
 
     const EARTH_RADIUS_M: f64 = 6_371_000.0;
 
-    /// Chord-distance ground error in meters. Chord, not acos(dot): acos has
-    /// a ~1.5e-8 rad (~10 cm) precision floor near zero angle, far above the
-    /// codec's resolution.
+    /// Chord-distance ground error in meters. Chord, not acos(dot): acos has a ~1.5e-8 rad (~10 cm) precision floor near zero angle, far above the codec's resolution.
     fn ground_error_m(lat: f64, lon: f64, coord: WorldCoord) -> f64 {
         let (px, py, pz) = lat_lon_to_xyz(lat, lon);
         let (qx, qy, qz) = coord.to_xyz();
@@ -3867,13 +3829,10 @@ mod tests {
         (dx * dx + dy * dy + dz * dz).sqrt() * EARTH_RADIUS_M
     }
 
-    /// Regression for the corrupted FACES table: every edge of every face
-    /// must be a true icosahedron edge (vertex distance 2A), and every
-    /// vertex must appear in exactly 5 faces.
+    /// Regression for the corrupted FACES table: every edge of every face must be a true icosahedron edge (vertex distance 2A), and every vertex must appear in exactly 5 faces.
     #[test]
     fn face_table_is_a_real_icosahedron() {
-        // Unit-radius icosahedron: adjacent vertices have dot 1/sqrt(5),
-        // so the chord length squared is 2 - 2/sqrt(5).
+        // Unit-radius icosahedron: adjacent vertices have dot 1/sqrt(5), so the chord length squared is 2 - 2/sqrt(5).
         let edge2 = 2.0 - 2.0 / 5f64.sqrt();
         let mut vertex_use = [0usize; 12];
         for (fi, f) in FACES.iter().enumerate() {
@@ -3896,9 +3855,7 @@ mod tests {
         }
     }
 
-    /// Regression for the 29-bit field overflow: the old packing corrupted
-    /// every point with v0-weight > 0.559 (~19% of each face, near v0).
-    /// Sample tightly around all 12 vertices and along spokes toward them.
+    /// Regression for the 29-bit field overflow: the old packing corrupted every point with v0-weight > 0.559 (~19% of each face, near v0). Sample tightly around all 12 vertices and along spokes toward them.
     #[test]
     fn near_vertex_round_trips() {
         for v in VERTICES {
@@ -3931,8 +3888,7 @@ mod tests {
         assert!(worst < 0.01, "worst round-trip error {worst} m");
     }
 
-    /// Encoding is idempotent after the first quantization: decode then
-    /// re-encode returns the identical u64.
+    /// Encoding is idempotent after the first quantization: decode then re-encode returns the identical u64.
     #[test]
     fn reencode_is_stable() {
         for (lat, lon) in [
@@ -3969,8 +3925,7 @@ mod tests {
         assert!(seen.iter().all(|&s| s), "unreached faces: {seen:?}");
     }
 
-    /// The coarse 32-bit dense encode round-trips within its cell size
-    /// (~481 m steps; allow stretch at face corners), globally.
+    /// The coarse 32-bit dense encode round-trips within its cell size (~481 m steps; allow stretch at face corners), globally.
     #[test]
     fn coarse32_round_trips_within_cell() {
         let mut worst: f64 = 0.0;
@@ -3993,8 +3948,7 @@ mod tests {
         assert!(worst < 600.0, "worst coarse32 error {worst} m");
     }
 
-    /// Wire widths are spatial: every coarse width round-trips within its
-    /// own cell scale, and w6 is exact.
+    /// Wire widths are spatial: every coarse width round-trips within its own cell scale, and w6 is exact.
     #[test]
     fn wire_widths_are_spatial() {
         let c = WorldCoord::from_lat_lon(47.6062, -122.3321);

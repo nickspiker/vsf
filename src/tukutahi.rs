@@ -1,10 +1,8 @@
 //! Tukutahi (te reo Māori: simultaneous, in sync): how a video or audio stream declares its rate, how every frame and sample is named, and how those names are tied to true time — with Manawa (heartbeat), the cadence at which measurements are written down.
 //!
-//! The specification is photon's `docs/tukutahi.md` (v0.1, Nick Spiker, 2026-09-25; contributor-not-owner). Section numbers below are its sections.
-//! Eagle Time is the timescale (epoch 1969-07-20T20:17:48 TAI, fixed forever). No float appears in a declaration, a name, a mark or an encoding; the one float-free rule holds everywhere here.
+//! The specification is photon's `docs/tukutahi.md` (v0.1, Nick Spiker, 2026-09-25; contributor-not-owner). Section numbers below are its sections. Eagle Time is the timescale (epoch 1969-07-20T20:17:48 TAI, fixed forever). No float appears in a declaration, a name, a mark or an encoding; the one float-free rule holds everywhere here.
 //!
-//! What this module is: the declaration and its validation (§3), exact rational naming (§4, Appendix B), the Manawa marking grid with its hash chain (§5, §6), interpolation between marks (§5.3), capture geometry (§7), the lock enum (§8), timecode export (§12.2), the VSF field encoding (§13) and a validating reader (§14).
-//! Mark signatures (§5.2 `sig`) are carried when present and never required: decryption is verification too, and the chain (`root`, `prev`) is rolled regardless.
+//! What this module is: the declaration and its validation (§3), exact rational naming (§4, Appendix B), the Manawa marking grid with its hash chain (§5, §6), interpolation between marks (§5.3), capture geometry (§7), the lock enum (§8), timecode export (§12.2), the VSF field encoding (§13) and a validating reader (§14). Mark signatures (§5.2 `sig`) are carried when present and never required: decryption is verification too, and the chain (`root`, `prev`) is rolled regardless.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;

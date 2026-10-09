@@ -70,8 +70,7 @@ impl CfaPattern {
     }
 }
 
-/// Sensor black level (digital zero point), in raw sample units (DN)
-/// WHY integer: a black level is a sample value, and samples are integers; an f32 here was a float at rest for a count.
+/// Sensor black level (digital zero point), in raw sample units (DN) WHY integer: a black level is a sample value, and samples are integers; an f32 here was a float at rest for a count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlackLevel(u64);
 
@@ -93,8 +92,7 @@ impl BlackLevel {
     }
 }
 
-/// Sensor white level (saturation point), in raw sample units (DN)
-/// A white level of zero is refused: it would leave no range above black, and "unknown" is an absent field, never 0.
+/// Sensor white level (saturation point), in raw sample units (DN) A white level of zero is refused: it would leave no range above black, and "unknown" is an absent field, never 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WhiteLevel(u64);
 
@@ -206,11 +204,7 @@ impl Magic9 {
 
 // ==================== INTEGER EXPOSURE METADATA ====================
 //
-// Doctrine (Nick, 2026-09-26): exposure metadata is LINEAR INTEGERS at rest, never floats, never logs, never reciprocals.
-// Durations are Eagle oscillations; gain, f-number and lens lengths are reduced integer fractions; an exposure SETTING (bias, aperture, ISO) is a signed rational count of stops, shown in twelfths.
-// Stops and "1/250" are display forms, derived exactly from the stored integers.
-// All maths is 64-bit and checked: overflow-checks are off in every profile, so plain `*` or `+` would wrap silently.
-// Every overflow or inexact conversion comes back as Err; nothing here panics on input.
+// Doctrine (Nick, 2026-09-26): exposure metadata is LINEAR INTEGERS at rest, never floats, never logs, never reciprocals. Durations are Eagle oscillations; gain, f-number and lens lengths are reduced integer fractions; an exposure SETTING (bias, aperture, ISO) is a signed rational count of stops, shown in twelfths. Stops and "1/250" are display forms, derived exactly from the stored integers. All maths is 64-bit and checked: overflow-checks are off in every profile, so plain `*` or `+` would wrap silently. Every overflow or inexact conversion comes back as Err; nothing here panics on input.
 
 /// Write a u64 as an auto-sized (EWE) unsigned.
 /// PROOF: on a 32-bit target usize cannot hold every u64, so a value past usize::MAX goes out as a fixed u6 rather than being truncated by `as usize`.
@@ -248,9 +242,7 @@ fn gcd(mut a: u64, mut b: u64) -> u64 {
     a
 }
 
-/// A non-negative integer fraction with a positive denominator, always reduced to lowest terms.
-/// WHY reduced: one value gets one encoding at rest, so two files holding f/2.8 are byte-identical in that field and a reader can refuse any other spelling.
-/// WHY a fraction: cameras report f-numbers, gains and lens lengths as fractions (EXIF RATIONAL); keeping the fraction is exact where a float or a fixed unit would round.
+/// A non-negative integer fraction with a positive denominator, always reduced to lowest terms. WHY reduced: one value gets one encoding at rest, so two files holding f/2.8 are byte-identical in that field and a reader can refuse any other spelling. WHY a fraction: cameras report f-numbers, gains and lens lengths as fractions (EXIF RATIONAL); keeping the fraction is exact where a float or a fixed unit would round.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ratio {
     num: u64,
@@ -340,9 +332,7 @@ impl IsoSpeed {
     }
 }
 
-/// Exposure duration in WHOLE Eagle oscillations, floored like every other Eagle count.
-/// One oscillation is about 704 ps: every consumer shutter, strobe and high-speed cinema exposure resolves to a millionth or better, and a u64 spans about 412 years.
-/// Zero is a real reading, not a sentinel: it means the exposure was under one oscillation (a gated-ICCD corner), exactly as `end − start` of two floored instants inside one oscillation is 0.
+/// Exposure duration in WHOLE Eagle oscillations, floored like every other Eagle count. One oscillation is about 704 ps: every consumer shutter, strobe and high-speed cinema exposure resolves to a millionth or better, and a u64 spans about 412 years. Zero is a real reading, not a sentinel: it means the exposure was under one oscillation (a gated-ICCD corner), exactly as `end − start` of two floored instants inside one oscillation is 0.
 /// "Unknown" is an absent field; a finer remainder, if ever needed, is a separate optional field beside this count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShutterTime(u64);
@@ -352,17 +342,13 @@ impl ShutterTime {
         Ok(ShutterTime(oscillations))
     }
 
-    /// From a camera's nominal seconds as a fraction (1/250 s = `from_seconds(1, 250)`).
-    /// Floors to whole oscillations, the Euclidean way: the stored count is the whole oscillations elapsed, never rounded up into one that was not.
-    /// An exposure under one oscillation floors to 0, which is stored, not refused.
-    /// Err only on a zero denominator or a value 64-bit maths cannot hold (never a wrap).
+    /// From a camera's nominal seconds as a fraction (1/250 s = `from_seconds(1, 250)`). Floors to whole oscillations, the Euclidean way: the stored count is the whole oscillations elapsed, never rounded up into one that was not. An exposure under one oscillation floors to 0, which is stored, not refused. Err only on a zero denominator or a value 64-bit maths cannot hold (never a wrap).
     pub fn from_seconds(num: u64, den: u64) -> Result<Self, String> {
         if den == 0 {
             return Err("Exposure time denominator cannot be zero".to_string());
         }
         const OPS: u64 = crate::types::eagle_time::OSCILLATIONS_PER_SECOND;
-        // Split num = q·den + r so the product only overflows when the answer itself would.
-        // PROOF: r < den, so r·OPS/den < OPS and the second term adds less than one second.
+        // Split num = q·den + r so the product only overflows when the answer itself would. PROOF: r < den, so r·OPS/den < OPS and the second term adds less than one second.
         let (q, r) = (num / den, num % den);
         let whole = q
             .checked_mul(OPS)
@@ -397,14 +383,11 @@ impl ShutterTime {
     }
 }
 
-/// Aperture as N², the f-number SQUARED, a reduced positive fraction.
-/// WHY squared: exposure goes as t × ISO / N², so N² is the linear quantity the photometry multiplies, and the full-stop series lands on exact powers of two (f/1.4 → 2, f/2.8 → 8, f/11 → 128) where N itself (2√2, 8√2) is irrational and no fraction holds it.
-/// Third-, half- and quarter-stop steps are irrational in every linear space; their exact home is [`StopSetting`], a rational count of stops stored beside this.
+/// Aperture as N², the f-number SQUARED, a reduced positive fraction. WHY squared: exposure goes as t × ISO / N², so N² is the linear quantity the photometry multiplies, and the full-stop series lands on exact powers of two (f/1.4 → 2, f/2.8 → 8, f/11 → 128) where N itself (2√2, 8√2) is irrational and no fraction holds it. Third-, half- and quarter-stop steps are irrational in every linear space; their exact home is [`StopSetting`], a rational count of stops stored beside this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Aperture(Ratio);
 
-/// The full-stop markings whose convention is √2^k, as (marking num, marking den) reduced → N² (num, den).
-/// Markings that are already exact (1, 2, 4, 8, 16, 32, 64, 128) square exactly without the table.
+/// The full-stop markings whose convention is √2^k, as (marking num, marking den) reduced → N² (num, den). Markings that are already exact (1, 2, 4, 8, 16, 32, 64, 128) square exactly without the table.
 const FULL_STOP_MARKINGS: [((u64, u64), (u64, u64)); 8] = [
     ((7, 10), (1, 2)),
     ((7, 5), (2, 1)),
@@ -422,9 +405,7 @@ impl Aperture {
         Ok(Aperture(Ratio::positive(num, den, "Aperture N²")?))
     }
 
-    /// From the f-number printed on the lens or reported by the camera, as a fraction (f/2.8 = `from_marking(28, 10)`).
-    /// A full-stop marking means its √2^k by convention and maps to that exact power of two; any other marking (f/1.8, f/0.95, f/3.2) is squared exactly as written.
-    /// Err on zero, a zero denominator, or a square that overflows 64 bits.
+    /// From the f-number printed on the lens or reported by the camera, as a fraction (f/2.8 = `from_marking(28, 10)`). A full-stop marking means its √2^k by convention and maps to that exact power of two; any other marking (f/1.8, f/0.95, f/3.2) is squared exactly as written. Err on zero, a zero denominator, or a square that overflows 64 bits.
     pub fn from_marking(num: u64, den: u64) -> Result<Self, String> {
         let m = Ratio::positive(num, den, "Aperture f-number")?;
         if let Some(&(_, (n2n, n2d))) = FULL_STOP_MARKINGS.iter().find(|&&(k, _)| k == (m.num, m.den)) {
@@ -477,12 +458,7 @@ impl FocalLength {
     }
 }
 
-/// A camera SETTING in log space: a signed count of stops from a stated reference, as an exact reduced fraction (num/den stops, den > 0).
-/// WHY a fraction of stops: grid positions are powers of 2^(1/den), irrational in every linear space, but exact as a rational exponent; any grid (half, third, quarter, or one nobody has built yet) lands without rounding.
-/// Display in twelfths: 12 divides by 2, 3, 4 and 6, so every real camera grid shows as whole twelfths (−1⅓ stops = −16); [`twelfths`](Self::twelfths) is None only for a grid twelfths cannot show.
-/// Used for exposure bias (reference: no bias), aperture setting (reference: f/1, so f/2.8 = 3 stops) and ISO setting (reference: ISO 100, so ISO 50 = −1 stop, ISO 125 = 1/3).
-/// Durations never use this: they stay linear oscillations, since exposure maths and row timing need them linear.
-/// Zero is a real setting (the reference itself), not a sentinel.
+/// A camera SETTING in log space: a signed count of stops from a stated reference, as an exact reduced fraction (num/den stops, den > 0). WHY a fraction of stops: grid positions are powers of 2^(1/den), irrational in every linear space, but exact as a rational exponent; any grid (half, third, quarter, or one nobody has built yet) lands without rounding. Display in twelfths: 12 divides by 2, 3, 4 and 6, so every real camera grid shows as whole twelfths (−1⅓ stops = −16); [`twelfths`](Self::twelfths) is None only for a grid twelfths cannot show. Used for exposure bias (reference: no bias), aperture setting (reference: f/1, so f/2.8 = 3 stops) and ISO setting (reference: ISO 100, so ISO 50 = −1 stop, ISO 125 = 1/3). Durations never use this: they stay linear oscillations, since exposure maths and row timing need them linear. Zero is a real setting (the reference itself), not a sentinel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StopSetting {
     num: i64,
@@ -561,8 +537,7 @@ impl StopSetting {
     }
 }
 
-/// Focus distance in metres as a reduced positive fraction.
-/// Zero is refused (nothing focuses at the lens plane) and "unknown" is an absent field.
+/// Focus distance in metres as a reduced positive fraction. Zero is refused (nothing focuses at the lens plane) and "unknown" is an absent field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FocusDistance(Ratio);
 
@@ -1091,8 +1066,7 @@ pub fn build_raw_image(
 ) -> Result<Vec<u8>, String> {
     let mut builder = VsfBuilder::new();
 
-    // Build raw section - start with the image (p type has width, height, bit_depth)
-    // Each item is (field name, values): the integer fractions ride as two values in one field.
+    // Build raw section - start with the image (p type has width, height, bit_depth) Each item is (field name, values): the integer fractions ride as two values in one field.
     let mut raw_items: Vec<(String, Vec<VsfType>)> = vec![("image".to_string(), vec![VsfType::p(image)])];
 
     // Add optional metadata
@@ -2163,8 +2137,7 @@ mod tests {
         assert_eq!(StopSetting::from_stops(i64::MAX, 1).unwrap().twelfths(), None);
         assert!(ExposureCompensation::from_stops(1, 0).is_err());
 
-        // Fractions reduce on the way in and refuse zero where the quantity must be positive.
-        // Full-stop markings land on exact powers of two in N²; other markings square as written.
+        // Fractions reduce on the way in and refuse zero where the quantity must be positive. Full-stop markings land on exact powers of two in N²; other markings square as written.
         let n2 = |n, d| {
             let r = Aperture::from_marking(n, d).unwrap().n_squared();
             (r.num(), r.den())

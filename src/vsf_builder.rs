@@ -538,8 +538,7 @@ impl VsfBuilder {
 
     /// Build the document and Ed25519-sign the named section in one step.
     ///
-    /// Convenience over `build()` followed by `verification::sign_section`: the signature replaces the rolling hash as this section's integrity mechanism, additionally proving authorship.
-    /// `section_name` must be one of the sections added to this builder.
+    /// Convenience over `build()` followed by `verification::sign_section`: the signature replaces the rolling hash as this section's integrity mechanism, additionally proving authorship. `section_name` must be one of the sections added to this builder.
     #[cfg(feature = "crypto")]
     pub fn build_signed(
         self,

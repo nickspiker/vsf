@@ -1340,8 +1340,7 @@ const LMS_2000_10DEG_1NM_DATA: [f32; 1323] = [
 
 /// Stockman & Sharpe (2000) 10° cone fundamentals at 1nm spacing
 ///
-/// Linear interpolation from 5nm data, normalized so each channel sums to 1.0.
-/// Data spans 390nm to 830nm with 1nm spacing (441 wavelength samples).
+/// Linear interpolation from 5nm data, normalized so each channel sums to 1.0. Data spans 390nm to 830nm with 1nm spacing (441 wavelength samples).
 /// 3-channel interleaved format: [L, M, S] at each wavelength.
 pub const LMS_2000_10DEG_1NM: ConstSpectrum = ConstSpectrum {
     start_nm: 390.0,
@@ -1388,8 +1387,7 @@ pub const LMS2VSF_RGB: [f32; 9] = [
 
 /// lms → Photopic luminance weights
 ///
-/// CIE 170-2 / Stockman & Sharpe 10° luminous efficiency V*₁₀(λ) = 0.692839·l̄(λ) + 0.349676·m̄(λ) (unit-peak energy fundamentals), converted to VSF's sum-normalized basis via w = coefficient/max(channel), then rescaled to sum to 1.
-/// The weights read as the L and M SHARES of photopic luminance; only the ratio affects output — downstream white normalization (PHOTOPIC_WHITE_NORM) divides out any absolute scale. S-cones contribute zero to photopic luminance by definition.
+/// CIE 170-2 / Stockman & Sharpe 10° luminous efficiency V*₁₀(λ) = 0.692839·l̄(λ) + 0.349676·m̄(λ) (unit-peak energy fundamentals), converted to VSF's sum-normalized basis via w = coefficient/max(channel), then rescaled to sum to 1. The weights read as the L and M SHARES of photopic luminance; only the ratio affects output — downstream white normalization (PHOTOPIC_WHITE_NORM) divides out any absolute scale. S-cones contribute zero to photopic luminance by definition.
 pub const LMS2PHOTOPIC: [f32; 3] = [
     0.699_893_2_f32,  // l cone share
     0.300_106_85_f32, // m cone share

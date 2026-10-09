@@ -1,6 +1,4 @@
-//! The empty 1D vector round trip — pinned against the count-0 decode bug.
-//! The 'n' vector form with count 0 used to fall thru the `count > 0` guards into the multi-dim path, parse a shape dimension the encoder never wrote, and eat the NEXT byte of the stream — a field's ',' separator — as a size marker.
-//! Photon's persisted phonebook hit this on any peer with no local_ip (an empty t_u3), going "unreadable, starting fresh" on every boot.
+//! The empty 1D vector round trip — pinned against the count-0 decode bug. The 'n' vector form with count 0 used to fall thru the `count > 0` guards into the multi-dim path, parse a shape dimension the encoder never wrote, and eat the NEXT byte of the stream — a field's ',' separator — as a size marker. Photon's persisted phonebook hit this on any peer with no local_ip (an empty t_u3), going "unreadable, starting fresh" on every boot.
 
 use vsf::{Tensor, VsfType};
 

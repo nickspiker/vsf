@@ -1,7 +1,6 @@
 //! Committed coverage for the GENERIC verified-document round-trip.
 //!
-//! Phases 1-3 built the pieces (VsfBuilder auto-fills hp+hb, is_original/verify_file_hash verify them, read_verified composes an un-skippable check, and SectionBuilder::parse_document reads a named section only after read_verified passes).
-//! Nothing pinned those guarantees down as tests on a NON-image document, so this module does: it builds a plain "payload" section, verifies both hashes, reads it back thru parse_document, and — the load-bearing part — proves that the things that MUST be rejected actually are (a bare error-frame-shaped doc with no integrity, a tampered byte) while the things that MUST be tolerated are (an unknown forward-compat field).
+//! Phases 1-3 built the pieces (VsfBuilder auto-fills hp+hb, is_original/verify_file_hash verify them, read_verified composes an un-skippable check, and SectionBuilder::parse_document reads a named section only after read_verified passes). Nothing pinned those guarantees down as tests on a NON-image document, so this module does: it builds a plain "payload" section, verifies both hashes, reads it back thru parse_document, and — the load-bearing part — proves that the things that MUST be rejected actually are (a bare error-frame-shaped doc with no integrity, a tampered byte) while the things that MUST be tolerated are (an unknown forward-compat field).
 
 use vsf::schema::{SectionSchema, TypeConstraint};
 use vsf::verification::{is_original, read_verified, verify_file_hash};
@@ -75,8 +74,7 @@ fn verified_round_trip_reads_fields_back() {
 
 #[test]
 fn hp_only_documents_verify_on_provenance_alone() {
-    // An hp-only document (provenance_only shape): for an UNSIGNED doc, hp and hb are equally self-attesting BLAKE3 anchors, so hp alone suffices — is_original is the integrity check.
-    // (Error frames are NOT filtered here — error-frame detection is a separate, explicit, FIRST step at every read; see fgtw::client::error_frame.)
+    // An hp-only document (provenance_only shape): for an UNSIGNED doc, hp and hb are equally self-attesting BLAKE3 anchors, so hp alone suffices — is_original is the integrity check. (Error frames are NOT filtered here — error-frame detection is a separate, explicit, FIRST step at every read; see fgtw::client::error_frame.)
     let hp_only = VsfBuilder::new()
         .provenance_only()
         .add_section(
@@ -121,8 +119,7 @@ fn tampering_breaks_both_hashes() {
     is_original(&doc).expect("clean doc provenance ok");
     verify_file_hash(&doc).expect("clean doc rolling hash ok");
 
-    // Flip a byte inside the section body (the last byte before the closing ']').
-    // Walk back from the end to find the final ']' and tamper the byte just before it.
+    // Flip a byte inside the section body (the last byte before the closing ']'). Walk back from the end to find the final ']' and tamper the byte just before it.
     let close = doc
         .iter()
         .rposition(|&b| b == b']')
@@ -181,8 +178,7 @@ fn parse_document_tolerates_unknown_field() {
     );
 }
 
-/// Write the well-formed acceptance fixture to /tmp/accept.vsf so the vsfinfo acceptance run has a real, verified file to inspect.
-/// Not a guarantee test — a fixture emitter — but it keeps the file generation in-tree and reproducible.
+/// Write the well-formed acceptance fixture to /tmp/accept.vsf so the vsfinfo acceptance run has a real, verified file to inspect. Not a guarantee test — a fixture emitter — but it keeps the file generation in-tree and reproducible.
 #[test]
 fn emit_accept_fixture() {
     let doc = build_payload_doc();

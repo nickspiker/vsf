@@ -26,10 +26,7 @@ impl VsfType {
     /// Returns a Vec<u8> containing the encoded bytes ready to write to a file.
     ///
     /// # Panics
-    /// This is the infallible façade over [`VsfType::try_flatten`] and is kept for the many internal callers that build fixed, feature-safe types (integers, hashes, lengths).
-    /// The only variant that can fail is `x` (Unicode text) when neither the `text` nor `text-encode` feature is enabled, because Huffman compression is unavailable.
-    /// Historically that case panicked; it now surfaces thru `try_flatten` as an `Err` and, on this infallible path, encodes an empty `x` field as a non-crashing fallback (a `debug_assert!` fires in debug builds to flag the misuse).
-    /// Callers that may hold Unicode text without the text feature should call `try_flatten` and handle the error.
+    /// This is the infallible façade over [`VsfType::try_flatten`] and is kept for the many internal callers that build fixed, feature-safe types (integers, hashes, lengths). The only variant that can fail is `x` (Unicode text) when neither the `text` nor `text-encode` feature is enabled, because Huffman compression is unavailable. Historically that case panicked; it now surfaces thru `try_flatten` as an `Err` and, on this infallible path, encodes an empty `x` field as a non-crashing fallback (a `debug_assert!` fires in debug builds to flag the misuse). Callers that may hold Unicode text without the text feature should call `try_flatten` and handle the error.
     pub fn flatten(&self) -> Vec<u8> {
         match self.try_flatten() {
             Ok(bytes) => bytes,
@@ -249,8 +246,7 @@ impl VsfType {
             }
 
             VsfType::wm(cell) => {
-                // Wire: "wm6" + 8 bytes big-endian u64. Morton-coded: coarser
-                // widths (wm3/wm4/wm5) are bit truncations; wm7 zero-extends.
+                // Wire: "wm6" + 8 bytes big-endian u64. Morton-coded: coarser widths (wm3/wm4/wm5) are bit truncations; wm7 zero-extends.
                 let mut flat = vec![b'w', b'm', b'6'];
                 flat.extend_from_slice(&cell.raw().to_be_bytes());
                 flat

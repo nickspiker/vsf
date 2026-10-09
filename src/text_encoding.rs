@@ -177,9 +177,7 @@ pub fn encode_text(text: &str) -> (Vec<u8>, usize) {
             // Fast path: direct array access (~2-3 CPU cycles)
             &ascii_lut[c as usize]
         } else {
-            // Slow path: HashMap lookup for Unicode (~10-20 cycles).
-            // The codebook covers all 1,112,064 valid codepoints, so this lookup cannot fail for any character producible by NFC over a valid &str.
-            // If it does, the codebook itself is corrupted — fall thru to the .expect for a loud failure; huffman_codes.bin is BLAKE3-verified in build.rs, so the only real cause is a docs.rs-style build that skipped codebook generation.
+            // Slow path: HashMap lookup for Unicode (~10-20 cycles). The codebook covers all 1,112,064 valid codepoints, so this lookup cannot fail for any character producible by NFC over a valid &str. If it does, the codebook itself is corrupted — fall thru to the .expect for a loud failure; huffman_codes.bin is BLAKE3-verified in build.rs, so the only real cause is a docs.rs-style build that skipped codebook generation.
             codes
                 .get(&c)
                 .expect("huffman_codes.bin missing or codebook lookup table corrupted")
@@ -436,8 +434,7 @@ impl DecodeNode {
             }
 
             if start_bit + consumed >= bytes.len() * 8 {
-                // Premature end of stream — must error, not silently inject U+0000.
-                // Returning Ok(('\0', 0)) used to let truncated bitstreams decode to strings ending in U+0000 that then re-encoded to different bytes — a wire-format canonicalization break that an attacker could exploit to produce two distinct VSF capsules with the "same" decoded text.
+                // Premature end of stream — must error, not silently inject U+0000. Returning Ok(('\0', 0)) used to let truncated bitstreams decode to strings ending in U+0000 that then re-encoded to different bytes — a wire-format canonicalization break that an attacker could exploit to produce two distinct VSF capsules with the "same" decoded text.
                 return Err("Premature end of Huffman bitstream");
             }
 
@@ -542,14 +539,12 @@ mod tests {
         assert_eq!(count_a, count_b);
     }
 
-    /// Decoder must error — not silently emit U+0000 — when the bitstream ends mid-code.
-    /// Truncated input is a wire-format error, not a decode-to-NUL case.
+    /// Decoder must error — not silently emit U+0000 — when the bitstream ends mid-code. Truncated input is a wire-format error, not a decode-to-NUL case.
     #[test]
     fn test_decoder_premature_eof_errors() {
         let (encoded, char_count) = encode_text("Hello, world!");
         assert!(char_count > 0);
-        // Truncate the encoded bytes to less than what's needed for the full character count.
-        // Asking for the full char_count from a truncated stream must fail.
+        // Truncate the encoded bytes to less than what's needed for the full character count. Asking for the full char_count from a truncated stream must fail.
         let truncated = &encoded[..1];
         let result = decode_text(truncated, char_count);
         assert!(

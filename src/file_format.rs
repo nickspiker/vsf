@@ -519,9 +519,7 @@ impl VsfHeader {
         let _b_start = ptr;
         ptr += 1; // Skip 'b'
 
-        // Find end of b (header length) value: stop at the next field marker.
-        // The b value is immediately followed by the l (file length) field on the encode path, then optionally e (creation time), then hp (provenance) — so l must be a stop too.
-        // Without the l stop the scan overruns and the drain below swallows the whole l field, leaving update_file_length nothing to patch and VsfHeader::decode reporting file_length = 0.
+        // Find end of b (header length) value: stop at the next field marker. The b value is immediately followed by the l (file length) field on the encode path, then optionally e (creation time), then hp (provenance) — so l must be a stop too. Without the l stop the scan overruns and the drain below swallows the whole l field, leaving update_file_length nothing to patch and VsfHeader::decode reporting file_length = 0.
         let value_start = ptr;
         while ptr < header_bytes.len()
             && header_bytes[ptr] != b'l'
@@ -1390,8 +1388,7 @@ mod tests {
         assert!(encoded.contains(&b'>')); // Header end
     }
 
-    /// Regression: update_header_length must NOT strip the l (file length) field.
-    /// Before the fix the b-value scan overran the l marker, drained the whole l field, and VsfHeader::decode then reported file_length = 0 on the encode/rebuild path.
+    /// Regression: update_header_length must NOT strip the l (file length) field. Before the fix the b-value scan overran the l marker, drained the whole l field, and VsfHeader::decode then reported file_length = 0 on the encode/rebuild path.
     #[test]
     fn test_update_header_length_preserves_file_length() {
         let mut header = VsfHeader::new(crate::VSF_VERSION, crate::VSF_BACKWARD_COMPAT);

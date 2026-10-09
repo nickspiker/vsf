@@ -1314,15 +1314,12 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
 
 /// Read a VSF document with verification that CANNOT be skipped.
 ///
-/// This is the composed entry point every trusting reader should use instead of calling [`VsfHeader::decode`] and then hoping the caller remembers to verify.
-/// It decodes the header, checks provenance self-consistency ([`is_original`]), and then insists on at least one *semantic* guarantee:
+/// This is the composed entry point every trusting reader should use instead of calling [`VsfHeader::decode`] and then hoping the caller remembers to verify. It decodes the header, checks provenance self-consistency ([`is_original`]), and then insists on at least one *semantic* guarantee:
 ///
-/// - If the header carries a signature (both `ke` pubkey and `ge` signature present) the Ed25519 signature is verified, and — when `expected_signer` is supplied — the signer pubkey must match.
-///   With the `crypto` feature off a signed document cannot be verified, so it is rejected rather than silently trusted.
+/// - If the header carries a signature (both `ke` pubkey and `ge` signature present) the Ed25519 signature is verified, and — when `expected_signer` is supplied — the signer pubkey must match. With the `crypto` feature off a signed document cannot be verified, so it is rejected rather than silently trusted.
 /// - Otherwise, if `expected_signer` was supplied the unsigned document is rejected — stripping `ke`/`ge` must not demote a signer-pinned read to integrity-only.
 /// - Otherwise, if the header carries a rolling hash (`hb`) it is verified via [`verify_file_hash`].
-/// - Otherwise the document verifies on `hp` alone: for an unsigned document `hp` and `hb` are equally self-attesting BLAKE3 anchors, and [`is_original`] already enforced the former.
-///   NOTE: an error frame passes this — error-frame detection is a separate, explicit, FIRST step at every read (`fgtw::client::error_frame`), never `read_verified`'s job.
+/// - Otherwise the document verifies on `hp` alone: for an unsigned document `hp` and `hb` are equally self-attesting BLAKE3 anchors, and [`is_original`] already enforced the former. NOTE: an error frame passes this — error-frame detection is a separate, explicit, FIRST step at every read (`fgtw::client::error_frame`), never `read_verified`'s job.
 ///
 /// # Arguments
 /// * `doc` - Complete VSF file bytes
@@ -1755,8 +1752,7 @@ fn find_header_ge(data: &[u8]) -> Result<HeaderFieldInfo, String> {
 // Semantically a keyed rolling hash — identical to `hb` except the shared session key replaces the "hash the file with the field zeroed" step. Used where two peers share a secret established out of band (e.g. a session nonce) and want cheap tamper/authorship proof on every message without a public-key signature or the header-placeholder stabilization dance. The MAC covers all preceding bytes, so it authenticates a complete VSF message as-is.
 // ---------------------------------------------------------------------------
 
-/// Append a `gH` keyed-MAC trailer over `msg`: `blake3::keyed_hash(key, msg)` wrapped as a `gH` VSF field.
-/// The returned bytes are `msg` followed by the encoded `gH`; verification recomputes the MAC over everything before the trailer.
+/// Append a `gH` keyed-MAC trailer over `msg`: `blake3::keyed_hash(key, msg)` wrapped as a `gH` VSF field. The returned bytes are `msg` followed by the encoded `gH`; verification recomputes the MAC over everything before the trailer.
 pub fn append_keyed_mac(mut msg: Vec<u8>, key: &[u8; 32]) -> Vec<u8> {
     let mac = blake3::keyed_hash(key, &msg);
     let field = VsfType::gH(mac.as_bytes().to_vec()).flatten();
@@ -1764,8 +1760,7 @@ pub fn append_keyed_mac(mut msg: Vec<u8>, key: &[u8; 32]) -> Vec<u8> {
     msg
 }
 
-/// Verify a `gH`-trailed message: split off the trailing `gH` field, recompute the keyed MAC over the prefix, and constant-time compare.
-/// Returns the authenticated payload (everything before the trailer) on success. A wrong key, tampered payload, or missing trailer all fail.
+/// Verify a `gH`-trailed message: split off the trailing `gH` field, recompute the keyed MAC over the prefix, and constant-time compare. Returns the authenticated payload (everything before the trailer) on success. A wrong key, tampered payload, or missing trailer all fail.
 pub fn verify_keyed_mac<'a>(signed: &'a [u8], key: &[u8; 32]) -> Result<&'a [u8], String> {
     // A gH field is: 'g' 'H' <encoded (len-1)> <32 bytes>. For a 32-byte MAC that is 'g' 'H' <enc(31)> + 32 bytes.
     let trailer = VsfType::gH(vec![0u8; 32]).flatten();
