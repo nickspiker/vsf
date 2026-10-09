@@ -345,6 +345,9 @@ pub mod text_encoding;
 // VSF file format with headers and labels
 pub mod file_format;
 
+/// Lazy, source-agnostic reading of a document: the header, then only the bytes asked for. See [`container::Document`].
+pub mod container;
+
 // VSF file builder
 pub mod vsf_builder;
 
@@ -382,6 +385,9 @@ pub mod image;
 // VSF-Image v0 — spectral-first raw image container (K channels of sensor counts + per-channel spectral response + ihi provenance ingredients). Pure VSF types, no heavy deps, so it's unconditional. Consumed by opsin (viewer/converter) and chameleon.
 pub mod spectral_image;
 
+/// VSF visual data: tracks, spans, planes, capture, characterization, graph, view — the container for stills, video, audio, layers and provenance. See [`visual::Visual`].
+pub mod visual;
+
 // Structured VSF logging: the ONE durable, adb-pullable, self-describing log for the whole stack
 // (replaces logcat + scattered println!). The `logf!`/`logf_at!` macros and the record codec
 // (parse_log_records) are always available; the FILE SINK is gated behind `logging` (implies std).
@@ -413,6 +419,7 @@ pub use decoding::parse;
 
 // Re-export file format and builder
 pub use file_format::{validate_name, HeaderField, VsfField, VsfHeader, VsfSection};
+pub use container::{ByteSource, Document};
 pub use vsf_builder::{SectionMeta, VsfBuilder};
 
 // RAW image builders and parser

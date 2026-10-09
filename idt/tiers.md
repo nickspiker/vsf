@@ -5,7 +5,7 @@ A tier says how a characterization was arrived at. It is the trust axis, indepen
 ## The three
 
 0. **`unit`** — measured on *this* physical unit. A chameleon magic-9 target scan thru this body and this lens. The strongest claim, and the only one that can say anything about the copy of the camera in your hand rather than the model.
-1. **`model`** — the manufacturer's word for the model. A DNG `ColorMatrix1`/`ColorMatrix2`, shipped for every body of that type. Good, general, and blind to unit-to-unit variation and to the lens.
+1. **`model`** — a characterization of the *model*, not of this unit. The manufacturer's DNG `ColorMatrix1`/`ColorMatrix2`, shipped for every body of that type — or a third party's measurement of the model, which is what every raw converter carries for the proprietary formats that ship no matrix at all (Adobe's, as dcraw, LibRaw and rawler copied them). General, and blind to unit-to-unit variation and to the lens. Whose it is lives in `source`, and that matters — see [below](#a-tier-is-who-measured-not-whether-they-were-honest).
 2. **`assumed`** — implied by a format's convention alone. An untagged JPEG read as sRGB; a WebP, a TIFF with no ICC profile; a JXL taken at its colour-encoding tag; a RAW with no matrix at all, taken as roughly VSF RGB. The convention might simply be wrong about the file, and the tier says so.
 
 They are ordered. A profile lists entries best first, and a reader prefers a higher tier for the same illuminant. `unit` over `model` over `assumed`.
@@ -13,6 +13,16 @@ They are ordered. A profile lists entries best first, and a reader prefers a hig
 ## What each permits
 
 An `assumed` entry is honest about being a guess, which is its whole value: a viewer can show a JPEG in colour without pretending the JPEG told it anything, and the HUD reads `assumed` beside the source so nobody mistakes it for a measurement. A `model` entry can be trusted for the model's colour and not for this unit's. A `unit` entry can be trusted, full stop, for the glass and the body it names — and its provenance (`cal`, `patches`) is in the file so that trust can be audited rather than extended.
+
+## A tier is who measured, not whether they were honest
+
+A tier is a claim about **provenance**: this unit, this model, or nobody. It says nothing about whether the numbers in the slot are a measurement. Class is the axis for that, and class is only as truthful as the writer.
+
+This stopped being theoretical on 2026-10-08. The Sigma fp writes its colour matrices into the DNG itself — the one case among the cameras to hand where the maker, not a third party, fills the Model slot — and it writes a **different pair per colour mode**, same sensor, same firmware. Scored on five frames of a VERICHROME target against the target's own measured spectra (mean ΔE2000, white balance from the target's greys, so the matrix's colour error alone): mode OFF, the "flat" look, renders a measured surface at 0.57× its true chroma, 8.2 ΔE; Standard/Neutral at 0.80×, 5.0 ΔE; the Adobe-derived matrix RawTherapee carries for the same body at 0.92×, 4.0 ΔE; the best any 3×3 could do on those frames, 2.5. Adobe's matrices for two Sony bodies, scored the same way on a ColorChecker, sat 0.5–1 ΔE above that floor at 0.89–1.0× chroma — an honest measurement. Sigma's is a look, in the slot the DNG specification reserves for the characterization, and every DNG reader on earth trusts it as one.
+
+The tier axis cannot see this and should not try to; it would be the `native` mistake again, a judgement smuggled into an enum that claims something else. What the format *does* have is `source`, open and free-form, which says whose per-model characterization an entry is. A reader is free to rank sources within a tier, and opsin does: a chameleon entry (`unit`) over Adobe's per-model measurement (`model`, source `adobe_model_matrix`) over the file's own (`model`, source `dng_colormatrix1`). The ordering is the reader's policy, stated in the reader. The file just says who.
+
+The lesson for a writer is the same one as everywhere else in this directory: if the numbers were chosen for how they look, say `creative`, and the slot stays honest.
 
 ## The tier that was added and removed
 

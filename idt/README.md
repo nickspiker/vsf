@@ -2,6 +2,8 @@
 
 An Input Device Transform relates the light a sensor captured to the values a file hands you. That is the whole definition, and it is enough to force a taxonomy: a transform either preserves what the light was, preserves what the object was, deliberately departs from both, or makes no claim about the scene at all. Those are the four kinds. There is no fifth that isn't one of them wearing a hat.
 
+The relation runs both ways. A medium — a print, a panel, a slide — turns the values back into light, and the same four kinds describe that transform too; what changes is which of them the medium can physically keep. A print is the Relative case made of paper. See [`output.md`](output.md).
+
 This directory is the specification of how VSF records them. It sits on top of [`colour.md`](../colour.md), which defines the colourspace every IDT lands in — VSF RGB, monochromatic primaries at 703/523/462 nm, Illuminant E white, gamma 2 — and on [`units.md`](../units.md) for the physical units an Absolute IDT ultimately speaks in.
 
 ## The four classes
@@ -52,5 +54,6 @@ The four classes are not a variant of the ACES model. They are what ACES has one
 - [relative.md](relative.md) — the Relative IDT: the DSR spectral solve, where its scale comes from, and what the lens has to do with it
 - [creative.md](creative.md) — Creative layers: white balance as the naive DSR, camera looks, curves, and the rule for a second exposure scalar
 - [technical.md](technical.md) — Technical ops: value-preserving mechanics, instrument remaps, and the line between them and Creative
-- [tiers.md](tiers.md) — Unit, Model, Assumed: the trust axis, and the tier that was added and removed
+- [tiers.md](tiers.md) — Unit, Model, Assumed: the trust axis, the tier that was added and removed, and why a tier says who measured and not whether they were honest
+- [output.md](output.md) — the four classes on the way out: emissive, reflective and transmissive media, a medium's white and black as measurements (above 1 is real), which class each kind can keep, and what a renderer does about a medium's range
 - [fields.md](fields.md) — every field a VSF image carries today, the wire names, the defaults absence implies, and the proposed additions with their status

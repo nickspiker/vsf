@@ -38,14 +38,16 @@ pub fn parse_bitpacked_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfTyp
     // Parse shape
     let shape = parse_shape(data, pointer, ndim)?;
 
-    // Calculate expected byte count
-    let total_elements: usize = shape.iter().product();
+    // Expected byte count — refusing to wrap: a forged shape must fail here, loudly, not allocate or index past the end.
+    let total_elements = crate::types::packed_view::shape_elements(&shape).map_err(DecodeError::InvalidTensor)?;
     let bits_per_sample = if bit_depth == 0 {
         256
     } else {
         bit_depth as usize
     };
-    let total_bits = total_elements * bits_per_sample;
+    let total_bits = total_elements
+        .checked_mul(bits_per_sample)
+        .ok_or_else(|| DecodeError::InvalidTensor(format!("{total_elements} samples × {bits_per_sample} bits overflows the address space")))?;
     let byte_count = total_bits.div_ceil(8);
 
     // Read packed data

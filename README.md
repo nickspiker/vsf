@@ -347,7 +347,7 @@ BitPackedTensor {
 // 18 MB vs 24 MB as a sixteen bit array
 ```
 
-Supports 1-256 bits per element efficiently.
+Supports 1–128 bits per element efficiently (0 is reserved for a future 256-bit width and is refused today).
 
 ### 1. Cryptographic Primitives as Types
 
@@ -451,7 +451,7 @@ VsfType::x(text)  // Automatically compressed
 - Primitives: u3-u7 (8-128 bit), i3-i7 (signed), f5-f6 (float), j5-j6 (complex)
 - Spirix: 50 types (25 Scalar + 25 Circle varieties)
 - Tensors: 130 flavors (65 contiguous + 65 strided)
-- Bitpacked: 1-256 bit bins
+- Bitpacked: 1–128 bit bins
 - Metadata: strings, time, hashes, signatures, keys, MACs
 
 ✅ **Encoding/decoding**
@@ -484,10 +484,10 @@ VsfType::x(text)  // Automatically compressed
 - Nested builders for organized metadata
 - Already implemented and working
 
-✅ **Zero-copy mmap support**
-- BitPackedTensor data is raw bytes after header
-- Parse `'p' [bit_depth] [ndim] [shapes...]` then mmap the data
-- No "unboxed sections" needed - bulk data types are already mmap-able
+✅ **Lazy, partial reads**
+- `container::Document` opens any `ByteSource` (a slice, a `Vec`, a `File`) by reading the header alone, then fetches a section's bytes only when asked
+- `Document::packed` locates a bit-packed plane's samples without copying them; `packed_rows_u16` reads just the rows a viewer needs
+- `types::BitPackedView` unpacks any sub-range, rows or tile of a `p` tensor straight from its bytes; over an in-memory source nothing is copied but the output. (The parsers in `parse`/`VsfSection::parse` still materialise whole values — use `Document` when that matters.)
 
 ✅ **Hierarchical field names**
 - Section names support dots: `"camera.sensor"`, `"raw.calibration"`, etc.
@@ -809,21 +809,17 @@ VsfType::a(MAC_HMAC_SHA256, mac_tag)     // 32 bytes
 
 ### Per-Section Provenance (Strategy 2)
 
-Lock specific sections with signatures while allowing other sections to be modified freely:
+What exists today: `sign_section` signs a BLAKE3 hash of the **whole document** with that one section's signature slot zeroed — so it proves authorship of the file as built, and any section added afterwards invalidates it. What the visual container adds (see [`idt/image.md`](idt/image.md) — the container, generations and the still slice are implemented; manifest signatures are the next milestone): every table-of-contents entry can carry a content hash of its body (`VsfBuilder::content_hashes(true)`, checked by `Document::content_hash_ok`), and a *manifest* signature names sections by content hash at known offsets. Content that is never moved stays provable whatever is appended after it — a camera's capture signature, a lab's thumbnail generation and an editor's edit generation each verify on their own.
 
 ```rust
-// Camera signs RAW sensor data at capture
+// Today — one signer, whole document:
 let bytes = raw.build()?;
-let bytes = sign_section(bytes, "raw", &camera_private_key)?;
+let bytes = sign_section(bytes, "raw", &camera_private_key)?;   // valid until anything is appended
 
-// Later: Add thumbnail without breaking RAW signature
-builder.add_section("thumbnail", thumbnail_data);
-
-// Later: Add EXIF metadata without breaking RAW signature
-builder.add_section("exif", exif_data);
-
-// Verify original RAW data is untouched
-verify_section_signature(&bytes, "raw", &camera_public_key)?;
+// With content hashes — each entry carries blake3(body):
+let bytes = VsfBuilder::new().content_hashes(true).add_section("raw", raw_fields).build()?;
+let doc = Document::open(&bytes[..])?;
+assert_eq!(doc.content_hash_ok(doc.entry("raw").unwrap())?, Some(true));
 ```
 
 **Use cases:**

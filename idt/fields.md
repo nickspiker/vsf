@@ -62,13 +62,13 @@ Absence is a specification, not a gap. Every field below has a defined reading w
 0. **No `colour_profile`** — the samples **are VSF RGB**. Not "uncharacterized": a reader renders thru the identity camera matrix with Illuminant E as the white, which XYZ→VSF RGB maps to exactly (1, 1, 1). There is nothing to tier because nothing is claimed beyond what the format guarantees. *Implemented in opsin, 2026-09-22.* A RAW with no matrix is **not** this case — sensor counts are not VSF RGB — and it carries the identity at `assumed`, source `no_colormatrix`.
 1. **No `view_transform`** — no ops. Display as characterized.
 2. **No `curve`** — the entry's matrix is the characterization, bounded to its fit set. See [tiers.md](tiers.md#what-a-tier-is-not).
-3. **Sample encoding** — integer planes are **gamma 2**, encoded with the square root and decoded with the square, per [`colour.md`](../colour.md) and the reference implementation. Float planes are linear. (There are no float planes yet; `samples` is integer-only.)
+3. **Sample encoding** — a plane without `encoding` is **gamma 2**, encoded with the square root and decoded with the square, per [`colour.md`](../colour.md) and the reference implementation. Float planes are linear. (There are no float planes yet; `samples` is integer-only.) *Since 2026-10-09 every writer says which:* a `plane.*` section in the visual container ([`image.md`](image.md)) always carries `encoding = linear | gamma2`, and the legacy `spectral_image` section reads as **linear** — its only writer, opsin, wrote linear counts — so the absence rule is reached only by a plane written by hand.
 
-> **Note on direction.** The reference implementation in `src/colour/convert.rs` encodes with `sqrt` and decodes with the square — `let encoded = linear.sqrt()` — and lumis and opsin do the same. The prose in `colour.md` currently states the reverse (`encoded = linear*linear`). The implementation is authoritative; the prose is a known discrepancy as of 2026-09-22.
+> **Note on direction.** The reference implementation in `src/colour/convert.rs` encodes with `sqrt` and decodes with the square — `let encoded = linear.sqrt()` — and lumis and opsin do the same. `colour.md` said the reverse until 2026-10-08; it now agrees with the code, and the code was always authoritative.
 
 ## `transfer` is vestigial
 
-`ProfileEntry::transfer` was designed in with the colour_profile section (vsf 0.9.2) so a display-referred ingest could store a JPEG's sRGB-encoded values as-is and let the *reader* linearize. No writer took that path: opsin linearizes at ingest and stores linear planes, so every writer emits `linear` and nothing anywhere reads it back — the only reader is vsf's own parser, round-tripping it. Its own doc calls it "the transfer the *samples* carry," which is a property of the plane, stored on the entry. That misplacement is the reason identity entries kept being invented: they were the only place to say "this plane is linear." It is superseded by `encoding` below.
+`ProfileEntry::transfer` was designed in with the colour_profile section (vsf 0.9.2) so a display-referred ingest could store a JPEG's sRGB-encoded values as-is and let the *reader* linearize. No writer took that path: opsin linearizes at ingest and stores linear planes, so every writer emits `linear` and nothing anywhere reads it back — the only reader is vsf's own parser, round-tripping it. Its own doc calls it "the transfer the *samples* carry," which is a property of the plane, stored on the entry. That misplacement is the reason identity entries kept being invented: they were the only place to say "this plane is linear." It is superseded by the plane's `encoding` (implemented 2026-10-09, [`image.md`](image.md)); the entry field is still written and read for the legacy section and ignored.
 
 ## Proposed additions — 2026-09-22
 
@@ -76,7 +76,7 @@ Status: **proposed** unless marked. Field names are the ones the class pages use
 
 | where | field | what | status |
 |---|---|---|---|
-| `spectral_image` | `encoding` | `linear` \| `gamma2` — the sample encoding, on the plane, defaulting per the absence rule | proposed; replaces `transfer` |
+| `plane.*` | `encoding` | `linear` \| `gamma2` — the sample encoding, on the plane, defaulting per the absence rule | **implemented 2026-10-09** in `vsf::visual` ([`image.md`](image.md)); replaces `transfer` |
 | entry | `sensitivity[k]` | sensor-plane exposure at white level, per channel. Absolute: J·m⁻² monochromatic-equivalent at the curve's peak. Relative: fraction of a perfect diffuse reflector under the solved illuminant | proposed. The scalar the entry is incomplete without |
 | entry | `gain_ref` | the gain `sensitivity` was measured at | proposed |
 | entry | `unit` | what 1.0 means in the output: `reflectance` for Relative; radiance in [`units.md`](../units.md) base units, SI interim, for Absolute | proposed |
@@ -84,14 +84,37 @@ Status: **proposed** unless marked. Field names are the ones the class pages use
 | entry | `illuminant` | Relative: which illuminant this entry was solved under, for **selection**. Absolute: absent — no illuminant in the transform | proposed change of meaning |
 | entry | `transfer` | retired | proposed |
 | `cal` | `emitter` | which source an Absolute scan was shot under, and its measured absolute output — provenance, like the target serial | proposed |
-| `capture` (new section) | `exposure_s`, `t_stop`, `gain`, `shading` | the per-frame triangle, and an optional per-lens flat-field. Needed to go from sensor-plane exposure to scene radiance. Today only in EXIF headers | proposed — the schema system's own README already sketches a `camera` section with `iso`/`aperture`/`timestamp` |
-| DNG bridge | — | `BaselineExposure` applied to the render, derived fresh, never into the slider | **implemented in opsin, 2026-09-22** — DNG-side only; a VSF has no field to carry it until `sensitivity` lands |
+| `capture` (new section) | `exposure_s`, `f_number`, `t_stop`, `gain`, `iso`, `focal_mm`, `at`, `location`, `make`, `model`, `lens`, `mode`, `baseline`, `shading`, … | the per-frame triangle, optics, when and where, body and lens, and an optional per-lens flat-field. Needed to go from sensor-plane exposure to scene radiance | **implemented 2026-10-09** ([`image.md`](image.md#capture)); opsin fills it from EXIF + GPS on every ingest. A zero rational (f/0, 0 mm from a manual lens) is carried as absent |
+| DNG bridge | — | `BaselineExposure` applied to the render, derived fresh, never into the slider | **implemented in opsin, 2026-09-22**; carried as `capture.baseline` since 2026-10-09 |
 | class doc | `technical` | "makes no claim about how the scene looked and expresses no taste — value-preserving mechanics, and instrument remaps" | proposed, see [technical.md](technical.md#a-sharpening-of-the-definition) |
 | opsin | `exposure` op | class `creative`, not `technical` — it is a second scalar | proposed, see [creative.md](creative.md#status-of-opsins-exposure-op) |
 | `view_transform` | ordering | Technical ops precede Creative ops | proposed, see [creative.md](creative.md#the-layer-stack) |
 
 Two things are decided by the class pages and not yet by fields: what 1.0 means for Absolute radiance (SI interim, base units when [`units.md`](../units.md) carries symbols), and where `shading` lives (own section, or a sidecar reference).
 
+## Proposed additions — 2026-10-08
+
+Status: **proposed**. Fixed by [`output.md`](output.md) and the maker's-crop work in opsin; not yet fields.
+
+| where | field | what | status |
+|---|---|---|---|
+| `medium` (new section) | `kind` | `emissive` \| `reflective` \| `transmissive` — closed; decides what 1.0 means and which classes the medium can keep | proposed |
+| `medium` | `white[3]`, `black[3]` | the most and least the medium gives back, per primary in the output space, on the kind's scale: a perfect diffuser under the viewing illuminant (reflective), the open lamp (transmissive), a stated radiance (emissive). **Values above 1 are real and kept** — a brightened paper, a specular — never normalised | proposed |
+| `medium` | `illuminant` | EXIF LightSource code the white and black were measured under — a brightener's white depends on the lamp's UV | proposed |
+| `medium` | `geometry` | the measurement geometry (45/0, specular…) — gloss is a direction | proposed |
+| `medium` | `tier` | `unit` (this sheet, this panel) \| `model` (the stock's datasheet) \| `assumed` (took 1 and 0) | proposed |
+| `plane.*` | `maker_crop` | `[x, y, w, h]` in sensor pixels: the maker's recommended crop (DNG `DefaultCropOrigin`/`Size` offset by `ActiveArea`, or a body's published crop). A **suggestion**, never applied — the plane and the view show everything recorded, masked borders included; opsin's crop tool starts here. Technical by nature; distinct from the `crop` op, which is the operator's | **implemented 2026-10-09** on the plane ([`image.md`](image.md#planetrackseqname)) |
+
+### DNG carriage — decided 2026-10-08
+
+Implemented in opsin (`src/idt.rs`), Nick: "I'm down with your recommendation." A DNG cannot say what an IDT claims, but it can carry one so that every reader applies it, and it can carry a note beside it that says what it is.
+
+0. **The matrix goes in `CameraCalibration1/2`**, the specification's own per-unit slot, which every DNG reader multiplies onto the ColorMatrix: `XYZ→camera = CameraCalibration × ColorMatrix`. The paste writes `CC_i = M × CM_i⁻¹` per slot, so the product is the IDT exactly at each slot's illuminant. The file's own `ColorMatrix1/2` is untouched — the factory matrix survives. `CameraCalibrationSignature` and `ProfileCalibrationSignature` are set equal (`VERICHROME <class> <tier> target#<serial> <scanned>`), so a reader using the file's embedded profile applies the calibration and one that swaps in its own profile sees no match, ignores it, and falls back to its own per-model matrix — never our correction on someone else's base.
+1. **The claim goes in XMP** (tag 700), namespace `https://verichrome.cc/ns/idt/1.0/`, prefix `verichrome:` — `IdtClass`, `IdtTier`, `Observer` (the matching functions the solve targeted: a DNG assumes CIE 1931, chameleon solves for CVRL 2006), `Illuminant`, the nine exact rationals as `Matrix` (so copy out of a pasted file is verbatim, not `CC × CM` rounded), `TargetType`, `TargetSerial`, `TargetCalibrated`, `Scanned`, `Source`, `Signature`, `Pasted`. An existing packet is kept byte for byte and the description added beside it; a re-paste replaces its own description.
+2. **No original byte moves.** The new tags need a bigger IFD0, so the paste appends a copy of IFD0 with the added entries at the end of the file and repoints the header's one 4-byte offset. `OriginalIFD0` and `OriginalLength` in the XMP make undo (`opsin --unpaste-idt`) a 4-byte write and a truncate — byte for byte the file it was, even after several pastes.
+
+A reader without the XMP sees an ordinary calibrated DNG. opsin reads all three: it elects a `VERICHROME`-signed calibration as `unit` / `relative` (or whatever the XMP says — a factory matrix pasted between frames of one camera records itself as `model` / `absolute`), and applies `CameraCalibration × ColorMatrix` on every DNG regardless, as the specification requires.
+
 ## Migration
 
-About ten 16-bit VSF images exist as of 2026-09-22, all written by opsin with linear planes. Under the absence rule their integer samples would read as gamma 2. They need either re-encoding or an explicit `encoding = linear` once that field exists — which is the reason `encoding` is a field and not only a default.
+About ten 16-bit VSF images exist as of 2026-09-22, all written by opsin with linear planes. Under the absence rule their integer samples would read as gamma 2. **Resolved 2026-10-09 without a table:** the legacy `spectral_image` section had one writer and it wrote linear, so `Visual::read` adapts a legacy document to a one-track visual whose plane is `linear` ([`image.md`](image.md#absence)). New files carry `encoding` explicitly — which is the reason it is a field and not only a default. The visual container itself is specified in [`image.md`](image.md); this page remains the catalogue of fields and proposals.

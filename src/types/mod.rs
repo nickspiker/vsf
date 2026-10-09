@@ -11,6 +11,7 @@
 pub mod eagle_time;
 pub mod network;
 pub mod tensor;
+pub mod packed_view;
 pub mod vsf_type;
 pub mod world_cell;
 pub mod world_coord;
@@ -29,6 +30,7 @@ pub use eagle_time::{set_leap_table, NtpTai};
 pub use eagle_time::{eagle_time_nanos, eagle_time_oscillations};
 pub use network::{NaScheme, WaAddress};
 pub use tensor::{BitPackedTensor, LayoutOrder, StridedTensor, Tensor, Vector};
+pub use packed_view::{BitPackedView, BitPacker};
 pub use vsf_type::VsfType;
 pub use world_cell::WorldCell;
 pub use world_coord::WorldCoord;

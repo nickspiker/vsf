@@ -17,12 +17,14 @@ use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
 pub struct SectionMeta {
     /// Cryptographic key associated with this section (ke for Ed25519, kx for X25519)
     pub key: Option<VsfType>,
+    /// Put a BLAKE3 hash of this section's body bytes in its table-of-contents entry (`hb`), so the body can be checked on its own — and signed on its own, by a signature that names content rather than a whole file. [`VsfBuilder::content_hashes`] turns it on for every section.
+    pub content_hash: bool,
 }
 
 impl SectionMeta {
     /// Create new section metadata with a key
     pub fn new(key: VsfType) -> Self {
-        Self { key: Some(key) }
+        Self { key: Some(key), content_hash: false }
     }
 }
 
@@ -42,6 +44,7 @@ pub struct VsfBuilder {
     signer_pubkey: Option<VsfType>, // Signer's Ed25519 pubkey (ke) - for signature verification
     signature: Option<(VsfType, Vec<u8>)>, // (signature type, signature bytes) - replaces hb. Variable length: an Ed25519 `ge` is 64 bytes, a multi-scheme `gm` is a framed egg list of whatever its slots need
     avatar_hash: Option<[u8; 32]>,  // Optional avatar provenance hash as header field
+    content_hashes: bool,           // Hash every section body into its TOC entry (`hb`)
 }
 
 impl VsfBuilder {
@@ -61,6 +64,7 @@ impl VsfBuilder {
             signer_pubkey: None,
             signature: None,
             avatar_hash: None,
+            content_hashes: false,
         }
     }
 
@@ -198,6 +202,12 @@ impl VsfBuilder {
             section.add_field(field_name, value);
         }
         self.sections.push((section, meta));
+        self
+    }
+
+    /// Hash every section body (and unboxed blob) into its table-of-contents entry as `hb`. A reader checks a body against its entry without re-hashing the file ([`crate::container::Document::content_hash_ok`]); a signature over those entry hashes survives anything appended later. Off by default so existing writers' bytes are unchanged.
+    pub fn content_hashes(mut self, on: bool) -> Self {
+        self.content_hashes = on;
         self
     }
 
@@ -385,6 +395,19 @@ impl VsfBuilder {
             vsf.push(section_bytes);
         }
 
+        // Section bodies never change across iterations (near form, encoded once), so their content hashes are fixed here. One per TOC entry: structured sections first, then unboxed blobs.
+        let content_hashes: Vec<Option<[u8; 32]>> = (0..self.sections.len() + self.unboxed.len())
+            .map(|field_idx| {
+                let (want, bytes): (bool, &[u8]) = if field_idx < self.sections.len() {
+                    (self.content_hashes || self.sections[field_idx].1.content_hash, &vsf[header_end_index + field_idx])
+                } else {
+                    let u = &self.unboxed[field_idx - self.sections.len()];
+                    (self.content_hashes || u.2.content_hash, &u.1)
+                };
+                want.then(|| *blake3::hash(bytes).as_bytes())
+            })
+            .collect();
+
         // Stabilization loop
         let mut prev_header_length = 0;
         let mut prev_file_length = 0;
@@ -409,8 +432,8 @@ impl VsfBuilder {
                 changed = true;
             }
 
-            // Calculate total file length
-            let file_length: usize = vsf.iter().map(|chunk| chunk.len()).sum();
+            // Calculate total file length — the whole document, unboxed blobs included (they are appended after the stabilised bytes; `l` is defined as the file's length, and a reader that trusts it to find the document's end must not be handed the header-and-sections length instead).
+            let file_length: usize = vsf.iter().map(|chunk| chunk.len()).sum::<usize>() + self.unboxed.iter().map(|u| u.1.len()).sum::<usize>();
 
             if file_length != prev_file_length {
                 vsf[file_length_index] = VsfType::l(file_length, true).flatten();
@@ -449,6 +472,10 @@ impl VsfBuilder {
 
                     // Rebuild field with updated values using VsfField API
                     let mut field = crate::file_format::VsfField::new(name);
+                    // Content hash first (the decoder is order-agnostic; the header encoder puts hashes first too)
+                    if let Some(h) = content_hashes[*field_idx] {
+                        field = field.with_value(VsfType::hb(h.to_vec()));
+                    }
                     // Add key metadata if present (before offset/size/n)
                     if let Some(meta) = meta {
                         if let Some(ref key) = meta.key {

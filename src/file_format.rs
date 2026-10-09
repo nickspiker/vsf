@@ -1014,6 +1014,26 @@ impl VsfSection {
     ///
     /// Putting metadata after the name means you know WHAT you're looking at before you see HOW BIG it is. Reading `[d"attachments"n{12}b{1847}` tells you "this is attachments, 12 fields, 1847 bytes" in natural order.
     pub fn encode_at_offset(&self, file_offset: usize) -> Vec<u8> {
+        const ONE_MB: usize = 1_048_576;
+        if file_offset > ONE_MB {
+            return self.encode_far();
+        }
+        // Empty sections have no body - the header already declares them
+        if self.fields.is_empty() {
+            return Vec::new();
+        }
+        let mut bytes = Vec::new();
+        bytes.push(b'[');
+        // No metadata suffix for near sections: the name lives only in the header TOC.
+        for field in &self.fields {
+            bytes.extend_from_slice(&field.flatten());
+        }
+        bytes.push(b']');
+        bytes
+    }
+
+    /// The self-describing FAR form at any offset: `[ d{name} n{count} b{length} fields… ]`. `encode_at_offset` emits it past 1 MB; a body appended to an existing document uses it unconditionally, so the body reads on its own — name, count and length in front of the fields — wherever it lands and whatever the table of contents says.
+    pub fn encode_far(&self) -> Vec<u8> {
         // Empty sections have no body - the header already declares them
         if self.fields.is_empty() {
             return Vec::new();
@@ -1021,11 +1041,7 @@ impl VsfSection {
 
         let mut bytes = Vec::new();
         bytes.push(b'[');
-
-        // Add n{count}b{length} suffix + section name for sections >1MB from file start For sections <=1MB, section name is ONLY in the header TOC, not in the body
-        const ONE_MB: usize = 1_048_576;
-        if file_offset > ONE_MB {
-            // Section name + metadata only for distant sections (>1MB from header)
+        {
             bytes.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
 
             let field_count = self.fields.len();
@@ -1057,11 +1073,6 @@ impl VsfSection {
             bytes.extend_from_slice(&n_encoded);
             bytes.extend_from_slice(&b_encoded);
             bytes.extend_from_slice(&fields_bytes);
-        } else {
-            // No metadata suffix for small files
-            for field in &self.fields {
-                bytes.extend_from_slice(&field.flatten());
-            }
         }
 
         bytes.push(b']');

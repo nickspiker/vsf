@@ -74,6 +74,15 @@ pub struct StridedTensor<T> {
 }
 
 impl<T> Tensor<T> {
+    /// A tensor whose `shape` must account for every element of `data`, refusing overflow — the total reader-facing constructor; [`Self::new`] keeps panicking on a mismatch for in-process callers.
+    pub fn try_new(shape: Vec<usize>, data: Vec<T>) -> Result<Self, String> {
+        let n = crate::types::packed_view::shape_elements(&shape)?;
+        if n != data.len() {
+            return Err(format!("shape {:?} holds {n} elements but {} were given", shape, data.len()));
+        }
+        Ok(Self { shape, data })
+    }
+
     /// Create a new contiguous tensor with given shape and data
     pub fn new(shape: Vec<usize>, data: Vec<T>) -> Self {
         let expected_len: usize = shape.iter().product();

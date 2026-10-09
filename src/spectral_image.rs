@@ -48,7 +48,7 @@ pub struct Provenance {
     pub identity: Option<[u8; 32]>,
 }
 
-/// VERICHROME IDT taxonomy — how a colour transform relates the captured light to its output. `Absolute`: straight inversion, cast preserved (a DNG-matrix render). `Relative`: DSR spectral solve to a reference (a chameleon magic-9). `Creative`: deliberate shift (white balance, contrast, colour skew). `Technical`: hue-free mechanics (a scalar exposure). Stable four-value vocabulary — unknown values fail loud on read, per the "we control all clients" rule.
+/// VERICHROME IDT taxonomy — what relation a colour transform claims between the data and the light, on the way in (a sensor) or on the way out (a medium: a print, a panel, a slide — see `idt/output.md`). `Absolute`: faithful to the light — a straight inversion, cast preserved (a DNG-matrix render). `Relative`: faithful to the object — a DSR spectral solve to a reference, the illuminant divided out (a chameleon magic-9; a print is this class made of paper). `Creative`: faithful to a preference — a deliberate departure (white balance, a maker's look, a curve, a second exposure scalar, a gamut squeezed into a smaller one). `Technical`: no claim about how the scene looked and no taste — value-preserving mechanics (orientation, crop, the ONE sensitivity scalar inside a characterization, one neutral scale onto a medium's white) and instrument remaps (near-infrared or X-ray into the visible, as a legend). Characterization entries are Absolute or Relative — or Creative, when a maker's look is honest enough to say so; view ops are Creative or Technical. Stable four-value vocabulary — unknown values fail loud on read, per the "we control all clients" rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdtClass {
     Absolute,
@@ -66,7 +66,7 @@ impl IdtClass {
             IdtClass::Technical => "technical",
         }
     }
-    fn parse(s: &str) -> Result<Self, SpectralImageError> {
+    pub fn parse(s: &str) -> Result<Self, SpectralImageError> {
         match s {
             "absolute" => Ok(IdtClass::Absolute),
             "relative" => Ok(IdtClass::Relative),
@@ -77,7 +77,7 @@ impl IdtClass {
     }
 }
 
-/// Trust tier of a characterization matrix. `Unit`: measured on THIS camera (a magic-9 target scan). `Model`: factory per-model (a DNG ColorMatrix). `Assumed`: implied by the format convention alone (an sRGB JPEG). This is how "assumed profile, best guess" is first-class rather than a lie. Ordered — `Unit` > `Model` > `Assumed` — which is why it is a TIER and not a grade: "grade" is this format's audience's word for the CREATIVE colour pass, so `ProfileGrade` read as "the profile's look", the exact opposite of a measurement's trust level (renamed 2026-09-22, before any file carried it — so there is no alias, and a reader that meets `grades` fails loud like any other unknown field). "Tiered characterization" was already the docs' own phrase.
+/// Trust tier of a characterization matrix: WHO measured. `Unit`: this physical unit (a magic-9 target scan thru this body and lens). `Model`: the model — the maker's DNG ColorMatrix, or a third party's per-model measurement (Adobe's, as every raw converter carries for formats that ship none). `Assumed`: implied by the format convention alone (an sRGB JPEG). This is how "assumed profile, best guess" is first-class rather than a lie. A tier is provenance, never honesty: a maker can write a look into its Model slot (the Sigma fp writes a different, desaturated matrix per colour mode, 2026-10-08) and the tier cannot see it — `source` says whose, and a reader may rank sources within a tier (opsin: a third party's measurement over the file's own). See `idt/tiers.md`. Ordered — `Unit` > `Model` > `Assumed` — which is why it is a TIER and not a grade: "grade" is this format's audience's word for the CREATIVE colour pass, so `ProfileGrade` read as "the profile's look", the exact opposite of a measurement's trust level (renamed 2026-09-22, before any file carried it — so there is no alias, and a reader that meets `grades` fails loud like any other unknown field). "Tiered characterization" was already the docs' own phrase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProfileTier {
     Unit,
@@ -93,7 +93,7 @@ impl ProfileTier {
             ProfileTier::Assumed => "assumed",
         }
     }
-    fn parse(s: &str) -> Result<Self, SpectralImageError> {
+    pub fn parse(s: &str) -> Result<Self, SpectralImageError> {
         match s {
             "unit" => Ok(ProfileTier::Unit),
             "model" => Ok(ProfileTier::Model),
@@ -121,7 +121,7 @@ impl Transfer {
             Transfer::Gamma22 => "gamma22",
         }
     }
-    fn parse(s: &str) -> Result<Self, SpectralImageError> {
+    pub fn parse(s: &str) -> Result<Self, SpectralImageError> {
         match s {
             "linear" => Ok(Transfer::Linear),
             "srgb" => Ok(Transfer::Srgb),
@@ -302,79 +302,15 @@ pub fn write(img: &SpectralImage) -> Result<Vec<u8>, String> {
         );
     }
 
-    // Provenance — every field individually optional; the section itself is omitted when it would be empty. An empty handle is *not* written: "" is the reserved omission value and is exactly what read() yields for the absent field.
-    let p = &img.provenance;
-    let mut prov: Vec<(String, VsfType)> = Vec::new();
-    if !p.handle.is_empty() {
-        // Handles are Unicode and canonically Huffman-encoded (x) — that's what ihi hashes. Without the text feature compiled in, fall back to ASCII (a) and reject what it can't hold rather than silently mangling.
-        #[cfg(any(feature = "text", feature = "text-encode"))]
-        prov.push(("handle".to_string(), VsfType::x(p.handle.clone())));
-        #[cfg(not(any(feature = "text", feature = "text-encode")))]
-        {
-            if !p.handle.is_ascii() {
-                return Err("non-ASCII handle requires the 'text' or 'text-encode' feature".to_string());
-            }
-            prov.push(("handle".to_string(), VsfType::a(p.handle.clone())));
-        }
-    }
-    if let Some(h) = &p.calibration_hash {
-        prov.push(("calibration_hash".to_string(), VsfType::hp(h.to_vec())));
-    }
-    if let Some(h) = &p.camera_ihi {
-        prov.push(("camera_ihi".to_string(), VsfType::hs(h.to_vec())));
-    }
-    if let Some(h) = &p.identity {
-        prov.push(("identity".to_string(), VsfType::hs(h.to_vec())));
-    }
+    // Provenance — every field individually optional; the section itself is omitted when it would be empty.
+    let prov = provenance_fields(&img.provenance)?;
     if !prov.is_empty() {
         builder = builder.add_section("provenance", prov);
     }
 
-    // Colour profile — tiered characterization. Omitted entirely when uncharacterized. Entries become parallel arrays (best first); the raw-question fields ride alongside, each individually optional.
+    // Colour profile — tiered characterization. Omitted entirely when uncharacterized.
     if let Some(profile) = &img.profile {
-        let n = profile.entries.len();
-        let mut matrices: Vec<f32> = Vec::with_capacity(n * 9);
-        let mut sources: Vec<&str> = Vec::with_capacity(n);
-        let mut classes: Vec<&str> = Vec::with_capacity(n);
-        let mut tiers: Vec<&str> = Vec::with_capacity(n);
-        let mut illuminants: Vec<u16> = Vec::with_capacity(n);
-        let mut transfers: Vec<&str> = Vec::with_capacity(n);
-        for e in &profile.entries {
-            matrices.extend_from_slice(&e.matrix);
-            sources.push(&e.source);
-            classes.push(e.class.as_str());
-            tiers.push(e.tier.as_str());
-            illuminants.push(e.illuminant);
-            transfers.push(e.transfer.as_str());
-        }
-        let mut fields: Vec<(String, VsfType)> = vec![
-            ("target".to_string(), VsfType::a(profile.target.clone())),
-            ("count".to_string(), VsfType::u(n, false)),
-            ("matrices".to_string(), VsfType::t_f5(Tensor::new(vec![n, 3, 3], matrices))),
-            ("sources".to_string(), VsfType::a(sources.join("\n"))),
-            ("classes".to_string(), VsfType::a(classes.join("\n"))),
-            ("tiers".to_string(), VsfType::a(tiers.join("\n"))),
-            ("illuminants".to_string(), VsfType::t_u4(Tensor::new(vec![n], illuminants))),
-            ("transfers".to_string(), VsfType::a(transfers.join("\n"))),
-        ];
-        for (i, name) in ["dng_colormatrix1", "dng_colormatrix2"].iter().enumerate() {
-            if let Some((m, code)) = &profile.dng_colormatrix[i] {
-                fields.push((name.to_string(), VsfType::t_f5(Tensor::new(vec![3, 3], m.to_vec()))));
-                let illum_name = if i == 0 { "dng_illuminant1" } else { "dng_illuminant2" };
-                fields.push((illum_name.to_string(), VsfType::u(*code as usize, false)));
-            }
-        }
-        if let Some((cam, reference)) = &profile.patches {
-            let p = cam.len() / 3;
-            fields.push(("patches_camera".to_string(), VsfType::t_f5(Tensor::new(vec![p, 3], cam.clone()))));
-            fields.push(("patches_reference".to_string(), VsfType::t_f5(Tensor::new(vec![p, 3], reference.clone()))));
-        }
-        if let Some(cal) = &profile.cal {
-            fields.push(("cal_target_type".to_string(), VsfType::u(cal.target_type as usize, false)));
-            fields.push(("cal_target_serial".to_string(), VsfType::u(cal.target_serial as usize, false)));
-            fields.push(("cal_timestamp".to_string(), VsfType::a(cal.timestamp.clone())));
-        }
-        builder = builder.add_section("colour_profile", fields);
+        builder = builder.add_section("colour_profile", profile_fields(profile));
     }
 
     // View transform — the translateration log. Omitted when empty. Ops become parallel arrays; params concatenate, sliced back by param_counts.
@@ -404,6 +340,92 @@ pub fn write(img: &SpectralImage) -> Result<Vec<u8>, String> {
     }
 
     builder.build()
+}
+
+/// The `provenance` section's fields — every one individually optional; empty when there is nothing to write. An empty handle is *not* written: "" is the reserved omission value and is exactly what reading the absent field yields.
+pub fn provenance_fields(p: &Provenance) -> Result<Vec<(String, VsfType)>, String> {
+    let mut prov: Vec<(String, VsfType)> = Vec::new();
+    if !p.handle.is_empty() {
+        // Handles are Unicode and canonically Huffman-encoded (x) — that's what ihi hashes. Without the text feature compiled in, fall back to ASCII (a) and reject what it can't hold rather than silently mangling.
+        #[cfg(any(feature = "text", feature = "text-encode"))]
+        prov.push(("handle".to_string(), VsfType::x(p.handle.clone())));
+        #[cfg(not(any(feature = "text", feature = "text-encode")))]
+        {
+            if !p.handle.is_ascii() {
+                return Err("non-ASCII handle requires the 'text' or 'text-encode' feature".to_string());
+            }
+            prov.push(("handle".to_string(), VsfType::a(p.handle.clone())));
+        }
+    }
+    if let Some(h) = &p.calibration_hash {
+        prov.push(("calibration_hash".to_string(), VsfType::hp(h.to_vec())));
+    }
+    if let Some(h) = &p.camera_ihi {
+        prov.push(("camera_ihi".to_string(), VsfType::hs(h.to_vec())));
+    }
+    if let Some(h) = &p.identity {
+        prov.push(("identity".to_string(), VsfType::hs(h.to_vec())));
+    }
+    Ok(prov)
+}
+
+/// A `provenance` section's fields back into a [`Provenance`] — absent fields read as the defaults.
+pub fn provenance_from_fields(fields: &[VsfField]) -> Provenance {
+    let mut provenance = Provenance::default();
+    if let Some(h) = take_string_opt(fields, "handle") {
+        provenance.handle = h;
+    }
+    provenance.calibration_hash = take_hash32(fields, "calibration_hash");
+    provenance.camera_ihi = take_hash32(fields, "camera_ihi");
+    provenance.identity = take_hash32(fields, "identity");
+    provenance
+}
+
+/// The tiered characterization as section fields: entries become parallel arrays (best first); the raw-question fields ride alongside, each individually optional. Written under `colour_profile` by [`write`] and under `characterization` by the visual container — the same bytes.
+pub fn profile_fields(profile: &ColourProfile) -> Vec<(String, VsfType)> {
+    let n = profile.entries.len();
+    let mut matrices: Vec<f32> = Vec::with_capacity(n * 9);
+    let mut sources: Vec<&str> = Vec::with_capacity(n);
+    let mut classes: Vec<&str> = Vec::with_capacity(n);
+    let mut tiers: Vec<&str> = Vec::with_capacity(n);
+    let mut illuminants: Vec<u16> = Vec::with_capacity(n);
+    let mut transfers: Vec<&str> = Vec::with_capacity(n);
+    for e in &profile.entries {
+        matrices.extend_from_slice(&e.matrix);
+        sources.push(&e.source);
+        classes.push(e.class.as_str());
+        tiers.push(e.tier.as_str());
+        illuminants.push(e.illuminant);
+        transfers.push(e.transfer.as_str());
+    }
+    let mut fields: Vec<(String, VsfType)> = vec![
+        ("target".to_string(), VsfType::a(profile.target.clone())),
+        ("count".to_string(), VsfType::u(n, false)),
+        ("matrices".to_string(), VsfType::t_f5(Tensor::new(vec![n, 3, 3], matrices))),
+        ("sources".to_string(), VsfType::a(sources.join("\n"))),
+        ("classes".to_string(), VsfType::a(classes.join("\n"))),
+        ("tiers".to_string(), VsfType::a(tiers.join("\n"))),
+        ("illuminants".to_string(), VsfType::t_u4(Tensor::new(vec![n], illuminants))),
+        ("transfers".to_string(), VsfType::a(transfers.join("\n"))),
+    ];
+    for (i, name) in ["dng_colormatrix1", "dng_colormatrix2"].iter().enumerate() {
+        if let Some((m, code)) = &profile.dng_colormatrix[i] {
+            fields.push((name.to_string(), VsfType::t_f5(Tensor::new(vec![3, 3], m.to_vec()))));
+            let illum_name = if i == 0 { "dng_illuminant1" } else { "dng_illuminant2" };
+            fields.push((illum_name.to_string(), VsfType::u(*code as usize, false)));
+        }
+    }
+    if let Some((cam, reference)) = &profile.patches {
+        let p = cam.len() / 3;
+        fields.push(("patches_camera".to_string(), VsfType::t_f5(Tensor::new(vec![p, 3], cam.clone()))));
+        fields.push(("patches_reference".to_string(), VsfType::t_f5(Tensor::new(vec![p, 3], reference.clone()))));
+    }
+    if let Some(cal) = &profile.cal {
+        fields.push(("cal_target_type".to_string(), VsfType::u(cal.target_type as usize, false)));
+        fields.push(("cal_target_serial".to_string(), VsfType::u(cal.target_serial as usize, false)));
+        fields.push(("cal_timestamp".to_string(), VsfType::a(cal.timestamp.clone())));
+    }
+    fields
 }
 
 /// Parse a VSF-Image file back into a [`SpectralImage`].
@@ -500,22 +522,28 @@ fn split_n(joined: &str, n: usize, what: &str) -> Result<Vec<String>, SpectralIm
     Ok(parts)
 }
 
-/// Parse the optional `colour_profile` section into a [`ColourProfile`]. Absent section ⇒ `None` (uncharacterized). Parallel arrays are length-checked against `count`; the matrices tensor against `count*9`.
+/// Parse the optional `colour_profile` section into a [`ColourProfile`]. Absent section ⇒ `None` (uncharacterized).
 fn read_colour_profile(data: &[u8], header: &VsfHeader) -> Result<Option<ColourProfile>, SpectralImageError> {
     let Some(sec) = section_fields(data, header, "colour_profile")? else {
         return Ok(None);
     };
-    let target = take_string(&sec, "target")?;
-    let n = take_usize(&sec, "count")?;
-    let matrices = take_f32_vec(&sec, "matrices")?;
+    profile_from_fields(&sec).map(Some)
+}
+
+/// A characterization section's fields back into a [`ColourProfile`]. Parallel arrays are length-checked against `count`; the matrices tensor against `count*9`.
+pub fn profile_from_fields(sec: &[VsfField]) -> Result<ColourProfile, SpectralImageError> {
+    let sec: &[VsfField] = sec;
+    let target = take_string(sec, "target")?;
+    let n = take_usize(sec, "count")?;
+    let matrices = take_f32_vec(sec, "matrices")?;
     if matrices.len() != n * 9 {
         return Err(SpectralImageError::BadField(format!("colour_profile matrices carries {} values for {} entries", matrices.len(), n)));
     }
-    let sources = split_n(&take_string(&sec, "sources")?, n, "colour_profile sources")?;
-    let classes = split_n(&take_string(&sec, "classes")?, n, "colour_profile classes")?;
-    let tiers = split_n(&take_string(&sec, "tiers")?, n, "colour_profile tiers")?;
-    let transfers = split_n(&take_string(&sec, "transfers")?, n, "colour_profile transfers")?;
-    let illuminants = take_u32_vec(&sec, "illuminants")?;
+    let sources = split_n(&take_string(sec, "sources")?, n, "colour_profile sources")?;
+    let classes = split_n(&take_string(sec, "classes")?, n, "colour_profile classes")?;
+    let tiers = split_n(&take_string(sec, "tiers")?, n, "colour_profile tiers")?;
+    let transfers = split_n(&take_string(sec, "transfers")?, n, "colour_profile transfers")?;
+    let illuminants = take_u32_vec(sec, "illuminants")?;
     if illuminants.len() != n {
         return Err(SpectralImageError::BadField(format!("colour_profile illuminants carries {} values for {} entries", illuminants.len(), n)));
     }
@@ -546,28 +574,28 @@ fn read_colour_profile(data: &[u8], header: &VsfHeader) -> Result<Option<ColourP
             }
             let mut m = [0f32; 9];
             m.copy_from_slice(&flat);
-            let code = take_usize(&sec, iname).unwrap_or(0) as u16;
+            let code = take_usize(sec, iname).unwrap_or(0) as u16;
             dng_colormatrix[i] = Some((m, code));
         }
     }
 
     let patches = match (sec.iter().any(|f| f.name == "patches_camera"), sec.iter().any(|f| f.name == "patches_reference")) {
-        (true, true) => Some((take_f32_vec(&sec, "patches_camera")?, take_f32_vec(&sec, "patches_reference")?)),
+        (true, true) => Some((take_f32_vec(sec, "patches_camera")?, take_f32_vec(sec, "patches_reference")?)),
         (false, false) => None,
         _ => return Err(SpectralImageError::BadField("colour_profile has one of patches_camera/patches_reference without the other".into())),
     };
 
     let cal = if sec.iter().any(|f| f.name == "cal_target_type") {
         Some(CalProvenance {
-            target_type: take_usize(&sec, "cal_target_type")? as u32,
-            target_serial: take_usize(&sec, "cal_target_serial")? as u64,
-            timestamp: take_string(&sec, "cal_timestamp")?,
+            target_type: take_usize(sec, "cal_target_type")? as u32,
+            target_serial: take_usize(sec, "cal_target_serial")? as u64,
+            timestamp: take_string(sec, "cal_timestamp")?,
         })
     } else {
         None
     };
 
-    Ok(Some(ColourProfile { target, entries, dng_colormatrix, patches, cal }))
+    Ok(ColourProfile { target, entries, dng_colormatrix, patches, cal })
 }
 
 /// Parse the optional `view_transform` section into a [`ViewTransform`]. Absent section ⇒ `None`. Params are sliced back by param_counts; a shortfall fails loud.

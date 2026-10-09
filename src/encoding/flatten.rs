@@ -1529,7 +1529,10 @@ impl VsfType {
                 let mut flat = Vec::new();
                 flat.push(b'v');
                 flat.push(*algorithm); // Algorithm ID (e.g., b'z' for zstd, b'r' for Reed-Solomon)
-                flat.extend_from_slice(&(value.len() << 3).encode_number()); // Convert bytes to bits
+                // Bytes → bits, minimal EWE width as always. On a 32-bit target `len << 3` would wrap silently past 512 MiB; it now stops with a message naming the cap instead of writing a corrupt length.
+                let bits = (value.len() as u64) << 3;
+                let bits = usize::try_from(bits).expect("wrapped payload exceeds 512 MiB, the limit of a 32-bit length-in-bits — split it or build for a 64-bit target");
+                flat.extend_from_slice(&bits.encode_number());
                 flat.extend_from_slice(value);
                 flat
             }
@@ -1543,13 +1546,13 @@ impl VsfType {
                 );
 
                 // Validate data length
-                let total_elements: usize = tensor.shape.iter().product();
+                let total_elements = crate::types::packed_view::shape_elements(&tensor.shape).expect("bit-packed tensor shape overflows the address space");
                 let bits_per_sample = if tensor.bit_depth == 0 {
                     256
                 } else {
                     tensor.bit_depth as usize
                 };
-                let total_bits = total_elements * bits_per_sample;
+                let total_bits = total_elements.checked_mul(bits_per_sample).expect("bit-packed tensor bit length overflows the address space");
                 let expected_bytes = total_bits.div_ceil(8);
                 assert_eq!(
                     tensor.data.len(),

@@ -673,14 +673,14 @@ pub fn parse_wrapped(data: &[u8], pointer: &mut usize) -> Result<VsfType, Decode
 
     // Read wrapped data length and data
     let length_bits = decode_usize(data, pointer)?;
-    let length_bytes = (length_bits + 7) >> 3; // Convert bits to bytes (round up)
-    if *pointer + length_bytes > data.len() {
-        return Err(DecodeError::UnexpectedEofMsg(
-            "Not enough data for wrapped data".into(),
-        ));
-    }
-    let wrapped_data = data[*pointer..*pointer + length_bytes].to_vec();
-    *pointer += length_bytes;
+    // Bits → bytes without the `+ 7` that wraps on a forged length near usize::MAX; then a checked end so a hostile length can never index past the buffer.
+    let length_bytes = length_bits.div_ceil(8);
+    let end = pointer
+        .checked_add(length_bytes)
+        .filter(|&e| e <= data.len())
+        .ok_or_else(|| DecodeError::UnexpectedEofMsg("Not enough data for wrapped data".into()))?;
+    let wrapped_data = data[*pointer..end].to_vec();
+    *pointer = end;
     Ok(VsfType::v(algorithm, wrapped_data))
 }
 

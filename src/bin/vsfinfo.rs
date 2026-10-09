@@ -6,7 +6,10 @@ use clap::{Parser, Subcommand};
 use colored::*;
 use std::fs;
 use std::path::{Path, PathBuf};
+use vsf::container::{truncate_file, Document};
 use vsf::file_format::VsfHeader;
+use vsf::spectral_image::PlaneLayout;
+use vsf::visual::{FrameData, Samples, Visual};
 use vsf::inspect::{
     format_value, format_value_short, labels_from_header, parse_section_fields,
 };
@@ -61,8 +64,24 @@ enum Commands {
         field_path: String,
     },
 
-    /// Show file structure as a tree
+    /// Show file structure as a tree (latest generation; tracks, planes and the layer program for a visual)
     Tree,
+
+    /// List the generations of an append-only document, oldest first, each with its content hash checked
+    History,
+
+    /// Write the document exactly as it stood at generation N (its first bytes, byte for byte)
+    Checkout {
+        /// Generation index (0 = the original)
+        #[arg(value_name = "N")]
+        generation: u32,
+        /// Output path
+        #[arg(value_name = "OUT")]
+        out: PathBuf,
+    },
+
+    /// Remove the latest generation in place by truncating the file (or discard a torn append's orphaned tail)
+    Undo,
 
     /// Derive Photon identity seed from a handle string Formula: BLAKE3(VsfType::x(handle).flatten())
     #[command(name = "seed")]
@@ -145,6 +164,9 @@ fn main() {
         Some(Commands::Verify) => verify_file(&data),
         Some(Commands::Extract { field_path }) => extract_field(&data, &field_path),
         Some(Commands::Tree) => show_tree(&data),
+        Some(Commands::History) => show_history(&data),
+        Some(Commands::Checkout { generation, out }) => checkout(&data, generation, &out),
+        Some(Commands::Undo) => undo(&file),
         Some(Commands::DeriveSeed { handle }) => derive_seed(&handle),
     };
 
@@ -397,22 +419,68 @@ fn verify_file(data: &[u8]) -> Result<(), String> {
         println!("✓ Magic number valid");
     }
 
-    // Parse header
-    let (header, _) = match VsfHeader::decode(data) {
-        Ok(h) => {
-            println!("✓ Header structure valid");
-            h
+    // Parse header — the latest generation's when the document has been appended to, so the live table of contents is what gets checked.
+    let doc = Document::open(data).ok();
+    let header = match &doc {
+        Some(d) => {
+            println!("✓ Header structure valid (generation {} at offset {})", d.generation(), d.header_offset());
+            d.header().clone()
         }
-        Err(e) => {
-            println!("✗ Header parsing failed: {}", e);
-            errors += 1;
-            return Err("Cannot continue verification".into());
-        }
+        None => match VsfHeader::decode(data) {
+            Ok((h, _)) => {
+                println!("✓ Header structure valid");
+                h
+            }
+            Err(e) => {
+                println!("✗ Header parsing failed: {}", e);
+                return Err("Cannot continue verification".into());
+            }
+        },
     };
     let labels = labels_from_header(&header);
 
+    // Generations: each header's content hash over its own bytes, and the prev chain between them.
+    if let Some(d) = &doc {
+        match d.generations() {
+            Ok(gens) => {
+                for g in &gens {
+                    match d.generation_hash_ok(g) {
+                        Ok(Some(true)) => println!("✓ Generation {}: content hash verified{}", g.index, gen_label(&g.tool, &g.action)),
+                        Ok(Some(false)) => {
+                            println!("✗ Generation {}: content hash mismatch!{}", g.index, gen_label(&g.tool, &g.action));
+                            errors += 1;
+                        }
+                        Ok(None) => {
+                            println!("○ Generation {}: no content hash", g.index);
+                            warnings += 1;
+                        }
+                        Err(e) => {
+                            println!("✗ Generation {}: {}", g.index, e);
+                            errors += 1;
+                        }
+                    }
+                }
+                if gens.len() > 1 {
+                    println!("✓ History chain: {} generations, every prev link matches its header", gens.len());
+                }
+            }
+            Err(e) => {
+                println!("✗ History chain broken: {}", e);
+                errors += 1;
+            }
+        }
+        if d.orphaned_bytes() > 0 {
+            println!("! {} orphaned bytes after generation {} (a torn append; `vsfinfo undo` discards them)", d.orphaned_bytes(), d.generation());
+            warnings += 1;
+        }
+    }
+
     // Verify each section
     for label in &labels {
+        // Inline header fields (a generation's `prev` carries the previous header's hash as a value) are checked by the chain walk above, not as sections.
+        if is_inline_label(label) {
+            continue;
+        }
         // Check section hash (now in label, not preamble)
         if let Some(ref hash_vsf) = label.hash {
             let hash_bytes = match hash_vsf {
@@ -518,11 +586,25 @@ fn extract_field(data: &[u8], field_path: &str) -> Result<(), String> {
 
 /// Show file structure as a tree
 fn show_tree(data: &[u8]) -> Result<(), String> {
-    let (header, _) = VsfHeader::decode(data)?;
-    let labels = labels_from_header(&header);
+    // The latest generation's table of contents when the document has one; the plain header otherwise (encrypted and pre-container files).
+    let doc = Document::open(data).ok();
+    let header = match &doc {
+        Some(d) => d.header().clone(),
+        None => VsfHeader::decode(data)?.0,
+    };
+    // Inline generation fields (gen, start, prev, tool, action) are shown in the history lines, not as sections.
+    let labels: Vec<_> = labels_from_header(&header).into_iter().filter(|l| !is_inline_label(l)).collect();
 
     println!("VSF File Tree");
     println!("{}", "=".repeat(50));
+    if let Some(d) = &doc {
+        if d.generation() > 0 || d.orphaned_bytes() > 0 {
+            for line in history_lines(d)? {
+                println!("{}", line);
+            }
+            println!();
+        }
+    }
     println!();
 
     for (i, label) in labels.iter().enumerate() {
@@ -552,7 +634,8 @@ fn show_tree(data: &[u8]) -> Result<(), String> {
                 let mut line_buffer = String::new();
 
                 for val_vsf in field.values.iter() {
-                    let val_str = format_value_short(val_vsf);
+                    // A newline-joined list (channel names, graph ops) stays on its own line of the tree.
+                    let val_str = format_value_short(val_vsf).replace('\n', " ⏎ ");
                     let is_opcode = matches!(val_vsf, VsfType::op(_, _));
 
                     // If we hit an opcode and have buffered content, flush the line
@@ -580,7 +663,283 @@ fn show_tree(data: &[u8]) -> Result<(), String> {
         }
     }
 
+    if let Some(d) = &doc {
+        if d.entry("visual").is_some() || d.entry("spectral_image").is_some() {
+            match Visual::read_document(d) {
+                Ok(v) => print_visual(&v),
+                Err(e) => println!("\n(visual: {})", e),
+            }
+        }
+    }
+
     Ok(())
+}
+
+/// A header field with no body: inline values (a generation's `gen`/`start`/`prev`/`tool`/`action`) or a bare name.
+fn is_inline_label(l: &vsf::inspect::LabelInfo) -> bool {
+    l.size == 0 && l.offset == 0 && l.child_count == 0
+}
+
+fn gen_label(tool: &str, action: &str) -> String {
+    if tool.is_empty() && action.is_empty() {
+        String::new()
+    } else {
+        format!("  ({} — {})", tool, action)
+    }
+}
+
+/// One line per generation, oldest first, each content hash checked; a trailing line for a torn append's orphaned tail.
+fn history_lines(doc: &Document<&[u8]>) -> Result<Vec<String>, String> {
+    let gens = doc.generations().map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for g in &gens {
+        let mark = match doc.generation_hash_ok(g).map_err(|e| e.to_string())? {
+            Some(true) => "✓",
+            Some(false) => "✗",
+            None => "○",
+        };
+        let who = if g.tool.is_empty() && g.action.is_empty() { "original".to_string() } else { format!("{} — {}", g.tool, g.action) };
+        out.push(format!("{} gen {:<3} bytes {}..{} ({} B)  header @{} ({} B)  {}", mark, g.index, g.start, g.end, g.end - g.start, g.header_offset, g.header_len, who));
+    }
+    if doc.orphaned_bytes() > 0 {
+        out.push(format!("! {} orphaned bytes after generation {} (a torn append; `vsfinfo undo` discards them)", doc.orphaned_bytes(), doc.generation()));
+    }
+    Ok(out)
+}
+
+/// `history`: the generations of an append-only document.
+fn show_history(data: &[u8]) -> Result<(), String> {
+    let doc = Document::open(data).map_err(|e| e.to_string())?;
+    println!("{}", "VSF History".cyan().bold());
+    println!("{}", "=".repeat(50));
+    for line in history_lines(&doc)? {
+        println!("{}", line);
+    }
+    if doc.generation() == 0 && doc.orphaned_bytes() == 0 {
+        println!("(the original; nothing has been appended)");
+    }
+    Ok(())
+}
+
+/// `checkout N OUT`: the document exactly as it stood at generation N.
+fn checkout(data: &[u8], generation: u32, out: &Path) -> Result<(), String> {
+    let doc = Document::open(data).map_err(|e| e.to_string())?;
+    let bytes = doc.checkout(generation).map_err(|e| e.to_string())?;
+    fs::write(out, &bytes).map_err(|e| format!("write {}: {}", out.display(), e))?;
+    println!("wrote generation {} ({} bytes) to {}", generation, bytes.len(), out.display());
+    Ok(())
+}
+
+/// `undo`: truncate the file to the previous generation's end — or, when the file ends in a torn append, to the last provable header.
+fn undo(path: &Path) -> Result<(), String> {
+    let f = fs::File::open(path).map_err(|e| format!("open {}: {}", path.display(), e))?;
+    let doc = Document::open(f).map_err(|e| e.to_string())?;
+    let (len, what) = if doc.orphaned_bytes() > 0 {
+        (doc.end(), format!("{} orphaned bytes of a torn append", doc.orphaned_bytes()))
+    } else {
+        match doc.undo_len().map_err(|e| e.to_string())? {
+            Some(len) => {
+                let gens = doc.generations().map_err(|e| e.to_string())?;
+                let g = gens.last().unwrap();
+                (len, format!("generation {}{}", g.index, gen_label(&g.tool, &g.action)))
+            }
+            None => {
+                println!("{} is the original; nothing to undo", path.display());
+                return Ok(());
+            }
+        }
+    };
+    drop(doc);
+    truncate_file(path, len).map_err(|e| e.to_string())?;
+    println!("removed {}; {} is now {} bytes", what, path.display(), len);
+    Ok(())
+}
+
+fn hex8(h: &[u8]) -> String {
+    h.iter().take(4).map(|b| format!("{:02x}", b)).collect::<String>() + "…"
+}
+
+fn floats(v: &[f32]) -> String {
+    v.iter().map(|x| format!("{}", x)).collect::<Vec<_>>().join(" ")
+}
+
+fn opt(v: Option<f32>, unit: &str) -> String {
+    v.map(|x| format!("{}{}", x, unit)).unwrap_or_default()
+}
+
+/// The visual model of a document: tracks, spans, planes, capture, characterization, the layer programs, views and foreign metadata.
+fn print_visual(v: &Visual) {
+    println!();
+    println!("{}", "Visual".cyan().bold());
+    println!("{}", "=".repeat(50));
+    if !v.title.is_empty() {
+        println!("title: {}", v.title);
+    }
+    if !v.text.is_empty() {
+        println!("text: {}", v.text);
+    }
+    if !v.default_view.is_empty() {
+        println!("default view: {}", v.default_view);
+    }
+    for t in &v.tracks {
+        let codec = if t.codec.is_empty() { "packed".to_string() } else { t.codec.clone() };
+        println!("track.{}: {} {} · {} channel(s) · {}{}", t.id, t.kind.as_str(), t.role.as_str(), t.channels, codec, if t.title.is_empty() { String::new() } else { format!(" · {}", t.title) });
+    }
+    for sp in &v.spans {
+        let (mut refs, mut inline, mut holes) = (0, 0, 0);
+        for d in &sp.data {
+            match d {
+                FrameData::PlaneRef(_) => refs += 1,
+                FrameData::Packed(_) | FrameData::Wrapped(..) => inline += 1,
+                FrameData::Hole => holes += 1,
+            }
+        }
+        let first_ref = sp.data.iter().find_map(|d| if let FrameData::PlaneRef(n) = d { Some(n.as_str()) } else { None }).unwrap_or("");
+        println!("span.{}.{}: first {}, {} frame(s) — {} plane ref(s) {} inline {} hole(s) {}", sp.track, sp.seq, sp.first, sp.count(), refs, inline, holes, if refs == 1 { format!("→ {}", first_ref) } else { String::new() });
+    }
+    for p in &v.planes {
+        let layout = match &p.layout {
+            PlaneLayout::Mosaic { cfa } => format!("mosaic {}×{} cfa", cfa.shape.first().copied().unwrap_or(0), cfa.shape.get(1).copied().unwrap_or(0)),
+            PlaneLayout::Planar => "planar".to_string(),
+        };
+        let samples = match &p.samples {
+            Samples::Packed(t) => format!("packed {:?}", t.shape),
+            Samples::Wrapped(c, b) => format!("wrapped '{}' {} B", *c as char, b.len()),
+        };
+        let names: Vec<&str> = p.channels.iter().map(|c| c.name.as_str()).collect();
+        println!("plane.{}.{}.{}: {} {}×{} [{}] {} {}-bit {} · {}", p.track, p.seq, p.name, p.role.as_str(), p.width, p.height, names.join(""), layout, p.depth, p.encoding.as_str(), samples);
+        println!("    black [{}] white [{}]", floats(&p.black), floats(&p.white));
+        let mut extras = Vec::new();
+        if let Some(c) = p.maker_crop {
+            extras.push(format!("maker_crop {:?}", c));
+        }
+        if p.orientation != 1 {
+            extras.push(format!("orientation {}", p.orientation));
+        }
+        if let Some(at) = p.at {
+            extras.push(format!("at {}", at));
+        }
+        if let Some((hp, hb)) = &p.parent {
+            extras.push(format!("parent {} plane {}", hex8(hp), hex8(hb)));
+        }
+        if !p.program.is_empty() {
+            extras.push(format!("program {}", p.program));
+        }
+        if p.channels.iter().any(|c| c.curve.is_some()) {
+            extras.push("spectral curves".to_string());
+        }
+        if !extras.is_empty() {
+            println!("    {}", extras.join(" · "));
+        }
+    }
+    if let Some(c) = &v.capture {
+        let mut parts = Vec::new();
+        for s in [c.make.as_str(), c.model.as_str(), c.sensor_module.as_str(), c.lens.as_str()] {
+            if !s.is_empty() {
+                parts.push(s.to_string());
+            }
+        }
+        println!("capture: {}", parts.join(" · "));
+        let mut exp = Vec::new();
+        if let Some(e) = c.exposure_s {
+            exp.push(if e < 1.0 && e > 0.0 { format!("1/{:.0} s", 1.0 / e) } else { format!("{} s", e) });
+        }
+        if c.f_number.is_some() {
+            exp.push(format!("f/{}", c.f_number.unwrap()));
+        }
+        if c.t_stop.is_some() {
+            exp.push(format!("T{}", c.t_stop.unwrap()));
+        }
+        if c.iso.is_some() {
+            exp.push(format!("ISO {}", c.iso.unwrap()));
+        }
+        if c.gain.is_some() {
+            exp.push(format!("gain {}", c.gain.unwrap()));
+        }
+        if c.focal_mm.is_some() {
+            exp.push(format!("{}mm{}", c.focal_mm.unwrap(), c.focal_35mm.map(|f| format!(" ({}mm eq)", f)).unwrap_or_default()));
+        }
+        if c.subject_m.is_some() {
+            exp.push(opt(c.subject_m, " m"));
+        }
+        exp.push(format!("baseline {:+} EV", c.baseline));
+        if !c.mode.is_empty() {
+            exp.push(c.mode.clone());
+        }
+        println!("    {}", exp.join(" · "));
+        let mut when = Vec::new();
+        if !c.at_text.is_empty() {
+            when.push(c.at_text.clone());
+        }
+        if let Some(at) = c.at {
+            when.push(format!("eagle {}", at));
+        }
+        if let Some(loc) = &c.location {
+            let (lat, lon) = loc.to_lat_lon();
+            when.push(format!("{:.6}, {:.6}{}", lat, lon, c.altitude_m.map(|a| format!(" @ {} m", a)).unwrap_or_default()));
+        }
+        if !when.is_empty() {
+            println!("    {}", when.join(" · "));
+        }
+        if !c.stack.is_empty() || !c.cal_applied.is_empty() || !c.shading.is_empty() {
+            println!("    stack {} · cal [{}] · shading {}", c.stack, c.cal_applied.join(" "), c.shading);
+        }
+    }
+    if let Some(p) = &v.characterization {
+        println!("characterization → {}{}: {} entr{}", p.target, if v.observer.is_empty() { String::new() } else { format!(" ({})", v.observer) }, p.entries.len(), if p.entries.len() == 1 { "y" } else { "ies" });
+        for (i, e) in p.entries.iter().enumerate() {
+            println!("    [{}] {} {}/{} illuminant {} · [{}]", i, e.source, e.class.as_str(), e.tier.as_str(), e.illuminant, floats(&e.matrix));
+        }
+        for (i, cm) in p.dng_colormatrix.iter().enumerate() {
+            if let Some((m, ill)) = cm {
+                println!("    dng ColorMatrix{} illuminant {} · [{}]", i + 1, ill, floats(m));
+            }
+        }
+        if let Some(cal) = &p.cal {
+            println!("    target type {} serial {} calibrated {}", cal.target_type, cal.target_serial, cal.timestamp);
+        }
+        if let Some((cam, refv)) = &p.patches {
+            println!("    {} patches", cam.len().min(refv.len()) / 3);
+        }
+    }
+    for g in &v.graphs {
+        println!("graph.{} (root {}, hash {}):", g.id, g.root, hex8(&g.hash()));
+        for (i, op) in g.ops.iter().enumerate() {
+            let mut line = format!("    {:>3}  {:<12} {:<9} arity {}", i, op.name, op.class.as_str(), op.arity);
+            if !op.params.is_empty() {
+                line.push_str(&format!("  [{}]", floats(&op.params)));
+            }
+            if !op.reference.is_empty() {
+                line.push_str(&format!("  → {}", op.reference));
+            }
+            if i == g.root {
+                line.push_str("  ◂ root");
+            }
+            println!("{}", line);
+        }
+    }
+    for w in &v.views {
+        println!("view.{}: {} op {} → {} {} {}-bit · {}", w.id, w.graph, w.root, w.space, w.encoding.as_str(), w.bits, w.purpose.as_str());
+    }
+    if !v.foreign.is_empty() {
+        let mut f = Vec::new();
+        if let Some(x) = &v.foreign.xmp {
+            f.push(format!("xmp {} B", x.len()));
+        }
+        if let Some(x) = &v.foreign.icc {
+            f.push(format!("icc {} B", x.len()));
+        }
+        if !v.foreign.profile_name.is_empty() {
+            f.push(format!("profile '{}'", v.foreign.profile_name));
+        }
+        if !v.foreign.calibration_signature.is_empty() {
+            f.push(format!("calibration signature '{}'", v.foreign.calibration_signature));
+        }
+        println!("foreign: {}", f.join(" · "));
+    }
+    if !v.provenance.handle.is_empty() || v.provenance.calibration_hash.is_some() || v.provenance.camera_ihi.is_some() {
+        println!("provenance: handle '{}'{}{}", v.provenance.handle, v.provenance.calibration_hash.map(|h| format!(" · calibration {}", hex8(&h))).unwrap_or_default(), v.provenance.camera_ihi.map(|h| format!(" · camera ihi {}", hex8(&h))).unwrap_or_default());
+    }
 }
 
 /// Derive Photon identity seed from a handle string Formula: BLAKE3(VsfType::x(handle).flatten())
