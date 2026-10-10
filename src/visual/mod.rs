@@ -952,8 +952,8 @@ impl Visual {
         Ok(v)
     }
 
-    /// Read a file.
-    #[cfg(feature = "std")]
+    /// Read a file. Gated as the `ByteSource` impl for `File` is (positional reads need unix `FileExt`), so a wasm32 build with `std` — the fgtw worker — does not reach for an impl that is not there (2026-10-10).
+    #[cfg(all(feature = "std", unix))]
     pub fn read_file(path: &std::path::Path) -> Result<Visual, VisualError> {
         let f = std::fs::File::open(path).map_err(|e| bad(format!("{}: {e}", path.display())))?;
         let doc = Document::open(f)?;
