@@ -1009,12 +1009,21 @@ impl Visual {
         Ok(v)
     }
 
-    /// Read a file. Gated as the `ByteSource` impl for `File` is (positional reads need unix `FileExt`), so a wasm32 build with `std` — the fgtw worker — does not reach for an impl that is not there (2026-10-10).
-    #[cfg(all(feature = "std", unix))]
+    /// Read a file. On unix the `Document` reads the file positionally (no copy); elsewhere — Windows, and a wasm32 build with `std` such as the fgtw worker, where `File` has no positional reads and so no `ByteSource` impl — the file is read whole and the `Document` opens over the bytes (2026-10-10: the unix-only gate this replaced broke limbus on Windows).
+    #[cfg(feature = "std")]
     pub fn read_file(path: &std::path::Path) -> Result<Visual, VisualError> {
-        let f = std::fs::File::open(path).map_err(|e| bad(format!("{}: {e}", path.display())))?;
-        let doc = Document::open(f)?;
-        Self::read_document(&doc)
+        #[cfg(unix)]
+        {
+            let f = std::fs::File::open(path).map_err(|e| bad(format!("{}: {e}", path.display())))?;
+            let doc = Document::open(f)?;
+            Self::read_document(&doc)
+        }
+        #[cfg(not(unix))]
+        {
+            let bytes = std::fs::read(path).map_err(|e| bad(format!("{}: {e}", path.display())))?;
+            let doc = Document::open(bytes)?;
+            Self::read_document(&doc)
+        }
     }
 
     /// The bytes that append an EDIT generation to `doc`: a new graph and view holding `ops` (the default still graph: source, normalise, idt, then the ops), a `visual` manifest pointing the default view at it, the previous graphs and views superseded in the table of contents (their bytes stay; history has them). The caller appends them (`container::append_to_file`).
