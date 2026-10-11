@@ -10,7 +10,34 @@ Where an [Absolute IDT](absolute.md) is faithful to the light, a Relative IDT is
 
 The camera sees, per channel, the integral of reflectance × illuminant × sensitivity. A calibration target carries patches whose reflectance spectra are known. Shoot the target under the scene's illuminant and the solve has enough to separate the three: the reflectances are given, the sensitivity is the camera's, and what remains is the illuminant — which is then divided out. The result maps counts to **reflectance in VSF RGB**: what the surface would return under Illuminant E, VSF RGB's white.
 
-That is why a Relative IDT is *per lighting condition*. It divided out one specific illuminant. Apply it to a scene under another and the answer is wrong by the ratio of the two. A profile may therefore carry several Relative entries, one per illuminant it was solved under, best first; the entry's `illuminant` field is there so a reader can select the matching one. It is **never** used for chromatic adaptation. Adaptation is a [Creative](creative.md) op, and a bad one.
+That is why a Relative IDT built as a single matrix is *per lighting condition*: it divided out one specific illuminant, and applied to a scene under another it is wrong by the ratio of the two. The representation below removes that limit by keeping the illuminant as its own term. An entry's `illuminant` field remains for selection among stored matrices; it is **never** used for chromatic adaptation. Adaptation is a [Creative](creative.md) op, and a bad one.
+
+## The representation — decided 2026-10-10
+
+A Relative IDT is **a spectral response and an illuminant ratio**, not a matrix. The matrix is derived.
+
+```
+P₀_c(λ)   = S_c(λ) · E_ref(λ)        the camera's channel c under the calibration light — stored once per sensor
+ρ(λ)      = E_shot(λ) / E_ref(λ)      the shot's light relative to that light             — per shot; 1 when absent
+counts_c  = g · Σ_λ P₀_c(λ) · ρ(λ) · R(λ)                                                   what a surface R produced
+```
+
+`P₀` has as many channels as the camera (three for a Bayer set, seven for a seven-channel camera); the output has as many as the observer (three for CIE 1931 or CVRL 2006, four for a tetrachromat). The IDT at render time is the `N × K` matrix that best solves `Σ P₀·ρ·R → Σ CMF_E·R` over a reflectance ensemble in a perceptual metric, with the overall scalar `g` factored out as `sensitivity` exactly as below. Nothing in this needs an absolute illuminant: `E_ref` is whatever lit the target, and it cancels — a shot's `ρ` is relative to the same light the response is.
+
+What is stored:
+
+- `P₀` — the response curves, on the target's band grid, **one common scale for all channels** (their relative heights are information: they are the channels' sensitivities under the reference light, with whatever per-channel gain the readout applied). Recovered from the scan by a regularised non-negative solve; the regulariser is a stated choice (`response_prior`), because 21 broad patches cannot distinguish a single-humped curve from a two-humped one and the **shortest curve** (least path length) is the one a dye set can be, where a quadratic smoothness prior is not.
+- `response_light` — the identity (content hash) of the scan that is the reference light. Two frames with the same `response_light` share a reference, so their `ρ` compare.
+- the scan's own best-fit matrix, as today — now a **cache**: what a reader without curves uses, and what a reader with curves checks itself against (on the scan frame the derived matrix and the direct fit differ by 2–3 % of white; a larger gap means a broken `ρ` or a wrong prior).
+- per shot, `ρ` — a Technical op on the view graph (`relight`), a few smooth coefficients from the shot's neutrals when there is no chart (three neutrals suffice under a broadband light: 3.2 % against 2.5 % for a full chart fit), finer knots from a chart when there is one (well posed, since `S` is no longer free), or a measured SPD divided by the reference when a spectrometer reading exists (`capture.spd`). Structured lights — phosphor LEDs, fluorescents — are the case neutrals cannot resolve, and the reason the SPD slot exists.
+
+What follows from it:
+
+- **Relighting is a change of `ρ`**; the desired output light is a change on the observer side. Neither touches the stored response.
+- **The observer is a render-time choice**, since the curves are spectral.
+- **Absolute is the same object with one more fact.** A measured `E_ref` turns `P₀` into `S` and the scalar into radiance; every Relative IDT ever made against that reference upgrades retroactively, which is what `response_light` is for.
+
+The study that settled this (chameleon `spectral.rs`, three Sigma fp frames and a Canon, 2026-10-10): a transform built from recovered curves over an ensemble that never saw the patches matches the direct 21-patch fit on held-out patches within 0.1–0.4 % of white — the curves carry everything the chart knows — and a new frame's transform from its neutrals alone lands within 0.7 % of white of its own full-chart fit under a broadband light. The two routes disagree by 2–3 % of white on the chart and 3–4.5 % on spectra the chart lacks: the price of the chart's blind spots, paid either way, and the gap the stored cache makes visible.
 
 ## Where the scale comes from
 

@@ -265,6 +265,8 @@ pub struct Visual {
     pub characterization: Option<ColourProfile>,
     /// The observer the characterization's matrices target (open: `cie1931`, `cvrl2006`); empty when unstated.
     pub observer: String,
+    /// The camera's spectral response under the calibration light — the Relative IDT's stored half; the characterization's matrices are its cache (`idt/relative.md`, "The representation").
+    pub response: Option<SpectralResponse>,
     pub graphs: Vec<Graph>,
     pub views: Vec<View>,
     pub foreign: Foreign,
@@ -273,7 +275,58 @@ pub struct Visual {
 
 impl Default for Visual {
     fn default() -> Self {
-        Visual { title: String::new(), text: String::new(), default_view: String::new(), tracks: Vec::new(), spans: Vec::new(), planes: Vec::new(), capture: None, characterization: None, observer: String::new(), graphs: Vec::new(), views: Vec::new(), foreign: Foreign::default(), provenance: Provenance::default() }
+        Visual { title: String::new(), text: String::new(), default_view: String::new(), tracks: Vec::new(), spans: Vec::new(), planes: Vec::new(), capture: None, characterization: None, observer: String::new(), response: None, graphs: Vec::new(), views: Vec::new(), foreign: Foreign::default(), provenance: Provenance::default() }
+    }
+}
+
+/// A camera's spectral response under its calibration light, `P₀_c(λ) = S_c(λ)·E_ref(λ)`: one value per band per camera channel on a linear grid, **one common scale** across channels (their relative heights are information). Stored in `characterization` as `response_start`, `response_step`, `response_count` (bands), `response_channels`, `response_values` (`[channels × bands]`, channel-major), `response_prior` (how the curves were regularised — open, `shortest` today) and `response_light` (BLAKE3 identity of the calibration scan; two responses with the same light compare directly, and a shot's illuminant ratio is relative to it).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SpectralResponse {
+    pub start_nm: f32,
+    pub step_nm: f32,
+    pub channels: Vec<Vec<f32>>,
+    pub prior: String,
+    pub light: Option<[u8; 32]>,
+}
+
+impl SpectralResponse {
+    pub fn fields(&self) -> Vec<(String, VsfType)> {
+        let n = self.channels.first().map_or(0, Vec::len);
+        let mut f = vec![
+            ("response_start".to_string(), VsfType::f5(self.start_nm)),
+            ("response_step".to_string(), VsfType::f5(self.step_nm)),
+            ("response_count".to_string(), VsfType::u(n, false)),
+            ("response_channels".to_string(), VsfType::u(self.channels.len(), false)),
+            ("response_values".to_string(), VsfType::t_f5(Tensor::new(vec![self.channels.len() * n], self.channels.iter().flat_map(|c| c.iter().copied()).collect()))),
+        ];
+        push_text(&mut f, "response_prior", &self.prior);
+        if let Some(l) = &self.light {
+            f.push(("response_light".to_string(), VsfType::hb(l.to_vec())));
+        }
+        f
+    }
+
+    /// From a characterization section; `None` when it carries no response.
+    pub fn from_section(s: &VsfSection) -> Result<Option<SpectralResponse>, VisualError> {
+        let Some(values) = f32_vec(s, "response_values") else { return Ok(None) };
+        let scalar = |name: &str| match s.get_field(name).and_then(|f| f.values.first()) {
+            Some(VsfType::f5(v)) => Some(*v),
+            Some(VsfType::f6(v)) => Some(*v as f32),
+            _ => None,
+        };
+        let uint = |name: &str| s.get_field(name).and_then(|f| f.values.first()).and_then(u64_of).map(|v| v as usize);
+        let count = uint("response_count").ok_or(VisualError::Missing("response_count"))?;
+        let k = uint("response_channels").ok_or(VisualError::Missing("response_channels"))?;
+        if count == 0 || k == 0 || values.len() != count * k {
+            return Err(bad(format!("response_values holds {} values for {k} channels × {count} bands", values.len())));
+        }
+        Ok(Some(SpectralResponse {
+            start_nm: scalar("response_start").ok_or(VisualError::Missing("response_start"))?,
+            step_nm: scalar("response_step").ok_or(VisualError::Missing("response_step"))?,
+            channels: values.chunks(count).map(|c| c.to_vec()).collect(),
+            prior: text(s, "response_prior"),
+            light: s.get_field("response_light").and_then(|f| f.values.first()).and_then(hash32),
+        }))
     }
 }
 
@@ -778,9 +831,12 @@ impl Foreign {
 }
 
 /// The characterization section: today's `colour_profile` fields (reused through `spectral_image`'s own codec) plus `observer`.
-pub fn characterization_fields(p: &ColourProfile, observer: &str) -> Vec<(String, VsfType)> {
+pub fn characterization_fields(p: &ColourProfile, observer: &str, response: Option<&SpectralResponse>) -> Vec<(String, VsfType)> {
     let mut f = spectral_image::profile_fields(p);
     push_text(&mut f, "observer", observer);
+    if let Some(r) = response {
+        f.extend(r.fields());
+    }
     f
 }
 
@@ -841,7 +897,7 @@ impl Visual {
             }
         }
         if let Some(p) = &self.characterization {
-            b = b.add_section("characterization", characterization_fields(p, &self.observer));
+            b = b.add_section("characterization", characterization_fields(p, &self.observer, self.response.as_ref()));
         }
         for g in &self.graphs {
             b = b.add_section(g.section_name(), g.fields());
@@ -901,6 +957,7 @@ impl Visual {
                 ("characterization", 1) | ("colour_profile", 1) => {
                     v.characterization = Some(spectral_image::profile_from_fields(&s.fields).map_err(|e| bad(e.to_string()))?);
                     v.observer = text(&s, "observer");
+                    v.response = SpectralResponse::from_section(&s)?;
                 }
                 ("graph", 2) => {
                     let g = Graph::from_section(parts[1], &s)?;

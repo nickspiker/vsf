@@ -3,7 +3,7 @@
 use vsf::container::Document;
 use vsf::spectral_image::{self, CalProvenance, ColourProfile, IdtClass, PlaneLayout, ProfileEntry, ProfileTier, SpectralChannel, SpectralCurve, SpectralImage, Transfer, ViewOp, ViewTransform};
 use vsf::types::{BitPackedTensor, Tensor, WorldCoord};
-use vsf::visual::{Capture, Encoding, Foreign, Plane, PlaneRole, Samples, TrackKind, TrackRole, Visual, OP_BLACK_WHITE, OP_IDT, OP_PLANE};
+use vsf::visual::{Capture, Encoding, Foreign, Plane, PlaneRole, Samples, SpectralResponse, TrackKind, TrackRole, Visual, OP_BLACK_WHITE, OP_IDT, OP_PLANE};
 
 fn samples() -> Vec<u16> {
     (0..24 * 16).map(|i| ((i * 4099) % 16384) as u16).collect()
@@ -52,6 +52,8 @@ fn still() -> Visual {
     v.text = "a test frame".into();
     v.observer = "cvrl2006".into();
     v.foreign = Foreign { xmp: Some(b"<x:xmpmeta/>".to_vec()), icc: Some(vec![1, 2, 3, 4]), profile_name: "Verichrome scene-relative IDT".into(), calibration_signature: "VERICHROME relative unit target#13 -".into() };
+    // The sensor's response under the calibration light: three channels on a 5-band grid, one common scale.
+    v.response = Some(SpectralResponse { start_nm: 400.0, step_nm: 80.0, channels: vec![vec![0.0, 0.1, 0.4, 1.0, 0.3], vec![0.1, 0.7, 1.3, 0.5, 0.0], vec![0.9, 1.1, 0.2, 0.0, 0.0]], prior: "shortest".into(), light: Some([7u8; 32]) });
     v
 }
 
@@ -67,6 +69,7 @@ fn a_still_round_trips_with_content_hashes_on_every_entry() {
     }
     let back = Visual::read(&bytes).unwrap();
     assert_eq!(back, v);
+    assert_eq!(back.response.as_ref().map(|r| r.channels.len()), Some(3));
     // The plane is reachable lazily, by name, rows at a time.
     let plane = doc.entry("plane.b0.s0.sensor").unwrap();
     let span = doc.packed(plane, "samples").unwrap().unwrap();

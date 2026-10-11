@@ -115,6 +115,23 @@ Implemented in opsin (`src/idt.rs`), Nick: "I'm down with your recommendation." 
 
 A reader without the XMP sees an ordinary calibrated DNG. opsin reads all three: it elects a `VERICHROME`-signed calibration as `unit` / `relative` (or whatever the XMP says — a factory matrix pasted between frames of one camera records itself as `model` / `absolute`), and applies `CameraCalibration × ColorMatrix` on every DNG regardless, as the specification requires.
 
+## The spectral response — implemented 2026-10-10
+
+From the chameleon `spectral.rs` study and Nick's direction: *encode the spectral response, ditch the chart, then relight the shot illuminant to the desired one.* The representation is specified in [`relative.md`](relative.md#the-representation--decided-2026-10-10); the fields live on `characterization`, beside the matrices they supersede (the matrices stay as the cache a reader without curves uses and a reader with curves checks against). Nothing here needs an absolute illuminant.
+
+| where | field | what | status |
+|---|---|---|---|
+| `characterization` | `response_start`, `response_step` (`f5`), `response_count`, `response_channels` (`u`) | the linear band grid and the shape of the response: `channels` camera channels (three for a Bayer set, seven for a seven-channel camera) × `count` bands | **implemented** (`vsf::visual::SpectralResponse`) |
+| `characterization` | `response_values` (`t_f5 [channels × count]`) | `P₀_c(λ) = S_c(λ)·E_ref(λ)`, channel-major, **one common scale** — relative channel heights are information | **implemented** |
+| `characterization` | `response_prior` (`a`, open) | how the curves were regularised: `shortest` (path length; the default — a dye set's shape), `unimodal`, … A reader shows it; nothing depends on it | **implemented** |
+| `characterization` | `response_light` (`hb`) | identity of the calibration light — BLAKE3 over the scan's target serial and 21 patch values. Two responses with the same light compare; a shot's illuminant ratio is relative to it; a measured `E_ref` for this light upgrades every response made against it to Absolute | **implemented** |
+| `plane.*` | `curve_*` | unchanged: a channel's *measured* spectral sensitivity when one exists (monochromator, LED sweep). The response above is the chart-recovered effective curve under one light; the two are different claims and keep different homes | — |
+| `graph` op `idt` | `observer`, `illuminant` params | the transform *derived* from the response at render time — `N × K` for an N-channel observer and a K-channel camera, fitted over a reflectance ensemble in a perceptual metric — the stored matrix read only when no response is present | proposed (M3) |
+| `graph` op `relight` (new, Technical) | `ratio` | `ρ(λ) = E_shot/E_ref` on the response grid: a few smooth coefficients from the shot's neutrals when there is no chart, finer knots from a chart, or a measured SPD over the reference. Absent ⇒ 1 | proposed (M3) |
+| `capture` | `spd` | a measured illuminant spectrum for the shot, verbatim, when one exists — what `relight` prefers under structured lights (LED, fluorescent), where neutrals alone cannot resolve the dips | proposed, optional |
+
+What the study established (three Sigma fp frames + one Canon): the transform built from recovered curves over an ensemble matches the direct 21-patch fit on held-out patches within 0.1–0.4 % of white; a new frame's transform from *its neutrals only* lands within 0.7 % of white of its full-chart fit under broadband light; the two routes differ by 2–3 % of white on the chart and 3–4.5 % on spectra the chart lacks; quadratic smoothness priors produce two-humped curves no dye set has, the shortest-curve prior does not, and the data cannot tell them apart — so the prior is stated. Structured lights remain the limit of chart-free relighting and are why `spd` exists.
+
 ## Migration
 
 About ten 16-bit VSF images exist as of 2026-09-22, all written by opsin with linear planes. Under the absence rule their integer samples would read as gamma 2. **Resolved 2026-10-09 without a table:** the legacy `spectral_image` section had one writer and it wrote linear, so `Visual::read` adapts a legacy document to a one-track visual whose plane is `linear` ([`image.md`](image.md#absence)). New files carry `encoding` explicitly — which is the reason it is a field and not only a default. The visual container itself is specified in [`image.md`](image.md); this page remains the catalogue of fields and proposals.
