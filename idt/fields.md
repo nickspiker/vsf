@@ -115,6 +115,24 @@ Implemented in opsin (`src/idt.rs`), Nick: "I'm down with your recommendation." 
 
 A reader without the XMP sees an ordinary calibrated DNG. opsin reads all three: it elects a `VERICHROME`-signed calibration as `unit` / `relative` (or whatever the XMP says — a factory matrix pasted between frames of one camera records itself as `model` / `absolute`), and applies `CameraCalibration × ColorMatrix` on every DNG regardless, as the specification requires.
 
+## Proposed additions — 2026-10-12: the medium response
+
+Status: **proposed**. Fixed by [`output.md`](output.md#a-mediums-response-control-values-to-spectra); extends the `medium` section above. A medium's response is the camera response's mirror: control values in, spectrum out, stored as a K-dimensional table of spectra (or a model that predicts one).
+
+| where | field | what | status |
+|---|---|---|---|
+| `medium` | `colorants` | `a` nl-joined: one name per control axis (`C M Y K`, eight inks, a spot ink, `R G B` drive levels for a display) | proposed |
+| `medium` | `axes` | `t_f5 [Σnₖ]` + `axis_counts t_u5 [K]`: the grid nodes along each axis, coverage or drive in 0..1, non-uniform allowed | proposed |
+| `medium` | `response_start`, `response_step` | the band grid, as the camera response's | proposed |
+| `medium` | `response` | `t_f5 [n₁ … n_K, B]`: reflectance factor (reflective), transmittance (transmissive) or radiance (emissive) at every node. **Values above 1 are kept** | proposed |
+| `medium` | `emission`, `excitation` | `t_f5 [n₁ … n_K, B]` and `t_f5 [B]`: the separable fluorescence model, M1 minus M2 per node, one excitation curve for the substrate. Optional | proposed |
+| `medium` | `donaldson` | `t_f5 [n₁ … n_K, B, B]`: the full bispectral matrix per node, for whoever has a bispectrometer. Optional, supersedes the separable pair | proposed |
+| `medium` | `model` | `a` open: `sampled` (the table was measured), `ynsn` (Yule–Nielsen spectral Neugebauer; then `primaries` + `yn_n` replace `response`), `cellular`, `km` (Kubelka–Munk) | proposed |
+| `medium` | `condition` | `a` closed: `M0`, `M1`, `M2`, `M3`, the measurement condition (ISO 13655); required with `emission` | proposed |
+| `medium` | `identity` | `a`: ink set, substrate, screening, press or printer, in words; the medium's equivalent of a camera's make and model | proposed |
+| `medium` | `icc` | `v('b')`: an imported ICC output profile, verbatim. Its `A2B` tables render at tier `model`, D50 and CIE 1931 only; its `B2A` tables are a separation and are used for nothing else | proposed |
+| `plane.*` | `role = ink` | a new plane role: K channels named by colorant, coverage, `black` 0 and `white` full. Rendered only through a `medium`; never blended with light planes | proposed |
+
 ## The spectral response — implemented 2026-10-10
 
 From the chameleon `spectral.rs` study and Nick's direction: *encode the spectral response, ditch the chart, then relight the shot illuminant to the desired one.* The representation is specified in [`relative.md`](relative.md#the-representation--decided-2026-10-10); the fields live on `characterization`, beside the matrices they supersede (the matrices stay as the cache a reader without curves uses and a reader with curves checks against). Nothing here needs an absolute illuminant.

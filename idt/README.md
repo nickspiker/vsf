@@ -52,6 +52,7 @@ The four classes are not a variant of the ACES model. They are what ACES has one
 
 - [absolute.md](absolute.md) — the Absolute IDT: what it is, the strict field set, the read chain from counts to radiance, the two-camera test, and why ISO is derived rather than primary
 - [relative.md](relative.md) — the Relative IDT: the DSR spectral solve, where its scale comes from, and what the lens has to do with it
+- [layers.md](layers.md) — the K-channel compositing model: physical ops on K channels vs observer ops on the rendered view, blending space as a per-op parameter, the integer rules at the PSD/TIFF borders, and the op inventory (design, 2026-10-12)
 - [creative.md](creative.md) — Creative layers: white balance as the naive DSR, camera looks, curves, and the rule for a second exposure scalar
 - [technical.md](technical.md) — Technical ops: value-preserving mechanics, instrument remaps, and the line between them and Creative
 - [tiers.md](tiers.md) — Unit, Model, Assumed: the trust axis, the tier that was added and removed, and why a tier says who measured and not whether they were honest
