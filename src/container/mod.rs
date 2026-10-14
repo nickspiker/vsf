@@ -8,7 +8,9 @@ pub mod append;
 pub mod skip;
 pub mod source;
 
-pub use append::{append_to_file, truncate_file, Appender, TRAILER_LEN};
+pub use append::{Appender, TRAILER_LEN};
+#[cfg(feature = "std")]
+pub use append::{append_to_file, truncate_file};
 pub use skip::{FieldSpan, ValueKind, ValueSpan};
 pub use source::{ByteSource, SourceError};
 
