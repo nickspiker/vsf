@@ -63,14 +63,14 @@ Filters (blur, sharpen, noise, distort, …) are a separate list; each is a kern
 
 Inside VSF there is no rule because there is no fixed white: every plane says its own `black` and `white`, in its own counts, and a sample's light is `(v − black) / (white − black)`. The madness lives at the borders, and these are the borders.
 
-**Import from 8- and 16-bit display-referred sources (PSD, TIFF, PNG, JPEG).** The source's `white` is its code limit: 255 for 8-bit, 65535 for 16-bit TIFF, and **32768 for 16-bit PSD** (Photoshop's 16-bit is 15 bits plus one; 32768 is white, codes above it do not occur). Samples are decoded through the embedded profile's curve to linear (matrix/TRC profiles honoured, LUT profiles declined and the sRGB convention taken with that fact recorded; the opsin JPEG rule), and the plane is written with `black = 0`, `white = the code limit`, `encoding` stating what was done. 32-bit PSD is IEEE float, linear, 1.0 = diffuse white; it is the only PSD form that carries linear data and HDR, and it imports losslessly.
+**Import from 8- and 16-bit display-referred sources (PSD, TIFF, PNG, JPEG).** The source's `white` is its code limit: 255 for 8-bit and 65535 for 16-bit, **PSD included**. Photoshop works internally in 0 to 32768 (15 bits plus one, so white is a power of two and 0.5 is an exact code), but its files store full-range 0 to 65535 and it converts on load and save. The internal range shows up only as quantisation: a 16-bit file saved by Photoshop holds about 32,769 distinct levels, odd codes do not survive, and so 16-bit PSD is not a lossless home for a 16-bit plane. Samples are decoded through the embedded profile's curve to linear (matrix/TRC profiles honoured, LUT profiles declined and the sRGB convention taken with that fact recorded; the opsin JPEG rule), and the plane is written with `black = 0`, `white = the code limit`, `encoding` stating what was done. 32-bit PSD is IEEE float, linear, 1.0 = diffuse white; it is the only PSD form that carries linear data and HDR, and it imports losslessly.
 
 **Export to PSD.** A PSD is display-referred, so export is where translateration ends: the graph is evaluated to the export observer and space (sRGB, Display P3, Rec.2020, or linear with a linear profile), the chosen ICC profile is embedded, and:
 
 | PSD depth | code for light `n ∈ [0, 1]` | notes |
 |---|---|---|
 | 8-bit | `n · 255`, **error-diffusion dithered** to the code, never truncated | the stack's rule for every 8-bit output (lumis, opsin); a plain round is a banding generator |
-| 16-bit | `n · 32768`, dithered | not 65535: Photoshop's 16-bit range |
+| 16-bit | `n · 65535`, dithered | the file's range; Photoshop requantises to its internal 0..32768 on load, so the export cannot be more precise than that |
 | 32-bit | `n` as f32, linear, no transfer | the lossless path; use it when the receiver can |
 
 Opacity: Photoshop's layer opacity is a byte, `255` = 100 %; fill opacity (`iOpa`) likewise; the UI's percent is `round(byte / 2.55)`. VSF ops carry opacity as a plain fraction and export rounds to the byte. Masks and alpha are planes with their own levels and export as 8- or 16-bit channels by the same table.

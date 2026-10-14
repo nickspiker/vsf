@@ -125,6 +125,7 @@ Status: **proposed**. Fixed by [`output.md`](output.md#a-mediums-response-contro
 | `medium` | `axes` | `t_f5 [Σnₖ]` + `axis_counts t_u5 [K]`: the grid nodes along each axis, coverage or drive in 0..1, non-uniform allowed | proposed |
 | `medium` | `response_start`, `response_step` | the band grid, as the camera response's | proposed |
 | `medium` | `response` | `t_f5 [n₁ … n_K, B]`: reflectance factor (reflective), transmittance (transmissive) or radiance (emissive) at every node. **Values above 1 are kept** | proposed |
+| `medium` | `primary_spectra`, `primary_curves`, `black_spectrum` | the additive form for an emissive medium: `t_f5 [K, B]` primary spectra at full drive, `t_f5 [K, n]` drive-to-linear curves, `t_f5 [B]` emission at zero drive. Used instead of `response` for any display that passes an additivity check; `response` remains for displays with drive-dependent primaries or added processing | proposed |
 | `medium` | `emission`, `excitation` | `t_f5 [n₁ … n_K, B]` and `t_f5 [B]`: the separable fluorescence model, M1 minus M2 per node, one excitation curve for the substrate. Optional | proposed |
 | `medium` | `donaldson` | `t_f5 [n₁ … n_K, B, B]`: the full bispectral matrix per node, for whoever has a bispectrometer. Optional, supersedes the separable pair | proposed |
 | `medium` | `model` | `a` open: `sampled` (the table was measured), `ynsn` (Yule–Nielsen spectral Neugebauer; then `primaries` + `yn_n` replace `response`), `cellular`, `km` (Kubelka–Munk) | proposed |
