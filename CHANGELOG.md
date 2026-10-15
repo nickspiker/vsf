@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - format v10 (reads v9 unchanged)
+
+### Changed
+
+- **What is built is what is read.** A 1-D tensor reads back as the `Tensor` it was built as, shape `[n]`; the `Vector` type and the `v_*` variants are gone (the compact `[t][n][count][type][size]` wire form is unchanged, and every contiguous tensor now writes its header through one canonical path: the u0, f5, f6, j5 and j6 tensors used to write a 1-D tensor in the long form). Until v9 a reader matching `t_*` found nothing in a 1-D field and said nothing. Migrate: match `t_*` only. `tests/round_trip.rs` pins every tensor type, bit-packed width and scalar.
+
+### Added
+
+- **Context-coded tensors, `vc`** (`vsf::codec`): integer tensors range-coded under adaptive context models (raster, quadtree pyramid with an optional reference stream, series), wrapped as `v` data with encoding byte `c`; `codec::decode` gives back the tensor exactly. Beat whole-file zstd by a fifth on mahere's map cells. `tests/codec.rs`.
+
+### Format
+
+- `z` 10, floor 9: v10 changed no byte of an existing type, so v9 files read unchanged and `vc` is skipped by a v9 reader as wrapped data.
+
+## [0.9.x]
+
 ### Added
 
 - **The visual container, still slice, and append-only generations (M1 of the VSF visual-data plan, 2026-10-09).** `vsf::visual` is the one model for stills, bursts and (later) video — specified in [`idt/image.md`](idt/image.md): `visual` manifest, `track.<id>`, `span.<track>.<seq>`, `plane.<track>.<seq>.<name>` (role, geometry, CFA, black/white, **`encoding` always written**, `maker_crop`, `orientation`, lineage), `capture` (the EXIF triangle, optics, Eagle instant, `WorldCoord` location, body/lens, `baseline`), `characterization` (today's `colour_profile` fields plus `observer`), `graph.<id>` (the layer program as a canonical Stack Notation DAG — `plane → black_white → idt → view ops`, an op's IDT class carried per op; the `idt` op takes the class of the entry it indexes), `view.<id>`, `foreign` (XMP/ICC verbatim, profile name, calibration signature) and `provenance`. `Visual::write` emits generation 0 with a content hash on every entry and the plane's samples last, so a lazy reader's header pass is short; `Visual::read` / `read_document` / `read_file` read new documents, hybrid appended ones, and legacy five-section `spectral_image` files as a one-track visual whose plane is **linear** (its only writer wrote linear counts — no migration table needed); `to_spectral_image` / `from_spectral_image` bridge the in-memory model both ways. `container::append`: `Appender` builds a generation — far-form bodies, a header listing every live section by absolute offset with inline `gen`/`start`/`prev`(offset + BLAKE3 of the previous header)/`tool`/`action`, its own `hp` over bodies ‖ header, and a 16-byte trailer naming the header — `append_to_file` writes it with fsyncs in the order that keeps every intermediate state readable, and `truncate_file` is undo. `Document::open` follows the trailer, falls back to the **last complete generation** after a torn append (walking forward from the original's end for a header whose `start`, `l` and trailer all agree) and reports the orphaned tail; `generations()` walks and verifies the chain; `generation_hash_ok` recomputes a generation's `hp`; `checkout(n)` is the first *n*-th-generation bytes, byte for byte; `undo_len` is where to truncate. `Visual::still_edit_generation` appends a new graph + view for an edit without touching a sample. `vsfinfo tree` shows the generations and the visual model (tracks, spans, planes, capture, characterization, graph disassembly, views, foreign); `verify` checks every generation's hash and the chain and skips inline header fields; new `history`, `checkout N OUT` and `undo` subcommands. `VsfBuilder` fix: `l` (file length) now includes unboxed blobs — earlier builders wrote it short, and `Document` tolerates those files. Tests: `visual_still.rs`, `container_append.rs` (including a torn third generation falling back to the second), `container_lazy.rs`. Version stays 9: every change is additive and a v9 reader sees generation 0 as the document it always was.
