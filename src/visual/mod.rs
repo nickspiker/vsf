@@ -404,7 +404,6 @@ fn f32_field(s: &VsfSection, name: &str) -> Option<f32> {
 fn f32_vec(s: &VsfSection, name: &str) -> Option<Vec<f32>> {
     match first(s, name)? {
         VsfType::t_f5(t) => Some(t.data.clone()),
-        VsfType::v_f5(v) => Some(v.data.clone()),
         _ => None,
     }
 }
@@ -412,11 +411,8 @@ fn f32_vec(s: &VsfSection, name: &str) -> Option<Vec<f32>> {
 fn u32_vec(s: &VsfSection, name: &str) -> Option<Vec<u32>> {
     match first(s, name)? {
         VsfType::t_u5(t) => Some(t.data.clone()),
-        VsfType::v_u5(v) => Some(v.data.clone()),
         VsfType::t_u4(t) => Some(t.data.iter().map(|&x| x as u32).collect()),
-        VsfType::v_u4(v) => Some(v.data.iter().map(|&x| x as u32).collect()),
         VsfType::t_u3(t) => Some(t.data.iter().map(|&x| x as u32).collect()),
-        VsfType::v_u3(v) => Some(v.data.iter().map(|&x| x as u32).collect()),
         _ => None,
     }
 }

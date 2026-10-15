@@ -49,10 +49,6 @@ fn empty_u16_vector_round_trips() {
     let mut ptr = 0;
     let back = vsf::parse(&bytes, &mut ptr).expect("empty u16 vector must parse");
     assert_eq!(ptr, bytes.len());
-    // 1D u16 vectors decode to the dedicated Vector type (crate convention); empty must still round-trip.
-    match back {
-        VsfType::t_u4(t) => assert!(t.data.is_empty()),
-        VsfType::v_u4(v) => assert!(v.data.is_empty()),
-        other => panic!("expected an empty u16 vector shape, got {:?}", other),
-    }
+    // An empty 1-D tensor reads back as the empty tensor it was (v10).
+    assert_eq!(back, VsfType::t_u4(Tensor::new(vec![0], Vec::new())));
 }

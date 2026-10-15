@@ -31,25 +31,7 @@ pub struct Tensor<T> {
     pub data: Vec<T>,
 }
 
-/// 1D tensor (vector)
-///
-/// Binary format: `[t][n][count][type][data...]`
-///
-/// Where:
-/// - `t` = tensor/vector marker
-/// - `n` = count marker (indicates 1D vector vs multi-dimensional tensor)
-/// - `count` = number of elements (encoded number)
-/// - `type` = element type marker (e.g., `u3`, `i4`, `f5`, `j6`)
-/// - `data` = raw element bytes
-///
-/// Examples:
-/// - Vector<u8> with 10 elements: `[t][n][0x0A][u][3][bytes...]`
-/// - IPv4 address: `[t][n][0x04][u][3][4 bytes]`
-/// - IPv6 address: `[t][n][0x10][u][3][16 bytes]`
-#[derive(Debug, Clone, PartialEq)]
-pub struct Vector<T> {
-    pub data: Vec<T>,
-}
+// A 1-D tensor is a `Tensor` with one dimension; on the wire it takes the compact form `[t][n][count][type][size][data...]` (an IPv4 address: `[t][n][0x04][u][3][4 bytes]`), and reads back as the same `Tensor` (v10; until v9 it read back as a separate vector type).
 
 /// Tensor with explicit stride for non-contiguous layouts
 ///

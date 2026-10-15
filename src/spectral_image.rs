@@ -566,7 +566,6 @@ pub fn profile_from_fields(sec: &[VsfField]) -> Result<ColourProfile, SpectralIm
         if let Some(f) = sec.iter().find(|f| f.name == *mname) {
             let flat = match f.values.first() {
                 Some(VsfType::t_f5(t)) => t.data.clone(),
-                Some(VsfType::v_f5(v)) => v.data.clone(),
                 _ => return Err(SpectralImageError::BadField(format!("{} is not an f32 tensor", mname))),
             };
             if flat.len() != 9 {
@@ -683,24 +682,20 @@ fn take_string_opt(fields: &[VsfField], name: &str) -> Option<String> {
 }
 
 fn take_f32_vec(fields: &[VsfField], name: &'static str) -> Result<Vec<f32>, SpectralImageError> {
-    // 1D tensors take the compact `tn` wire form and parse back as Vector variants, so accept both shapes of the same data.
+    // An f32 tensor (a 1-D one reads back as the tensor it was, v10).
     match find(fields, name) {
         Some(VsfType::t_f5(t)) => Ok(t.data.clone()),
-        Some(VsfType::v_f5(v)) => Ok(v.data.clone()),
         Some(_) => Err(SpectralImageError::BadField(format!("'{}' is not an f32 tensor", name))),
         None => Err(SpectralImageError::MissingField(name)),
     }
 }
 
 fn take_u32_vec(fields: &[VsfField], name: &'static str) -> Result<Vec<u32>, SpectralImageError> {
-    // 1D unsigned tensors come back as Vector variants (compact `tn` wire form); accept tensor and vector forms at any width and widen to u32.
+    // Unsigned tensors at any width, widened to u32 (a 1-D one reads back as the tensor it was, v10).
     match find(fields, name) {
         Some(VsfType::t_u3(t)) => Ok(t.data.iter().map(|&v| v as u32).collect()),
         Some(VsfType::t_u4(t)) => Ok(t.data.iter().map(|&v| v as u32).collect()),
         Some(VsfType::t_u5(t)) => Ok(t.data.clone()),
-        Some(VsfType::v_u3(v)) => Ok(v.data.iter().map(|&v| v as u32).collect()),
-        Some(VsfType::v_u4(v)) => Ok(v.data.iter().map(|&v| v as u32).collect()),
-        Some(VsfType::v_u5(v)) => Ok(v.data.clone()),
         Some(_) => Err(SpectralImageError::BadField(format!("'{}' is not an unsigned tensor", name))),
         None => Err(SpectralImageError::MissingField(name)),
     }

@@ -16,7 +16,7 @@ use super::spirix::{
 };
 use crate::decoding::traits::DecodeError;
 use crate::prelude::*;
-use crate::types::{BitPackedTensor, StridedTensor, Tensor, Vector, VsfType};
+use crate::types::{BitPackedTensor, StridedTensor, Tensor, VsfType};
 use num_complex::Complex;
 
 // ==================== BITPACKED TENSORS ====================
@@ -1034,7 +1034,7 @@ pub fn parse_vector_data_u0(
     }
 
     *pointer += byte_count;
-    Ok(VsfType::v_u0(Vector { data: values }))
+    Ok(VsfType::t_u0(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_u8(
@@ -1073,7 +1073,7 @@ pub fn parse_vector_data_u16(
         values.push(value);
         *pointer += 2;
     }
-    Ok(VsfType::v_u4(Vector { data: values }))
+    Ok(VsfType::t_u4(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_u32(
@@ -1099,7 +1099,7 @@ pub fn parse_vector_data_u32(
         values.push(value);
         *pointer += 4;
     }
-    Ok(VsfType::v_u5(Vector { data: values }))
+    Ok(VsfType::t_u5(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_u64(
@@ -1129,7 +1129,7 @@ pub fn parse_vector_data_u64(
         values.push(value);
         *pointer += 8;
     }
-    Ok(VsfType::v_u6(Vector { data: values }))
+    Ok(VsfType::t_u6(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_u128(
@@ -1167,7 +1167,7 @@ pub fn parse_vector_data_u128(
         values.push(value);
         *pointer += 16;
     }
-    Ok(VsfType::v_u7(Vector { data: values }))
+    Ok(VsfType::t_u7(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_i8(
@@ -1185,7 +1185,7 @@ pub fn parse_vector_data_i8(
         .map(|&b| b as i8)
         .collect();
     *pointer += count;
-    Ok(VsfType::v_i3(Vector { data: values }))
+    Ok(VsfType::t_i3(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_i16(
@@ -1206,7 +1206,7 @@ pub fn parse_vector_data_i16(
         values.push(value);
         *pointer += 2;
     }
-    Ok(VsfType::v_i4(Vector { data: values }))
+    Ok(VsfType::t_i4(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_i32(
@@ -1232,7 +1232,7 @@ pub fn parse_vector_data_i32(
         values.push(value);
         *pointer += 4;
     }
-    Ok(VsfType::v_i5(Vector { data: values }))
+    Ok(VsfType::t_i5(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_i64(
@@ -1262,7 +1262,7 @@ pub fn parse_vector_data_i64(
         values.push(value);
         *pointer += 8;
     }
-    Ok(VsfType::v_i6(Vector { data: values }))
+    Ok(VsfType::t_i6(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_i128(
@@ -1300,7 +1300,7 @@ pub fn parse_vector_data_i128(
         values.push(value);
         *pointer += 16;
     }
-    Ok(VsfType::v_i7(Vector { data: values }))
+    Ok(VsfType::t_i7(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_f32(
@@ -1326,7 +1326,7 @@ pub fn parse_vector_data_f32(
         values.push(value);
         *pointer += 4;
     }
-    Ok(VsfType::v_f5(Vector { data: values }))
+    Ok(VsfType::t_f5(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_f64(
@@ -1356,7 +1356,7 @@ pub fn parse_vector_data_f64(
         values.push(value);
         *pointer += 8;
     }
-    Ok(VsfType::v_f6(Vector { data: values }))
+    Ok(VsfType::t_f6(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_j32(
@@ -1388,7 +1388,7 @@ pub fn parse_vector_data_j32(
         values.push(Complex::new(re, im));
         *pointer += 8;
     }
-    Ok(VsfType::v_j5(Vector { data: values }))
+    Ok(VsfType::t_j5(Tensor { shape: vec![count], data: values }))
 }
 
 pub fn parse_vector_data_j64(
@@ -1428,7 +1428,7 @@ pub fn parse_vector_data_j64(
         values.push(Complex::new(re, im));
         *pointer += 16;
     }
-    Ok(VsfType::v_j6(Vector { data: values }))
+    Ok(VsfType::t_j6(Tensor { shape: vec![count], data: values }))
 }
 
 // ==================== STRIDED TENSOR DATA PARSERS ====================

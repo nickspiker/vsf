@@ -29,7 +29,7 @@ pub use eagle_time::{set_leap_table, NtpTai};
 #[cfg(feature = "std")]
 pub use eagle_time::{eagle_time_nanos, eagle_time_oscillations};
 pub use network::{NaScheme, WaAddress};
-pub use tensor::{BitPackedTensor, LayoutOrder, StridedTensor, Tensor, Vector};
+pub use tensor::{BitPackedTensor, LayoutOrder, StridedTensor, Tensor};
 pub use packed_view::{BitPackedView, BitPacker};
 pub use vsf_type::VsfType;
 pub use world_cell::WorldCell;

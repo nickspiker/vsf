@@ -1572,13 +1572,7 @@ impl VsfType {
 
             // ==================== CONTIGUOUS TENSORS ====================
             VsfType::t_u0(tensor) => {
-                let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'u');
-                flat.push(b'0');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
+                let mut flat = tensor_head(&tensor.shape, b'u', b'0');
                 // Pack bools into bytes (8 per byte)
                 let mut byte = 0u8;
                 let mut bit_pos = 0;
@@ -1849,13 +1843,7 @@ impl VsfType {
 
             // Float tensors
             VsfType::t_f5(tensor) => {
-                let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'f');
-                flat.push(b'5');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
+                let mut flat = tensor_head(&tensor.shape, b'f', b'5');
                 for &value in &tensor.data {
                     flat.extend_from_slice(&value.to_be_bytes());
                 }
@@ -1863,13 +1851,7 @@ impl VsfType {
             }
 
             VsfType::t_f6(tensor) => {
-                let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'f');
-                flat.push(b'6');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
+                let mut flat = tensor_head(&tensor.shape, b'f', b'6');
                 for &value in &tensor.data {
                     flat.extend_from_slice(&value.to_be_bytes());
                 }
@@ -1878,13 +1860,7 @@ impl VsfType {
 
             // Complex tensors
             VsfType::t_j5(tensor) => {
-                let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'j');
-                flat.push(b'5');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
+                let mut flat = tensor_head(&tensor.shape, b'j', b'5');
                 for value in &tensor.data {
                     flat.extend_from_slice(&value.re.to_be_bytes());
                     flat.extend_from_slice(&value.im.to_be_bytes());
@@ -1893,195 +1869,8 @@ impl VsfType {
             }
 
             VsfType::t_j6(tensor) => {
-                let mut flat = vec![b't'];
-                flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b'j');
-                flat.push(b'6');
-                for &dim in &tensor.shape {
-                    flat.extend_from_slice(&dim.encode_number());
-                }
+                let mut flat = tensor_head(&tensor.shape, b'j', b'6');
                 for value in &tensor.data {
-                    flat.extend_from_slice(&value.re.to_be_bytes());
-                    flat.extend_from_slice(&value.im.to_be_bytes());
-                }
-                flat
-            }
-
-            // ==================== VECTORS (1D CONTIGUOUS) ====================
-            VsfType::v_u0(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'u');
-                flat.push(b'0');
-                // Bit-pack bools (8 per byte)
-                let mut byte = 0u8;
-                let mut bit_pos = 0;
-                for &value in &vector.data {
-                    if value {
-                        byte |= 1 << (7 - bit_pos);
-                    }
-                    bit_pos += 1;
-                    if bit_pos == 8 {
-                        flat.push(byte);
-                        byte = 0;
-                        bit_pos = 0;
-                    }
-                }
-                // Push partial byte if any
-                if bit_pos > 0 {
-                    flat.push(byte);
-                }
-                flat
-            }
-
-            VsfType::v_u3(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'u');
-                flat.push(b'3');
-                flat.extend_from_slice(&vector.data);
-                flat
-            }
-
-            VsfType::v_u4(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'u');
-                flat.push(b'4');
-                for &value in &vector.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
-                }
-                flat
-            }
-
-            VsfType::v_u5(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'u');
-                flat.push(b'5');
-                for &value in &vector.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
-                }
-                flat
-            }
-
-            VsfType::v_u6(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'u');
-                flat.push(b'6');
-                for &value in &vector.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
-                }
-                flat
-            }
-
-            VsfType::v_u7(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'u');
-                flat.push(b'7');
-                for &value in &vector.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
-                }
-                flat
-            }
-
-            VsfType::v_i3(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'i');
-                flat.push(b'3');
-                for &value in &vector.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
-                }
-                flat
-            }
-
-            VsfType::v_i4(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'i');
-                flat.push(b'4');
-                for &value in &vector.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
-                }
-                flat
-            }
-
-            VsfType::v_i5(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'i');
-                flat.push(b'5');
-                for &value in &vector.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
-                }
-                flat
-            }
-
-            VsfType::v_i6(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'i');
-                flat.push(b'6');
-                for &value in &vector.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
-                }
-                flat
-            }
-
-            VsfType::v_i7(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'i');
-                flat.push(b'7');
-                for &value in &vector.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
-                }
-                flat
-            }
-
-            VsfType::v_f5(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'f');
-                flat.push(b'5');
-                for &value in &vector.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
-                }
-                flat
-            }
-
-            VsfType::v_f6(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'f');
-                flat.push(b'6');
-                for &value in &vector.data {
-                    flat.extend_from_slice(&value.to_be_bytes());
-                }
-                flat
-            }
-
-            VsfType::v_j5(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'j');
-                flat.push(b'5');
-                for value in &vector.data {
-                    flat.extend_from_slice(&value.re.to_be_bytes());
-                    flat.extend_from_slice(&value.im.to_be_bytes());
-                }
-                flat
-            }
-
-            VsfType::v_j6(vector) => {
-                let mut flat = vec![b't', b'n'];
-                flat.extend_from_slice(&vector.data.len().encode_number());
-                flat.push(b'j');
-                flat.push(b'6');
-                for value in &vector.data {
                     flat.extend_from_slice(&value.re.to_be_bytes());
                     flat.extend_from_slice(&value.im.to_be_bytes());
                 }
@@ -5378,4 +5167,23 @@ mod tests {
         // Header: 1 + 2 + 3 + 2 + 2 = 10 bytes Data: 200 elements × 10 bytes each = 2000 bytes
         assert_eq!(result.len(), 10 + 200 * 10);
     }
+}
+
+/// A contiguous tensor's header, canonical: a 1-D tensor in the compact form `[t][n][count][type][size]`, every other `[t][ndim][type][size][shape...]` (v10: one value, one byte form, so a tensor reads back as the tensor it was built as).
+fn tensor_head(shape: &[usize], ty: u8, size: u8) -> Vec<u8> {
+    let mut flat = vec![b't'];
+    if shape.len() == 1 {
+        flat.push(b'n');
+        flat.extend_from_slice(&shape[0].encode_number());
+        flat.push(ty);
+        flat.push(size);
+    } else {
+        flat.extend_from_slice(&shape.len().encode_number());
+        flat.push(ty);
+        flat.push(size);
+        for &dim in shape {
+            flat.extend_from_slice(&dim.encode_number());
+        }
+    }
+    flat
 }

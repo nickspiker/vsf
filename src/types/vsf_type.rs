@@ -59,7 +59,7 @@ use spirix::{
 
 use super::eagle_time::EtType;
 use super::network::WaAddress;
-use super::tensor::{BitPackedTensor, StridedTensor, Tensor, Vector};
+use super::tensor::{BitPackedTensor, StridedTensor, Tensor};
 use super::world_cell::WorldCell;
 use super::world_coord::WorldCoord;
 
@@ -242,24 +242,6 @@ pub enum VsfType {
     // ==================== WORLD ADDRESS FAMILY (w + lowercase) ==================== w + digit (w3..w7) = WorldCoord at 2^N-bit resolution w + lowercase letter = other world types (wa = postal address)
     wa(WaAddress), // World address: structured postal address (all fields optional)
     // wb reserved: world bounds (geographic bounding box) wc..wz reserved for future world/physical types
-
-    // ==================== VECTORS (1D CONTIGUOUS) ====================
-    /// 1D contiguous vectors - compact encoding with count marker Binary format: [t][n][count][type][data...] Where n indicates 1D (count) vs multi-dimensional (shape) Primitive element types
-    v_u0(Vector<bool>), // Bit-packed bools (8 per byte)
-    v_u3(Vector<u8>),
-    v_u4(Vector<u16>),
-    v_u5(Vector<u32>),
-    v_u6(Vector<u64>),
-    v_u7(Vector<u128>),
-    v_i3(Vector<i8>),
-    v_i4(Vector<i16>),
-    v_i5(Vector<i32>),
-    v_i6(Vector<i64>),
-    v_i7(Vector<i128>),
-    v_f5(Vector<f32>),
-    v_f6(Vector<f64>),
-    v_j5(Vector<Complex<f32>>),
-    v_j6(Vector<Complex<f64>>),
 
     // ==================== WRAPPED/ENCODED DATA ====================
     /// Wrapped/encoded VSF data with compression, error correction, encryption, units or other encoding
@@ -1152,11 +1134,10 @@ impl VsfType {
 
     /// Extract as byte slice
     ///
-    /// Supports: v (wrapped bytes), v_u3 (vector), t_u3 (tensor), the standard hash family (hp/hb/hs/hm/hg/hc/hk), the application-specific Photon hashes (hP/hR/hI/hV), public/symmetric keys (ke/kx/kc/ka), and signatures (ge/gp). Photon reads handle-proofs as `hP` and blobs as `ge`, so those two must be covered here.
+    /// Supports: v (wrapped bytes), t_u3 (a tensor of bytes, 1-D or not), the standard hash family (hp/hb/hs/hm/hg/hc/hk), the application-specific Photon hashes (hP/hR/hI/hV), public/symmetric keys (ke/kx/kc/ka), and signatures (ge/gp). Photon reads handle-proofs as `hP` and blobs as `ge`, so those two must be covered here.
     pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             VsfType::v(_, bytes) => Some(bytes),
-            VsfType::v_u3(vector) => Some(&vector.data),
             VsfType::t_u3(tensor) => Some(&tensor.data),
             VsfType::hp(bytes)
             | VsfType::hb(bytes)

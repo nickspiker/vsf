@@ -815,7 +815,7 @@ mod tests {
 
     #[test]
     fn test_roundtrip_tensor_1d() {
-        // 1D tensor of i32 - encodes as tensor, decodes as vector (1D optimization)
+        // 1D tensor of i32: the compact wire form, read back as the tensor it was (v10)
         let data = vec![-100i32, 0, 100, 200, -50];
         let tensor = Tensor::new(vec![5], data.clone());
         let val = VsfType::t_i5(tensor);
@@ -824,11 +824,11 @@ mod tests {
         let mut ptr = 0;
         let parsed = parse(&flat, &mut ptr).unwrap();
 
-        // 1D tensors decode as vectors (compact representation)
-        if let VsfType::v_i5(v) = parsed {
+        if let VsfType::t_i5(v) = parsed {
+            assert_eq!(v.shape, vec![5]);
             assert_eq!(v.data, data);
         } else {
-            panic!("Expected v_i5 vector, got {:?}", parsed);
+            panic!("Expected the t_i5 it was built as, got {:?}", parsed);
         }
     }
 
@@ -870,10 +870,10 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_u16 = parse(&flat_u16, &mut ptr).unwrap();
-        if let VsfType::v_u4(v) = parsed_u16 {
+        if let VsfType::t_u4(v) = parsed_u16 {
             assert_eq!(v.data, data_u16);
         } else {
-            panic!("Expected v_u4 vector, got {:?}", parsed_u16);
+            panic!("Expected the t_u4 it was built as, got {:?}", parsed_u16);
         }
 
         // u32 vector
@@ -887,10 +887,10 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_u32 = parse(&flat_u32, &mut ptr).unwrap();
-        if let VsfType::v_u5(v) = parsed_u32 {
+        if let VsfType::t_u5(v) = parsed_u32 {
             assert_eq!(v.data, data_u32);
         } else {
-            panic!("Expected v_u5 vector, got {:?}", parsed_u32);
+            panic!("Expected the t_u5 it was built as, got {:?}", parsed_u32);
         }
 
         // u64 vector
@@ -904,10 +904,10 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_u64 = parse(&flat_u64, &mut ptr).unwrap();
-        if let VsfType::v_u6(v) = parsed_u64 {
+        if let VsfType::t_u6(v) = parsed_u64 {
             assert_eq!(v.data, data_u64);
         } else {
-            panic!("Expected v_u6 vector, got {:?}", parsed_u64);
+            panic!("Expected the t_u6 it was built as, got {:?}", parsed_u64);
         }
     }
 
@@ -926,10 +926,10 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_i8 = parse(&flat_i8, &mut ptr).unwrap();
-        if let VsfType::v_i3(v) = parsed_i8 {
+        if let VsfType::t_i3(v) = parsed_i8 {
             assert_eq!(v.data, data_i8);
         } else {
-            panic!("Expected v_i3 vector, got {:?}", parsed_i8);
+            panic!("Expected the t_i3 it was built as, got {:?}", parsed_i8);
         }
 
         // i16 vector
@@ -943,10 +943,10 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_i16 = parse(&flat_i16, &mut ptr).unwrap();
-        if let VsfType::v_i4(v) = parsed_i16 {
+        if let VsfType::t_i4(v) = parsed_i16 {
             assert_eq!(v.data, data_i16);
         } else {
-            panic!("Expected v_i4 vector, got {:?}", parsed_i16);
+            panic!("Expected the t_i4 it was built as, got {:?}", parsed_i16);
         }
 
         // i32 vector
@@ -960,10 +960,10 @@ mod tests {
 
         let mut ptr = 0;
         let parsed_i32 = parse(&flat_i32, &mut ptr).unwrap();
-        if let VsfType::v_i5(v) = parsed_i32 {
+        if let VsfType::t_i5(v) = parsed_i32 {
             assert_eq!(v.data, data_i32);
         } else {
-            panic!("Expected v_i5 vector, got {:?}", parsed_i32);
+            panic!("Expected the t_i5 it was built as, got {:?}", parsed_i32);
         }
     }
 
