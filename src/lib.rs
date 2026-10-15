@@ -332,6 +332,9 @@ pub mod encoding;
 // Binary decoding
 pub mod decoding;
 
+// Context-coded tensors (`vc`): integer tensors range-coded under adaptive context models
+pub mod codec;
+
 // High-level builders for common use cases
 pub mod builders;
 
