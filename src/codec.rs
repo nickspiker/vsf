@@ -519,6 +519,18 @@ fn head(payload: &[u8]) -> Result<Head, DecodeError> {
     Ok(Head { model, elem, shape, param, reference, start: p + 1 })
 }
 
+/// The model a `vc` value was coded with, from its header alone (None for anything else).
+pub fn model_of(value: &VsfType) -> Option<Model> {
+    let VsfType::v(ENCODING, p) = value else { return None };
+    let h = head(p).ok()?;
+    match h.model {
+        1 => Some(Model::Raster),
+        2 => Some(Model::Pyramid { roots: h.param }),
+        3 => Some(Model::Series),
+        _ => None,
+    }
+}
+
 /// Whether a `vc` value was coded against a reference the reader must hold first.
 pub fn needs_reference(value: &VsfType) -> bool {
     matches!(value, VsfType::v(ENCODING, p) if head(p).is_ok_and(|h| h.reference))

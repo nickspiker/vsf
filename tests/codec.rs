@@ -42,6 +42,7 @@ fn through(value: &VsfType, model: Model, reference: Option<&[i32]>) -> VsfType 
     assert_eq!(p, flat.len());
     assert_eq!(parsed, coded);
     assert_eq!(codec::needs_reference(&parsed), reference.is_some());
+    assert_eq!(codec::model_of(&parsed), Some(model));
     codec::decode(&parsed, reference).expect("decodes")
 }
 
