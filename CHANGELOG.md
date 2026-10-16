@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - format v11 (reads v9 and v10 unchanged)
+
 ### Added
 
 - **`gamma2tanh`, VSF RGB with HDR headroom** ([`colour.md`](colour.md), "HDR: Gamma 2, Then tanh"): `encoded = tanh(√linear)`, per channel, decoded as `atanh(encoded)²`. Diffuse white (linear 1.0) lands on code 194 of 256; the top code is 3.28 stops above it at 8 bits, 3.86 at 10, 4.34 at 12 and 5.12 at 16, and shadows are plain gamma 2. Transfer functions in `colour::convert` for f32 (u8, u16, any depth from 1 to 16 bits, RGB triples) and S44, `ColourValue::{to,from}_linear_gamma2tanh`, and `gamma2tanh` as a plane/view `encoding` ([`idt/image.md`](idt/image.md)). Encoders settle the tanh estimate against the decoder, so decode → encode is exact at every code (S44 at 16 bits: within one code). `tests/gamma2tanh.rs`.
@@ -18,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Format
 
 - The closed `encoding` vocabulary gains `gamma2tanh`. A 0.10 reader refuses a plane that uses it by name; every other byte reads as before.
+- `z` 11, floor 9: v11 changed no byte of an existing type, so v9 and v10 files read unchanged.
 
 ## [0.10.0] - format v10 (reads v9 unchanged)
 
