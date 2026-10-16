@@ -62,7 +62,7 @@ macro_rules! closed_vocab {
 closed_vocab!(TrackKind { Beam => "beam", Wave => "wave", Timecode => "timecode", Annotation => "annotation", Data => "data" }, "track kind");
 closed_vocab!(TrackRole { Capture => "capture", Derived => "derived", Display => "display", Preview => "preview", Calibration => "calibration" }, "track role");
 closed_vocab!(PlaneRole { Sensor => "sensor", Display => "display", Preview => "preview", Depth => "depth", Ir => "ir", Uv => "uv", Confidence => "confidence", Motion => "motion", Matte => "matte", Mask => "mask", Alpha => "alpha", Dark => "dark", Flat => "flat", Bias => "bias", Derived => "derived" }, "plane role");
-closed_vocab!(Encoding { Linear => "linear", Gamma2 => "gamma2" }, "encoding");
+closed_vocab!(Encoding { Linear => "linear", Gamma2 => "gamma2", Gamma2Tanh => "gamma2tanh" }, "encoding");
 closed_vocab!(Purpose { Default => "default", Preview => "preview", Print => "print", Technical => "technical" }, "view purpose");
 
 /// A track: one stream of frames (beam), samples (wave), marks (timecode), notes (annotation) or sensor data (data).

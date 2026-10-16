@@ -90,6 +90,12 @@ pub trait ColourValue<Linear: Copy>: Copy {
 
     /// Convert from linear to gamma 2 encoded (VSF RGB native)
     fn from_linear_gamma2(linear: Linear) -> Self;
+
+    /// Convert from gamma2tanh encoded (VSF RGB HDR: gamma 2, then tanh) to linear
+    fn to_linear_gamma2tanh(self) -> Linear;
+
+    /// Convert from linear to gamma2tanh encoded (VSF RGB HDR: gamma 2, then tanh)
+    fn from_linear_gamma2tanh(linear: Linear) -> Self;
 }
 
 impl ColourValue<f32> for f32 {
@@ -130,6 +136,16 @@ impl ColourValue<f32> for f32 {
 
     #[inline]
     fn from_linear_gamma2(linear: f32) -> Self {
+        linear
+    }
+
+    #[inline]
+    fn to_linear_gamma2tanh(self) -> f32 {
+        self
+    }
+
+    #[inline]
+    fn from_linear_gamma2tanh(linear: f32) -> Self {
         linear
     }
 }
@@ -173,6 +189,16 @@ impl ColourValue<S44> for S44 {
 
     #[inline]
     fn from_linear_gamma2(linear: S44) -> Self {
+        linear
+    }
+
+    #[inline]
+    fn to_linear_gamma2tanh(self) -> S44 {
+        self
+    }
+
+    #[inline]
+    fn from_linear_gamma2tanh(linear: S44) -> Self {
         linear
     }
 }
@@ -222,6 +248,16 @@ impl ColourValue<f32> for u8 {
     #[inline]
     fn from_linear_gamma2(linear: f32) -> Self {
         delinearize_gamma2_u8_f32(linear)
+    }
+
+    #[inline]
+    fn to_linear_gamma2tanh(self) -> f32 {
+        linearize_gamma2tanh_u8_f32(self)
+    }
+
+    #[inline]
+    fn from_linear_gamma2tanh(linear: f32) -> Self {
+        delinearize_gamma2tanh_u8_f32(linear)
     }
 }
 
@@ -326,6 +362,16 @@ impl ColourValue<S44> for u8 {
         let encoded = linear.sqrt();
         (encoded << 8isize).to_u8()
     }
+
+    #[inline]
+    fn to_linear_gamma2tanh(self) -> S44 {
+        linearize_gamma2tanh_u8_s44(self)
+    }
+
+    #[inline]
+    fn from_linear_gamma2tanh(linear: S44) -> Self {
+        delinearize_gamma2tanh_u8_s44(linear)
+    }
 }
 
 impl ColourValue<f32> for u16 {
@@ -373,6 +419,16 @@ impl ColourValue<f32> for u16 {
     #[inline]
     fn from_linear_gamma2(linear: f32) -> Self {
         delinearize_gamma2_u16_f32(linear)
+    }
+
+    #[inline]
+    fn to_linear_gamma2tanh(self) -> f32 {
+        linearize_gamma2tanh_u16_f32(self)
+    }
+
+    #[inline]
+    fn from_linear_gamma2tanh(linear: f32) -> Self {
+        delinearize_gamma2tanh_u16_f32(linear)
     }
 }
 
@@ -453,6 +509,16 @@ impl ColourValue<S44> for u16 {
     fn from_linear_gamma2(linear: S44) -> Self {
         let encoded = linear.sqrt();
         (encoded << 16isize).to_u16()
+    }
+
+    #[inline]
+    fn to_linear_gamma2tanh(self) -> S44 {
+        linearize_gamma2tanh_u16_s44(self)
+    }
+
+    #[inline]
+    fn from_linear_gamma2tanh(linear: S44) -> Self {
+        delinearize_gamma2tanh_u16_s44(linear)
     }
 }
 
@@ -2298,6 +2364,189 @@ pub fn delinearize_gamma2_rgb_s44(r: S44, g: S44, b: S44) -> (u8, u8, u8) {
         delinearize_gamma2_u8_s44(r),
         delinearize_gamma2_u8_s44(g),
         delinearize_gamma2_u8_s44(b),
+    )
+}
+
+// ==================== GAMMA 2 + TANH (HDR) FUNCTIONS ====================
+//
+// `gamma2tanh` (colour.md, "HDR: Gamma 2, Then tanh"): gamma 2, then tanh, per channel. Linear 1.0 is diffuse white and lands on tanh(1), code 194 of 256; everything brighter rolls off under the tanh instead of clipping. Integer codes decode at the bucket bottom exactly as gamma 2 does, so the top code is (2ⁿ−1)/2ⁿ, never 1, and atanh stays finite: the top code is 3.28 stops above diffuse white at 8 bits, 3.86 at 10, 4.34 at 12 and 5.12 at 16. Near black tanh(x) ≈ x, so the shadows are plain gamma 2. Encoding is truncation settled against the decoder (`gamma2tanh_code_f32`), so decode → encode is exact at every code, as it is for gamma 2.
+
+/// Linearize a gamma2tanh encoded value (0-1 range): `atanh(encoded)²`.
+///
+/// An encoded value of 1.0 is infinitely bright (atanh(1) = ∞); integer codes never reach it.
+pub fn linearize_gamma2tanh_f32(encoded: f32) -> f32 {
+    let a = encoded.atanh();
+    a * a
+}
+
+/// Delinearize a linear value to gamma2tanh (0-1 range): `tanh(√linear)`.
+///
+/// Linear 1.0 is diffuse white; any finite brightness above it encodes below 1.0.
+pub fn delinearize_gamma2tanh_f32(linear: f32) -> f32 {
+    linear.sqrt().tanh()
+}
+
+/// Linearize an 8-bit gamma2tanh code (×256, bucket bottom, as gamma 2)
+pub fn linearize_gamma2tanh_u8_f32(encoded: u8) -> f32 {
+    linearize_gamma2tanh_f32(encoded as f32 / 256.)
+}
+
+/// Delinearize a linear value to an 8-bit gamma2tanh code (×256 truncation, as gamma 2)
+pub fn delinearize_gamma2tanh_u8_f32(linear: f32) -> u8 {
+    gamma2tanh_code_f32(linear, 8) as u8
+}
+
+/// Linearize a 16-bit gamma2tanh code (×65536, bucket bottom, as gamma 2)
+pub fn linearize_gamma2tanh_u16_f32(encoded: u16) -> f32 {
+    linearize_gamma2tanh_f32(encoded as f32 / 65536.)
+}
+
+/// Delinearize a linear value to a 16-bit gamma2tanh code (×65536 truncation, as gamma 2)
+pub fn delinearize_gamma2tanh_u16_f32(linear: f32) -> u16 {
+    gamma2tanh_code_f32(linear, 16) as u16
+}
+
+/// Linearize a gamma2tanh code of any depth from 1 to 16 bits (10- and 12-bit planes): ×2ⁿ, bucket bottom.
+pub fn linearize_gamma2tanh_bits_f32(encoded: u32, bits: u32) -> f32 {
+    linearize_gamma2tanh_f32(encoded as f32 / (1u32 << bits) as f32)
+}
+
+/// Delinearize a linear value to a gamma2tanh code of any depth from 1 to 16 bits: ×2ⁿ truncation.
+pub fn delinearize_gamma2tanh_bits_f32(linear: f32, bits: u32) -> u32 {
+    gamma2tanh_code_f32(linear, bits)
+}
+
+/// The gamma2tanh code for `linear` at `bits` (1 to 16): the largest code whose bucket bottom — the value it decodes to — is at or below `linear`.
+///
+/// That is ×2ⁿ truncation, made exact: gamma 2 gets decode → encode exact for free because sqrt(x²) = x in IEEE arithmetic, but tanh and atanh are not exact inverses, so a decoded value sitting on a bucket bottom can come back a hair under it and truncate one code low (re-saving an image would drift it). The tanh estimate is settled against the decoder's own values, so every code round-trips. Above 16 bits an f32 stops separating adjacent codes. tanh of a large enough value rounds to exactly 1.0, so the estimate is clamped to the top code; NaN and negative input encode to 0.
+fn gamma2tanh_code_f32(linear: f32, bits: u32) -> u32 {
+    let top = (1u32 << bits) - 1;
+    let mut code = ((delinearize_gamma2tanh_f32(linear) * (1u32 << bits) as f32) as u32).min(top);
+    while code < top && linearize_gamma2tanh_bits_f32(code + 1, bits) <= linear {
+        code += 1;
+    }
+    while code > 0 && linearize_gamma2tanh_bits_f32(code, bits) > linear {
+        code -= 1;
+    }
+    code
+}
+
+/// Linearize an RGB triple (8-bit gamma2tanh per channel)
+pub fn linearize_gamma2tanh_rgb_f32(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    (
+        linearize_gamma2tanh_u8_f32(r),
+        linearize_gamma2tanh_u8_f32(g),
+        linearize_gamma2tanh_u8_f32(b),
+    )
+}
+
+/// Delinearize a linear RGB triple to 8-bit gamma2tanh per channel
+pub fn delinearize_gamma2tanh_rgb_f32(r: f32, g: f32, b: f32) -> (u8, u8, u8) {
+    (
+        delinearize_gamma2tanh_u8_f32(r),
+        delinearize_gamma2tanh_u8_f32(g),
+        delinearize_gamma2tanh_u8_f32(b),
+    )
+}
+
+// ==================== GAMMA 2 + TANH (HDR) FUNCTIONS (S44) ====================
+
+/// Linearize a gamma2tanh encoded value (0-1 range, S44 version): `atanh(encoded)²`.
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn linearize_gamma2tanh_s44(encoded: S44) -> S44 {
+    atanh_s44(encoded).square()
+}
+
+/// atanh for the S44 gamma2tanh decode (Scalar has none).
+///
+/// ½·ln((1+v)/(1−v)) loses v's low bits where 1 + v rounds to a 16-bit fraction, and near black that is most of v (code 5 decoded 0.4% dark). Below ½ the odd series v·Σ v²ᵏ/(2k+1) keeps them; eight terms reach past S44's precision. From ½ up, 1 − v is exact for a code and the log form is accurate.
+#[cfg(feature = "spirix")]
+fn atanh_s44(v: S44) -> S44 {
+    const RECIPROCALS: [S44; 8] = [sf!(1.0 / 3.0), sf!(1.0 / 5.0), sf!(1.0 / 7.0), sf!(1.0 / 9.0), sf!(1.0 / 11.0), sf!(1.0 / 13.0), sf!(1.0 / 15.0), sf!(1.0 / 17.0)];
+    if v < S44::HALF {
+        let v2 = v.square();
+        let mut power = v;
+        let mut sum = v;
+        for r in RECIPROCALS {
+            power = power * v2;
+            sum = sum + power * r;
+        }
+        sum
+    } else {
+        ((S44::ONE + v) / (S44::ONE - v)).ln() >> 1isize
+    }
+}
+
+/// The S44 gamma2tanh code for `linear` at `bits` (8 or 16): the largest code whose decoded value is at or below `linear`, settled against the decoder as in `gamma2tanh_code_f32`.
+///
+/// Every 8-bit code round-trips. At 16 bits S44's 16-bit fraction cannot separate every pair of adjacent codes once the tanh flattens (they decode about 8×10⁻⁵ apart in the upper midtones), so a 16-bit round trip is within one code (1,360 of 65,536 codes land one high); use the f32 path where 16-bit codes must survive exactly. For comparison, the gamma 2 S44 16-bit path misses 64,256 codes.
+#[cfg(feature = "spirix")]
+fn gamma2tanh_code_s44(linear: S44, bits: isize) -> u32 {
+    let top = (1u32 << bits) - 1;
+    let decode = |code: u32| linearize_gamma2tanh_s44(S44::from(code) >> bits);
+    let mut code = (delinearize_gamma2tanh_s44(linear) << bits).to_u32().min(top);
+    while code < top && decode(code + 1) <= linear {
+        code += 1;
+    }
+    while code > 0 && decode(code) > linear {
+        code -= 1;
+    }
+    code
+}
+
+/// Delinearize a linear value to gamma2tanh (0-1 range, S44 version): `tanh(√linear)`
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn delinearize_gamma2tanh_s44(linear: S44) -> S44 {
+    linear.sqrt().tanh()
+}
+
+/// Linearize an 8-bit gamma2tanh code (S44 version)
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn linearize_gamma2tanh_u8_s44(encoded: u8) -> S44 {
+    linearize_gamma2tanh_s44(S44::from(encoded) >> 8isize)
+}
+
+/// Delinearize a linear value to an 8-bit gamma2tanh code (S44 version)
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn delinearize_gamma2tanh_u8_s44(linear: S44) -> u8 {
+    gamma2tanh_code_s44(linear, 8) as u8
+}
+
+/// Linearize a 16-bit gamma2tanh code (S44 version)
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn linearize_gamma2tanh_u16_s44(encoded: u16) -> S44 {
+    linearize_gamma2tanh_s44(S44::from(encoded) >> 16isize)
+}
+
+/// Delinearize a linear value to a 16-bit gamma2tanh code (S44 version)
+#[cfg(feature = "spirix")]
+#[inline]
+pub fn delinearize_gamma2tanh_u16_s44(linear: S44) -> u16 {
+    gamma2tanh_code_s44(linear, 16) as u16
+}
+
+/// Linearize an RGB triple (8-bit gamma2tanh per channel, S44 version)
+#[cfg(feature = "spirix")]
+pub fn linearize_gamma2tanh_rgb_s44(r: u8, g: u8, b: u8) -> (S44, S44, S44) {
+    (
+        linearize_gamma2tanh_u8_s44(r),
+        linearize_gamma2tanh_u8_s44(g),
+        linearize_gamma2tanh_u8_s44(b),
+    )
+}
+
+/// Delinearize a linear RGB triple to 8-bit gamma2tanh per channel (S44 version)
+#[cfg(feature = "spirix")]
+pub fn delinearize_gamma2tanh_rgb_s44(r: S44, g: S44, b: S44) -> (u8, u8, u8) {
+    (
+        delinearize_gamma2tanh_u8_s44(r),
+        delinearize_gamma2tanh_u8_s44(g),
+        delinearize_gamma2tanh_u8_s44(b),
     )
 }
 

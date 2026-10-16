@@ -120,6 +120,53 @@ VSF's ×256 truncation has the SAME asymmetry (128 represents [0.5, 0.50390625) 
 
 No branches. No rounding. No arbitrary division. Just bitshifts and truncation.
 
+## HDR: Gamma 2, Then tanh (`gamma2tanh`)
+
+**`gamma2tanh` is VSF RGB with headroom: gamma 2, then tanh, per channel.** Same primaries, same white, same ×2ⁿ truncation. Only the transfer differs, and only where it matters, near the top.
+
+**Encoding:** `encoded = tanh(√linear)`
+**Linearization:** `linear = atanh(encoded)²`
+
+Linear 1.0 is diffuse white: paper white, the brightest thing in the scene that isn't a light source or a reflection of one. It encodes to tanh(1) = 0.7616, code 194 of 256. Everything brighter rolls off under the tanh instead of clipping, so speculars, the sun's glint and lamps keep their detail and their place above white.
+
+### Why tanh, and why after the square root
+
+- **Black stays gamma 2.** Near zero tanh(x) ≈ x, so the shadows are plain gamma 2 (within 1% for codes 1–16 at 8 bits) and black is 0.
+- **The roll-off happens in eye space.** Gamma 2 is roughly perceptual lightness, so the tanh compresses where the eye measures brightness. The eye's own front end saturates the same way: a cone's response follows Naka–Rushton, R = I/(I+σ) = ½(1 + tanh(½·ln(I/σ))), a tanh of the natural log of intensity. The decode, atanh(v) = ½·ln((1+v)/(1−v)), is a natural log too.
+- **The order doubles the headroom.** Decoding squares atanh, so the tanh's tail headroom squares on the way back to light and the stops double. tanh before the square root (√tanh(L)) gives about 60% of the stops for the same diffuse white code.
+- **One curve.** No knee, no piecewise segments, no fitted constants, no branches.
+
+### Headroom Comes From the Bit Depth
+
+×2ⁿ truncation decodes at bucket bottoms, so the top code is (2ⁿ−1)/2ⁿ, never 1, and atanh stays finite. With ×255 normalisation the top code would be exactly 1, infinitely bright: VSF's quantization rule is what makes this colourspace well defined.
+
+| Depth | Top code, above diffuse white |
+|---|---|
+| 8 bits | 3.28 stops |
+| 10 bits | 3.86 stops |
+| 12 bits | 4.34 stops |
+| 16 bits | 5.12 stops |
+
+Each extra bit adds about 0.35 to the tanh's reach (atanh(1−ε) ≈ ½·ln(2/ε)), squared on the way out. At 8 bits the stops above white get 32, 19, 7 and 1.6 codes: three usable stops. 16 bits gives all five.
+
+### Per Channel
+
+Each channel rolls off on its own, like gamma 2 applies per channel. VSF RGB's primaries come from the cone fundamentals, and each cone class saturates on its own curve, so per-channel roll-off is what vision does: very bright saturated colours shift and wash toward white the way they do in film and in the eye. A hue-preserving roll-off, if a display wants one, is a rendering decision, not something baked into the data.
+
+### Quantization
+
+The same ×2ⁿ truncation as gamma 2: a value's code is the largest code whose decoded value is at or below it. Gamma 2 gets decode → encode exact for free because sqrt(x²) = x in IEEE arithmetic. tanh and atanh are not exact inverses, so a decoded value on a bucket bottom can come back a hair under it and truncate one code low, and re-saving an image would drift it. The reference encoder therefore estimates with tanh and settles against the decoder's own values: every code at every depth from 1 to 16 bits round-trips (`tests/gamma2tanh.rs`). S44's 16-bit fraction can't separate every pair of adjacent 16-bit codes, so its 16-bit round trip is within one code.
+
+### Tagging and Fallback
+
+A plane or view says `encoding: gamma2tanh` (`idt/image.md`). A reader that knows the tag expands the top end into the display's headroom: it puts diffuse white at a comfortable brightness and drives highlights above it. On an OLED only the highlight pixels get brighter. A reader that shows the codes as plain gamma 2 gets a correctly exposed picture: exact shadows, diffuse white at code 194 (about 0.8 stops under full scale, like any normally exposed photo) and highlights softly rolled off rather than clipped. A VSF 0.10 reader refuses the plane by name, because `encoding` is a closed vocabulary; it never renders it wrong.
+
+Display headroom is reference-white placement. A panel that peaks at 1000 nits with diffuse white at 175 nits has log₂(1000/175) ≈ 2.5 stops above white. When content reaches further than the display can, roll it off into what the display has with the same tanh.
+
+### Prior Art: HLG
+
+HLG (ITU-R BT.2100) has the same structure: a square root below a knee, a compressive curve above it, diffuse white near 75% of the signal. It has proven that structure in broadcast. `gamma2tanh` replaces HLG's knee, its log segment, its hard clip and its three fitted constants (a = 0.17883277, b = 0.28466892, c = 0.55991073) with one smooth curve whose headroom is exact from the bit depth. Diffuse white lands at 76% of the signal, essentially where HLG puts it.
+
 ## Observer Model: Stockman & Sharpe 2000 10° Cone Fundamentals
 
 VSF RGB uses the **Stockman & Sharpe (2000) 10° cone fundamentals** for everything spectral: placing its own primaries, placing any other wavelength-defined primary, chromatic adaptation, and sensor characterisation. Earlier versions used the 2° set.

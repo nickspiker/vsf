@@ -67,7 +67,7 @@ A gap between two spans is a hole; so is an empty `v` inside one. Decoders reset
 | `layout` | `a` closed | `mosaic` \| `planar` |
 | `cfa` | `t_u3 [th, tw]` | mosaic only: channel index per cell; 2×2, 4×4, 6×6 all fit |
 | `black`, `white` | `t_f5 [k]` | raw counts, per channel |
-| `encoding` | `a` closed | `linear` \| `gamma2`; **absent ⇒ `gamma2`** (the integer-plane rule) — every writer here says which |
+| `encoding` | `a` closed | `linear` \| `gamma2` \| `gamma2tanh` (VSF RGB with HDR headroom, `colour.md`); **absent ⇒ `gamma2`** (the integer-plane rule) — every writer here says which |
 | `depth` | `u` | bits per sample, 1–128 |
 | `curve_start`, `curve_step`, `curve_counts`, `curve_values` | `t_f5 [k]`, `t_f5 [k]`, `t_u5 [k]`, `t_f5` | spectral sensitivity per channel, when characterized (the `spectral_response` codec, on the plane) |
 | `maker_crop` | `t_u5 [4]` | `[x, y, w, h]`: the maker's recommended crop — a suggestion, never applied |
@@ -124,7 +124,7 @@ Reserved ops (the still's default graph uses the first three and the view ops): 
 |---|---|---|
 | `graph`, `root` | `a`, `u` | which program, which op |
 | `space` | `a` | `vsf_rgb_linear` |
-| `encoding` | `a` closed | `linear` \| `gamma2` |
+| `encoding` | `a` closed | `linear` \| `gamma2` \| `gamma2tanh` |
 | `bits` | `u` | |
 | `purpose` | `a` closed | `default` \| `preview` \| `print` \| `technical` |
 
