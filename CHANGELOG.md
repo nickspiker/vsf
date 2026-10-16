@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`gamma2tanh`, VSF RGB with HDR headroom** ([`colour.md`](colour.md), "HDR: Gamma 2, Then tanh"): `encoded = tanh(√linear)`, per channel, decoded as `atanh(encoded)²`. Diffuse white (linear 1.0) lands on code 194 of 256; the top code is 3.28 stops above it at 8 bits, 3.86 at 10, 4.34 at 12 and 5.12 at 16, and shadows are plain gamma 2. Transfer functions in `colour::convert` for f32 (u8, u16, any depth from 1 to 16 bits, RGB triples) and S44, `ColourValue::{to,from}_linear_gamma2tanh`, and `gamma2tanh` as a plane/view `encoding` ([`idt/image.md`](idt/image.md)). Encoders settle the tanh estimate against the decoder, so decode → encode is exact at every code (S44 at 16 bits: within one code). `tests/gamma2tanh.rs`.
 
+### Fixed
+
+- **Gamma 2 S44 at 16 bits now round-trips at every code.** S44's square root of a decoded code could land a hair under it, and truncation took it one low: every odd code from 257 up (64,256 of 65,536) came back one less. The S44 encoders now settle their estimate against the decoder, which S44 can do exactly here because it decodes every 16-bit code strictly above the one below. f32 and 8-bit S44 were already exact and are unchanged. `tests/gamma2_round_trip.rs`.
+
 ### Changed
 
 - `ColourValue` gains two required methods, `to_linear_gamma2tanh` and `from_linear_gamma2tanh` (breaking for implementors outside this crate).

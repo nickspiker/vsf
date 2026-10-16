@@ -359,8 +359,7 @@ impl ColourValue<S44> for u8 {
 
     #[inline]
     fn from_linear_gamma2(linear: S44) -> Self {
-        let encoded = linear.sqrt();
-        (encoded << 8isize).to_u8()
+        delinearize_gamma2_u8_s44(linear)
     }
 
     #[inline]
@@ -507,8 +506,7 @@ impl ColourValue<S44> for u16 {
 
     #[inline]
     fn from_linear_gamma2(linear: S44) -> Self {
-        let encoded = linear.sqrt();
-        (encoded << 16isize).to_u16()
+        delinearize_gamma2_u16_s44(linear)
     }
 
     #[inline]
@@ -2321,13 +2319,12 @@ pub fn linearize_gamma2_u8_s44(encoded: u8) -> S44 {
     normalized.square()
 }
 
-/// Delinearize a linear value to 8-bit gamma 2 (S44 version)
+/// Delinearize a linear value to 8-bit gamma 2 (S44 version), settled against the decoder like the 16-bit one
 #[cfg(feature = "spirix")]
 #[inline]
 pub fn delinearize_gamma2_u8_s44(linear: S44) -> u8 {
-    let encoded = linear.sqrt();
-    let scaled = encoded << 8isize;
-    scaled.to_u8()
+    let estimate = (linear.sqrt() << 8isize).to_u32();
+    settle_code_s44(estimate, 255, linear, |c| linearize_gamma2_u8_s44(c as u8)) as u8
 }
 
 /// Linearize a 16-bit gamma 2 encoded value (S44 version)
@@ -2339,12 +2336,28 @@ pub fn linearize_gamma2_u16_s44(encoded: u16) -> S44 {
 }
 
 /// Delinearize a linear value to 16-bit gamma 2 (S44 version)
+///
+/// S44's square root of a decoded 16-bit code can land a hair under the code, and plain truncation then took it one low: every odd code from 257 up failed the round trip (64,256 of 65,536). S44 still decodes every 16-bit code strictly above the one below it, so settling the estimate against the decoder makes every code round-trip.
 #[cfg(feature = "spirix")]
 #[inline]
 pub fn delinearize_gamma2_u16_s44(linear: S44) -> u16 {
-    let encoded = linear.sqrt();
-    let scaled: S44 = encoded << 16;
-    scaled.to_u16()
+    let estimate = (linear.sqrt() << 16isize).to_u32();
+    settle_code_s44(estimate, 65535, linear, |c| linearize_gamma2_u16_s44(c as u16)) as u16
+}
+
+/// ×2ⁿ truncation made exact against a decoder: from `estimate`, the largest code up to `top` whose decoded value is at or below `linear`.
+///
+/// For transfers whose encode and decode are not exact inverses in S44 arithmetic, where a decoded bucket bottom can re-encode one code low. Unchanged from the estimate whenever the arithmetic was exact.
+#[cfg(feature = "spirix")]
+fn settle_code_s44(estimate: u32, top: u32, linear: S44, decode: impl Fn(u32) -> S44) -> u32 {
+    let mut code = estimate.min(top);
+    while code < top && decode(code + 1) <= linear {
+        code += 1;
+    }
+    while code > 0 && decode(code) > linear {
+        code -= 1;
+    }
+    code
 }
 
 /// Linearize an RGB triple (8-bit per channel, S44 version)
@@ -2420,12 +2433,17 @@ pub fn delinearize_gamma2tanh_bits_f32(linear: f32, bits: u32) -> u32 {
 ///
 /// That is ×2ⁿ truncation, made exact: gamma 2 gets decode → encode exact for free because sqrt(x²) = x in IEEE arithmetic, but tanh and atanh are not exact inverses, so a decoded value sitting on a bucket bottom can come back a hair under it and truncate one code low (re-saving an image would drift it). The tanh estimate is settled against the decoder's own values, so every code round-trips. Above 16 bits an f32 stops separating adjacent codes. tanh of a large enough value rounds to exactly 1.0, so the estimate is clamped to the top code; NaN and negative input encode to 0.
 fn gamma2tanh_code_f32(linear: f32, bits: u32) -> u32 {
-    let top = (1u32 << bits) - 1;
-    let mut code = ((delinearize_gamma2tanh_f32(linear) * (1u32 << bits) as f32) as u32).min(top);
-    while code < top && linearize_gamma2tanh_bits_f32(code + 1, bits) <= linear {
+    let estimate = (delinearize_gamma2tanh_f32(linear) * (1u32 << bits) as f32) as u32;
+    settle_code_f32(estimate, (1u32 << bits) - 1, linear, |c| linearize_gamma2tanh_bits_f32(c, bits))
+}
+
+/// ×2ⁿ truncation made exact against a decoder: from `estimate`, the largest code up to `top` whose decoded value is at or below `linear` (the f32 twin of `settle_code_s44`).
+fn settle_code_f32(estimate: u32, top: u32, linear: f32, decode: impl Fn(u32) -> f32) -> u32 {
+    let mut code = estimate.min(top);
+    while code < top && decode(code + 1) <= linear {
         code += 1;
     }
-    while code > 0 && linearize_gamma2tanh_bits_f32(code, bits) > linear {
+    while code > 0 && decode(code) > linear {
         code -= 1;
     }
     code
@@ -2480,19 +2498,11 @@ fn atanh_s44(v: S44) -> S44 {
 
 /// The S44 gamma2tanh code for `linear` at `bits` (8 or 16): the largest code whose decoded value is at or below `linear`, settled against the decoder as in `gamma2tanh_code_f32`.
 ///
-/// Every 8-bit code round-trips. At 16 bits S44's 16-bit fraction cannot separate every pair of adjacent codes once the tanh flattens (they decode about 8×10⁻⁵ apart in the upper midtones), so a 16-bit round trip is within one code (1,360 of 65,536 codes land one high); use the f32 path where 16-bit codes must survive exactly. For comparison, the gamma 2 S44 16-bit path misses 64,256 codes.
+/// Every 8-bit code round-trips. At 16 bits S44's 16-bit fraction cannot separate every pair of adjacent codes once the tanh flattens (they decode about 8×10⁻⁵ apart in the upper midtones), so a 16-bit round trip is within one code (1,360 of 65,536 codes land one high); use the f32 path where 16-bit codes must survive exactly.
 #[cfg(feature = "spirix")]
 fn gamma2tanh_code_s44(linear: S44, bits: isize) -> u32 {
-    let top = (1u32 << bits) - 1;
-    let decode = |code: u32| linearize_gamma2tanh_s44(S44::from(code) >> bits);
-    let mut code = (delinearize_gamma2tanh_s44(linear) << bits).to_u32().min(top);
-    while code < top && decode(code + 1) <= linear {
-        code += 1;
-    }
-    while code > 0 && decode(code) > linear {
-        code -= 1;
-    }
-    code
+    let estimate = (delinearize_gamma2tanh_s44(linear) << bits).to_u32();
+    settle_code_s44(estimate, (1u32 << bits) - 1, linear, |c| linearize_gamma2tanh_s44(S44::from(c) >> bits))
 }
 
 /// Delinearize a linear value to gamma2tanh (0-1 range, S44 version): `tanh(√linear)`
