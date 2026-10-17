@@ -260,7 +260,7 @@ pub enum VsfType {
     /// - **Uppercase** = Application-specific custom encodings (per-application basis)
     ///
     /// **Standard encoding identifiers** (lowercase, VSF spec):
-    /// - `b` = Binary blob (raw bytes, no encoding, vb#⦉size of blob⦊ where # represents the 2^# bits in the blob size)
+    /// - `b` = Binary blob (raw bytes, no encoding, vb#⦉size of blob in BITS⦊ where # represents the 2^# bits of the size field itself — 100 bytes is `vb4⦉800⦊`)
     /// - `a` = AV1 video codec (image/video compression)
     /// - `o` = Opus audio packet (one packet per value; an empty value is a declared hole, so a stream keeps its timing)
     /// - `z` = zstd compression
@@ -281,9 +281,9 @@ pub enum VsfType {
     ///
     /// Example usage:
     /// ```ignore
-    /// // Binary blob (raw bytes, no encoding) - displays as vb3{size} let file_bytes = std::fs::read("image.png")?; let binary = VsfType::v(b'b', file_bytes); let raw_bytes: &[u8] = binary.as_bytes(); // Convenience helper
+    /// // Binary blob (raw bytes, no encoding) - displays as vb#⦉bits⦊ let file_bytes = std::fs::read("image.png")?; let binary = VsfType::v(b'b', file_bytes); let raw_bytes: &[u8] = binary.as_bytes(); // Convenience helper
     ///
-    /// // Compress VSF data with zstd - displays as vz3{size} let original = VsfType::t_u3(tensor); let compressed = compress_zstd(&original.flatten()); let wrapped = VsfType::v(b'z', compressed);
+    /// // Compress VSF data with zstd - displays as vz#⦉bits⦊ let original = VsfType::t_u3(tensor); let compressed = compress_zstd(&original.flatten()); let wrapped = VsfType::v(b'z', compressed);
     ///
     /// // Can nest wrappers (compress then error-correct) let inner = VsfType::v(b'z', compressed_bytes); let outer = VsfType::v(b'r', reed_solomon_encode(&inner.flatten()));
     ///

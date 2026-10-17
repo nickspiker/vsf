@@ -667,8 +667,9 @@ fn format_crypto_hex(type_name: &str, data: &[u8]) -> String {
 
 /// Format v wrapper type with colour coding: v{algo}3⦉size⦊0xHEX
 fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
-    let wire_len = if data.len() > 0 { data.len() - 1 } else { 0 };
-    let size_str = format!("3⦉{}⦊", wire_len);
+    // The wire length of a `v` is in BITS at its minimal width (flatten.rs: `len << 3`, EWE-encoded), so show exactly that: `vb4⦉800⦊` for 100 bytes. The old display hard-coded width 3 and printed bytes − 1, matching neither.
+    let bits = (data.len() as u64) << 3;
+    let size_str = format!("{}⦉{}⦊", size_marker(usize::try_from(bits).unwrap_or(usize::MAX)), bits);
 
     let (head, notice, tail) = format_hex_head_tail(data);
     if head.len() == 1 && notice.is_none() {
@@ -3320,6 +3321,19 @@ pub fn hex_dump(data: &[u8]) -> String {
 #[cfg(test)]
 mod hex_elision_tests {
     use super::*;
+
+    /// The inspector shows a `v`'s size as the wire carries it: length in BITS, with the EWE width marker the encoder actually wrote (100 bytes → `vb4⦉800⦊`, never the old hard-coded `3⦉99⦊`).
+    #[test]
+    fn wrapped_size_is_bits_at_the_encoded_width() {
+        for len in [0usize, 1, 31, 32, 100, 9000] {
+            let data = vec![0xABu8; len];
+            let flat = VsfType::v(b'b', data.clone()).flatten();
+            let width = flat[2] as char; // [b'v', encoding, width marker, length…]
+            let bits = len * 8;
+            let shown = strip_ansi(&format_crypto_wrap(b'b', &data));
+            assert!(shown.starts_with(&format!("vb{}⦉{}⦊", width, bits)), "len {len}: shown {shown:?}, wire width {width}");
+        }
+    }
 
     #[test]
     fn elision_uses_configured_lengths_and_elides_large_blobs() {
