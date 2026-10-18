@@ -23,8 +23,10 @@ use crate::types::VsfType;
 pub struct DecodedImage {
     pub width: u32,
     pub height: u32,
-    /// Packed α + darkness pixels, row-major, `width * height` long. α byte = `0xFF` (opaque); RGB bytes = `255 − visible_RGB` (VSF RGB gamma2 darkness).
+    /// Packed α + darkness pixels, row-major, `width * height` long. α byte = `0xFF` (opaque); RGB bytes = `255 − visible_RGB` (VSF RGB gamma2 darkness), already mapped for the display (see [`decode_for_display`]).
     pub pixels: Vec<u32>,
+    /// The file's own encoding (the `image` section's `encoding` field, absent ⇒ `gamma2`), before display mapping.
+    pub encoding: crate::visual::Encoding,
 }
 
 #[derive(Debug)]
@@ -60,8 +62,37 @@ impl core::fmt::Display for ImageError {
 
 impl std::error::Error for ImageError {}
 
-/// Decode a full VSF image file — header + `image` section + tensor / AV1 payload — into a ready-to-composite α + darkness buffer.
+/// Decode a full VSF image file — header + `image` section + tensor / AV1 payload — into a ready-to-composite α + darkness buffer, for an SDR display (headroom 1).
 pub fn decode(data: &[u8]) -> Result<DecodedImage, ImageError> {
+    decode_for_display(data, 1.)
+}
+
+/// [`decode`] for a display whose peak is `headroom` × diffuse white. An untagged (gamma 2) image comes out unchanged on an SDR display. A `g2t` image is mapped through [`crate::colour::display::display_light`] for its own brightest code and re-expressed as the gamma 2 display codes this buffer carries, so its highlights fit the display instead of its codes being shown as if they were gamma 2.
+pub fn decode_for_display(data: &[u8], headroom: f32) -> Result<DecodedImage, ImageError> {
+    let mut img = decode_codes(data)?;
+    map_for_display(&mut img, headroom);
+    Ok(img)
+}
+
+/// Re-express the decoded codes as gamma 2 display codes for `headroom`: one 256-entry table per image, built for the image's brightest code. Identity for gamma 2 on an SDR display.
+fn map_for_display(img: &mut DecodedImage, headroom: f32) {
+    if img.encoding == crate::visual::Encoding::Gamma2 && !(headroom > 1.) {
+        return;
+    }
+    let peak = img.pixels.iter().map(|p| 255 - (p & 0xFF).min((p >> 8) & 0xFF).min((p >> 16) & 0xFF)).max().unwrap_or(0) as u8;
+    let light = crate::colour::display::display_lut_u8(img.encoding, headroom, peak);
+    let mut code = [0u32; 256];
+    for (c, out) in code.iter_mut().enumerate() {
+        *out = (light[c].sqrt() * 256.).min(255.) as u32;
+    }
+    for p in img.pixels.iter_mut() {
+        let dark = |shift: u32| (255 - code[(255 - ((*p >> shift) & 0xFF)) as usize]) << shift;
+        *p = (*p & 0xFF00_0000) | dark(16) | dark(8) | dark(0);
+    }
+}
+
+/// Decode to the file's own codes, no display mapping.
+fn decode_codes(data: &[u8]) -> Result<DecodedImage, ImageError> {
     let (header, _consumed) = VsfHeader::decode(data).map_err(ImageError::Parse)?;
 
     let img_field = header
@@ -98,11 +129,21 @@ pub fn decode(data: &[u8]) -> Result<DecodedImage, ImageError> {
             parse(data, &mut p).map_err(|e| ImageError::Parse(format!("section b: {:?}", e)))?;
     }
 
-    // Match the image payload by type, not field name: `vsfimg`/orb uses `data`, `builders::compressed_image` uses `pixels`. Take the first tensor or AV1 wrapper.
+    // Match the image payload by type, not field name: `vsfimg`/orb uses `data`, `builders::compressed_image` uses `pixels`. Take the first tensor or AV1 wrapper. The `encoding` field (absent ⇒ gamma 2) may sit on either side of it, so every field is read.
     let mut image_value: Option<VsfType> = None;
+    let mut encoding = crate::visual::Encoding::Gamma2;
     for _ in 0..img_field.child_count {
         let field = VsfField::parse(data, &mut p)
             .map_err(|e| ImageError::Parse(format!("field parse: {}", e)))?;
+        if field.name == "encoding" {
+            if let Some(VsfType::a(text)) = field.values.first() {
+                encoding = crate::visual::Encoding::parse(text).map_err(|e| ImageError::Parse(format!("image encoding: {e}")))?;
+            }
+            continue;
+        }
+        if image_value.is_some() {
+            continue;
+        }
         for v in field.values {
             match v {
                 VsfType::t_u3(_) => {
@@ -116,17 +157,16 @@ pub fn decode(data: &[u8]) -> Result<DecodedImage, ImageError> {
                 _ => {}
             }
         }
-        if image_value.is_some() {
-            break;
-        }
     }
     let image_value = image_value.ok_or(ImageError::MissingImageData)?;
 
-    match image_value {
+    let mut img = match image_value {
         VsfType::t_u3(tensor) => from_rgb_tensor(tensor.shape, tensor.data),
         VsfType::v(tag, av1_bytes) if tag == b'a' => from_av1(&av1_bytes),
         _ => Err(ImageError::UnsupportedDataType),
-    }
+    }?;
+    img.encoding = encoding;
+    Ok(img)
 }
 
 /// Build directly from an uncompressed `[h, w, 3]` VSF RGB gamma2 buffer.
@@ -137,7 +177,7 @@ fn from_rgb_tensor(shape: Vec<usize>, bytes: Vec<u8>) -> Result<DecodedImage, Im
     let h = shape[0] as u32;
     let w = shape[1] as u32;
     let pixels = pack_alpha_darkness(&bytes, w, h);
-    Ok(DecodedImage { width: w, height: h, pixels })
+    Ok(DecodedImage { width: w, height: h, pixels, encoding: crate::visual::Encoding::Gamma2 })
 }
 
 /// Decode an AV1 OBU bitstream → YCbCr → VSF RGB gamma2 → α + darkness. YCbCr inverse mirrors `vsfimg`'s encoder math byte-for-byte. Runs single-threaded (`n_threads` left at the default, but we only ever feed one frame) — safe for the OS-less wasm target where thread spawning would panic.
@@ -233,7 +273,7 @@ fn from_av1(av1: &[u8]) -> Result<DecodedImage, ImageError> {
         dav1d_close(NonNull::new(&mut Some(ctx) as *mut _));
     }
 
-    Ok(DecodedImage { width: width as u32, height: height as u32, pixels })
+    Ok(DecodedImage { width: width as u32, height: height as u32, pixels, encoding: crate::visual::Encoding::Gamma2 })
 }
 
 /// Pack VSF RGB gamma2 u8 triples into α + darkness u32: α=0xFF, darkness = 255 − visible. The buffer length must be `w * h * 3` (caller guarantees from a verified `[h, w, 3]` shape).

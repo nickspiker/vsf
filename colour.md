@@ -173,13 +173,26 @@ At 8 bits the cost is small and stated: shadows are gamma 2 to within 1% for cod
 
 What this needs:
 
-- **The flat `image` section gains `encoding`**, absent ⇒ `gamma2`, so every existing avatar and preview reads unchanged.
+- **The flat `image` section carries `encoding`** (done 2026-10-17: `builders::compressed_image_encoded`, `parse_compressed_image().colour_encoding`, `vsf::image::decode_for_display`), absent ⇒ `gamma2`, so every existing avatar and preview reads unchanged. Avatars may be `g2t` too: a reader from before the field ignores it and shows the codes as gamma 2, about 0.8 stops darker with soft highlights.
 - **AV1 previews say `transfer_characteristics = 2` (unspecified)** in the sequence header's colour config, since CICP has no code for this curve; the VSF tag is the statement.
-- **Readers expand the headroom** where the display has it (Display headroom, above) and show plain codes where it does not.
+- **Readers map for the display** (Display Mapping, below).
 
 ### Prior Art: HLG
 
 HLG (ITU-R BT.2100) has the same structure: a square root below a knee, a compressive curve above it, diffuse white near 75% of the signal. It has proven that structure in broadcast. `gamma2tanh` replaces HLG's knee, its log segment, its hard clip and its three fitted constants (a = 0.17883277, b = 0.28466892, c = 0.55991073) with one smooth curve whose headroom is exact from the bit depth. Diffuse white lands at 76% of the signal, essentially where HLG puts it.
+
+## Display Mapping
+
+Storage and display are separate stages, and stay separate. An encoding (`gamma2`, `g2t`, `linear`) says what scene light a code holds, diffuse white at 1.0, and never changes with the screen. Display mapping says how one particular display shows that light, and is never written back into a file. A display's own highlight curve may resemble `g2t`'s tanh; that is coincidence, not a shared definition.
+
+`colour::display::display_light(l, headroom, content_peak)` is the one mapping the stack's viewers call as their last step, so no two disagree:
+
+- **headroom** is the display's peak over diffuse white: 1 for an SDR monitor, the HDR/SDR ratio on an HDR panel.
+- **content_peak** is the brightest light the content holds: the image's own brightest code decoded, so a picture with mild highlights is not compressed for headroom it never uses.
+- When the content fits (`content_peak ≤ headroom`) the mapping is exactly linear, `l / headroom`: SDR content on any display, and HDR content on a display with room for it.
+- Otherwise it is linear up to a knee at 0.75 of the display's peak (`DISPLAY_KNEE`) and an extended-Reinhard shoulder above it, slope-continuous at the knee, monotone, and reaching the display's peak exactly at `content_peak`. On an SDR monitor a `g2t` picture's diffuse white then sits near 0.88 of peak, with its highlights in the top eighth.
+
+The result is display light as a fraction of peak, linear; the app applies its display's own transfer last (sRGB for a desktop window, the panel's measured curve on ferros). `display_lut_u8` builds the per-image 256-entry table, and `vsf::image::decode_for_display` applies it for the α + darkness buffers fluor and toka draw.
 
 ## Observer Model: Stockman & Sharpe 2000 10° Cone Fundamentals
 

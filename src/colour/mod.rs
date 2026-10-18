@@ -14,6 +14,7 @@
 //! Traditional colourspaces (sRGB, Adobe RGB, etc.) specify primaries using CIE xy chromaticity coordinates derived from the 1931 Standard Observer. These spaces are permanently bound to historical observer data and cannot be updated without changing the specification itself.
 
 pub mod convert;
+pub mod display;
 pub mod legacy;
 pub mod rec2020;
 pub mod spectral;

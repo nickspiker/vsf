@@ -1275,7 +1275,7 @@ pub const ENCODING_AV1: u8 = b'a';
 ///
 /// The `va` encoding tells us it's AV1, and AV1 bitstream contains dimensions. Provenance hash ensures integrity. No redundant metadata needed.
 ///
-/// Assumes VSF RGB colourspace (gamma 2, Rec.2020 primaries).
+/// Untagged: VSF RGB, gamma 2. For headroom use [`compressed_image_encoded`] with `g2t`.
 ///
 /// # Arguments
 /// * `av1_data` - AV1-encoded pixel data
@@ -1283,19 +1283,25 @@ pub const ENCODING_AV1: u8 = b'a';
 /// # Returns
 /// Complete VSF file bytes ready to write to disk
 pub fn compressed_image(av1_data: Vec<u8>) -> Result<Vec<u8>, String> {
-    VsfBuilder::new()
-        .provenance_only()
-        .add_section(
-            "image",
-            vec![("pixels".to_string(), VsfType::v(ENCODING_AV1, av1_data))],
-        )
-        .build()
+    compressed_image_encoded(av1_data, crate::visual::Encoding::Gamma2)
+}
+
+/// [`compressed_image`] with the pixels' encoding stated. `gamma2` writes no tag (untagged is always VSF RGB gamma 2); any other encoding adds an `encoding` field beside `pixels`. A reader that predates the field ignores it and shows the codes as gamma 2: a `g2t` image then looks about 0.8 stops darker with soft highlights, never broken.
+pub fn compressed_image_encoded(av1_data: Vec<u8>, encoding: crate::visual::Encoding) -> Result<Vec<u8>, String> {
+    let mut fields = vec![("pixels".to_string(), VsfType::v(ENCODING_AV1, av1_data))];
+    if encoding != crate::visual::Encoding::Gamma2 {
+        fields.push(("encoding".to_string(), VsfType::a(encoding.as_str().into())));
+    }
+    VsfBuilder::new().provenance_only().add_section("image", fields).build()
 }
 
 /// Parsed compressed image from a VSF file
 pub struct ParsedCompressedImage {
+    /// The `v` wrapper's codec byte (`b'a'` for AV1).
     pub encoding: u8,
     pub data: Vec<u8>,
+    /// What light the decoded codes hold: the section's `encoding` field, absent ⇒ `gamma2`.
+    pub colour_encoding: crate::visual::Encoding,
 }
 
 /// Parse a compressed image VSF file
@@ -1332,10 +1338,17 @@ pub fn parse_compressed_image(data: &[u8]) -> Result<ParsedCompressedImage, Stri
     // Get first value (the v-wrapped data)
     let value = pixels_field.values.first().ok_or("Empty 'pixels' field")?;
 
+    let colour_encoding = match section.get_field("encoding").and_then(|f| f.values.first()) {
+        Some(VsfType::a(text)) => crate::visual::Encoding::parse(text).map_err(|e| format!("image encoding: {e}"))?,
+        Some(_) => return Err("Expected text for the image's encoding field".to_string()),
+        None => crate::visual::Encoding::Gamma2,
+    };
+
     match value {
         VsfType::v(encoding, pixel_data) => Ok(ParsedCompressedImage {
             encoding: *encoding,
             data: pixel_data.clone(),
+            colour_encoding,
         }),
         _ => Err("Expected v type for pixels field".to_string()),
     }

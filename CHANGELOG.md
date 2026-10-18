@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `colour::display`: the display mapping, separate from storage ([`colour.md`](colour.md), "Display Mapping"). `display_light(l, headroom, content_peak)` is linear when the content fits the display and otherwise linear to a knee at 0.75 of peak with an extended-Reinhard shoulder that reaches peak at the content's brightest value; `display_lut_u8` builds the per-image table; `g2t_peak(bits)`.
+- The flat `image` section carries `encoding`: `builders::compressed_image_encoded` writes it (nothing for `gamma2`), `parse_compressed_image` returns it as `colour_encoding`, and `vsf::image::decode_for_display(data, headroom)` maps a `g2t` image for the display (`decode` is headroom 1). `DecodedImage` gains `encoding`. `tests/flat_image_encoding.rs`.
 - `g2t`, the short spelling of the `gamma2tanh` encoding: a reader accepts either, and writers here write `g2t`. No version change (no v11 writer had been deployed). Closed vocabularies may now list aliases (`closed_vocab!`, `"long" | "short"`).
 
 ### Fixed
