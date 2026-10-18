@@ -67,7 +67,7 @@ A gap between two spans is a hole; so is an empty `v` inside one. Decoders reset
 | `layout` | `a` closed | `mosaic` \| `planar` |
 | `cfa` | `t_u3 [th, tw]` | mosaic only: channel index per cell; 2×2, 4×4, 6×6 all fit |
 | `black`, `white` | `t_f5 [k]` | raw counts, per channel |
-| `encoding` | `a` closed | `linear` \| `gamma2` \| `gamma2tanh` (VSF RGB with HDR headroom, `colour.md`); **absent ⇒ `gamma2`** (the integer-plane rule) — every writer here says which |
+| `encoding` | `a` closed | `linear` \| `gamma2` \| `g2t`, also spelled `gamma2tanh` (VSF RGB with HDR headroom, `colour.md`); **absent ⇒ `gamma2`** (the integer-plane rule) — every writer here says which |
 | `depth` | `u` | bits per sample, 1–128 |
 | `curve_start`, `curve_step`, `curve_counts`, `curve_values` | `t_f5 [k]`, `t_f5 [k]`, `t_u5 [k]`, `t_f5` | spectral sensitivity per channel, when characterized (the `spectral_response` codec, on the plane) |
 | `maker_crop` | `t_u5 [4]` | `[x, y, w, h]`: the maker's recommended crop — a suggestion, never applied |
@@ -124,7 +124,7 @@ Reserved ops (the still's default graph uses the first three and the view ops): 
 |---|---|---|
 | `graph`, `root` | `a`, `u` | which program, which op |
 | `space` | `a` | `vsf_rgb_linear` |
-| `encoding` | `a` closed | `linear` \| `gamma2` \| `gamma2tanh` |
+| `encoding` | `a` closed | `linear` \| `gamma2` \| `g2t` (or `gamma2tanh`); **absent ⇒ `gamma2`**, as for a plane: untagged is always VSF RGB, gamma 2 |
 | `bits` | `u` | |
 | `purpose` | `a` closed | `default` \| `preview` \| `print` \| `technical` |
 
@@ -136,7 +136,7 @@ Reserved ops (the still's default graph uses the first three and the view ops): 
 | `profile_name` | `a` | DNG `ProfileName` |
 | `calibration_signature` | `a` | DNG `CameraCalibrationSignature`, or the one a paste wrote |
 
-Foreign *metadata* is kept verbatim. Foreign *renderings* (a maker's JPEG preview) are not: a preview is a `plane` with `role = preview` and lineage, re-rendered from the sensor plane, which any reader may regenerate.
+Foreign *metadata* is kept verbatim. Foreign *renderings* (a maker's JPEG preview) are not: a preview is a `plane` with `role = preview` and lineage, re-rendered from the sensor plane, which any reader may regenerate. *(planned 2026-10-17)*: a preview of content with light above diffuse white is `encoding = g2t` at 8 bits, so thumbnails keep their highlights on an HDR display; SDR content stays untagged gamma 2 (`colour.md`, "8-bit Pictures With Headroom").
 
 ### `provenance`
 Unchanged from `spectral_image` (`handle`, `calibration_hash`, `camera_ihi`, `identity`). *(design)*: superseded by `attest`/`witness`/`run` from `lumis/docs/provenance.md`, `lineage`, `change` per generation, and `signature.<n>` manifest signatures — see [`fields.md`](fields.md).

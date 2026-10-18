@@ -159,9 +159,23 @@ The same ×2ⁿ truncation as gamma 2: a value's code is the largest code whose 
 
 ### Tagging and Fallback
 
-A plane or view says `encoding: gamma2tanh` (`idt/image.md`). A reader that knows the tag expands the top end into the display's headroom: it puts diffuse white at a comfortable brightness and drives highlights above it. On an OLED only the highlight pixels get brighter. A reader that shows the codes as plain gamma 2 gets a correctly exposed picture: exact shadows, diffuse white at code 194 (about 0.8 stops under full scale, like any normally exposed photo) and highlights softly rolled off rather than clipped. A VSF 0.10 reader refuses the plane by name, because `encoding` is a closed vocabulary; it never renders it wrong.
+A plane or view says `encoding: g2t` (`idt/image.md`). `gamma2tanh` is the same tag spelled long: readers accept either, and writers write `g2t`. A reader that knows the tag expands the top end into the display's headroom: it puts diffuse white at a comfortable brightness and drives highlights above it. On an OLED only the highlight pixels get brighter. A reader that shows the codes as plain gamma 2 gets a correctly exposed picture: exact shadows, diffuse white at code 194 (about 0.8 stops under full scale, like any normally exposed photo) and highlights softly rolled off rather than clipped. A VSF 0.10 reader refuses the plane by name, because `encoding` is a closed vocabulary; it never renders it wrong.
 
 Display headroom is reference-white placement. A panel that peaks at 1000 nits with diffuse white at 175 nits has log₂(1000/175) ≈ 2.5 stops above white. When content reaches further than the display can, roll it off into what the display has with the same tanh.
+
+### 8-bit Pictures With Headroom *(planned 2026-10-17)*
+
+ferros is HDR native, so every reader in the stack supports `gamma2tanh` by default, and the stack's 8-bit pictures use it **when the content has light above diffuse white**: renders of raws and VSF captures, HDR sources, and their preview planes, preview tiers (`idt/image.md`) and flat `image` sections (thumbnails, attachment previews; `builders::compressed_image`). Content with nothing above white (UI captures, text, SDR imports, most avatars and icons) stays plain VSF RGB. Exports to foreign formats keep their own transfer (an sRGB JPEG is sRGB).
+
+The tagging is the existing rule: **untagged is VSF RGB, gamma 2**; a picture tagged `g2t` is VSF RGB with the extension (same primaries, same white, same ×2ⁿ truncation, tanh on top). A writer adds the tag only when it uses the curve.
+
+At 8 bits the cost is small and stated: shadows are gamma 2 to within 1% for codes 1–16, diffuse white sits at code 194, and codes 195–255 hold 3.28 stops above white (32, 19, 7 and 1.6 codes per stop). The range up to white gets 194 codes instead of 256, so steps there are about 1.32× coarser; the stack dithers every 8-bit output already, which keeps that from banding. That cost is why SDR content stays gamma 2: the tanh would spend 61 of its 256 codes on range it never uses. A reader that ignores the tag sees a correctly exposed picture with soft highlights (Tagging and Fallback, above).
+
+What this needs:
+
+- **The flat `image` section gains `encoding`**, absent ⇒ `gamma2`, so every existing avatar and preview reads unchanged.
+- **AV1 previews say `transfer_characteristics = 2` (unspecified)** in the sequence header's colour config, since CICP has no code for this curve; the VSF tag is the statement.
+- **Readers expand the headroom** where the display has it (Display headroom, above) and show plain codes where it does not.
 
 ### Prior Art: HLG
 

@@ -2,7 +2,7 @@
 //!
 //! A still is the one-frame case of a beam track: `visual` + `track.b0` + `span.b0.s0` (one frame, naming a plane) + `plane.b0.s0.sensor` + `capture` + `characterization` + `graph.g0` + `view.v0`. Video adds a rate declaration and spans whose frames are inline; nothing about a still changes when it does. Every section is written with a content hash in its table-of-contents entry, so each can be checked — and later signed — on its own.
 //!
-//! The normative field tables live in `idt/image.md`; this module's doc comments are the implementation's own account. What a reader does with absence: no `characterization` ⇒ the samples are VSF RGB; no `graph` ⇒ render the sensor plane through `black_white → idt(0)`; a `plane` with no `encoding` ⇒ `gamma2` (the integer-plane rule of `colour.md`) — which is why every writer here emits `encoding`, and why the legacy `spectral_image` section reads as `linear`: its only writer ever was opsin, writing linear counts.
+//! The normative field tables live in `idt/image.md`; this module's doc comments are the implementation's own account. What a reader does with absence: no `characterization` ⇒ the samples are VSF RGB; no `graph` ⇒ render the sensor plane through `black_white → idt(0)`; a `plane` or `view` with no `encoding` ⇒ `gamma2`, always (the integer-plane rule of `colour.md`) — which is why every writer here emits `encoding`, and why the legacy `spectral_image` section reads as `linear`: its only writer ever was opsin, writing linear counts.
 //!
 //! [`Visual::to_spectral_image`] / [`Visual::from_spectral_image`] bridge to the [`crate::spectral_image::SpectralImage`] in-memory model opsin renders from, so a consumer can adopt the container without rewriting its pipeline.
 
@@ -44,8 +44,9 @@ fn bad(s: impl Into<String>) -> VisualError {
 }
 
 /// Closed vocabularies — a reader fails loud on a value it does not know.
+/// A closed vocabulary: each variant writes its first spelling and reads that or any alias after `|`.
 macro_rules! closed_vocab {
-    ($name:ident { $($variant:ident => $s:literal),+ $(,)? }, $what:literal) => {
+    ($name:ident { $($variant:ident => $s:literal $(| $alias:literal)*),+ $(,)? }, $what:literal) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum $name { $($variant),+ }
         impl $name {
@@ -53,7 +54,7 @@ macro_rules! closed_vocab {
                 match self { $($name::$variant => $s),+ }
             }
             pub fn parse(s: &str) -> Result<Self, VisualError> {
-                match s { $($s => Ok($name::$variant),)+ other => Err(bad(format!("unknown {} '{}'", $what, other))) }
+                match s { $($s $(| $alias)* => Ok($name::$variant),)+ other => Err(bad(format!("unknown {} '{}'", $what, other))) }
             }
         }
     };
@@ -62,7 +63,7 @@ macro_rules! closed_vocab {
 closed_vocab!(TrackKind { Beam => "beam", Wave => "wave", Timecode => "timecode", Annotation => "annotation", Data => "data" }, "track kind");
 closed_vocab!(TrackRole { Capture => "capture", Derived => "derived", Display => "display", Preview => "preview", Calibration => "calibration" }, "track role");
 closed_vocab!(PlaneRole { Sensor => "sensor", Display => "display", Preview => "preview", Depth => "depth", Ir => "ir", Uv => "uv", Confidence => "confidence", Motion => "motion", Matte => "matte", Mask => "mask", Alpha => "alpha", Dark => "dark", Flat => "flat", Bias => "bias", Derived => "derived" }, "plane role");
-closed_vocab!(Encoding { Linear => "linear", Gamma2 => "gamma2", Gamma2Tanh => "gamma2tanh" }, "encoding");
+closed_vocab!(Encoding { Linear => "linear", Gamma2 => "gamma2", Gamma2Tanh => "g2t" | "gamma2tanh" }, "encoding");
 closed_vocab!(Purpose { Default => "default", Preview => "preview", Print => "print", Technical => "technical" }, "view purpose");
 
 /// A track: one stream of frames (beam), samples (wave), marks (timecode), notes (annotation) or sensor data (data).
@@ -797,7 +798,7 @@ impl View {
         vec![("graph".into(), VsfType::a(self.graph.clone())), ("root".into(), VsfType::u(self.root, false)), ("space".into(), VsfType::a(self.space.clone())), ("encoding".into(), VsfType::a(self.encoding.as_str().into())), ("bits".into(), VsfType::u(self.bits as usize, false)), ("purpose".into(), VsfType::a(self.purpose.as_str().into()))]
     }
     fn from_section(id: &str, s: &VsfSection) -> Result<View, VisualError> {
-        Ok(View { id: id.into(), graph: text(s, "graph"), root: s.uint("root").unwrap_or(0) as usize, space: text(s, "space"), encoding: Encoding::parse(s.text("encoding").unwrap_or("linear"))?, bits: s.uint("bits").unwrap_or(16) as u8, purpose: Purpose::parse(s.text("purpose").unwrap_or("default"))? })
+        Ok(View { id: id.into(), graph: text(s, "graph"), root: s.uint("root").unwrap_or(0) as usize, space: text(s, "space"), encoding: match s.text("encoding") { Some(e) => Encoding::parse(e)?, None => Encoding::Gamma2 }, bits: s.uint("bits").unwrap_or(16) as u8, purpose: Purpose::parse(s.text("purpose").unwrap_or("default"))? })
     }
 }
 
@@ -1071,5 +1072,31 @@ impl Visual {
         };
         let view = self.default_graph().map(|g| g.to_view_transform()).filter(|v| !v.ops.is_empty());
         Ok(SpectralImage { width: p.width, height: p.height, channels: p.channels.clone(), layout: p.layout.clone(), samples, black: p.black.clone(), white: p.white.clone(), make, model, provenance: self.provenance.clone(), profile: self.characterization.clone(), view })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Untagged is always VSF RGB gamma 2: a view (like a plane) that omits `encoding` reads as `gamma2`, never `linear`.
+    #[test]
+    fn a_view_without_encoding_is_gamma2() {
+        let mut s = VsfSection::new("view.v0");
+        s.add_field("graph", VsfType::a("g0".into()));
+        s.add_field("root", VsfType::u(0, false));
+        let v = View::from_section("v0", &s).unwrap();
+        assert_eq!(v.encoding, Encoding::Gamma2);
+        s.add_field("encoding", VsfType::a("gamma2tanh".into()));
+        assert_eq!(View::from_section("v0", &s).unwrap().encoding, Encoding::Gamma2Tanh);
+    }
+
+    /// `g2t` is the short spelling of `gamma2tanh`: both read as the same encoding, and writers emit `g2t`.
+    #[test]
+    fn g2t_reads_as_gamma2tanh() {
+        assert_eq!(Encoding::parse("g2t").unwrap(), Encoding::Gamma2Tanh);
+        assert_eq!(Encoding::parse("gamma2tanh").unwrap(), Encoding::Gamma2Tanh);
+        assert_eq!(Encoding::Gamma2Tanh.as_str(), "g2t");
+        assert!(Encoding::parse("G2T").is_err());
     }
 }

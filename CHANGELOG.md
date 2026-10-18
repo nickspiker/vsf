@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `g2t`, the short spelling of the `gamma2tanh` encoding: a reader accepts either, and writers here write `g2t`. No version change (no v11 writer had been deployed). Closed vocabularies may now list aliases (`closed_vocab!`, `"long" | "short"`).
+
+### Fixed
+
+- A `view` with no `encoding` reads as `gamma2`, the same as a plane: untagged is always VSF RGB, gamma 2. It read as `linear` before. Every writer in this crate emits `encoding`, so no file written here changes meaning ([`idt/image.md`](idt/image.md)).
+
+### Docs
+
+- `colour.md`, "8-bit Pictures With Headroom" *(planned)*: 8-bit pictures and previews use `gamma2tanh` only when the content has light above diffuse white; SDR stays untagged gamma 2; the flat `image` section gains `encoding` (absent ⇒ `gamma2`); AV1 previews mark their transfer unspecified.
+
 ## [0.11.0] - format v11 (reads v9 and v10 unchanged)
 
 ### Added
