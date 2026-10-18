@@ -153,6 +153,34 @@ impl Plane {
     pub fn section_name(&self) -> String {
         format!("plane.{}.{}.{}", self.track, self.seq, self.name)
     }
+
+    /// The plane as LINEAR counts: `(samples, black, white)`. A linear plane is returned as stored. A `gamma2` or `g2t` plane is decoded code by code (×2ⁿ, bucket bottom, the VSF rule; its codes start at 0) and re-packed at 16 bits with black 0 and white placed so its brightest light still fits: `white = 65535 / max(1, peak)`, so diffuse white stays at `white` and the highlights a `g2t` plane holds sit above it rather than clipping. Readers that want counts (opsin's bridge, limbus's raw reader) go through here and never see an encoded plane as if it were linear.
+    pub fn linear_samples(&self) -> Result<(BitPackedTensor, Vec<f32>, Vec<f32>), VisualError> {
+        let t = match &self.samples {
+            Samples::Packed(t) => t,
+            Samples::Wrapped(code, _) => return Err(bad(format!("plane is wrapped under codec '{}' — not a bit-packed plane", *code as char))),
+        };
+        if self.encoding == Encoding::Linear {
+            return Ok((t.clone(), self.black.clone(), self.white.clone()));
+        }
+        if t.bit_depth > 16 {
+            return Err(bad(format!("{}-bit {} plane: encoded planes are 1 to 16 bits", t.bit_depth, self.encoding.as_str())));
+        }
+        let bits = t.bit_depth as u32;
+        let decode = |c: u16| match self.encoding {
+            Encoding::Gamma2Tanh => crate::colour::convert::linearize_gamma2tanh_bits_f32(c as u32, bits),
+            _ => {
+                let e = c as f32 / (1u32 << bits) as f32;
+                e * e
+            }
+        };
+        let light: Vec<f32> = t.unpack_u16().into_iter().map(decode).collect();
+        let peak = light.iter().copied().fold(1f32, f32::max);
+        let white = 65535. / peak;
+        let counts: Vec<u16> = light.iter().map(|&l| (l * white + 0.5).min(65535.) as u16).collect();
+        let k = self.white.len().max(1);
+        Ok((BitPackedTensor::pack(16, t.shape.clone(), &counts), vec![0.; k], vec![white; k]))
+    }
 }
 
 /// The capture facts: the exposure triangle, the optics, when and where, the body and lens, the mode and the stack recipe — what EXIF and DNG carry today, with Eagle time and a `WorldCoord` where a string and a sexagesimal triple used to be.
@@ -1062,16 +1090,14 @@ impl Visual {
     /// Bridge to the in-memory model: the primary plane as the image, the characterization as its profile, the default graph's view ops as its view log. Extra planes, the capture facts and foreign metadata stay on the `Visual`.
     pub fn to_spectral_image(&self) -> Result<SpectralImage, VisualError> {
         let p = self.primary_plane().ok_or(VisualError::Missing("plane"))?;
-        let samples = match &p.samples {
-            Samples::Packed(t) => t.clone(),
-            Samples::Wrapped(code, _) => return Err(bad(format!("primary plane is wrapped under codec '{}' — not a bit-packed plane", *code as char))),
-        };
+        // The in-memory model holds linear counts, so an encoded plane is linearized on the way (`Plane::linear_samples`).
+        let (samples, black, white) = p.linear_samples()?;
         let (make, model) = match &self.capture {
             Some(c) => (c.make.clone(), c.model.clone()),
             None => (String::new(), String::new()),
         };
         let view = self.default_graph().map(|g| g.to_view_transform()).filter(|v| !v.ops.is_empty());
-        Ok(SpectralImage { width: p.width, height: p.height, channels: p.channels.clone(), layout: p.layout.clone(), samples, black: p.black.clone(), white: p.white.clone(), make, model, provenance: self.provenance.clone(), profile: self.characterization.clone(), view })
+        Ok(SpectralImage { width: p.width, height: p.height, channels: p.channels.clone(), layout: p.layout.clone(), samples, black, white, make, model, provenance: self.provenance.clone(), profile: self.characterization.clone(), view })
     }
 }
 
@@ -1089,6 +1115,25 @@ mod tests {
         assert_eq!(v.encoding, Encoding::Gamma2);
         s.add_field("encoding", VsfType::a("gamma2tanh".into()));
         assert_eq!(View::from_section("v0", &s).unwrap().encoding, Encoding::Gamma2Tanh);
+    }
+
+    /// An encoded plane reaches the in-memory model as linear counts: gamma 2 squares, `g2t` keeps its highlights above white.
+    #[test]
+    fn encoded_planes_linearize_with_room_above_white() {
+        use crate::spectral_image::PlaneLayout;
+        let codes: Vec<u16> = vec![0, 128, 194, 255];
+        let mut p = Plane::sensor("b0", "s0", 4, 1, vec![], PlaneLayout::Planar, vec![0.], vec![255.], BitPackedTensor::pack(8, vec![1, 4], &codes));
+        p.encoding = Encoding::Gamma2;
+        let (t, black, white) = p.linear_samples().unwrap();
+        assert_eq!((black[0], white[0], t.bit_depth), (0., 65535., 16));
+        assert_eq!(t.unpack_u16()[1], 16384);
+        p.encoding = Encoding::Gamma2Tanh;
+        let (t, _, white) = p.linear_samples().unwrap();
+        let counts = t.unpack_u16();
+        assert_eq!(counts[3], 65535, "the brightest code takes the top count");
+        assert!(white[0] < 65535. / 9.);
+        let diffuse = counts[2] as f32 / white[0];
+        assert!((diffuse - 1.).abs() < 0.02, "code 194 is diffuse white: {diffuse}");
     }
 
     /// `g2t` is the short spelling of `gamma2tanh`: both read as the same encoding, and writers emit `g2t`.

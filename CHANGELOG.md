@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Visual::to_spectral_image` ignored the plane's `encoding`, so a `gamma2` or `g2t` plane reached the in-memory model as if its codes were linear counts. New `Plane::linear_samples` decodes an encoded plane (×2ⁿ, bucket bottom) to 16-bit linear counts with white at `65535 / max(1, peak)`, so a `g2t` plane's highlights sit above white; the bridge uses it (and limbus's raw reader). Linear planes are untouched.
+
 - A `view` with no `encoding` reads as `gamma2`, the same as a plane: untagged is always VSF RGB, gamma 2. It read as `linear` before. Every writer in this crate emits `encoding`, so no file written here changes meaning ([`idt/image.md`](idt/image.md)).
 
 ### Docs
