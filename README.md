@@ -4,9 +4,11 @@
 
 # VSF (Versatile Serial Format)
 
-A self-describing binary container, and a colour model that says what a picture claims.
+A self-describing binary format for any kind of data. For images, it adds a colour model that says what each one claims.
 
 Use DNG. Use Protobuf. Write JSON. All of them work, and nothing here asks you to stop. What this repo is: a long stretch of work on making a better option exist, for anyone who wants one. Every value carries its type. Every file carries its hash. Every number is as wide as it needs to be and no wider, with no ceiling. Every colour entry says whether it was measured or guessed. None of that is new on its own. Having all of it in one open format, checked by default, is the point.
+
+**Readable by people and by AI.** Every value carries its type and size, and every section its name, so a file can be printed exactly as it is stored, with no schema and without the program that wrote it. `vsfinfo` shows each value in VSF's own notation, type and size first (`z3⦉9⦊ version`, `l5⦉96002205⦊ File length`), each section by name, offset and size, and whether the hashes verify. A person can read that, and so can a language model, which can then explain or check a file it has never seen. The printout is for reading; files are written by code.
 
 **Crate:** `vsf` 0.10.1, format v10, reads v9. **Docs and examples:** https://holdmyoscilloscope.com/vsf/
 
@@ -152,7 +154,7 @@ Three layers above that:
 
 0. **Content hashes per section.** `VsfBuilder::content_hashes(true)` gives every table-of-contents entry a BLAKE3 of its body, checked by `Document::content_hash_ok`. A section that is never moved stays provable whatever is appended after it.
 1. **Signatures.** `sign_section` signs a hash of the whole document with that section's signature slot zeroed, so it proves the file as built and any later append invalidates it. Manifest signatures, which name sections by content hash so a camera's capture, a lab's thumbnail and an editor's generation each verify on their own, are the next milestone in [`idt/image.md`](idt/image.md).
-2. **Calibration hashes.** A RAW names its dark, flat, bias, vignette and distortion frames by hash, so the wrong frame is caught before it corrupts a picture.
+2. **Calibration hashes.** A RAW names its dark, flat, bias, vignette and distortion frames by hash, so the wrong frame is caught before it corrupts a photograph.
 
 BLAKE3 runs at several GB/s per core, faster than the storage the file is going to, so the hash costs nothing you would notice.
 
