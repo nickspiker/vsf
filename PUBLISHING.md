@@ -2,7 +2,7 @@
 
 ## Order
 
-`vsf` depends on `vsf-derive` (this repo's `derive/`), so the derive crate goes first:
+`vsf` depends on `vsf-derive` (this repo's `derive/`, the `#[derive(Vsf)]` macro behind the `derive` feature), so the derive crate goes first. The two are versioned in lockstep and vsf requires the derive at exactly its own version (`=0.10.0`), because the derive generates code against that release's API:
 
 ```bash
 cd derive && cargo publish      # vsf-derive

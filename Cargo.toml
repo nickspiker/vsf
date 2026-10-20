@@ -98,7 +98,8 @@ resize = { version = "0.8.8", optional = true }
 rgb = { version = "0.8.52", optional = true }
 
 [dependencies.vsf-derive]
-version = "0.1.0"
+# Pinned exactly: the derive generates code against this vsf release's API, so the two ship together at the same version (the serde/serde_derive pattern).
+version = "=0.10.0"
 path = "derive"
 optional = true
 
