@@ -3,6 +3,10 @@ name = "vsf-derive"
 version = "0.1.0"
 edition = "2021"
 description = "Derive macro for VSF section codecs — one struct definition, both codec halves"
+license-file = "LICENSE"
+repository = "https://github.com/nickspiker/vsf"
+keywords = ["vsf", "derive", "serialization"]
+categories = ["encoding"]
 
 [lib]
 proc-macro = true
