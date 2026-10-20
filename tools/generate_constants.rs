@@ -98,8 +98,6 @@ const PROPHOTO_GREEN_XY: [f64; 2] = [0.1596, 0.8404];
 const PROPHOTO_BLUE_XY: [f64; 2] = [0.0366, 0.0001];
 const PROPHOTO_WHITE_XYZ: [f64; 3] = [0.3457 / 0.3585, 1.0, (1.0 - 0.3457 - 0.3585) / 0.3585];
 
-/// ICC profile connection space illuminant (D50), XYZ normalised to Y = 1. ICC v4 colorant tags (rXYZ/gXYZ/bXYZ) are chromatically adapted to this white.
-const D50_XYZ: [f64; 3] = [0.9642, 1.0, 0.8249];
 
 /// CIE 2019 D65 relative spectral power distribution: 1nm from 300nm to 830nm (531 samples)
 const D65_START_NM: usize = 300;
@@ -519,16 +517,6 @@ fn s44_module(items: &[(&str, &[f64])]) -> String {
     out
 }
 
-/// diag(d) · M for a column-major M: scales row i of every column by d[i]
-fn scale_rows(d: &[f64; 3], m: &[f64; 9]) -> [f64; 9] {
-    let mut out = *m;
-    for col in 0..3 {
-        for row in 0..3 {
-            out[col * 3 + row] *= d[row];
-        }
-    }
-    out
-}
 
 /// LMS cone response to CIE D65 under the (sum-normalised) SS2000 10° fundamentals, summed over 390..=830nm. Unnormalised: the caller scales it to the photopic luminance of Illuminant E.
 fn d65_lms(lms_1nm: &[f64]) -> [f64; 3] {
@@ -559,12 +547,6 @@ fn build_wavelength_rgb_to_lms_matrix(lms_1nm: &[f64], primaries_nm: [f64; 3], w
     scaled
 }
 
-/// Von Kries adaptation, expressed in VSF RGB, that carries `white_vsf` to Illuminant E (VSF `[1,1,1]`): A = LMS→VSF · diag(1 / LMS(white)) · VSF→LMS. Illuminant E is `[1,1,1]` in the sum-normalised LMS basis by construction of VSF_RGB2LMS.
-fn von_kries_to_e(vsf_to_lms: &[f64; 9], lms_to_vsf: &[f64; 9], white_vsf: &[f64; 3]) -> [f64; 9] {
-    let white_lms = apply_matrix_3x3(vsf_to_lms, white_vsf);
-    let gain = [1.0 / white_lms[0], 1.0 / white_lms[1], 1.0 / white_lms[2]];
-    convert_matrix_3x3(lms_to_vsf, &scale_rows(&gain, vsf_to_lms))
-}
 
 /// Build VSF RGB → XYZ transformation matrix Each ROW is one primary's normalized [x, y, z] triplet (sum normalization) Uses normalized 1nm data where Y (luminance) is scaled to peak at 1.0
 fn build_vsf_to_xyz_matrix(xyz_1nm: &[f64]) -> [f64; 9] {
@@ -896,7 +878,6 @@ fn format_xyz_1nm_array(data: &[f64]) -> String {
 fn write_xyz_constants(
     vsf_to_xyz: &[f64; 9],
     xyz_to_vsf: &[f64; 9],
-    xyz_d50_to_vsf: &[f64; 9],
     vsf_to_srgb: &[f64; 9],
     srgb_to_vsf: &[f64; 9],
     vsf_to_adobe_rgb: &[f64; 9],
@@ -945,12 +926,7 @@ use crate::colour::spectrum::ConstSpectrum;
 
 /// XYZ → VSF RGB transformation matrix
 ///
-/// Converts CIE 1931 XYZ colourspace to linear VSF RGB. Inverse of VSF_RGB2XYZ. Colorimetric: XYZ of Illuminant E maps to VSF `[1,1,1]`; no adaptation. For ICC profile connection space values (D50-relative) use XYZ_D50_2VSF_RGB.
-{}
-
-/// XYZ (D50 PCS) → VSF RGB transformation matrix
-///
-/// XYZ2VSF_RGB with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from the ICC profile connection space illuminant D50 to Illuminant E folded in, so PCS white maps to VSF `[1,1,1]`. Use for ICC colorant tags (rXYZ/gXYZ/bXYZ), which are D50-adapted by the ICC spec.
+/// Converts CIE 1931 XYZ colourspace to linear VSF RGB. Inverse of VSF_RGB2XYZ. Colorimetric: XYZ of Illuminant E maps to VSF `[1,1,1]`; no adaptation. ICC connection-space values are D50-adapted by the profile maker; undo that with the profile's own `chad` first (vsfimg does), then use this.
 {}
 
 /// VSF RGB → sRGB transformation matrix
@@ -1016,7 +992,6 @@ use crate::colour::spectrum::ConstSpectrum;
         format_xyz_1nm_array(xyz_1nm),
         format_matrix(vsf_to_xyz, "VSF_RGB2XYZ"),
         format_matrix(xyz_to_vsf, "XYZ2VSF_RGB"),
-        format_matrix(xyz_d50_to_vsf, "XYZ_D50_2VSF_RGB"),
         format_matrix(vsf_to_srgb, "VSF_RGB2SRGB"),
         format_matrix(srgb_to_vsf, "SRGB2VSF_RGB"),
         format_matrix(vsf_to_adobe_rgb, "VSF_RGB2ADOBE_RGB"),
@@ -1029,7 +1004,6 @@ use crate::colour::spectrum::ConstSpectrum;
     let content = content + &s44_module(&[
         ("VSF_RGB2XYZ_S44", vsf_to_xyz),
         ("XYZ2VSF_RGB_S44", xyz_to_vsf),
-        ("XYZ_D50_2VSF_RGB_S44", xyz_d50_to_vsf),
         ("VSF_RGB2SRGB_S44", vsf_to_srgb),
         ("SRGB2VSF_RGB_S44", srgb_to_vsf),
         ("VSF_RGB2ADOBE_RGB_S44", vsf_to_adobe_rgb),
@@ -1165,14 +1139,10 @@ fn main() -> std::io::Result<()> {
     let vsf_to_prophoto = invert_matrix_3x3(&prophoto_to_vsf);
     report_white("ProPhoto RGB", &prophoto_to_vsf);
 
-    // ICC profile connection space is D50-relative; give the ICC path its own adapted entry matrix.
-    let d50_vsf = apply_matrix_3x3(&xyz_to_vsf, &D50_XYZ);
-    let xyz_d50_to_vsf = convert_matrix_3x3(&von_kries_to_e(&vsf_to_lms, &lms_to_vsf, &d50_vsf), &xyz_to_vsf);
-    println!("// D50 thru XYZ_D50_2VSF_RGB: {:?}", apply_matrix_3x3(&xyz_d50_to_vsf, &D50_XYZ));
 
     // Write files
     write_spectral_constants(&vsf_to_lms, &lms_to_vsf, &lms_1nm)?;
-    write_xyz_constants(&vsf_to_xyz, &xyz_to_vsf, &xyz_d50_to_vsf, &vsf_to_srgb, &srgb_to_vsf, &vsf_to_adobe_rgb, &adobe_rgb_to_vsf, &vsf_to_display_p3, &display_p3_to_vsf, &vsf_to_prophoto, &prophoto_to_vsf, &xyz_1nm)?;
+    write_xyz_constants(&vsf_to_xyz, &xyz_to_vsf, &vsf_to_srgb, &srgb_to_vsf, &vsf_to_adobe_rgb, &adobe_rgb_to_vsf, &vsf_to_display_p3, &display_p3_to_vsf, &vsf_to_prophoto, &prophoto_to_vsf, &xyz_1nm)?;
     write_rec2020_constants(&vsf_to_rec2020, &rec2020_to_vsf)?;
 
     println!();

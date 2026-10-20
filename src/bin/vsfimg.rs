@@ -257,7 +257,48 @@ enum TrcCurve {
     Parametric { function_type: u16, vals: Vec<f32> },
 }
 
-/// Pre-parsed ICC converter for fast per-pixel use. Stores the ICC RGB → XYZ matrix + the static D50-PCS XYZ → VSF RGB matrix (ICC colorant tags are adapted to the D50 connection-space illuminant, so the entry matrix carries D50 → Illuminant E), plus the three TRC curves.
+/// The ICC connection-space illuminant, D50, as ICC encodes it (XYZ, Y = 1).
+const ICC_D50: [f32; 3] = [0.9642, 1.0, 0.8249];
+
+fn transpose(m: &[f32; 9]) -> [f32; 9] {
+    [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]]
+}
+
+fn mul_row_major(a: &[f32; 9], b: &[f32; 9]) -> [f32; 9] {
+    let mut o = [0f32; 9];
+    for r in 0..3 {
+        for c in 0..3 {
+            o[r * 3 + c] = (0..3).map(|k| a[r * 3 + k] * b[k * 3 + c]).sum();
+        }
+    }
+    o
+}
+
+fn invert_row_major(m: &[f32]) -> [f32; 9] {
+    let d = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
+    [
+        (m[4] * m[8] - m[5] * m[7]) / d,
+        (m[2] * m[7] - m[1] * m[8]) / d,
+        (m[1] * m[5] - m[2] * m[4]) / d,
+        (m[5] * m[6] - m[3] * m[8]) / d,
+        (m[0] * m[8] - m[2] * m[6]) / d,
+        (m[2] * m[3] - m[0] * m[5]) / d,
+        (m[3] * m[7] - m[4] * m[6]) / d,
+        (m[1] * m[6] - m[0] * m[7]) / d,
+        (m[0] * m[4] - m[1] * m[3]) / d,
+    ]
+}
+
+/// Linear Bradford from white `from` to white `to`, row-major: only to undo an adaptation a profile maker applied without recording it.
+fn bradford_row_major(from: &[f32; 3], to: &[f32; 3]) -> [f32; 9] {
+    const M: [f32; 9] = [0.8951, 0.2664, -0.1614, -0.7502, 1.7135, 0.0367, 0.0389, -0.0685, 1.0296];
+    let cone = |w: &[f32; 3]| [0, 1, 2].map(|r| M[r * 3] * w[0] + M[r * 3 + 1] * w[1] + M[r * 3 + 2] * w[2]);
+    let (s, d) = (cone(from), cone(to));
+    let diag = [d[0] / s[0], 0., 0., 0., d[1] / s[1], 0., 0., 0., d[2] / s[2]];
+    mul_row_major(&invert_row_major(&M), &mul_row_major(&diag, &M))
+}
+
+/// Pre-parsed ICC converter for fast per-pixel use. Stores the profile's RGB → XYZ matrix with the profile maker's D50 adaptation undone (so it is the profile's own colorimetry), the colorimetric XYZ → VSF RGB matrix, and the three TRC curves. No adaptation of our own: a D65 profile's white lands where D65 light sits in VSF RGB.
 struct IccColourConverter {
     icc_to_xyz: [f32; 9],
     xyz_to_vsf: [f32; 9],
@@ -268,7 +309,8 @@ struct IccColourConverter {
 
 fn parse_icc_converter(icc_profile: &[u8]) -> Result<IccColourConverter, String> {
     use icc_profile::{Data, DecodedICCProfile, ICCNumber};
-    use vsf::colour::XYZ_D50_2VSF_RGB;
+    use vsf::colour::convert::convert_matrix_3x3_f32;
+    use vsf::colour::XYZ2VSF_RGB;
 
     let icc_vec = icc_profile.to_vec();
     let profile =
@@ -289,10 +331,28 @@ fn parse_icc_converter(icc_profile: &[u8]) -> Result<IccColourConverter, String>
     let g_xyz = extract_xyz("gXYZ")?;
     let b_xyz = extract_xyz("bXYZ")?;
 
-    let icc_to_xyz = [
+    // ICC stores colorants adapted to its D50 connection space. The adaptation is the profile maker's, recorded in `chad` (row-major, PCS = chad · XYZ); undoing it recovers the profile's colorimetry. A profile with no `chad` whose white is D50 needs nothing undone. One with no `chad` and another white (most ICC v2 profiles) was adapted by a method it did not record; it is undone with linear Bradford, ICC's recommended method and the one such profiles were almost always built with.
+    let pcs_to_xyz_row_major = match profile.tags.get("chad") {
+        Some(Data::S15Fixed16NumberArray(v)) if v.len() == 9 => {
+            let chad: Vec<f32> = v.iter().map(|x| x.as_f32()).collect();
+            Some(invert_row_major(&chad))
+        }
+        _ => {
+            let white = extract_xyz("wtpt").ok();
+            match white {
+                Some(w) if (0..3).any(|i| (w[i] - ICC_D50[i]).abs() > 2e-3) => Some(bradford_row_major(&ICC_D50, &w)),
+                _ => None,
+            }
+        }
+    };
+    let pcs = [
         r_xyz[0], r_xyz[1], r_xyz[2], g_xyz[0], g_xyz[1], g_xyz[2], b_xyz[0], b_xyz[1], b_xyz[2],
     ];
-    let xyz_to_vsf = XYZ_D50_2VSF_RGB;
+    let icc_to_xyz = match pcs_to_xyz_row_major {
+        Some(m) => convert_matrix_3x3_f32(&transpose(&m), &pcs),
+        None => pcs,
+    };
+    let xyz_to_vsf = XYZ2VSF_RGB;
     let r_trc = parse_trc_curve(profile.tags.get("rTRC"))?;
     let g_trc = parse_trc_curve(profile.tags.get("gTRC"))?;
     let b_trc = parse_trc_curve(profile.tags.get("bTRC"))?;
@@ -530,4 +590,34 @@ fn encode_av1(linear_vsf: &[f32], width: usize, height: usize) -> Result<Vec<u8>
         return Err("rav1e produced no output".to_string());
     }
     Ok(output)
+}
+
+#[cfg(test)]
+mod icc_undo_tests {
+    use super::*;
+
+    /// The common sRGB IEC61966-2.1 v2 profile: colorants Bradford-adapted to D50, white point D65, no `chad`. Undoing the adaptation gives sRGB's own colorimetry, so the path into VSF RGB matches the colorimetric `SRGB2VSF_RGB` built from sRGB's xy primaries.
+    #[test]
+    fn undoing_a_v2_srgb_profile_recovers_srgb_colorimetry() {
+        use vsf::colour::convert::{apply_matrix_3x3_f32, convert_matrix_3x3_f32};
+        let pcs = [0.4361, 0.2225, 0.0139, 0.3851, 0.7169, 0.0971, 0.1431, 0.0606, 0.7141];
+        let d65 = [0.9505, 1.0, 1.0891];
+        let undo = bradford_row_major(&ICC_D50, &d65);
+        let icc_to_xyz = convert_matrix_3x3_f32(&transpose(&undo), &pcs);
+        let white = apply_matrix_3x3_f32(&icc_to_xyz, &[1., 1., 1.]);
+        assert!((0..3).all(|i| (white[i] - d65[i]).abs() < 2e-3), "white {white:?}");
+        let to_vsf = convert_matrix_3x3_f32(&vsf::colour::XYZ2VSF_RGB, &icc_to_xyz);
+        for i in 0..9 {
+            assert!((to_vsf[i] - vsf::colour::SRGB2VSF_RGB[i]).abs() < 3e-3, "element {i}: {} vs {}", to_vsf[i], vsf::colour::SRGB2VSF_RGB[i]);
+        }
+    }
+
+    #[test]
+    fn bradford_there_and_back_is_identity() {
+        let d65 = [0.9505, 1.0, 1.0891];
+        let m = mul_row_major(&bradford_row_major(&ICC_D50, &d65), &bradford_row_major(&d65, &ICC_D50));
+        for i in 0..9 {
+            assert!((m[i] - if i % 4 == 0 { 1. } else { 0. }).abs() < 1e-5);
+        }
+    }
 }

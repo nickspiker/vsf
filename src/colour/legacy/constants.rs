@@ -1264,7 +1264,7 @@ pub const VSF_RGB2XYZ: [f32; 9] = [
 
 /// XYZ → VSF RGB transformation matrix
 ///
-/// Converts CIE 1931 XYZ colourspace to linear VSF RGB. Inverse of VSF_RGB2XYZ. Colorimetric: XYZ of Illuminant E maps to VSF `[1,1,1]`; no adaptation. For ICC profile connection space values (D50-relative) use XYZ_D50_2VSF_RGB.
+/// Converts CIE 1931 XYZ colourspace to linear VSF RGB. Inverse of VSF_RGB2XYZ. Colorimetric: XYZ of Illuminant E maps to VSF `[1,1,1]`; no adaptation. ICC connection-space values are D50-adapted by the profile maker; undo that with the profile's own `chad` first (vsfimg does), then use this.
 pub const XYZ2VSF_RGB: [f32; 9] = [
     1.373_010_4_f32,
     -0.542_253_85_f32,
@@ -1275,21 +1275,6 @@ pub const XYZ2VSF_RGB: [f32; 9] = [
     -0.228_162_78_f32,
     0.031_001_983_f32,
     1.061_448_1_f32,
-];
-
-/// XYZ (D50 PCS) → VSF RGB transformation matrix
-///
-/// XYZ2VSF_RGB with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from the ICC profile connection space illuminant D50 to Illuminant E folded in, so PCS white maps to VSF `[1,1,1]`. Use for ICC colorant tags (rXYZ/gXYZ/bXYZ), which are D50-adapted by the ICC spec.
-pub const XYZ_D50_2VSF_RGB: [f32; 9] = [
-    1.396_139_6_f32,
-    -0.554_171_74_f32,
-    0.040_022_682_f32,
-    -0.171_051_43_f32,
-    1.545_597_7_f32,
-    -0.111_563_62_f32,
-    -0.212_275_85_f32,
-    -0.013_656_544_f32,
-    1.300_731_9_f32,
 ];
 
 /// VSF RGB → sRGB transformation matrix
@@ -1461,18 +1446,6 @@ mod s44_consts {
         sf!(-0.228_162_78_f32),
         sf!(0.031_001_983_f32),
         sf!(1.061_448_1_f32),
-    ];
-
-    pub const XYZ_D50_2VSF_RGB_S44: [S44; 9] = [
-        sf!(1.396_139_6_f32),
-        sf!(-0.554_171_74_f32),
-        sf!(0.040_022_682_f32),
-        sf!(-0.171_051_43_f32),
-        sf!(1.545_597_7_f32),
-        sf!(-0.111_563_62_f32),
-        sf!(-0.212_275_85_f32),
-        sf!(-0.013_656_544_f32),
-        sf!(1.300_731_9_f32),
     ];
 
     pub const VSF_RGB2SRGB_S44: [S44; 9] = [
