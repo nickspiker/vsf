@@ -5,80 +5,56 @@ All notable changes to VSF will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.12.0] - format v12 (reads v9, v10 and v11 unchanged)
+## [0.10.0] - unreleased · format v10 (reads v9 unchanged)
 
 ### Added
 
 - **A plane can keep a source's samples exactly as written** ([`idt/fields.md`](idt/fields.md), "Untouched sources and prior"; the reasoning in [`idt/README.md`](idt/README.md), "Encodings are not transforms"). A plane gains closed `primaries` (`vsf`, absent; `srgb`, `display_p3`, `adobe_rgb`, `prophoto`, `rec2020`), and `encoding` gains a source's own transfers (`srgb`, `bt1886`, `adobe_rgb`, `prophoto`, `pq`, `hlg`), whose codes run 0 to 2ⁿ − 1 with white at the top code. The graph's new Technical `decode` op takes such a plane into VSF RGB; `Visual::still` puts it after `black_white`. `Plane::encoded` builds one, `Encoding::light` / `light_f32` decode any encoding's code or signal, `Primaries::to_vsf_rgb` gives the matrix, and `Plane::vsf_linear_samples` does the decode once for an in-memory model (`to_spectral_image` uses it). Foreign primaries require a planar plane of three channels, checked on write and on read. `tests/foreign_planes.rs`.
 - **`prior` on a plane**: what was done to the samples before the file existed and is not recorded in it, as an IDT class. Absent ⇒ nothing; `technical` ⇒ mechanics only; `creative` ⇒ a look, which is every camera JPEG. A writer that cannot tell writes `creative`, and `Plane::encoded` starts there. The device stays in `capture` and the event with its evidence belongs to provenance.
-- Display P3 and ProPhoto RGB matrices (`DISPLAY_P3_2VSF_RGB`, `PROPHOTO2VSF_RGB` and their inverses, f32 and S44), generated like sRGB's and Adobe RGB's: thru 1931 XYZ, the encoding's white carried to Illuminant E by von Kries scaling in SS2000 10° LMS. The generator takes each space's white point (ProPhoto's is D50), its doc template escapes `[1,1,1]` and `[red, green, blue]` (rustdoc read them as links), and its spectral template matches the committed comments; the existing matrices regenerate unchanged.
+- Display P3 and ProPhoto RGB matrices (`DISPLAY_P3_2VSF_RGB`, `PROPHOTO2VSF_RGB` and their inverses, f32 and S44), generated like the others: thru 1931 XYZ, colorimetric. The generator takes each space's white point (ProPhoto's is D50), and its doc template escapes `[1,1,1]` and `[red, green, blue]` (rustdoc read them as links).
 - `colour::transfer::{bt1886_light, prophoto_light}`: the BT.1886 reference display (a 2.4 power) and ROMM RGB's 1.8 power with its linear toe.
 - `colour::display::{abl_peak, abl_headroom}`: an emissive panel's brightness limiter. From a panel's measured white windows (area → peak), the peak a picture can have is the peak of the window that draws the same mean light, and `abl_headroom` finds the headroom the panel can sustain for a given picture, for `display_light` to aim at ([`idt/output.md`](idt/output.md), "Peak brightness depends on how much is lit").
-
 - `colour::transfer::{pq_light, hlg_light}`: BT.2100 PQ and HLG signals → light relative to diffuse white (BT.2408: 203 cd/m² for PQ, 75 % of the HLG signal), light above white kept. One copy for every app that ingests HDR (photon previews, opsin's JPEG XL).
 - `colour::display`: the display mapping, separate from storage ([`colour.md`](colour.md), "Display Mapping"). `display_light(l, headroom, content_peak)` is linear when the content fits the display and otherwise linear to a knee at 0.75 of peak with an extended-Reinhard shoulder that reaches peak at the content's brightest value; `display_lut_u8` builds the per-image table; `g2t_peak(bits)`.
 - The flat `image` section carries `encoding`: `builders::compressed_image_encoded` writes it (nothing for `gamma2`), `parse_compressed_image` returns it as `colour_encoding`, and `vsf::image::decode_for_display(data, headroom)` maps a `g2t` image for the display (`decode` is headroom 1). `DecodedImage` gains `encoding`. `tests/flat_image_encoding.rs`.
-- `g2t`, the short spelling of the `gamma2tanh` encoding: a reader accepts either, and writers here write `g2t`. No version change (no v11 writer had been deployed). Closed vocabularies may now list aliases (`closed_vocab!`, `"long" | "short"`).
+- **`gamma2tanh`, VSF RGB with HDR headroom** ([`colour.md`](colour.md), "HDR: Gamma 2, Then tanh"): `encoded = tanh(√linear)`, per channel, decoded as `atanh(encoded)²`. Diffuse white (linear 1.0) lands on code 194 of 256; the top code is 3.28 stops above it at 8 bits, 3.86 at 10, 4.34 at 12 and 5.12 at 16, and shadows are plain gamma 2. Transfer functions in `colour::convert` for f32 (u8, u16, any depth from 1 to 16 bits, RGB triples) and S44, `ColourValue::{to,from}_linear_gamma2tanh`, and `gamma2tanh` as a plane/view `encoding` ([`idt/image.md`](idt/image.md)). Encoders settle the tanh estimate against the decoder, so decode → encode is exact at every code (S44 at 16 bits: within one code). `tests/gamma2tanh.rs`.
+- `g2t`, the short spelling of the `gamma2tanh` encoding: a reader accepts either, and writers here write `g2t`. Closed vocabularies may now list aliases (`closed_vocab!`, `"long" | "short"`).
+- **Context-coded tensors, `vc`** (`vsf::codec`): integer tensors range-coded under adaptive context models (raster, quadtree pyramid with an optional reference stream, series), wrapped as `v` data with encoding byte `c`; `codec::decode` gives back the tensor exactly. Beat whole-file zstd by a fifth on mahere's map cells. `tests/codec.rs`.
+- `codec::model_of`: a `vc` value's model (raster, pyramid with its root count, series) from its header alone, so a reader can leave a pyramid coded for its own decoder.
 
 ### Changed
 
+- **What is built is what is read.** A 1-D tensor reads back as the `Tensor` it was built as, shape `[n]`; the `Vector` type and the `v_*` variants are gone (the compact `[t][n][count][type][size]` wire form is unchanged, and every contiguous tensor now writes its header through one canonical path: the u0, f5, f6, j5 and j6 tensors used to write a 1-D tensor in the long form). Until v9 a reader matching `t_*` found nothing in a 1-D field and said nothing. Migrate: match `t_*` only. `tests/round_trip.rs` pins every tensor type, bit-packed width and scalar.
+- `ColourValue` gains two required methods, `to_linear_gamma2tanh` and `from_linear_gamma2tanh` (breaking for implementors outside this crate).
 - `Encoding` gains six variants and `Plane` gains `primaries` and `prior` (breaking for exhaustive matches and struct literals outside this crate). `Graph::default_still` takes the plane's `primaries`.
 - `colour::display::scene_light_u8` decodes thru `Encoding::light`, unchanged for VSF's own encodings.
 - The flat `image` section refuses a source encoding on write and read: it has no primaries, so it is always VSF RGB.
 
 ### Fixed
 
-- `colour::transfer` imported `num_traits::Float` without the `not(feature = "std")` gate the sibling modules use, an unused-import warning in every std build.
+- **Encoding matrices are colorimetric again; no chromatic adaptation.** Since 2026-09-22 (`fa75f5e`, a change carried inside a commit about the `grades` alias) every entry matrix into VSF RGB folded in a von Kries adaptation from the source white to Illuminant E, so sRGB, Adobe RGB and Rec.2020 white landed on VSF `[1,1,1]`. That contradicts the taxonomy: neutralising a white is white balance, a Creative op, and an encoding's matrix is Technical. The matrices now carry each white as the light it is: sRGB, Display P3 and Adobe RGB white come in at about VSF (0.91, 1.03, 1.09), Rec.2020's D65 (10° fundamentals) at (0.90, 1.03, 1.06), ProPhoto's D50 at (0.99, 1.01, 0.81), luminance held. Rec.2020's D65 is scaled to the photopic luminance of Illuminant E. `XYZ_D50_2VSF_RGB`, the ICC connection-space path, still adapts and is under review. Files converted from a legacy space between 2026-09-22 and 2026-10-20 hold adapted values; re-convert from source.
+- **Adobe RGB's transfer is 563/256 (2.19921875), as its specification states**, not 2.2. `adobe_rgb_oetf` / `adobe_rgb_eotf` and the `adobe_rgb` plane encoding.
+- **Gamma 2 S44 at 16 bits now round-trips at every code.** S44's square root of a decoded code could land a hair under it, and truncation took it one low: every odd code from 257 up (64,256 of 65,536) came back one less. The S44 encoders now settle their estimate against the decoder, which S44 can do exactly here because it decodes every 16-bit code strictly above the one below. f32 and 8-bit S44 were already exact and are unchanged. `tests/gamma2_round_trip.rs`.
 - `Visual::to_spectral_image` ignored the plane's `encoding`, so a `gamma2` or `g2t` plane reached the in-memory model as if its codes were linear counts. New `Plane::linear_samples` decodes an encoded plane (×2ⁿ, bucket bottom) to 16-bit linear counts with white at `65535 / max(1, peak)`, so a `g2t` plane's highlights sit above white; the bridge uses it (and limbus's raw reader). Linear planes are untouched.
 - The inspector showed a `v`'s size with a hard-coded width marker `3` and the byte count minus one, matching neither the wire nor the docs. It now shows what the wire carries: the length in bits at the width the encoder wrote (100 bytes → `vb4⦉800⦊`). The `VsfType::v` docs for `b` name the bits convention; a test holds the inspector to the encoder's own bytes.
 - A `view` with no `encoding` reads as `gamma2`, the same as a plane: untagged is always VSF RGB, gamma 2. It read as `linear` before. Every writer in this crate emits `encoding`, so no file written here changes meaning ([`idt/image.md`](idt/image.md)).
+- `colour::transfer` imported `num_traits::Float` without the `not(feature = "std")` gate the sibling modules use, an unused-import warning in every std build.
 
 ### Format
 
-- `z` 12, floor 9. A plane may carry `primaries` and `prior`, the closed `encoding` vocabulary gains six values, and the graph gains `decode`. No byte of an existing type changes and every v11 file reads unchanged. The bump stops a v11 reader from ignoring `primaries` and reading an sRGB plane as VSF RGB; a v11 reader refuses the new encodings by name.
+- `z` 10, floor 9: no byte of an existing v9 type changes, so v9 files read unchanged. Everything since 0.9.3, the last publish, is this one unreleased version.
+- `vc` is a new `v` encoding, skipped by a v9 reader as wrapped data.
+- The closed `encoding` vocabulary gains `gamma2tanh` (also `g2t`) and a source's own transfers (`srgb`, `bt1886`, `adobe_rgb`, `prophoto`, `pq`, `hlg`); a plane gains closed `primaries` and `prior`; the graph gains `decode`.
+- Development builds wrote `z` 11 from 2026-10-15 to 2026-10-20. Those files say `y` 9, so this build reads them unchanged; nothing was published at 11 or 12.
 
 ### Docs
 
 - `idt/README.md`: "Encodings are not transforms" (capture, encoding and medium told apart by what sits at each end; an encoding has no class and no tier; output-referred encodings bundle a reference medium) and "What came before the file" (`prior`, and where colour stops and provenance starts). The tier example no longer calls a JPEG read as sRGB an Absolute characterization.
 - `idt/output.md`, "Peak brightness depends on how much is lit": window curves, the equal-power rule, the sustained case, and what the model leaves out. `idt/fields.md` proposes `peak_area`, `peak_luminance` and `peak_sustained` on `medium`.
-- `idt/image.md`, `idt/layers.md` (the import rule keeps a named encoding untouched), `colour.md` (ProPhoto's D50 white; the adaptation keeps an encoding's definition; brightness-limited headroom).
+- `idt/image.md`, `idt/layers.md` (the import rule keeps a named encoding untouched), `colour.md` (no chromatic adaptation in any encoding matrix, with where each white lands; ProPhoto's D50; brightness-limited headroom).
 - `colour.md`, "8-bit Pictures With Headroom" *(planned)*: 8-bit pictures and previews use `gamma2tanh` only when the content has light above diffuse white; SDR stays untagged gamma 2; the flat `image` section gains `encoding` (absent ⇒ `gamma2`); AV1 previews mark their transfer unspecified.
 - `idt/README.md`, "What a spectral profile is, and why": what a profile that keeps the camera's per-channel response buys over a fitted matrix (any light, any observer, any channel count, an error bar, an upgrade to Absolute), what it cannot do, and that DNG has no tag for it. "Absolute and Relative are ICC's intents, spectrally": the same distinction as ICC's colorimetric intents, with two differences: the illuminant is divided out per wavelength rather than thru a chromatic adaptation model, and the reference is a perfect reflector under the light, not the medium's own white.
 - `idt/README.md`, "Why not ACES" rewritten as "Relation to ACES", facts only: the observer fixed in the encoding (1931 xy primaries and white), the spectral sensitivities used to build an IDT and then dropped, an IDT that states no class or tier (looks kept apart by the LMT convention, not by a field), and the 1.x per-channel tone scale with its hue shifts and blue-light artefacts, which ACES 2.0's output transform replaced. Credits ACES for its scene-referred interchange and for building IDTs from spectral sensitivities.
-
-## [0.11.0] - format v11 (reads v9 and v10 unchanged)
-
-### Added
-
-- **`gamma2tanh`, VSF RGB with HDR headroom** ([`colour.md`](colour.md), "HDR: Gamma 2, Then tanh"): `encoded = tanh(√linear)`, per channel, decoded as `atanh(encoded)²`. Diffuse white (linear 1.0) lands on code 194 of 256; the top code is 3.28 stops above it at 8 bits, 3.86 at 10, 4.34 at 12 and 5.12 at 16, and shadows are plain gamma 2. Transfer functions in `colour::convert` for f32 (u8, u16, any depth from 1 to 16 bits, RGB triples) and S44, `ColourValue::{to,from}_linear_gamma2tanh`, and `gamma2tanh` as a plane/view `encoding` ([`idt/image.md`](idt/image.md)). Encoders settle the tanh estimate against the decoder, so decode → encode is exact at every code (S44 at 16 bits: within one code). `tests/gamma2tanh.rs`.
-- `codec::model_of`: a `vc` value's model (raster, pyramid with its root count, series) from its header alone, so a reader can leave a pyramid coded for its own decoder.
-
-### Fixed
-
-- **Gamma 2 S44 at 16 bits now round-trips at every code.** S44's square root of a decoded code could land a hair under it, and truncation took it one low: every odd code from 257 up (64,256 of 65,536) came back one less. The S44 encoders now settle their estimate against the decoder, which S44 can do exactly here because it decodes every 16-bit code strictly above the one below. f32 and 8-bit S44 were already exact and are unchanged. `tests/gamma2_round_trip.rs`.
-
-### Changed
-
-- `ColourValue` gains two required methods, `to_linear_gamma2tanh` and `from_linear_gamma2tanh` (breaking for implementors outside this crate).
-
-### Format
-
-- The closed `encoding` vocabulary gains `gamma2tanh`. A 0.10 reader refuses a plane that uses it by name; every other byte reads as before.
-- `z` 11, floor 9: v11 changed no byte of an existing type, so v9 and v10 files read unchanged.
-
-## [0.10.0] - format v10 (reads v9 unchanged)
-
-### Changed
-
-- **What is built is what is read.** A 1-D tensor reads back as the `Tensor` it was built as, shape `[n]`; the `Vector` type and the `v_*` variants are gone (the compact `[t][n][count][type][size]` wire form is unchanged, and every contiguous tensor now writes its header through one canonical path: the u0, f5, f6, j5 and j6 tensors used to write a 1-D tensor in the long form). Until v9 a reader matching `t_*` found nothing in a 1-D field and said nothing. Migrate: match `t_*` only. `tests/round_trip.rs` pins every tensor type, bit-packed width and scalar.
-
-### Added
-
-- **Context-coded tensors, `vc`** (`vsf::codec`): integer tensors range-coded under adaptive context models (raster, quadtree pyramid with an optional reference stream, series), wrapped as `v` data with encoding byte `c`; `codec::decode` gives back the tensor exactly. Beat whole-file zstd by a fifth on mahere's map cells. `tests/codec.rs`.
-
-### Format
-
-- `z` 10, floor 9: v10 changed no byte of an existing type, so v9 files read unchanged and `vc` is skipped by a v9 reader as wrapped data.
 
 ## [0.9.x]
 

@@ -1294,142 +1294,142 @@ pub const XYZ_D50_2VSF_RGB: [f32; 9] = [
 
 /// VSF RGB → sRGB transformation matrix
 ///
-/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear sRGB (IEC 61966-2-1:1999 primaries, D65 white point). Built thru 1931 XYZ, the only observer an xy definition supports, with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D65 folded in, so VSF `[1,1,1]` maps to sRGB `[1,1,1]`.
+/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear sRGB (IEC 61966-2-1:1999 primaries, D65 white point). Built thru 1931 XYZ, the only observer an xy definition supports. Colorimetric, with no chromatic adaptation: VSF `[1,1,1]` is Illuminant E light, which is not the white of sRGB, and sRGB's white (D65) lands off VSF's R = G = B axis. Neutralising a white is white balance, a Creative op, never part of an encoding's matrix.
 ///
 /// Matrix layout (column-major):
 /// - Indices 0-2: Red channel contributions from `[red, green, blue]`
 /// - Indices 3-5: Green channel contributions from `[red, green, blue]`
 /// - Indices 6-8: Blue channel contributions from `[red, green, blue]`
 pub const VSF_RGB2SRGB: [f32; 9] = [
-    2.014_406_4_f32,
-    -0.220_223_44_f32,
-    -0.013_298_016_f32,
-    -1.003_637_1_f32,
-    1.281_085_7_f32,
-    -0.074_070_9_f32,
-    -0.010_769_348_f32,
-    -0.060_862_336_f32,
-    1.087_369_f32,
+    2.035_454_8_f32,
+    -0.224_166_7_f32,
+    -0.013_295_095_f32,
+    -0.822_553_5_f32,
+    1.217_049_5_f32,
+    -0.073_162_84_f32,
+    -0.008_116_852_5_f32,
+    -0.044_581_957_f32,
+    0.995_300_65_f32,
 ];
 
 /// sRGB → VSF RGB transformation matrix
 ///
 /// Converts linear sRGB to linear VSF RGB. Inverse of VSF_RGB2SRGB.
 pub const SRGB2VSF_RGB: [f32; 9] = [
-    0.543_338_4_f32,
-    0.094_021_87_f32,
-    0.013_049_488_f32,
-    0.427_360_1_f32,
-    0.857_074_7_f32,
-    0.063_609_81_f32,
-    0.029_301_494_f32,
-    0.048_903_476_f32,
-    0.923_340_7_f32,
+    0.531_090_56_f32,
+    0.098_345_54_f32,
+    0.014_323_449_f32,
+    0.360_172_4_f32,
+    0.890_573_2_f32,
+    0.070_275_64_f32,
+    0.020_464_143_f32,
+    0.040_692_985_f32,
+    1.007_986_2_f32,
 ];
 
 /// VSF RGB → Adobe RGB (1998) transformation matrix
 ///
-/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear Adobe RGB (1998 specification primaries, D65 white point). Built thru 1931 XYZ with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D65 folded in, so VSF `[1,1,1]` maps to Adobe RGB `[1,1,1]`.
+/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear Adobe RGB (1998 specification primaries, D65 white point). Built thru 1931 XYZ. Colorimetric, with no chromatic adaptation: VSF `[1,1,1]` is Illuminant E light, which is not the white of Adobe RGB, and Adobe RGB's white (D65) lands off VSF's R = G = B axis. Neutralising a white is white balance, a Creative op, never part of an encoding's matrix.
 ///
 /// Matrix layout (column-major):
 /// - Indices 0-2: Red channel contributions from `[red, green, blue]`
 /// - Indices 3-5: Green channel contributions from `[red, green, blue]`
 /// - Indices 6-8: Blue channel contributions from `[red, green, blue]`
 pub const VSF_RGB2ADOBE_RGB: [f32; 9] = [
-    1.377_900_5_f32,
-    -0.220_223_44_f32,
-    -0.021_817_24_f32,
-    -0.352_862_83_f32,
-    1.281_085_7_f32,
-    -0.018_278_407_f32,
-    -0.025_037_697_f32,
-    -0.060_862_336_f32,
-    1.040_095_7_f32,
+    1.391_830_3_f32,
+    -0.224_166_7_f32,
+    -0.021_976_788_f32,
+    -0.241_598_59_f32,
+    1.217_049_5_f32,
+    -0.020_044_139_f32,
+    -0.018_503_472_f32,
+    -0.044_581_957_f32,
+    0.952_488_1_f32,
 ];
 
 /// Adobe RGB (1998) → VSF RGB transformation matrix
 ///
 /// Converts linear Adobe RGB (1998) to linear VSF RGB. Inverse of VSF_RGB2ADOBE_RGB.
 pub const ADOBE_RGB2VSF_RGB: [f32; 9] = [
-    0.759_740_95_f32,
-    0.131_469_19_f32,
-    0.018_246_878_f32,
-    0.209_699_4_f32,
-    0.817_527_5_f32,
-    0.018_765_738_f32,
-    0.030_559_65_f32,
-    0.051_003_307_f32,
-    0.962_987_36_f32,
+    0.742_615_f32,
+    0.137_514_9_f32,
+    0.020_028_237_f32,
+    0.147_769_29_f32,
+    0.849_656_6_f32,
+    0.021_289_637_f32,
+    0.021_342_838_f32,
+    0.042_440_27_f32,
+    1.051_267_4_f32,
 ];
 
 /// VSF RGB → Display P3 transformation matrix
 ///
-/// Converts linear VSF RGB to linear Display P3 (the DCI-P3 primaries with a D65 white, SMPTE EG 432-1). Built thru 1931 XYZ with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D65 folded in, so VSF `[1,1,1]` maps to Display P3 `[1,1,1]`.
+/// Converts linear VSF RGB to linear Display P3 (the DCI-P3 primaries with a D65 white, SMPTE EG 432-1). Built thru 1931 XYZ. Colorimetric, with no chromatic adaptation: VSF `[1,1,1]` is Illuminant E light, which is not the white of Display P3, and Display P3's white (D65) lands off VSF's R = G = B axis. Neutralising a white is white balance, a Creative op, never part of an encoding's matrix.
 ///
 /// Matrix layout (column-major):
 /// - Indices 0-2: Red channel contributions from `[red, green, blue]`
 /// - Indices 3-5: Green channel contributions from `[red, green, blue]`
 /// - Indices 6-8: Blue channel contributions from `[red, green, blue]`
 pub const VSF_RGB2DISPLAY_P3: [f32; 9] = [
-    1.617_734_1_f32,
-    -0.146_033_63_f32,
-    0.006_369_773_3_f32,
-    -0.598_072_65_f32,
-    1.205_232_9_f32,
-    0.008_172_63_f32,
-    -0.019_661_425_f32,
-    -0.059_199_244_f32,
-    0.985_457_6_f32,
+    1.634_346_f32,
+    -0.149_147_17_f32,
+    0.006_446_59_f32,
+    -0.460_500_72_f32,
+    1.149_334_5_f32,
+    0.007_457_003_f32,
+    -0.014_589_825_f32,
+    -0.043_371_312_f32,
+    0.902_853_7_f32,
 ];
 
 /// Display P3 → VSF RGB transformation matrix
 ///
 /// Converts linear Display P3 to linear VSF RGB. Inverse of VSF_RGB2DISPLAY_P3.
 pub const DISPLAY_P3_2VSF_RGB: [f32; 9] = [
-    0.646_983_74_f32,
-    0.078_155_39_f32,
-    -0.004_830_116_4_f32,
-    0.320_834_5_f32,
-    0.868_134_f32,
-    -0.009_273_44_f32,
-    0.032_181_78_f32,
-    0.053_710_606_f32,
-    1.014_103_5_f32,
+    0.634_981_1_f32,
+    0.082_203_686_f32,
+    -0.005_212_866_7_f32,
+    0.254_270_3_f32,
+    0.902_715_f32,
+    -0.009_271_408_f32,
+    0.022_475_732_f32,
+    0.044_693_034_f32,
+    1.107_069_5_f32,
 ];
 
 /// VSF RGB → ProPhoto RGB transformation matrix
 ///
-/// Converts linear VSF RGB to linear ProPhoto RGB (ROMM RGB, ISO 22028-2: primaries outside the spectral locus, D50 white). Built thru 1931 XYZ with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D50 folded in, so VSF `[1,1,1]` maps to ProPhoto `[1,1,1]`. Two of ProPhoto's primaries are imaginary, so real VSF RGB colours can land on negative ProPhoto values and the reverse.
+/// Converts linear VSF RGB to linear ProPhoto RGB (ROMM RGB, ISO 22028-2: primaries outside the spectral locus, D50 white). Built thru 1931 XYZ. Colorimetric, with no chromatic adaptation: VSF `[1,1,1]` is Illuminant E light, which is not the white of ProPhoto, and ProPhoto's white (D50) lands off VSF's R = G = B axis. Neutralising a white is white balance, a Creative op, never part of an encoding's matrix. Two of ProPhoto's primaries are imaginary, so real VSF RGB colours can land on negative ProPhoto values and the reverse.
 ///
 /// Matrix layout (column-major):
 /// - Indices 0-2: Red channel contributions from `[red, green, blue]`
 /// - Indices 3-5: Green channel contributions from `[red, green, blue]`
 /// - Indices 6-8: Blue channel contributions from `[red, green, blue]`
 pub const VSF_RGB2PROPHOTO: [f32; 9] = [
-    0.939_601_66_f32,
-    -0.002_883_876_2_f32,
-    -0.000_015_201_414_5_f32,
-    -0.053_151_3_f32,
-    0.977_351_96_f32,
-    0.067_309_54_f32,
-    0.113_549_66_f32,
-    0.025_531_895_f32,
-    0.932_705_64_f32,
+    0.949_325_1_f32,
+    -0.002_613_048_3_f32,
+    -0.000_000_000_000_000_005_499_72_f32,
+    -0.068_115_72_f32,
+    0.997_096_3_f32,
+    0.072_272_64_f32,
+    0.157_903_24_f32,
+    -0.010_336_944_f32,
+    1.139_694_9_f32,
 ];
 
 /// ProPhoto RGB → VSF RGB transformation matrix
 ///
 /// Converts linear ProPhoto RGB to linear VSF RGB. Inverse of VSF_RGB2PROPHOTO.
 pub const PROPHOTO2VSF_RGB: [f32; 9] = [
-    1.064_484_1_f32,
-    0.003_146_455_9_f32,
-    -0.000_209_717_68_f32,
-    0.066_940_956_f32,
-    1.025_303_2_f32,
-    -0.073_990_844_f32,
-    -0.131_425_11_f32,
-    -0.028_449_72_f32,
-    1.074_200_5_f32,
+    1.053_607_1_f32,
+    0.002_759_329_7_f32,
+    -0.000_174_980_2_f32,
+    0.082_502_75_f32,
+    1.002_469_3_f32,
+    -0.063_570_62_f32,
+    -0.145_227_58_f32,
+    0.008_710_017_f32,
+    0.876_875_46_f32,
 ];
 
 #[cfg(feature = "spirix")]
@@ -1476,98 +1476,98 @@ mod s44_consts {
     ];
 
     pub const VSF_RGB2SRGB_S44: [S44; 9] = [
-        sf!(2.014_406_4_f32),
-        sf!(-0.220_223_44_f32),
-        sf!(-0.013_298_016_f32),
-        sf!(-1.003_637_1_f32),
-        sf!(1.281_085_7_f32),
-        sf!(-0.074_070_9_f32),
-        sf!(-0.010_769_348_f32),
-        sf!(-0.060_862_336_f32),
-        sf!(1.087_369_f32),
+        sf!(2.035_454_8_f32),
+        sf!(-0.224_166_7_f32),
+        sf!(-0.013_295_095_f32),
+        sf!(-0.822_553_5_f32),
+        sf!(1.217_049_5_f32),
+        sf!(-0.073_162_84_f32),
+        sf!(-0.008_116_852_5_f32),
+        sf!(-0.044_581_957_f32),
+        sf!(0.995_300_65_f32),
     ];
 
     pub const SRGB2VSF_RGB_S44: [S44; 9] = [
-        sf!(0.543_338_4_f32),
-        sf!(0.094_021_87_f32),
-        sf!(0.013_049_488_f32),
-        sf!(0.427_360_1_f32),
-        sf!(0.857_074_7_f32),
-        sf!(0.063_609_81_f32),
-        sf!(0.029_301_494_f32),
-        sf!(0.048_903_476_f32),
-        sf!(0.923_340_7_f32),
+        sf!(0.531_090_56_f32),
+        sf!(0.098_345_54_f32),
+        sf!(0.014_323_449_f32),
+        sf!(0.360_172_4_f32),
+        sf!(0.890_573_2_f32),
+        sf!(0.070_275_64_f32),
+        sf!(0.020_464_143_f32),
+        sf!(0.040_692_985_f32),
+        sf!(1.007_986_2_f32),
     ];
 
     pub const VSF_RGB2ADOBE_RGB_S44: [S44; 9] = [
-        sf!(1.377_900_5_f32),
-        sf!(-0.220_223_44_f32),
-        sf!(-0.021_817_24_f32),
-        sf!(-0.352_862_83_f32),
-        sf!(1.281_085_7_f32),
-        sf!(-0.018_278_407_f32),
-        sf!(-0.025_037_697_f32),
-        sf!(-0.060_862_336_f32),
-        sf!(1.040_095_7_f32),
+        sf!(1.391_830_3_f32),
+        sf!(-0.224_166_7_f32),
+        sf!(-0.021_976_788_f32),
+        sf!(-0.241_598_59_f32),
+        sf!(1.217_049_5_f32),
+        sf!(-0.020_044_139_f32),
+        sf!(-0.018_503_472_f32),
+        sf!(-0.044_581_957_f32),
+        sf!(0.952_488_1_f32),
     ];
 
     pub const ADOBE_RGB2VSF_RGB_S44: [S44; 9] = [
-        sf!(0.759_740_95_f32),
-        sf!(0.131_469_19_f32),
-        sf!(0.018_246_878_f32),
-        sf!(0.209_699_4_f32),
-        sf!(0.817_527_5_f32),
-        sf!(0.018_765_738_f32),
-        sf!(0.030_559_65_f32),
-        sf!(0.051_003_307_f32),
-        sf!(0.962_987_36_f32),
+        sf!(0.742_615_f32),
+        sf!(0.137_514_9_f32),
+        sf!(0.020_028_237_f32),
+        sf!(0.147_769_29_f32),
+        sf!(0.849_656_6_f32),
+        sf!(0.021_289_637_f32),
+        sf!(0.021_342_838_f32),
+        sf!(0.042_440_27_f32),
+        sf!(1.051_267_4_f32),
     ];
 
     pub const VSF_RGB2DISPLAY_P3_S44: [S44; 9] = [
-        sf!(1.617_734_1_f32),
-        sf!(-0.146_033_63_f32),
-        sf!(0.006_369_773_3_f32),
-        sf!(-0.598_072_65_f32),
-        sf!(1.205_232_9_f32),
-        sf!(0.008_172_63_f32),
-        sf!(-0.019_661_425_f32),
-        sf!(-0.059_199_244_f32),
-        sf!(0.985_457_6_f32),
+        sf!(1.634_346_f32),
+        sf!(-0.149_147_17_f32),
+        sf!(0.006_446_59_f32),
+        sf!(-0.460_500_72_f32),
+        sf!(1.149_334_5_f32),
+        sf!(0.007_457_003_f32),
+        sf!(-0.014_589_825_f32),
+        sf!(-0.043_371_312_f32),
+        sf!(0.902_853_7_f32),
     ];
 
     pub const DISPLAY_P3_2VSF_RGB_S44: [S44; 9] = [
-        sf!(0.646_983_74_f32),
-        sf!(0.078_155_39_f32),
-        sf!(-0.004_830_116_4_f32),
-        sf!(0.320_834_5_f32),
-        sf!(0.868_134_f32),
-        sf!(-0.009_273_44_f32),
-        sf!(0.032_181_78_f32),
-        sf!(0.053_710_606_f32),
-        sf!(1.014_103_5_f32),
+        sf!(0.634_981_1_f32),
+        sf!(0.082_203_686_f32),
+        sf!(-0.005_212_866_7_f32),
+        sf!(0.254_270_3_f32),
+        sf!(0.902_715_f32),
+        sf!(-0.009_271_408_f32),
+        sf!(0.022_475_732_f32),
+        sf!(0.044_693_034_f32),
+        sf!(1.107_069_5_f32),
     ];
 
     pub const VSF_RGB2PROPHOTO_S44: [S44; 9] = [
-        sf!(0.939_601_66_f32),
-        sf!(-0.002_883_876_2_f32),
-        sf!(-0.000_015_201_414_5_f32),
-        sf!(-0.053_151_3_f32),
-        sf!(0.977_351_96_f32),
-        sf!(0.067_309_54_f32),
-        sf!(0.113_549_66_f32),
-        sf!(0.025_531_895_f32),
-        sf!(0.932_705_64_f32),
+        sf!(0.949_325_1_f32),
+        sf!(-0.002_613_048_3_f32),
+        sf!(-0.000_000_000_000_000_005_499_72_f32),
+        sf!(-0.068_115_72_f32),
+        sf!(0.997_096_3_f32),
+        sf!(0.072_272_64_f32),
+        sf!(0.157_903_24_f32),
+        sf!(-0.010_336_944_f32),
+        sf!(1.139_694_9_f32),
     ];
 
     pub const PROPHOTO2VSF_RGB_S44: [S44; 9] = [
-        sf!(1.064_484_1_f32),
-        sf!(0.003_146_455_9_f32),
-        sf!(-0.000_209_717_68_f32),
-        sf!(0.066_940_956_f32),
-        sf!(1.025_303_2_f32),
-        sf!(-0.073_990_844_f32),
-        sf!(-0.131_425_11_f32),
-        sf!(-0.028_449_72_f32),
-        sf!(1.074_200_5_f32),
+        sf!(1.053_607_1_f32),
+        sf!(0.002_759_329_7_f32),
+        sf!(-0.000_174_980_2_f32),
+        sf!(0.082_502_75_f32),
+        sf!(1.002_469_3_f32),
+        sf!(-0.063_570_62_f32),
+        sf!(-0.145_227_58_f32),
+        sf!(0.008_710_017_f32),
+        sf!(0.876_875_46_f32),
     ];
 }

@@ -530,7 +530,7 @@ fn scale_rows(d: &[f64; 3], m: &[f64; 9]) -> [f64; 9] {
     out
 }
 
-/// LMS cone response to CIE D65 under the (sum-normalised) SS2000 10° fundamentals, summed over 390..=830nm. Absolute scale is irrelevant: it cancels between the primary scaling and the von Kries division.
+/// LMS cone response to CIE D65 under the (sum-normalised) SS2000 10° fundamentals, summed over 390..=830nm. Unnormalised: the caller scales it to the photopic luminance of Illuminant E.
 fn d65_lms(lms_1nm: &[f64]) -> [f64; 3] {
     let mut acc = [0.0; 3];
     for (i, wavelength) in (390..=830).enumerate() {
@@ -791,11 +791,8 @@ fn format_lms_1nm_array(data: &[f64]) -> String {
     output
 }
 
-fn write_spectral_constants(vsf_to_lms: &[f64; 9], lms_to_vsf: &[f64; 9], lms_1nm: &[f64]) -> std::io::Result<()> {
-    // lms → photopic weights: CIE 170-2 / Stockman & Sharpe define the 10° luminous efficiency on UNIT-PEAK energy fundamentals as V*₁₀(λ) = 0.692839·l̄(λ) + 0.349676·m̄(λ).
-    // Our channels are sum-normalized (l̂ = l̄/Σl̄) and the unit-peak table's max is 1, so Σl̄ = 1/max(l̂) — the weights convert to our basis as w = coefficient/max(channel).
-    // Rescaled to sum to 1 so the constants read as the L and M SHARES of luminance (only the ratio affects output; PHOTOPIC_WHITE_NORM divides out any absolute scale).
-    // S-cones contribute zero to photopic luminance by definition.
+/// lms → photopic weights `(w_l, w_m)`, in the sum-normalised basis, summing to 1 (see write_spectral_constants). Illuminant E is [1,1,1] in this basis, so its photopic luminance is exactly 1.
+fn photopic_weights(lms_1nm: &[f64]) -> (f64, f64) {
     let mut max_l = 0.0f64;
     let mut max_m = 0.0f64;
     for i in (0..lms_1nm.len()).step_by(3) {
@@ -804,8 +801,15 @@ fn write_spectral_constants(vsf_to_lms: &[f64; 9], lms_to_vsf: &[f64; 9], lms_1n
     }
     let raw_l = 0.692839 / max_l;
     let raw_m = 0.349676 / max_m;
-    let w_l = raw_l / (raw_l + raw_m);
-    let w_m = raw_m / (raw_l + raw_m);
+    (raw_l / (raw_l + raw_m), raw_m / (raw_l + raw_m))
+}
+
+fn write_spectral_constants(vsf_to_lms: &[f64; 9], lms_to_vsf: &[f64; 9], lms_1nm: &[f64]) -> std::io::Result<()> {
+    // lms → photopic weights: CIE 170-2 / Stockman & Sharpe define the 10° luminous efficiency on UNIT-PEAK energy fundamentals as V*₁₀(λ) = 0.692839·l̄(λ) + 0.349676·m̄(λ).
+    // Our channels are sum-normalized (l̂ = l̄/Σl̄) and the unit-peak table's max is 1, so Σl̄ = 1/max(l̂) — the weights convert to our basis as w = coefficient/max(channel).
+    // Rescaled to sum to 1 so the constants read as the L and M SHARES of luminance (only the ratio affects output; PHOTOPIC_WHITE_NORM divides out any absolute scale).
+    // S-cones contribute zero to photopic luminance by definition.
+    let (w_l, w_m) = photopic_weights(lms_1nm);
 
     let content = format!(
 r#"//! Spectral colourspace transformation matrices and constants
@@ -951,7 +955,7 @@ use crate::colour::spectrum::ConstSpectrum;
 
 /// VSF RGB → sRGB transformation matrix
 ///
-/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear sRGB (IEC 61966-2-1:1999 primaries, D65 white point). Built thru 1931 XYZ, the only observer an xy definition supports, with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D65 folded in, so VSF `[1,1,1]` maps to sRGB `[1,1,1]`.
+/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear sRGB (IEC 61966-2-1:1999 primaries, D65 white point). Built thru 1931 XYZ, the only observer an xy definition supports. Colorimetric, with no chromatic adaptation: VSF `[1,1,1]` is Illuminant E light, which is not the white of sRGB, and sRGB's white (D65) lands off VSF's R = G = B axis. Neutralising a white is white balance, a Creative op, never part of an encoding's matrix.
 ///
 /// Matrix layout (column-major):
 /// - Indices 0-2: Red channel contributions from `[red, green, blue]`
@@ -966,7 +970,7 @@ use crate::colour::spectrum::ConstSpectrum;
 
 /// VSF RGB → Adobe RGB (1998) transformation matrix
 ///
-/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear Adobe RGB (1998 specification primaries, D65 white point). Built thru 1931 XYZ with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D65 folded in, so VSF `[1,1,1]` maps to Adobe RGB `[1,1,1]`.
+/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear Adobe RGB (1998 specification primaries, D65 white point). Built thru 1931 XYZ. Colorimetric, with no chromatic adaptation: VSF `[1,1,1]` is Illuminant E light, which is not the white of Adobe RGB, and Adobe RGB's white (D65) lands off VSF's R = G = B axis. Neutralising a white is white balance, a Creative op, never part of an encoding's matrix.
 ///
 /// Matrix layout (column-major):
 /// - Indices 0-2: Red channel contributions from `[red, green, blue]`
@@ -981,7 +985,7 @@ use crate::colour::spectrum::ConstSpectrum;
 
 /// VSF RGB → Display P3 transformation matrix
 ///
-/// Converts linear VSF RGB to linear Display P3 (the DCI-P3 primaries with a D65 white, SMPTE EG 432-1). Built thru 1931 XYZ with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D65 folded in, so VSF `[1,1,1]` maps to Display P3 `[1,1,1]`.
+/// Converts linear VSF RGB to linear Display P3 (the DCI-P3 primaries with a D65 white, SMPTE EG 432-1). Built thru 1931 XYZ. Colorimetric, with no chromatic adaptation: VSF `[1,1,1]` is Illuminant E light, which is not the white of Display P3, and Display P3's white (D65) lands off VSF's R = G = B axis. Neutralising a white is white balance, a Creative op, never part of an encoding's matrix.
 ///
 /// Matrix layout (column-major):
 /// - Indices 0-2: Red channel contributions from `[red, green, blue]`
@@ -996,7 +1000,7 @@ use crate::colour::spectrum::ConstSpectrum;
 
 /// VSF RGB → ProPhoto RGB transformation matrix
 ///
-/// Converts linear VSF RGB to linear ProPhoto RGB (ROMM RGB, ISO 22028-2: primaries outside the spectral locus, D50 white). Built thru 1931 XYZ with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D50 folded in, so VSF `[1,1,1]` maps to ProPhoto `[1,1,1]`. Two of ProPhoto's primaries are imaginary, so real VSF RGB colours can land on negative ProPhoto values and the reverse.
+/// Converts linear VSF RGB to linear ProPhoto RGB (ROMM RGB, ISO 22028-2: primaries outside the spectral locus, D50 white). Built thru 1931 XYZ. Colorimetric, with no chromatic adaptation: VSF `[1,1,1]` is Illuminant E light, which is not the white of ProPhoto, and ProPhoto's white (D50) lands off VSF's R = G = B axis. Neutralising a white is white balance, a Creative op, never part of an encoding's matrix. Two of ProPhoto's primaries are imaginary, so real VSF RGB colours can land on negative ProPhoto values and the reverse.
 ///
 /// Matrix layout (column-major):
 /// - Indices 0-2: Red channel contributions from `[red, green, blue]`
@@ -1048,7 +1052,7 @@ r#"//! Rec.2020 colourspace transformation matrices
 //!
 //! **Auto-generated - do not edit directly!** Generated by tools/src/bin/generate_constants.rs
 //!
-//! ITU-R BT.2020 (Rec.2020) is a wide colour gamut standard for UHDTV. These matrices use its monochromatic primaries (630nm, 532nm, 467nm), evaluated under the Stockman & Sharpe 2000 10° cone fundamentals, with the D65 white (CIE 2019 spectral power distribution under the same fundamentals) adapted to Illuminant E by von Kries scaling in LMS. CIE 1931 is not involved. Rec.2020 [1,1,1] ↔ VSF RGB [1,1,1].
+//! ITU-R BT.2020 (Rec.2020) is a wide colour gamut standard for UHDTV. These matrices use its monochromatic primaries (630nm, 532nm, 467nm), evaluated under the Stockman & Sharpe 2000 10° cone fundamentals, with Rec.2020 `[1,1,1]` placed at D65 (the CIE 2019 spectral power distribution under the same fundamentals) at the photopic luminance of Illuminant E. CIE 1931 is not involved. Colorimetric, with no chromatic adaptation: D65 is bluer than E, so Rec.2020 white lands off VSF's R = G = B axis.
 
 /// VSF RGB → Rec.2020 transformation matrix
 ///
@@ -1083,16 +1087,10 @@ r#"//! Rec.2020 colourspace transformation matrices
     Ok(())
 }
 
-/// Fold a von Kries D-white → E adaptation into an entry matrix whose source white is RGB=`[1,1,1]`
-fn adapt_to_e(to_vsf_unadapted: &[f64; 9], vsf_to_lms: &[f64; 9], lms_to_vsf: &[f64; 9]) -> [f64; 9] {
-    let white_vsf = apply_matrix_3x3(to_vsf_unadapted, &[1.0, 1.0, 1.0]);
-    convert_matrix_3x3(&von_kries_to_e(vsf_to_lms, lms_to_vsf, &white_vsf), to_vsf_unadapted)
-}
-
+/// Where a space's white lands in VSF RGB. Not on [1,1,1]: the conversions are colorimetric, and only Illuminant E is VSF white. Luminance is held at 1.
 fn report_white(name: &str, to_vsf: &[f64; 9]) {
     let w = apply_matrix_3x3(to_vsf, &[1.0, 1.0, 1.0]);
     println!("// {name} [1,1,1] → VSF RGB {:?}", w);
-    assert!(w.iter().all(|v| (v - 1.0).abs() < 1e-9), "{name} white did not land on VSF [1,1,1]");
 }
 
 fn main() -> std::io::Result<()> {
@@ -1126,42 +1124,44 @@ fn main() -> std::io::Result<()> {
     // Invert to get XYZ → VSF
     let xyz_to_vsf = invert_matrix_3x3(&vsf_to_xyz);
 
-    // Rec.2020 → VSF RGB, entirely in SS2000 10° LMS: wavelength primaries scaled to D65 (CIE 2019 SPD under the same fundamentals), von Kries D65 → E, then into VSF. 1931 never appears.
+    // Rec.2020 → VSF RGB, entirely in SS2000 10° LMS: wavelength primaries scaled so [1,1,1] is D65 (CIE 2019 SPD under the same fundamentals) at the photopic luminance of Illuminant E, then into VSF. Colorimetric: no chromatic adaptation, so D65 white lands where D65 light is in VSF RGB, bluer than E and off the R = G = B axis. 1931 never appears.
     println!();
-    println!("// Building Rec.2020 matrices (LMS, D65 → E adapted)...");
-    let d65 = d65_lms(&lms_1nm);
+    println!("// Building Rec.2020 matrices (LMS, colorimetric)...");
+    let (w_l, w_m) = photopic_weights(&lms_1nm);
+    let d65_raw = d65_lms(&lms_1nm);
+    let d65_y = w_l * d65_raw[0] + w_m * d65_raw[1];
+    let d65 = [d65_raw[0] / d65_y, d65_raw[1] / d65_y, d65_raw[2] / d65_y];
     let rec2020_to_lms = build_wavelength_rgb_to_lms_matrix(&lms_1nm, [REC2020_RED_NM, REC2020_GREEN_NM, REC2020_BLUE_NM], &d65);
-    let d65_gain = [1.0 / d65[0], 1.0 / d65[1], 1.0 / d65[2]];
-    let rec2020_to_vsf = convert_matrix_3x3(&lms_to_vsf, &scale_rows(&d65_gain, &rec2020_to_lms));
+    let rec2020_to_vsf = convert_matrix_3x3(&lms_to_vsf, &rec2020_to_lms);
     let vsf_to_rec2020 = invert_matrix_3x3(&rec2020_to_vsf);
     report_white("Rec.2020", &rec2020_to_vsf);
 
-    // xy-defined spaces enter thru 1931 XYZ (the only observer an xy definition supports), then a von Kries adaptation in LMS carries their D65 white to E.
+    // xy-defined spaces enter thru 1931 XYZ (the only observer an xy definition supports), white at Y = 1 like VSF's. Colorimetric: no chromatic adaptation, so a D65 (or D50) white lands where that light is in VSF RGB, not on VSF white. Neutralising it is white balance, a Creative op (idt/creative.md), never folded into an encoding's matrix.
     println!();
-    println!("// Building sRGB matrices (1931 XYZ, D65 → E adapted)...");
+    println!("// Building sRGB matrices (1931 XYZ, colorimetric)...");
     let srgb_to_xyz = build_rgb_from_xy_to_xyz_matrix(SRGB_RED_XY, SRGB_GREEN_XY, SRGB_BLUE_XY, D65_XYZ, "sRGB");
-    let srgb_to_vsf = adapt_to_e(&convert_matrix_3x3(&xyz_to_vsf, &srgb_to_xyz), &vsf_to_lms, &lms_to_vsf);
+    let srgb_to_vsf = convert_matrix_3x3(&xyz_to_vsf, &srgb_to_xyz);
     let vsf_to_srgb = invert_matrix_3x3(&srgb_to_vsf);
     report_white("sRGB", &srgb_to_vsf);
 
     println!();
-    println!("// Building Adobe RGB matrices (1931 XYZ, D65 → E adapted)...");
+    println!("// Building Adobe RGB matrices (1931 XYZ, colorimetric)...");
     let adobe_rgb_to_xyz = build_rgb_from_xy_to_xyz_matrix(ADOBE_RGB_RED_XY, ADOBE_RGB_GREEN_XY, ADOBE_RGB_BLUE_XY, D65_XYZ, "Adobe RGB");
-    let adobe_rgb_to_vsf = adapt_to_e(&convert_matrix_3x3(&xyz_to_vsf, &adobe_rgb_to_xyz), &vsf_to_lms, &lms_to_vsf);
+    let adobe_rgb_to_vsf = convert_matrix_3x3(&xyz_to_vsf, &adobe_rgb_to_xyz);
     let vsf_to_adobe_rgb = invert_matrix_3x3(&adobe_rgb_to_vsf);
     report_white("Adobe RGB", &adobe_rgb_to_vsf);
 
     println!();
-    println!("// Building Display P3 matrices (1931 XYZ, D65 → E adapted)...");
+    println!("// Building Display P3 matrices (1931 XYZ, colorimetric)...");
     let display_p3_to_xyz = build_rgb_from_xy_to_xyz_matrix(DISPLAY_P3_RED_XY, DISPLAY_P3_GREEN_XY, DISPLAY_P3_BLUE_XY, D65_XYZ, "Display P3");
-    let display_p3_to_vsf = adapt_to_e(&convert_matrix_3x3(&xyz_to_vsf, &display_p3_to_xyz), &vsf_to_lms, &lms_to_vsf);
+    let display_p3_to_vsf = convert_matrix_3x3(&xyz_to_vsf, &display_p3_to_xyz);
     let vsf_to_display_p3 = invert_matrix_3x3(&display_p3_to_vsf);
     report_white("Display P3", &display_p3_to_vsf);
 
     println!();
-    println!("// Building ProPhoto RGB matrices (1931 XYZ, D50 → E adapted)...");
+    println!("// Building ProPhoto RGB matrices (1931 XYZ, colorimetric)...");
     let prophoto_to_xyz = build_rgb_from_xy_to_xyz_matrix(PROPHOTO_RED_XY, PROPHOTO_GREEN_XY, PROPHOTO_BLUE_XY, PROPHOTO_WHITE_XYZ, "ProPhoto RGB");
-    let prophoto_to_vsf = adapt_to_e(&convert_matrix_3x3(&xyz_to_vsf, &prophoto_to_xyz), &vsf_to_lms, &lms_to_vsf);
+    let prophoto_to_vsf = convert_matrix_3x3(&xyz_to_vsf, &prophoto_to_xyz);
     let vsf_to_prophoto = invert_matrix_3x3(&prophoto_to_vsf);
     report_white("ProPhoto RGB", &prophoto_to_vsf);
 

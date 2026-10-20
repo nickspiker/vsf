@@ -1,4 +1,4 @@
-//! A plane can keep a source's samples exactly as written (format v12): `primaries` and a source `encoding` say what the codes mean, `prior` says what was done before the file, and the graph's Technical `decode` op takes the plane into VSF RGB. `idt/fields.md`, "Untouched sources and prior".
+//! A plane can keep a source's samples exactly as written (format v10): `primaries` and a source `encoding` say what the codes mean, `prior` says what was done before the file, and the graph's Technical `decode` op takes the plane into VSF RGB. `idt/fields.md`, "Untouched sources and prior".
 
 use vsf::spectral_image::{IdtClass, PlaneLayout, SpectralChannel};
 use vsf::types::BitPackedTensor;
@@ -26,13 +26,24 @@ fn every_encodings_white_is_one_and_vsf_quantisation_is_unchanged() {
     assert!(Encoding::Gamma2Tanh.light_f32(1.).is_finite());
 }
 
+fn white(p: Primaries) -> [f32; 3] {
+    vsf::colour::convert::apply_matrix_3x3_f32(&p.to_vsf_rgb().unwrap(), &[1., 1., 1.])
+}
+
+/// Colorimetric, no chromatic adaptation: a source's white is the light its specification names, and lands where that light sits in VSF RGB (Illuminant E white), never on VSF white.
 #[test]
-fn every_primaries_white_lands_on_vsf_white() {
-    for p in [Primaries::Srgb, Primaries::DisplayP3, Primaries::AdobeRgb, Primaries::Prophoto, Primaries::Rec2020] {
-        let m = p.to_vsf_rgb().unwrap();
-        let w = vsf::colour::convert::apply_matrix_3x3_f32(&m, &[1., 1., 1.]);
-        assert!(w.iter().all(|v| (v - 1.).abs() < 1e-5), "{} white → {w:?}", p.as_str());
+fn every_primaries_white_is_its_own_light_not_vsf_white() {
+    let d65 = white(Primaries::Srgb);
+    assert!(d65[2] > d65[1] && d65[1] > d65[0] && d65[0] < 0.95, "D65 is bluer than E: {d65:?}");
+    for p in [Primaries::DisplayP3, Primaries::AdobeRgb] {
+        let w = white(p);
+        assert!((0..3).all(|i| (w[i] - d65[i]).abs() < 1e-4), "{} white is D65 like sRGB's: {w:?}", p.as_str());
     }
+    let d50 = white(Primaries::Prophoto);
+    assert!(d50[2] < 0.85 && d50[2] < d50[0], "D50 is warmer than E: {d50:?}");
+    // Rec.2020's D65 comes thru the 10° fundamentals, not 1931: close to sRGB's, not identical.
+    let r = white(Primaries::Rec2020);
+    assert!((0..3).all(|i| (r[i] - d65[i]).abs() < 0.05) && r[2] > r[0], "{r:?}");
     assert!(Primaries::Vsf.to_vsf_rgb().is_none());
 }
 
@@ -59,11 +70,14 @@ fn the_bridge_decodes_into_vsf_rgb() {
     let img = Visual::still(srgb_plane(), None, None, &[]).to_spectral_image().unwrap();
     assert!(img.profile.is_none(), "an encoding is not a characterization");
     let c = img.samples.unpack_u16();
-    let white = img.white[0];
-    // Pixel 0, sRGB white, is VSF white in every channel.
+    let unit = img.white[0];
+    // Pixel 0, sRGB white, is D65 light in VSF RGB: bluer than VSF white, the matrix's row sums.
+    let d65 = white(Primaries::Srgb);
     for ch in 0..3 {
-        assert!((c[ch * 2] as f32 / white - 1.).abs() < 1e-3, "white channel {ch}: {}", c[ch * 2] as f32 / white);
+        let got = c[ch * 2] as f32 / unit;
+        assert!((got - d65[ch]).abs() < 1e-3, "white channel {ch}: {got} vs {}", d65[ch]);
     }
+    let white = unit;
     // Pixel 1, sRGB red, is the first column of the sRGB → VSF RGB matrix.
     let m = Primaries::Srgb.to_vsf_rgb().unwrap();
     for ch in 0..3 {

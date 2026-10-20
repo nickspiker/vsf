@@ -139,8 +139,7 @@ pub fn rec709_eotf_rgb(rgb: &[f32; 3]) -> [f32; 3] {
 /// **DEPRECATED**: Adobe RGB primaries are based on CIE 1931 xy chromaticity (legacy).
 ///
 /// **Spec**: Adobe RGB (1998) Colour Image Encoding, Version 2005-05
-/// - Gamma: **2.2 exactly** (simple power function, no linear segment)
-/// - Some implementations use 563/256 ≈ 2.19921875 however spec says 2.2
+/// - Gamma: **563/256 = 2.19921875** (2 51/256), a pure power function with no linear segment. The specification states the fraction, not 2.2; 563/256 is also the value an ICC `curv` tag holds exactly (u8Fixed8Number).
 ///
 /// See `src/colour/legacy/constants.rs` for transformation matrices and deprecation notes.
 ///
@@ -151,7 +150,7 @@ pub fn rec709_eotf_rgb(rgb: &[f32; 3]) -> [f32; 3] {
 /// Gamma mapped value in range [0, 1]
 #[inline]
 pub fn adobe_rgb_oetf(linear: f32) -> f32 {
-    linear.powf(1. / 2.2)
+    linear.powf(256. / 563.)
 }
 
 /// Adobe RGB (1998) EOTF: Convert gamma mapped Adobe RGB to linear RGB
@@ -167,7 +166,7 @@ pub fn adobe_rgb_oetf(linear: f32) -> f32 {
 /// Linear RGB value in range [0, 1]
 #[inline]
 pub fn adobe_rgb_eotf(encoded: f32) -> f32 {
-    encoded.powf(2.2)
+    encoded.powf(563. / 256.)
 }
 
 /// Apply Adobe RGB OETF to RGB triplet

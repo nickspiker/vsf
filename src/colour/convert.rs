@@ -18,7 +18,7 @@
 //!
 //! - **Wavelength-defined** (VSF RGB, Rec.2020): primaries evaluated under the Stockman & Sharpe 2000 10° cone fundamentals, matrix built in LMS.
 //! - **xy-defined** (sRGB/Rec.709, Adobe RGB, ...): an xy pair is a 1931 chromaticity and nothing else, so the matrix is built xy → 1931 XYZ with VSF's primaries placed under the same 1931 CMFs. 1931 is confined to the entry matrix of the legacy space.
-//! - **Chromatic adaptation**: legacy whites are D65, VSF's is E; adaptation is a von Kries scaling in SS2000 10° LMS folded into the entry matrix.
+//! - **No chromatic adaptation**: every entry matrix is colorimetric. A D65 white is D65 light, which in VSF RGB (Illuminant E white) is bluer than white and off the R = G = B axis; ProPhoto's D50 is warmer. Neutralising a white is white balance, a Creative op (`idt/creative.md`), never part of an encoding's matrix.
 //!
 //! ## Why CIE 1931 is `legacy`
 //!
@@ -79,10 +79,10 @@ pub trait ColourValue<Linear: Copy>: Copy {
         Self::from_linear_rec709(linear)
     }
 
-    /// Convert from gamma 2.2 encoded (Adobe RGB) to linear
+    /// Convert from Adobe RGB encoded (gamma 563/256) to linear
     fn to_linear_adobe_rgb(self) -> Linear;
 
-    /// Convert from linear to gamma 2.2 encoded (Adobe RGB)
+    /// Convert from linear to Adobe RGB encoded (gamma 563/256)
     fn from_linear_adobe_rgb(linear: Linear) -> Self;
 
     /// Convert from gamma 2 encoded (VSF RGB native) to linear
@@ -1129,7 +1129,7 @@ impl VsfType {
 
     /// Convert VSF RGB to LMS cone space (linear, f32)
     ///
-    /// LMS represents Long, Medium, and Short wavelength cone responses. Used as a perceptually-uniform intermediate space for chromatic adaptation.
+    /// LMS represents Long, Medium, and Short wavelength cone responses.
     ///
     /// Based on the Stockman & Sharpe 2000 10° cone fundamentals.
     pub fn to_lms_linear_f32(&self) -> Option<(f32, f32, f32)> {
@@ -2808,10 +2808,10 @@ mod tests {
         let bt2020_white = VsfType::from_rec2020_f32(235u8, 235u8, 235u8, ColourFormat::Rf);
         let vsf_white = bt2020_white.to_rgb_linear_f32().unwrap();
 
-        // The Rec.2020 entry matrix carries a von Kries D65 → E adaptation, so Rec.2020 white is a VSF neutral: R = G = B = 1 after studio-range expansion.
-        for (name, v) in [("r", vsf_white.r), ("g", vsf_white.g), ("b", vsf_white.b)] {
-            assert!((v - 1.0).abs() < 1e-4, "{name}={v}");
-        }
+        // Colorimetric, no adaptation: Rec.2020 white is D65 light, bluer than VSF's Illuminant E white, so it lands off the R = G = B axis with B > G > R (about 0.90, 1.03, 1.06).
+        assert!(vsf_white.r > 0.85 && vsf_white.r < 0.95, "r={}", vsf_white.r);
+        assert!(vsf_white.g > 1.0 && vsf_white.g < 1.06, "g={}", vsf_white.g);
+        assert!(vsf_white.b > vsf_white.g && vsf_white.b < 1.1, "b={}", vsf_white.b);
 
         // Test BT.2020 black (studio range [16,235]) → VSF RGB black
         let bt2020_black = VsfType::from_rec2020_f32(16u8, 16u8, 16u8, ColourFormat::Ru);

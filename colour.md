@@ -196,7 +196,7 @@ The result is display light as a fraction of peak, linear; the app applies its d
 
 ## Observer Model: Stockman & Sharpe 2000 10° Cone Fundamentals
 
-VSF RGB uses the **Stockman & Sharpe (2000) 10° cone fundamentals** for everything spectral: placing its own primaries, placing any other wavelength-defined primary, chromatic adaptation, and sensor characterisation. Earlier versions used the 2° set.
+VSF RGB uses the **Stockman & Sharpe (2000) 10° cone fundamentals** for everything spectral: placing its own primaries, placing any other wavelength-defined primary, and sensor characterisation. Earlier versions used the 2° set.
 
 ### Why This Matters
 
@@ -222,7 +222,7 @@ How a space's entry matrix is derived depends on how the space defines itself.
 
 **xy-defined primaries (sRGB/Rec.709, Display P3, Adobe RGB, ProPhoto, ...):** an xy pair is a 1931 chromaticity and nothing else. There is no spectrum to re-evaluate under a better observer, so these matrices are built the only way they can be: xy → 1931 XYZ, with VSF's primaries placed in 1931 XYZ by the same colour matching functions, so both sides of the matrix share one observer. This is the one place 1931 is unavoidable, and it is confined to the entry matrix of the legacy space.
 
-**Chromatic adaptation:** VSF RGB's white is Illuminant E; most legacy standards' is D65, and ProPhoto's is D50. The entry matrix includes a von Kries adaptation in SS2000 10° LMS from the source white to E, so a neutral in the source is a neutral (R = G = B) in VSF RGB and back. This keeps the encoding's own definition, that its white code is white; it is not an adaptation to a measured medium white, which is Creative (`idt/output.md`). Without it, D65 white lands off the R = G = B axis, and VSF's YCbCr pays for that in chroma on every frame.
+**No chromatic adaptation.** VSF RGB's white is Illuminant E; most legacy standards' is D65, and ProPhoto's is D50. Every entry matrix is colorimetric: a source's white is the light its specification says it is, and it lands where that light sits in VSF RGB. sRGB, Display P3 and Adobe RGB white come in at about VSF (0.91, 1.03, 1.09), bluer than E; Rec.2020's D65, evaluated under the 10° fundamentals rather than 1931, at (0.90, 1.03, 1.06); ProPhoto's D50 at (0.99, 1.01, 0.81), warmer. Luminance is held: each white has the photopic luminance of VSF white. Making a source's white neutral is white balance, a Creative op ([`idt/creative.md`](idt/creative.md#chromatic-adaptation-honestly-labelled)), and is recorded as one in the graph, never folded into an encoding's matrix. (From 2026-09-22 to 2026-10-20 the matrices did fold in a von Kries adaptation to E; files converted from a legacy space in that window hold adapted values.) Without it, D65 white lands off the R = G = B axis, and VSF's YCbCr pays for that in chroma on every frame.
 
 ICC profiles hand over D50-relative XYZ (the profile connection space illuminant), so the ICC path enters thru its own D50 → E adapted matrix, `XYZ_D50_2VSF_RGB`, rather than the colorimetric `XYZ2VSF_RGB`.
 
@@ -232,18 +232,15 @@ All conversions operate in **floating-point linear light**. Integer inputs are l
 
 **Step 1: Rec.2020 RGB → LMS**
 - Calculate how much each Rec.2020 primary (630nm, 532nm, 467nm) excites L, M, S cones using the SS2000 10° cone fundamentals
-- Scale the primaries so Rec.2020 (1, 1, 1) produces D65 in LMS
+- Scale the primaries so Rec.2020 (1, 1, 1) produces D65 in LMS, at the photopic luminance of Illuminant E
 - Apply to input colour
 
-**Step 2: adapt D65 → E**
-- Von Kries scaling in LMS: divide by the D65 cone response, multiply by the E cone response
-
-**Step 3: LMS → VSF RGB**
+**Step 2: LMS → VSF RGB**
 - Calculate how much each VSF primary (703nm, 523nm, 462nm) excites L, M, S cones using the same cone fundamentals
 - Invert to get LMS → VSF RGB
 - Apply to get VSF RGB output
 
-The three steps fold into one 3×3 matrix at build time.
+The two steps fold into one 3×3 matrix at build time.
 
 ### Why We Use Rec.2020's Wavelengths, Not Its xy Coordinates
 
@@ -296,7 +293,6 @@ Equal energy white point (Illuminant E) is mathematically defined and laboratory
 
 The VSF Rust library provides:
 - Conversion functions between VSF RGB and common colourspaces
-- Chromatic adaptation (D65 ↔ Illuminant E, von Kries in LMS, folded into every legacy entry matrix)
 - Gamma conversion (including proper handling of sRGB/Rec.709/Rec.2020 piecewise curves)
 - Transformation matrices derived from Stockman & Sharpe 2000 10° cone fundamentals
 
