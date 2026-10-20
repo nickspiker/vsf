@@ -34,7 +34,7 @@ Designed and specified, not yet built:
 
 ## Why a new format
 
-Two problems, and no existing format solved both.
+Two problems this format was built to solve.
 
 **A camera matrix says nothing about itself.** A DNG's ColorMatrix, an ICC input profile and an ACES IDT are each a 3×K matrix fitted to a chart under a light or two. The file does not say whether it was measured on this unit or taken from the maker's datasheet, whether it is a characterization or a look, or what light it was fitted under. A guess reads as a measurement and a look reads as a characterization, by omission. [`idt/README.md`](idt/README.md) is the full argument, including why DNG was not extended and how this differs from ACES.
 
@@ -156,7 +156,7 @@ Three layers above that:
 1. **Signatures.** `sign_section` signs a hash of the whole document with that section's signature slot zeroed, so it proves the file as built and any later append invalidates it. Manifest signatures, which name sections by content hash so a camera's capture, a lab's thumbnail and an editor's generation each verify on their own, are the next milestone in [`idt/image.md`](idt/image.md).
 2. **Calibration hashes.** A RAW names its dark, flat, bias, vignette and distortion frames by hash, so the wrong frame is caught before it corrupts a photograph.
 
-BLAKE3 runs at several GB/s per core, faster than the storage the file is going to, so the hash costs nothing you would notice.
+BLAKE3 hashes at several GB/s per core, so on most storage the hash adds little to the time spent reading or writing the file.
 
 ---
 
