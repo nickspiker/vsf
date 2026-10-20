@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Docs
 
-- `idt/README.md`, "Why not extend DNG?": the size point now states the format's limit and today's readers' (2^35-bit and 128-bit widths) instead of "no maximum".
+- `idt/README.md`, "Why not extend DNG?": the size point says why there is no limit — the widest marker is a 2^35-bit integer, while counting every bit the observable universe could store takes about 406 — and that today's readers implement up to 128-bit widths.
 
 ## [0.10.0] - 2026-10-20 · format v10 (reads v9 unchanged)
 
