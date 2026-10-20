@@ -1288,6 +1288,9 @@ pub fn compressed_image(av1_data: Vec<u8>) -> Result<Vec<u8>, String> {
 
 /// [`compressed_image`] with the pixels' encoding stated. `gamma2` writes no tag (untagged is always VSF RGB gamma 2); any other encoding adds an `encoding` field beside `pixels`. A reader that predates the field ignores it and shows the codes as gamma 2: a `g2t` image then looks about 0.8 stops darker with soft highlights, never broken.
 pub fn compressed_image_encoded(av1_data: Vec<u8>, encoding: crate::visual::Encoding) -> Result<Vec<u8>, String> {
+    if !encoding.is_vsf() {
+        return Err(format!("image encoding '{}': the flat image section is VSF RGB and carries no primaries, so only linear, gamma2 or g2t", encoding.as_str()));
+    }
     let mut fields = vec![("pixels".to_string(), VsfType::v(ENCODING_AV1, av1_data))];
     if encoding != crate::visual::Encoding::Gamma2 {
         fields.push(("encoding".to_string(), VsfType::a(encoding.as_str().into())));
@@ -1339,7 +1342,10 @@ pub fn parse_compressed_image(data: &[u8]) -> Result<ParsedCompressedImage, Stri
     let value = pixels_field.values.first().ok_or("Empty 'pixels' field")?;
 
     let colour_encoding = match section.get_field("encoding").and_then(|f| f.values.first()) {
-        Some(VsfType::a(text)) => crate::visual::Encoding::parse(text).map_err(|e| format!("image encoding: {e}"))?,
+        Some(VsfType::a(text)) => match crate::visual::Encoding::parse(text).map_err(|e| format!("image encoding: {e}"))? {
+            e if e.is_vsf() => e,
+            e => return Err(format!("image encoding '{}': the flat image section is VSF RGB, so only linear, gamma2 or g2t", e.as_str())),
+        },
         Some(_) => return Err("Expected text for the image's encoding field".to_string()),
         None => crate::visual::Encoding::Gamma2,
     };

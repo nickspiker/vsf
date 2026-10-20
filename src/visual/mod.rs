@@ -2,7 +2,7 @@
 //!
 //! A still is the one-frame case of a beam track: `visual` + `track.b0` + `span.b0.s0` (one frame, naming a plane) + `plane.b0.s0.sensor` + `capture` + `characterization` + `graph.g0` + `view.v0`. Video adds a rate declaration and spans whose frames are inline; nothing about a still changes when it does. Every section is written with a content hash in its table-of-contents entry, so each can be checked — and later signed — on its own.
 //!
-//! The normative field tables live in `idt/image.md`; this module's doc comments are the implementation's own account. What a reader does with absence: no `characterization` ⇒ the samples are VSF RGB; no `graph` ⇒ render the sensor plane through `black_white → idt(0)`; a `plane` or `view` with no `encoding` ⇒ `gamma2`, always (the integer-plane rule of `colour.md`) — which is why every writer here emits `encoding`, and why the legacy `spectral_image` section reads as `linear`: its only writer ever was opsin, writing linear counts.
+//! The normative field tables live in `idt/image.md`; this module's doc comments are the implementation's own account. What a reader does with absence: no `characterization` and no `primaries` ⇒ the samples are VSF RGB; no `prior` ⇒ nothing was done to the samples before the file; no `graph` ⇒ render the sensor plane through `black_white → idt(0)`; a `plane` or `view` with no `encoding` ⇒ `gamma2`, always (the integer-plane rule of `colour.md`) — which is why every writer here emits `encoding`, and why the legacy `spectral_image` section reads as `linear`: its only writer ever was opsin, writing linear counts.
 //!
 //! [`Visual::to_spectral_image`] / [`Visual::from_spectral_image`] bridge to the [`crate::spectral_image::SpectralImage`] in-memory model opsin renders from, so a consumer can adopt the container without rewriting its pipeline.
 
@@ -63,8 +63,63 @@ macro_rules! closed_vocab {
 closed_vocab!(TrackKind { Beam => "beam", Wave => "wave", Timecode => "timecode", Annotation => "annotation", Data => "data" }, "track kind");
 closed_vocab!(TrackRole { Capture => "capture", Derived => "derived", Display => "display", Preview => "preview", Calibration => "calibration" }, "track role");
 closed_vocab!(PlaneRole { Sensor => "sensor", Display => "display", Preview => "preview", Depth => "depth", Ir => "ir", Uv => "uv", Confidence => "confidence", Motion => "motion", Matte => "matte", Mask => "mask", Alpha => "alpha", Dark => "dark", Flat => "flat", Bias => "bias", Derived => "derived" }, "plane role");
-closed_vocab!(Encoding { Linear => "linear", Gamma2 => "gamma2", Gamma2Tanh => "g2t" | "gamma2tanh" }, "encoding");
+closed_vocab!(Encoding { Linear => "linear", Gamma2 => "gamma2", Gamma2Tanh => "g2t" | "gamma2tanh", Srgb => "srgb", Bt1886 => "bt1886", AdobeRgb => "adobe_rgb", Prophoto => "prophoto", Pq => "pq", Hlg => "hlg" }, "encoding");
+closed_vocab!(Primaries { Vsf => "vsf", Srgb => "srgb", DisplayP3 => "display_p3", AdobeRgb => "adobe_rgb", Prophoto => "prophoto", Rec2020 => "rec2020" }, "primaries");
 closed_vocab!(Purpose { Default => "default", Preview => "preview", Print => "print", Technical => "technical" }, "view purpose");
+
+/// What light a code holds. VSF's own encodings (`linear`, `gamma2`, `g2t`) quantise ×2ⁿ with a code at the bottom of its bucket. The rest are a source's own transfer, kept so a plane can hold a JPEG, a TIFF or an AVIF exactly as it was written: their codes run 0 to 2ⁿ − 1 with white at the top code (the import rule of `idt/layers.md`), and each is named for the specification that defines it — `srgb` (IEC 61966-2-1, also Display P3's), `bt1886` (the BT.709/BT.2020 SDR reference display), `adobe_rgb`, `prophoto` (ROMM RGB), `pq` and `hlg` (BT.2100, diffuse white at 1.0 per BT.2408, so their light runs above 1).
+impl Encoding {
+    /// One of VSF's own encodings, quantised ×2ⁿ, bucket bottom.
+    pub fn is_vsf(self) -> bool {
+        matches!(self, Encoding::Linear | Encoding::Gamma2 | Encoding::Gamma2Tanh)
+    }
+
+    /// Light (diffuse white = 1.0) of a signal 0 to 1 in this encoding. `linear` is the signal itself; `g2t`, `pq` and `hlg` return light above 1 for their highlights. A `g2t` signal of 1 would be infinite light and is taken as the largest finite one.
+    #[allow(deprecated)]
+    pub fn light_f32(self, signal: f32) -> f32 {
+        use crate::colour::{convert, legacy::transfer as legacy, transfer};
+        match self {
+            Encoding::Linear => signal.max(0.),
+            Encoding::Gamma2 => {
+                let e = signal.clamp(0., 1.);
+                e * e
+            }
+            Encoding::Gamma2Tanh => convert::linearize_gamma2tanh_f32(signal.clamp(0., 1. - f32::EPSILON)),
+            Encoding::Srgb => legacy::srgb_eotf(signal.clamp(0., 1.)),
+            Encoding::Bt1886 => transfer::bt1886_light(signal),
+            Encoding::AdobeRgb => legacy::adobe_rgb_eotf(signal.clamp(0., 1.)),
+            Encoding::Prophoto => transfer::prophoto_light(signal),
+            Encoding::Pq => transfer::pq_light(signal),
+            Encoding::Hlg => transfer::hlg_light(signal),
+        }
+    }
+
+    /// Light (diffuse white = 1.0) of an integer `code` at `bits` depth: a VSF encoding ×2ⁿ, bucket bottom; a source's encoding `code / (2ⁿ − 1)`, white at the top code.
+    pub fn light(self, code: u32, bits: u32) -> f32 {
+        let bits = bits.clamp(1, 31);
+        match self {
+            Encoding::Gamma2Tanh => crate::colour::convert::linearize_gamma2tanh_bits_f32(code, bits),
+            e if e.is_vsf() => e.light_f32(code as f32 / (1u32 << bits) as f32),
+            e => e.light_f32(code as f32 / ((1u32 << bits) - 1) as f32),
+        }
+    }
+}
+
+/// The primaries a plane's samples are in, each with the white its specification states. `vsf` is VSF RGB, and also camera counts that a characterization maps (the characterization says what they are). Every other value marks a planar RGB plane kept exactly as a source wrote it: `srgb` (BT.709 primaries, D65), `display_p3` (DCI-P3 primaries, D65), `adobe_rgb` (D65), `prophoto` (ROMM RGB, D50, two primaries outside the spectral locus), `rec2020` (BT.2020, D65, also BT.2100's). They are encodings, not characterizations: a definition, exact by its specification, with no class and no tier (`idt/README.md`, "Encodings are not transforms").
+impl Primaries {
+    /// Linear RGB in these primaries → linear VSF RGB, column-major for [`crate::colour::convert::apply_matrix_3x3_f32`]; `None` for `vsf`. The encoding's white lands on VSF `[1,1,1]`: an encoding defines its white as white, and the matrix keeps that definition (xy-defined spaces thru CIE 1931 XYZ, the only observer an xy pair supports, with their white carried to Illuminant E by von Kries scaling in Stockman & Sharpe 2000 10° LMS; Rec.2020 from its wavelengths, 1931 not involved — `tools/generate_constants.rs`).
+    pub fn to_vsf_rgb(self) -> Option<[f32; 9]> {
+        use crate::colour::legacy::constants as c;
+        match self {
+            Primaries::Vsf => None,
+            Primaries::Srgb => Some(c::SRGB2VSF_RGB),
+            Primaries::DisplayP3 => Some(c::DISPLAY_P3_2VSF_RGB),
+            Primaries::AdobeRgb => Some(c::ADOBE_RGB2VSF_RGB),
+            Primaries::Prophoto => Some(c::PROPHOTO2VSF_RGB),
+            Primaries::Rec2020 => Some(crate::colour::rec2020::REC2020_2VSF_RGB),
+        }
+    }
+}
 
 /// A track: one stream of frames (beam), samples (wave), marks (timecode), notes (annotation) or sensor data (data).
 #[derive(Debug, Clone, PartialEq)]
@@ -129,6 +184,10 @@ pub struct Plane {
     pub black: Vec<f32>,
     pub white: Vec<f32>,
     pub encoding: Encoding,
+    /// The primaries the samples are in. `vsf` (absent on the wire) for VSF RGB and for camera counts a characterization maps; any other value for a planar RGB plane kept exactly as a source wrote it, which the graph's `decode` op takes into VSF RGB.
+    pub primaries: Primaries,
+    /// What was done to these samples before this file existed and is not recorded in it, as an IDT class. `None` (absent on the wire): nothing — raw counts, a drawing's own values. `technical`: mechanics only, such as a demosaic or a frame merge in the camera. `creative`: a look was applied — white balance, a phone's tone mapping — which is every camera JPEG. A writer that cannot tell writes `creative`: absence claims nothing happened, and the weaker claim must win. Only the class lives here; the device is in `capture`, and the event with its evidence belongs to provenance (`idt/fields.md`, "Prior").
+    pub prior: Option<IdtClass>,
     /// Bits per sample, 1–128.
     pub depth: u8,
     pub samples: Samples,
@@ -148,18 +207,38 @@ impl Plane {
     /// A capture plane holding `samples` at the given geometry, encoding linear, no crop, upright.
     pub fn sensor(track: &str, seq: &str, width: usize, height: usize, channels: Vec<SpectralChannel>, layout: PlaneLayout, black: Vec<f32>, white: Vec<f32>, samples: BitPackedTensor) -> Self {
         let depth = samples.bit_depth;
-        Plane { track: track.into(), seq: seq.into(), name: "sensor".into(), role: PlaneRole::Sensor, width, height, channels, layout, black, white, encoding: Encoding::Linear, depth, samples: Samples::Packed(samples), maker_crop: None, orientation: 1, at: None, parent: None, program: String::new() }
+        Plane { track: track.into(), seq: seq.into(), name: "sensor".into(), role: PlaneRole::Sensor, width, height, channels, layout, black, white, encoding: Encoding::Linear, primaries: Primaries::Vsf, prior: None, depth, samples: Samples::Packed(samples), maker_crop: None, orientation: 1, at: None, parent: None, program: String::new() }
+    }
+
+    /// A planar RGB plane kept exactly as a source encoded it — an sRGB or Display P3 JPEG, an Adobe RGB TIFF, a PQ AVIF. `samples` is `[3, height, width]`; `primaries` and `encoding` say what its codes mean; `black` is 0 and `white` the top code (`idt/layers.md`, the import rule); role `display`, name `main`. `prior` starts as `creative`, the weaker claim, since a picture in a display encoding has almost always been rendered by whatever made it; a writer that knows better (a drawing, a render with no tone map) clears it.
+    pub fn encoded(track: &str, seq: &str, width: usize, height: usize, primaries: Primaries, encoding: Encoding, samples: BitPackedTensor) -> Self {
+        let depth = samples.bit_depth;
+        let top = ((1u64 << depth.min(63)) - 1) as f32;
+        let channels = ["R", "G", "B"].iter().map(|n| SpectralChannel { name: (*n).into(), curve: None }).collect();
+        Plane { track: track.into(), seq: seq.into(), name: "main".into(), role: PlaneRole::Display, width, height, channels, layout: PlaneLayout::Planar, black: vec![0.; 3], white: vec![top; 3], encoding, primaries, prior: Some(IdtClass::Creative), depth, samples: Samples::Packed(samples), maker_crop: None, orientation: 1, at: None, parent: None, program: String::new() }
     }
     pub fn section_name(&self) -> String {
         format!("plane.{}.{}.{}", self.track, self.seq, self.name)
     }
 
-    /// The plane as LINEAR counts: `(samples, black, white)`. A linear plane is returned as stored. A `gamma2` or `g2t` plane is decoded code by code (×2ⁿ, bucket bottom, the VSF rule; its codes start at 0) and re-packed at 16 bits with black 0 and white placed so its brightest light still fits: `white = 65535 / max(1, peak)`, so diffuse white stays at `white` and the highlights a `g2t` plane holds sit above it rather than clipping. Readers that want counts (opsin's bridge, limbus's raw reader) go through here and never see an encoded plane as if it were linear.
+    fn packed(&self) -> Result<&BitPackedTensor, VisualError> {
+        match &self.samples {
+            Samples::Packed(t) => Ok(t),
+            Samples::Wrapped(code, _) => Err(bad(format!("plane is wrapped under codec '{}' — not a bit-packed plane", *code as char))),
+        }
+    }
+
+    /// A plane in foreign primaries must be planar RGB: the primaries are a 3 × 3 matrix's worth of meaning.
+    fn check_primaries(&self) -> Result<(), VisualError> {
+        if self.primaries != Primaries::Vsf && (self.channels.len() != 3 || self.layout != PlaneLayout::Planar) {
+            return Err(bad(format!("plane {}: primaries '{}' need a planar plane of 3 channels (it has {}, {})", self.section_name(), self.primaries.as_str(), self.channels.len(), if self.layout == PlaneLayout::Planar { "planar" } else { "mosaic" })));
+        }
+        Ok(())
+    }
+
+    /// The plane as LINEAR counts in its own primaries: `(samples, black, white)`. A linear plane is returned as stored. An encoded plane is decoded code by code by its encoding ([`Encoding::light`]: ×2ⁿ, bucket bottom for VSF's own; white at the top code for a source's) and re-packed at 16 bits with black 0 and white placed so its brightest light still fits: `white = 65535 / max(1, peak)`, so diffuse white stays at `white` and the highlights a `g2t`, PQ or HLG plane holds sit above it rather than clipping. Readers that want counts (opsin's bridge, limbus's raw reader) go thru here and never see an encoded plane as if it were linear. The primaries are untouched; [`Self::vsf_linear_samples`] also takes them into VSF RGB.
     pub fn linear_samples(&self) -> Result<(BitPackedTensor, Vec<f32>, Vec<f32>), VisualError> {
-        let t = match &self.samples {
-            Samples::Packed(t) => t,
-            Samples::Wrapped(code, _) => return Err(bad(format!("plane is wrapped under codec '{}' — not a bit-packed plane", *code as char))),
-        };
+        let t = self.packed()?;
         if self.encoding == Encoding::Linear {
             return Ok((t.clone(), self.black.clone(), self.white.clone()));
         }
@@ -167,20 +246,48 @@ impl Plane {
             return Err(bad(format!("{}-bit {} plane: encoded planes are 1 to 16 bits", t.bit_depth, self.encoding.as_str())));
         }
         let bits = t.bit_depth as u32;
-        let decode = |c: u16| match self.encoding {
-            Encoding::Gamma2Tanh => crate::colour::convert::linearize_gamma2tanh_bits_f32(c as u32, bits),
-            _ => {
-                let e = c as f32 / (1u32 << bits) as f32;
-                e * e
-            }
-        };
-        let light: Vec<f32> = t.unpack_u16().into_iter().map(decode).collect();
-        let peak = light.iter().copied().fold(1f32, f32::max);
-        let white = 65535. / peak;
-        let counts: Vec<u16> = light.iter().map(|&l| (l * white + 0.5).min(65535.) as u16).collect();
+        let light: Vec<f32> = t.unpack_u16().into_iter().map(|c| self.encoding.light(c as u32, bits)).collect();
+        let (counts, white) = pack_light(&light);
         let k = self.white.len().max(1);
         Ok((BitPackedTensor::pack(16, t.shape.clone(), &counts), vec![0.; k], vec![white; k]))
     }
+
+    /// The plane as LINEAR counts in VSF RGB, ready for a model with no notion of primaries (opsin's bridge). A `vsf` plane is [`Self::linear_samples`]. A plane in foreign primaries is decoded to light by its encoding (a linear one by its black and white), taken thru [`Primaries::to_vsf_rgb`] pixel by pixel — the graph's `decode` op, done once — and re-packed by the same rule. A colour outside VSF RGB, reachable only from ProPhoto's imaginary primaries, comes out negative and is clipped at 0 here; the file keeps it.
+    pub fn vsf_linear_samples(&self) -> Result<(BitPackedTensor, Vec<f32>, Vec<f32>), VisualError> {
+        let Some(m) = self.primaries.to_vsf_rgb() else { return self.linear_samples() };
+        self.check_primaries()?;
+        let t = self.packed()?;
+        if t.bit_depth > 16 {
+            return Err(bad(format!("{}-bit plane in '{}' primaries: a source's encoding is 1 to 16 bits", t.bit_depth, self.primaries.as_str())));
+        }
+        let n = self.width * self.height;
+        let codes = t.unpack_u16();
+        if codes.len() != 3 * n {
+            return Err(bad(format!("plane {}: {} samples for 3 × {} × {}", self.section_name(), codes.len(), self.width, self.height)));
+        }
+        let bits = t.bit_depth as u32;
+        let light = |ch: usize, c: u16| match self.encoding {
+            Encoding::Linear => (c as f32 - self.black[ch]) / (self.white[ch] - self.black[ch]),
+            e => e.light(c as u32, bits),
+        };
+        let mut out = vec![0f32; 3 * n];
+        for i in 0..n {
+            let rgb = [light(0, codes[i]), light(1, codes[n + i]), light(2, codes[2 * n + i])];
+            let v = crate::colour::convert::apply_matrix_3x3_f32(&m, &rgb);
+            for ch in 0..3 {
+                out[ch * n + i] = v[ch].max(0.);
+            }
+        }
+        let (counts, white) = pack_light(&out);
+        Ok((BitPackedTensor::pack(16, vec![3, self.height, self.width], &counts), vec![0.; 3], vec![white; 3]))
+    }
+}
+
+/// Light (diffuse white = 1.0) → 16-bit counts with white at `65535 / max(1, peak)`, so the brightest light takes the top count and nothing above white clips.
+fn pack_light(light: &[f32]) -> (Vec<u16>, f32) {
+    let peak = light.iter().copied().fold(1f32, f32::max);
+    let white = 65535. / peak;
+    (light.iter().map(|&l| (l * white + 0.5).min(65535.) as u16).collect(), white)
 }
 
 /// The capture facts: the exposure triangle, the optics, when and where, the body and lens, the mode and the stack recipe — what EXIF and DNG carry today, with Eagle time and a `WorldCoord` where a string and a sexagesimal triple used to be.
@@ -371,14 +478,19 @@ pub const OP_BASELINE: &str = "baseline";
 pub const OP_EXPOSURE: &str = "exposure";
 pub const OP_DR_CURVE: &str = "dr_curve";
 pub const OP_ENCODE: &str = "encode";
+/// Technical, arity 1, no params: its operand, a plane in foreign primaries, decoded to light by the plane's encoding and taken into VSF RGB by its primaries' matrix ([`Primaries::to_vsf_rgb`]). The plane says which; the op says where in the program it happens, so the two cannot disagree.
+pub const OP_DECODE: &str = "decode";
 
 impl Graph {
-    /// The default graph of a still: the sensor plane, normalised, through the first characterization entry, then the view ops in order. Every op after `idt` is arity 1, so a reader can strip the Creative ones and the program stays well-formed.
-    pub fn default_still(id: &str, plane: &str, idt_class: Option<IdtClass>, ops: &[ViewOp]) -> Graph {
+    /// The default graph of a still: the plane, normalised, decoded into VSF RGB when it is in foreign `primaries`, through the first characterization entry, then the view ops in order. Every op after `idt` is arity 1, so a reader can strip the Creative ones and the program stays well-formed.
+    pub fn default_still(id: &str, plane: &str, primaries: Primaries, idt_class: Option<IdtClass>, ops: &[ViewOp]) -> Graph {
         let mut g = vec![
             GraphOp { name: OP_PLANE.into(), class: IdtClass::Technical, arity: 0, params: vec![], reference: plane.into() },
             GraphOp { name: OP_BLACK_WHITE.into(), class: IdtClass::Technical, arity: 1, params: vec![], reference: String::new() },
         ];
+        if primaries != Primaries::Vsf {
+            g.push(GraphOp { name: OP_DECODE.into(), class: IdtClass::Technical, arity: 1, params: vec![], reference: String::new() });
+        }
         // The `idt` op carries the class of the characterization entry it indexes — an Absolute matrix makes an Absolute op.
         if let Some(class) = idt_class {
             g.push(GraphOp { name: OP_IDT.into(), class, arity: 1, params: vec![0.0], reference: String::new() });
@@ -390,12 +502,12 @@ impl Graph {
         Graph { id: id.into(), ops: g, root }
     }
 
-    /// The view ops of a still's default graph: everything after the source/normalise/idt prologue, as a [`ViewTransform`] — what opsin replays.
+    /// The view ops of a still's default graph: everything after the source/normalise/decode/idt prologue, as a [`ViewTransform`] — what opsin replays.
     pub fn to_view_transform(&self) -> ViewTransform {
         let ops = self
             .ops
             .iter()
-            .filter(|op| !matches!(op.name.as_str(), OP_PLANE | OP_BLACK_WHITE | OP_IDT | OP_ENCODE))
+            .filter(|op| !matches!(op.name.as_str(), OP_PLANE | OP_BLACK_WHITE | OP_DECODE | OP_IDT | OP_ENCODE))
             .map(|op| ViewOp { name: op.name.clone(), class: op.class, params: op.params.clone() })
             .collect();
         ViewTransform { space: "vsf_rgb_linear".into(), ops }
@@ -569,6 +681,14 @@ impl Plane {
         s.add_field("black", VsfType::t_f5(Tensor::new(vec![k], self.black.clone())));
         s.add_field("white", VsfType::t_f5(Tensor::new(vec![k], self.white.clone())));
         s.add_field("encoding", VsfType::a(self.encoding.as_str().into()));
+        // Absent ⇒ VSF RGB and nothing before the file: both written only when they say something, so a plane that needs neither keeps its bytes.
+        self.check_primaries()?;
+        if self.primaries != Primaries::Vsf {
+            s.add_field("primaries", VsfType::a(self.primaries.as_str().into()));
+        }
+        if let Some(c) = self.prior {
+            s.add_field("prior", VsfType::a(c.as_str().into()));
+        }
         s.add_field("depth", VsfType::u(self.depth as usize, false));
         if let Some(c) = self.maker_crop {
             s.add_field("maker_crop", VsfType::t_u5(Tensor::new(vec![4], c.to_vec())));
@@ -662,7 +782,7 @@ impl Plane {
             (Some(a), Some(b)) => Some((a, b)),
             _ => None,
         };
-        Ok(Plane {
+        let plane = Plane {
             track: track.into(),
             seq: seq.into(),
             name: name.into(),
@@ -678,6 +798,14 @@ impl Plane {
                 Some(e) => Encoding::parse(e)?,
                 None => Encoding::Gamma2,
             },
+            primaries: match s.text("primaries") {
+                Some(p) => Primaries::parse(p)?,
+                None => Primaries::Vsf,
+            },
+            prior: match s.text("prior") {
+                Some(c) => Some(IdtClass::parse(c).map_err(|e| bad(format!("plane prior: {e}")))?),
+                None => None,
+            },
             depth,
             samples,
             maker_crop,
@@ -685,7 +813,9 @@ impl Plane {
             at: eagle(s, "at"),
             parent,
             program: text(s, "program"),
-        })
+        };
+        plane.check_primaries()?;
+        Ok(plane)
     }
 }
 
@@ -868,13 +998,13 @@ pub fn characterization_fields(p: &ColourProfile, observer: &str, response: Opti
 // ───────────────────────── write / read ─────────────────────────
 
 impl Visual {
-    /// A still from its parts: one beam track `b0`, one span `s0` of one frame naming the plane, the plane as `plane.b0.s0.sensor`, the default graph and view.
+    /// A still from its parts: one beam track `b0`, one span `s0` of one frame naming the plane, the plane as `plane.b0.s0.<name>` (`sensor` for a capture, `main` for an encoded source), the default graph and view.
     pub fn still(plane: Plane, capture: Option<Capture>, characterization: Option<ColourProfile>, ops: &[ViewOp]) -> Visual {
         let mut plane = plane;
         plane.track = "b0".into();
         plane.seq = "s0".into();
         let plane_name = plane.section_name();
-        let graph = Graph::default_still("g0", &plane_name, characterization.as_ref().and_then(|p| p.entries.first()).map(|e| e.class), ops);
+        let graph = Graph::default_still("g0", &plane_name, plane.primaries, characterization.as_ref().and_then(|p| p.entries.first()).map(|e| e.class), ops);
         let view = View::default_of("v0", &graph);
         Visual {
             default_view: view.section_name(),
@@ -1056,7 +1186,8 @@ impl Visual {
         let vis = Self::read_document(doc)?;
         let plane_ref = vis.default_graph().and_then(|g| g.ops.iter().find(|o| o.name == OP_PLANE)).map(|o| o.reference.clone()).or_else(|| vis.primary_plane().map(|p| p.section_name())).ok_or(VisualError::Missing("plane"))?;
         let n = doc.generation() + 1;
-        let graph = Graph::default_still(&format!("g{n}"), &plane_ref, vis.characterization.as_ref().and_then(|p| p.entries.first()).map(|e| e.class), ops);
+        let primaries = vis.planes.iter().find(|p| p.section_name() == plane_ref).map_or(Primaries::Vsf, |p| p.primaries);
+        let graph = Graph::default_still(&format!("g{n}"), &plane_ref, primaries, vis.characterization.as_ref().and_then(|p| p.entries.first()).map(|e| e.class), ops);
         let view = View::default_of(&format!("v{n}"), &graph);
         let mut manifest = vec![("tracks".to_string(), VsfType::a(vis.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join("\n"))), ("default_view".to_string(), VsfType::a(view.section_name()))];
         push_text(&mut manifest, "title", &vis.title);
@@ -1090,8 +1221,8 @@ impl Visual {
     /// Bridge to the in-memory model: the primary plane as the image, the characterization as its profile, the default graph's view ops as its view log. Extra planes, the capture facts and foreign metadata stay on the `Visual`.
     pub fn to_spectral_image(&self) -> Result<SpectralImage, VisualError> {
         let p = self.primary_plane().ok_or(VisualError::Missing("plane"))?;
-        // The in-memory model holds linear counts, so an encoded plane is linearized on the way (`Plane::linear_samples`).
-        let (samples, black, white) = p.linear_samples()?;
+        // The in-memory model holds linear VSF RGB counts (or camera counts its profile maps), so an encoded plane is linearized and a plane in foreign primaries decoded on the way (`Plane::vsf_linear_samples`).
+        let (samples, black, white) = p.vsf_linear_samples()?;
         let (make, model) = match &self.capture {
             Some(c) => (c.make.clone(), c.model.clone()),
             None => (String::new(), String::new()),

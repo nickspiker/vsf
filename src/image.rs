@@ -138,6 +138,9 @@ fn decode_codes(data: &[u8]) -> Result<DecodedImage, ImageError> {
         if field.name == "encoding" {
             if let Some(VsfType::a(text)) = field.values.first() {
                 encoding = crate::visual::Encoding::parse(text).map_err(|e| ImageError::Parse(format!("image encoding: {e}")))?;
+                if !encoding.is_vsf() {
+                    return Err(ImageError::Parse(format!("image encoding '{}': the flat image section is VSF RGB, so only linear, gamma2 or g2t", encoding.as_str())));
+                }
             }
             continue;
         }

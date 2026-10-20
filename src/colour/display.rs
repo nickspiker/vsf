@@ -4,7 +4,7 @@
 //!
 //! The mapping is linear up to a knee and rolls off above it, reaching the display's peak exactly at the content's brightest value. Content that fits the display (`content_peak ≤ headroom`) is shown linearly, untouched: SDR content on any display, and HDR content on a display with room for it.
 
-use crate::colour::convert::{linearize_gamma2_u8_f32, linearize_gamma2tanh_bits_f32};
+use crate::colour::convert::linearize_gamma2tanh_bits_f32;
 use crate::visual::Encoding;
 
 /// Where the roll-off starts, as a fraction of the display's peak, when the content is brighter than the display can show. 0.75 keeps the lower three quarters of the display's range linear; on an SDR monitor (headroom 1) diffuse white then lands near 0.88 of peak, leaving the top eighth for the highlights.
@@ -37,13 +37,9 @@ pub fn display_light(l: f32, headroom: f32, content_peak: f32) -> f32 {
     ((k + r * s) / h).min(1.)
 }
 
-/// Scene light held by each 8-bit code of a plane or image with `encoding` (×256, bucket bottom, the VSF quantization rule).
+/// Light held by each 8-bit code of a plane or image with `encoding`: ×256, bucket bottom for VSF's own encodings; white at code 255 for a source's ([`Encoding::light`]).
 pub fn scene_light_u8(code: u8, encoding: Encoding) -> f32 {
-    match encoding {
-        Encoding::Linear => code as f32 / 256.,
-        Encoding::Gamma2 => linearize_gamma2_u8_f32(code),
-        Encoding::Gamma2Tanh => linearize_gamma2tanh_bits_f32(code as u32, 8),
-    }
+    encoding.light(code as u32, 8)
 }
 
 /// The display light (fraction of peak, linear) for every 8-bit code of `encoding`, on a display with `headroom`, for content whose brightest code is `peak_code`. One table per image: the per-pixel work is a lookup.
@@ -56,9 +52,86 @@ pub fn display_lut_u8(encoding: Encoding, headroom: f32, peak_code: u8) -> [f32;
     lut
 }
 
+/// The brightest an emissive panel can show, in cd/m², for a picture whose mean displayed light is `mean` cd/m², from the panel's window measurements: `area[i]` is a white window's fraction of the screen (ascending, 0 to 1) on black, and `peak[i]` the luminance it reached (`idt/output.md`, "Peak brightness depends on how much is lit"). A panel's brightness limiter answers to the power it draws, which tracks the picture's mean light; a window of area `a` at peak `p` draws a mean of `a·p`. So the picture gets the peak of the window that draws the same mean, interpolated between the two measurements that bracket it: below the smallest window's mean, that window's peak; above full screen's, full screen's. This takes white's power for every colour (a saturated colour draws differently) and one time scale (a sustained curve is a second set of measurements, passed the same way). Empty or mismatched measurements give 0.
+pub fn abl_peak(area: &[f32], peak: &[f32], mean: f32) -> f32 {
+    if area.is_empty() || area.len() != peak.len() {
+        return 0.;
+    }
+    let drawn = |i: usize| area[i] * peak[i];
+    if !(mean > drawn(0)) {
+        return peak[0];
+    }
+    for i in 1..area.len() {
+        let (lo, hi) = (drawn(i - 1), drawn(i));
+        if mean <= hi && hi > lo {
+            let t = (mean - lo) / (hi - lo);
+            return peak[i - 1] + t * (peak[i] - peak[i - 1]);
+        }
+    }
+    peak[peak.len() - 1]
+}
+
+/// The headroom (peak ÷ diffuse white) to pass [`display_light`] for this picture on a panel whose brightness limiter is measured as in [`abl_peak`], with diffuse white shown at `white` cd/m². `light` is the picture's scene light, diffuse white = 1 (a subsample is enough). The answer is the largest headroom the panel can sustain for the picture as it would be shown at that headroom: showing it brighter raises its mean, which lowers what the panel allows, so the two meet at one value, found by bisection. A small highlight gets the small-window peak and a bright sky the full-screen one. Never below 1.
+pub fn abl_headroom(light: &[f32], white: f32, area: &[f32], peak: &[f32]) -> f32 {
+    let top = peak.iter().copied().fold(0f32, f32::max) / white;
+    if light.is_empty() || !(top > 1.) {
+        return 1.;
+    }
+    let content_peak = light.iter().copied().fold(0f32, f32::max);
+    // Positive while the panel can sustain headroom `h` for this picture shown at `h`.
+    let room = |h: f32| {
+        let mean = light.iter().map(|&l| display_light(l, h, content_peak)).sum::<f32>() / light.len() as f32 * h * white;
+        abl_peak(area, peak, mean) - h * white
+    };
+    if room(top) >= 0. {
+        return top;
+    }
+    let (mut lo, mut hi) = (1f32, top);
+    if room(lo) < 0. {
+        return 1.;
+    }
+    for _ in 0..24 {
+        let mid = 0.5 * (lo + hi);
+        if room(mid) >= 0. {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An OLED-like limiter: 1000 cd/m² up to a 10 % window, 250 at full screen.
+    const AREA: [f32; 5] = [0.02, 0.1, 0.25, 0.5, 1.0];
+    const PEAK: [f32; 5] = [1000., 1000., 600., 400., 250.];
+
+    #[test]
+    fn abl_peak_follows_the_window_that_draws_the_same_power() {
+        assert_eq!(abl_peak(&AREA, &PEAK, 5.), 1000., "a tiny highlight gets the small-window peak");
+        assert_eq!(abl_peak(&AREA, &PEAK, 100.), 1000., "a 10 % window's mean is 100");
+        assert_eq!(abl_peak(&AREA, &PEAK, 250.), 250., "full screen white");
+        let mid = abl_peak(&AREA, &PEAK, 175.);
+        assert!(mid < 600. && mid > 400., "between the 25 % and 50 % windows: {mid}");
+        assert_eq!(abl_peak(&[], &[], 10.), 0.);
+    }
+
+    #[test]
+    fn a_small_highlight_gets_the_full_peak_and_a_bright_frame_does_not() {
+        let white = 200.;
+        // 1 % of the picture at 5× white, the rest at a fifth of white.
+        let mut speck = vec![0.2f32; 99];
+        speck.push(5.);
+        assert!((abl_headroom(&speck, white, &AREA, &PEAK) - 5.).abs() < 1e-3, "the panel's whole 1000 cd/m² is available");
+        // Everything at 2× white: the panel cannot hold 400 cd/m² full screen.
+        let sky = vec![2f32; 100];
+        let h = abl_headroom(&sky, white, &AREA, &PEAK);
+        assert!(h < 2. && h >= 1., "a bright frame is limited: {h}");
+        assert!(abl_headroom(&sky, white, &[], &[]) == 1.);
+    }
 
     #[test]
     fn content_that_fits_is_linear() {

@@ -21,7 +21,7 @@ span.b0.s0             first 0, count 1, data → plane.b0.s0.sensor
 plane.b0.s0.sensor     the sensor plane
 capture                exposure, optics, when, where, body, lens, mode, baseline
 characterization       the tiered camera → VSF RGB mapping, observer
-graph.g0               the default program: plane → black_white → idt → view ops
+graph.g0               the default program: plane → black_white → [decode] → idt → view ops
 view.v0                the default output of graph.g0
 foreign                XMP / ICC verbatim, profile name, calibration signature
 ```
@@ -67,7 +67,9 @@ A gap between two spans is a hole; so is an empty `v` inside one. Decoders reset
 | `layout` | `a` closed | `mosaic` \| `planar` |
 | `cfa` | `t_u3 [th, tw]` | mosaic only: channel index per cell; 2×2, 4×4, 6×6 all fit |
 | `black`, `white` | `t_f5 [k]` | raw counts, per channel |
-| `encoding` | `a` closed | `linear` \| `gamma2` \| `g2t`, also spelled `gamma2tanh` (VSF RGB with HDR headroom, `colour.md`); **absent ⇒ `gamma2`** (the integer-plane rule) — every writer here says which |
+| `encoding` | `a` closed | VSF's own: `linear` \| `gamma2` \| `g2t`, also spelled `gamma2tanh` (VSF RGB with HDR headroom, `colour.md`), quantised ×2ⁿ, bucket bottom. A source's own, kept as written (v12): `srgb` \| `bt1886` \| `adobe_rgb` \| `prophoto` \| `pq` \| `hlg`, codes 0 to 2ⁿ − 1 with white at the top code ([`fields.md`](fields.md#untouched-sources-and-prior--implemented-2026-10-20)). **Absent ⇒ `gamma2`** (the integer-plane rule) — every writer here says which |
+| `primaries` | `a` closed | `vsf` \| `srgb` \| `display_p3` \| `adobe_rgb` \| `prophoto` \| `rec2020`: the primaries and white the samples are in. **Absent ⇒ `vsf`** (VSF RGB, or camera counts a characterization maps). Any other value requires `layout = planar` and three channels, and the graph decodes it with `decode` (v12) |
+| `prior` | `a` closed | an IDT class: what was done to the samples before the file and is not recorded in it. **Absent ⇒ nothing**; `technical` ⇒ mechanics only; `creative` ⇒ a look, which is every camera JPEG. A writer that cannot tell writes `creative` (v12, [README](README.md#what-came-before-the-file)) |
 | `depth` | `u` | bits per sample, 1–128 |
 | `curve_start`, `curve_step`, `curve_counts`, `curve_values` | `t_f5 [k]`, `t_f5 [k]`, `t_u5 [k]`, `t_f5` | spectral sensitivity per channel, when characterized (the `spectral_response` codec, on the plane) |
 | `maker_crop` | `t_u5 [4]` | `[x, y, w, h]`: the maker's recommended crop — a suggestion, never applied |
@@ -117,7 +119,7 @@ A DAG of sources and ops, serialised as a **Stack Notation** (postfix) program i
 | `root` | `u` | the op whose result is the output; absent ⇒ the last |
 | `hash` | `hb` | BLAKE3 of the canonical program |
 
-Reserved ops (the still's default graph uses the first three and the view ops): `plane` (0, ref) · `black_white` (1) · `idt` (1, entry index) · `orientation` (1, EXIF code) · `crop` (1, x y w h) · `baseline` (1, stops) · `exposure` (1, stops) · `dr_curve` (1, coefficients) · `encode` (1, space transfer bits). *(design)*: `frame`, `frames`, `const`, `ref`, `demosaic`, `matrix`, `curve`, `contrast`, `white_balance`, `scale`, `mean`, `median`, `sum`, `max`, `min`, `sub`, `div`, `slitscan`, `under(mode)`, `alpha`, `mix` — bursts, composites and regional edits are all compositions of these. Technical ops precede Creative along every path; every op after `idt` in the default graph is arity 1, so a reader can strip the Creative ones and the program stays well-formed. An edit is a **new graph and view in a new generation**; the samples never change.
+Reserved ops (the still's default graph uses the first three, `decode` when its plane is in foreign primaries, and the view ops): `plane` (0, ref) · `black_white` (1) · `decode` (1; the plane's primaries and encoding into VSF RGB, Technical) · `idt` (1, entry index) · `orientation` (1, EXIF code) · `crop` (1, x y w h) · `baseline` (1, stops) · `exposure` (1, stops) · `dr_curve` (1, coefficients) · `encode` (1, space transfer bits). *(design)*: `frame`, `frames`, `const`, `ref`, `demosaic`, `matrix`, `curve`, `contrast`, `white_balance`, `scale`, `mean`, `median`, `sum`, `max`, `min`, `sub`, `div`, `slitscan`, `under(mode)`, `alpha`, `mix` — bursts, composites and regional edits are all compositions of these. Technical ops precede Creative along every path; every op after `idt` in the default graph is arity 1, so a reader can strip the Creative ones and the program stays well-formed. An edit is a **new graph and view in a new generation**; the samples never change.
 
 ### `view.<id>`
 | field | type | notes |
@@ -143,7 +145,8 @@ Unchanged from `spectral_image` (`handle`, `calibration_hash`, `camera_ihi`, `id
 
 ## Absence
 
-- No `characterization` ⇒ the samples are VSF RGB (the rule of [README](README.md#absence-is-a-statement)).
+- No `characterization` and no `primaries` ⇒ the samples are VSF RGB (the rule of [README](README.md#absence-is-a-statement)).
+- No `prior` ⇒ nothing was done to the samples before the file.
 - No `graph` ⇒ render the primary plane through `black_white → idt(0)`.
 - No `encoding` on a plane ⇒ `gamma2`. The legacy `spectral_image` section reads as **linear** — its only writer, opsin, wrote linear counts — and a legacy document reads as a one-track visual whose graph's `plane` op references `spectral_image`.
 - No `role` on a plane ⇒ `sensor`; no `orientation` ⇒ 1; no `default_view` ⇒ the first view.

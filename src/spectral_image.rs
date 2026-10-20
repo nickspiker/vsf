@@ -103,7 +103,7 @@ impl ProfileTier {
     }
 }
 
-/// The transfer the *samples* carry before this entry's matrix applies. All camera-raw paths are `Linear`; the rest exist so assumed-observer ingest (sRGB/Adobe JPEG) can record the encoding its code values arrived in, to be linearized before the matrix.
+/// The transfer the *samples* carry before this entry's matrix applies. All camera-raw paths are `Linear`; the rest exist so assumed-observer ingest (sRGB/Adobe JPEG) could record the encoding its code values arrived in, to be linearized before the matrix. Vestigial since format v12: a source's encoding is not a characterization, so an sRGB JPEG is a plane with `primaries = srgb` and `encoding = srgb`, decoded by the graph's `decode` op (`visual::Primaries`, `idt/fields.md`). Kept so files that wrote it still read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transfer {
     Linear,

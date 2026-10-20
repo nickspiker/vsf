@@ -187,7 +187,7 @@ Storage and display are separate stages, and stay separate. An encoding (`gamma2
 
 `colour::display::display_light(l, headroom, content_peak)` is the one mapping the stack's viewers call as their last step, so no two disagree:
 
-- **headroom** is the display's peak over diffuse white: 1 for an SDR monitor, the HDR/SDR ratio on an HDR panel.
+- **headroom** is the display's peak over diffuse white: 1 for an SDR monitor, the HDR/SDR ratio on an HDR panel. On a panel whose peak depends on how much of it is lit (an OLED, a local-dimming LCD), `colour::display::abl_headroom` finds the headroom it can sustain for this picture from the panel's measured window curve (`idt/output.md`, "Peak brightness depends on how much is lit").
 - **content_peak** is the brightest light the content holds: the image's own brightest code decoded, so a picture with mild highlights is not compressed for headroom it never uses.
 - When the content fits (`content_peak ≤ headroom`) the mapping is exactly linear, `l / headroom`: SDR content on any display, and HDR content on a display with room for it.
 - Otherwise it is linear up to a knee at 0.75 of the display's peak (`DISPLAY_KNEE`) and an extended-Reinhard shoulder above it, slope-continuous at the knee, monotone, and reaching the display's peak exactly at `content_peak`. On an SDR monitor a `g2t` picture's diffuse white then sits near 0.88 of peak, with its highlights in the top eighth.
@@ -220,9 +220,9 @@ How a space's entry matrix is derived depends on how the space defines itself.
 
 **Wavelength-defined primaries (VSF RGB, Rec.2020):** evaluate each primary's L, M, S response under the SS2000 10° cone fundamentals, build the matrix in LMS, and solve into VSF RGB. 1931 never appears.
 
-**xy-defined primaries (sRGB/Rec.709, Adobe RGB, DCI-P3, ...):** an xy pair is a 1931 chromaticity and nothing else. There is no spectrum to re-evaluate under a better observer, so these matrices are built the only way they can be: xy → 1931 XYZ, with VSF's primaries placed in 1931 XYZ by the same colour matching functions, so both sides of the matrix share one observer. This is the one place 1931 is unavoidable, and it is confined to the entry matrix of the legacy space.
+**xy-defined primaries (sRGB/Rec.709, Display P3, Adobe RGB, ProPhoto, ...):** an xy pair is a 1931 chromaticity and nothing else. There is no spectrum to re-evaluate under a better observer, so these matrices are built the only way they can be: xy → 1931 XYZ, with VSF's primaries placed in 1931 XYZ by the same colour matching functions, so both sides of the matrix share one observer. This is the one place 1931 is unavoidable, and it is confined to the entry matrix of the legacy space.
 
-**Chromatic adaptation:** VSF RGB's white is Illuminant E; every legacy standard's is D65. The entry matrix includes a von Kries adaptation in SS2000 10° LMS from the source white to E, so a neutral in the source is a neutral (R = G = B) in VSF RGB and back. Without it, D65 white lands off the R = G = B axis, and VSF's YCbCr pays for that in chroma on every frame.
+**Chromatic adaptation:** VSF RGB's white is Illuminant E; most legacy standards' is D65, and ProPhoto's is D50. The entry matrix includes a von Kries adaptation in SS2000 10° LMS from the source white to E, so a neutral in the source is a neutral (R = G = B) in VSF RGB and back. This keeps the encoding's own definition, that its white code is white; it is not an adaptation to a measured medium white, which is Creative (`idt/output.md`). Without it, D65 white lands off the R = G = B axis, and VSF's YCbCr pays for that in chroma on every frame.
 
 ICC profiles hand over D50-relative XYZ (the profile connection space illuminant), so the ICC path enters thru its own D50 → E adapted matrix, `XYZ_D50_2VSF_RGB`, rather than the colorimetric `XYZ2VSF_RGB`.
 

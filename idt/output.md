@@ -48,6 +48,22 @@ The medium's white and black are *facts*. What a renderer does about them is an 
 
 ICC's "relative colorimetric" intent bundles the first and the last of these into one step — a scale *and* a chromatic adaptation to media white. This format keeps them apart, because one is a scale and the other is a look, and the file should be able to say which it did.
 
+## Peak brightness depends on how much is lit
+
+An emissive medium's white is not one number. An OLED reaches its peak only in a small window and dims as more of the screen lights, because its brightness limiter answers to the power the panel draws; a local-dimming LCD does the same per zone. A typical HDR OLED shows about 1000 cd/m² in a 10 % window and about 250 cd/m² with the whole screen white. Time matters too: a brief flash is brighter than the same picture held, and static content dims further over minutes to protect the panel. VESA's DisplayHDR tests measure the small window, a short full-screen flash and a long full-screen hold separately for this reason.
+
+So an emissive medium records its peak as a curve: white windows of standard sizes (1, 2, 5, 10, 25, 50, 100 % of the screen) on black, and the luminance each reached, with a second curve for the sustained case when it is measured (`peak_area`, `peak_luminance`, `peak_sustained`; [`fields.md`](fields.md)). The tier rule is unchanged: measured on this panel, from the model's datasheet, or assumed.
+
+What a renderer does with the curve:
+
+0. A window of area `a` at peak `p` draws a mean of `a·p`. A picture whose mean displayed light is `M` can have the peak of the window that draws the same mean (`colour::display::abl_peak`).
+1. Showing a picture brighter raises its mean, which lowers what the panel allows. The headroom the panel can sustain for a given picture is where the two meet (`colour::display::abl_headroom`, by bisection). A small specular highlight gets the full small-window peak; a bright sky gets the full-screen figure.
+2. That headroom is what [`display_light`](../colour.md#display-mapping) aims at. The shoulder is unchanged; only its target is now measured for this picture instead of taken as the panel's best case.
+
+Classes are as before. Clipping at what the panel can sustain is an Absolute rendering being honest about its range; the shoulder above the knee is Creative. The curve itself is a measurement of the medium and carries no class.
+
+The model is a first approximation, stated as one: it takes white's power for every colour (a saturated colour draws differently, and a WRGB panel's peak white comes partly from its white subpixel, which is why a display that fails the additivity check uses the full `response` table instead), and it treats the limiter as instantaneous.
+
 ## A medium's response: control values to spectra
 
 A white and a black say where a medium's range ends. What happens in between is the medium's **response**: the function from its control values to the light it gives back. It is the same word as the camera's response in [`relative.md`](relative.md#the-representation--decided-2026-10-10), in the opposite direction. A camera's response maps a spectrum to counts; a medium's maps control values to a spectrum.

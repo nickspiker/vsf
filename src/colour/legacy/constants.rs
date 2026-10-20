@@ -1244,12 +1244,12 @@ pub const XYZ_1931_2DEG_1NM: ConstSpectrum = ConstSpectrum {
 
 /// VSF RGB → XYZ transformation matrix
 ///
-/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries) to CIE 1931 XYZ colourspace. Derived from CIE 1931 2° Standard Observer colour matching functions with white point scaling so that RGB=[1,1,1] maps to Illuminant E (equal energy spectrum).
+/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries) to CIE 1931 XYZ colourspace. Derived from CIE 1931 2° Standard Observer colour matching functions with white point scaling so that RGB=`[1,1,1]` maps to Illuminant E (equal energy spectrum).
 ///
 /// Matrix layout (column-major):
-/// - Indices 0-2: X channel contributions from [red, green, blue]
-/// - Indices 3-5: Y channel contributions from [red, green, blue]
-/// - Indices 6-8: Z channel contributions from [red, green, blue]
+/// - Indices 0-2: X channel contributions from `[red, green, blue]`
+/// - Indices 3-5: Y channel contributions from `[red, green, blue]`
+/// - Indices 6-8: Z channel contributions from `[red, green, blue]`
 pub const VSF_RGB2XYZ: [f32; 9] = [
     0.756_980_8_f32,
     0.271_613_06_f32,
@@ -1264,7 +1264,7 @@ pub const VSF_RGB2XYZ: [f32; 9] = [
 
 /// XYZ → VSF RGB transformation matrix
 ///
-/// Converts CIE 1931 XYZ colourspace to linear VSF RGB. Inverse of VSF_RGB2XYZ. Colorimetric: XYZ of Illuminant E maps to VSF [1,1,1]; no adaptation. For ICC profile connection space values (D50-relative) use XYZ_D50_2VSF_RGB.
+/// Converts CIE 1931 XYZ colourspace to linear VSF RGB. Inverse of VSF_RGB2XYZ. Colorimetric: XYZ of Illuminant E maps to VSF `[1,1,1]`; no adaptation. For ICC profile connection space values (D50-relative) use XYZ_D50_2VSF_RGB.
 pub const XYZ2VSF_RGB: [f32; 9] = [
     1.373_010_4_f32,
     -0.542_253_85_f32,
@@ -1279,7 +1279,7 @@ pub const XYZ2VSF_RGB: [f32; 9] = [
 
 /// XYZ (D50 PCS) → VSF RGB transformation matrix
 ///
-/// XYZ2VSF_RGB with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from the ICC profile connection space illuminant D50 to Illuminant E folded in, so PCS white maps to VSF [1,1,1]. Use for ICC colorant tags (rXYZ/gXYZ/bXYZ), which are D50-adapted by the ICC spec.
+/// XYZ2VSF_RGB with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from the ICC profile connection space illuminant D50 to Illuminant E folded in, so PCS white maps to VSF `[1,1,1]`. Use for ICC colorant tags (rXYZ/gXYZ/bXYZ), which are D50-adapted by the ICC spec.
 pub const XYZ_D50_2VSF_RGB: [f32; 9] = [
     1.396_139_6_f32,
     -0.554_171_74_f32,
@@ -1294,12 +1294,12 @@ pub const XYZ_D50_2VSF_RGB: [f32; 9] = [
 
 /// VSF RGB → sRGB transformation matrix
 ///
-/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear sRGB (IEC 61966-2-1:1999 primaries, D65 white point). Built thru 1931 XYZ, the only observer an xy definition supports, with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D65 folded in, so VSF [1,1,1] maps to sRGB [1,1,1].
+/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear sRGB (IEC 61966-2-1:1999 primaries, D65 white point). Built thru 1931 XYZ, the only observer an xy definition supports, with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D65 folded in, so VSF `[1,1,1]` maps to sRGB `[1,1,1]`.
 ///
 /// Matrix layout (column-major):
-/// - Indices 0-2: Red channel contributions from [red, green, blue]
-/// - Indices 3-5: Green channel contributions from [red, green, blue]
-/// - Indices 6-8: Blue channel contributions from [red, green, blue]
+/// - Indices 0-2: Red channel contributions from `[red, green, blue]`
+/// - Indices 3-5: Green channel contributions from `[red, green, blue]`
+/// - Indices 6-8: Blue channel contributions from `[red, green, blue]`
 pub const VSF_RGB2SRGB: [f32; 9] = [
     2.014_406_4_f32,
     -0.220_223_44_f32,
@@ -1329,12 +1329,12 @@ pub const SRGB2VSF_RGB: [f32; 9] = [
 
 /// VSF RGB → Adobe RGB (1998) transformation matrix
 ///
-/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear Adobe RGB (1998 specification primaries, D65 white point). Built thru 1931 XYZ with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D65 folded in, so VSF [1,1,1] maps to Adobe RGB [1,1,1].
+/// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear Adobe RGB (1998 specification primaries, D65 white point). Built thru 1931 XYZ with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D65 folded in, so VSF `[1,1,1]` maps to Adobe RGB `[1,1,1]`.
 ///
 /// Matrix layout (column-major):
-/// - Indices 0-2: Red channel contributions from [red, green, blue]
-/// - Indices 3-5: Green channel contributions from [red, green, blue]
-/// - Indices 6-8: Blue channel contributions from [red, green, blue]
+/// - Indices 0-2: Red channel contributions from `[red, green, blue]`
+/// - Indices 3-5: Green channel contributions from `[red, green, blue]`
+/// - Indices 6-8: Blue channel contributions from `[red, green, blue]`
 pub const VSF_RGB2ADOBE_RGB: [f32; 9] = [
     1.377_900_5_f32,
     -0.220_223_44_f32,
@@ -1360,6 +1360,76 @@ pub const ADOBE_RGB2VSF_RGB: [f32; 9] = [
     0.030_559_65_f32,
     0.051_003_307_f32,
     0.962_987_36_f32,
+];
+
+/// VSF RGB → Display P3 transformation matrix
+///
+/// Converts linear VSF RGB to linear Display P3 (the DCI-P3 primaries with a D65 white, SMPTE EG 432-1). Built thru 1931 XYZ with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D65 folded in, so VSF `[1,1,1]` maps to Display P3 `[1,1,1]`.
+///
+/// Matrix layout (column-major):
+/// - Indices 0-2: Red channel contributions from `[red, green, blue]`
+/// - Indices 3-5: Green channel contributions from `[red, green, blue]`
+/// - Indices 6-8: Blue channel contributions from `[red, green, blue]`
+pub const VSF_RGB2DISPLAY_P3: [f32; 9] = [
+    1.617_734_1_f32,
+    -0.146_033_63_f32,
+    0.006_369_773_3_f32,
+    -0.598_072_65_f32,
+    1.205_232_9_f32,
+    0.008_172_63_f32,
+    -0.019_661_425_f32,
+    -0.059_199_244_f32,
+    0.985_457_6_f32,
+];
+
+/// Display P3 → VSF RGB transformation matrix
+///
+/// Converts linear Display P3 to linear VSF RGB. Inverse of VSF_RGB2DISPLAY_P3.
+pub const DISPLAY_P3_2VSF_RGB: [f32; 9] = [
+    0.646_983_74_f32,
+    0.078_155_39_f32,
+    -0.004_830_116_4_f32,
+    0.320_834_5_f32,
+    0.868_134_f32,
+    -0.009_273_44_f32,
+    0.032_181_78_f32,
+    0.053_710_606_f32,
+    1.014_103_5_f32,
+];
+
+/// VSF RGB → ProPhoto RGB transformation matrix
+///
+/// Converts linear VSF RGB to linear ProPhoto RGB (ROMM RGB, ISO 22028-2: primaries outside the spectral locus, D50 white). Built thru 1931 XYZ with a von Kries adaptation (in Stockman & Sharpe 2000 10° LMS) from Illuminant E to D50 folded in, so VSF `[1,1,1]` maps to ProPhoto `[1,1,1]`. Two of ProPhoto's primaries are imaginary, so real VSF RGB colours can land on negative ProPhoto values and the reverse.
+///
+/// Matrix layout (column-major):
+/// - Indices 0-2: Red channel contributions from `[red, green, blue]`
+/// - Indices 3-5: Green channel contributions from `[red, green, blue]`
+/// - Indices 6-8: Blue channel contributions from `[red, green, blue]`
+pub const VSF_RGB2PROPHOTO: [f32; 9] = [
+    0.939_601_66_f32,
+    -0.002_883_876_2_f32,
+    -0.000_015_201_414_5_f32,
+    -0.053_151_3_f32,
+    0.977_351_96_f32,
+    0.067_309_54_f32,
+    0.113_549_66_f32,
+    0.025_531_895_f32,
+    0.932_705_64_f32,
+];
+
+/// ProPhoto RGB → VSF RGB transformation matrix
+///
+/// Converts linear ProPhoto RGB to linear VSF RGB. Inverse of VSF_RGB2PROPHOTO.
+pub const PROPHOTO2VSF_RGB: [f32; 9] = [
+    1.064_484_1_f32,
+    0.003_146_455_9_f32,
+    -0.000_209_717_68_f32,
+    0.066_940_956_f32,
+    1.025_303_2_f32,
+    -0.073_990_844_f32,
+    -0.131_425_11_f32,
+    -0.028_449_72_f32,
+    1.074_200_5_f32,
 ];
 
 #[cfg(feature = "spirix")]
@@ -1451,5 +1521,53 @@ mod s44_consts {
         sf!(0.030_559_65_f32),
         sf!(0.051_003_307_f32),
         sf!(0.962_987_36_f32),
+    ];
+
+    pub const VSF_RGB2DISPLAY_P3_S44: [S44; 9] = [
+        sf!(1.617_734_1_f32),
+        sf!(-0.146_033_63_f32),
+        sf!(0.006_369_773_3_f32),
+        sf!(-0.598_072_65_f32),
+        sf!(1.205_232_9_f32),
+        sf!(0.008_172_63_f32),
+        sf!(-0.019_661_425_f32),
+        sf!(-0.059_199_244_f32),
+        sf!(0.985_457_6_f32),
+    ];
+
+    pub const DISPLAY_P3_2VSF_RGB_S44: [S44; 9] = [
+        sf!(0.646_983_74_f32),
+        sf!(0.078_155_39_f32),
+        sf!(-0.004_830_116_4_f32),
+        sf!(0.320_834_5_f32),
+        sf!(0.868_134_f32),
+        sf!(-0.009_273_44_f32),
+        sf!(0.032_181_78_f32),
+        sf!(0.053_710_606_f32),
+        sf!(1.014_103_5_f32),
+    ];
+
+    pub const VSF_RGB2PROPHOTO_S44: [S44; 9] = [
+        sf!(0.939_601_66_f32),
+        sf!(-0.002_883_876_2_f32),
+        sf!(-0.000_015_201_414_5_f32),
+        sf!(-0.053_151_3_f32),
+        sf!(0.977_351_96_f32),
+        sf!(0.067_309_54_f32),
+        sf!(0.113_549_66_f32),
+        sf!(0.025_531_895_f32),
+        sf!(0.932_705_64_f32),
+    ];
+
+    pub const PROPHOTO2VSF_RGB_S44: [S44; 9] = [
+        sf!(1.064_484_1_f32),
+        sf!(0.003_146_455_9_f32),
+        sf!(-0.000_209_717_68_f32),
+        sf!(0.066_940_956_f32),
+        sf!(1.025_303_2_f32),
+        sf!(-0.073_990_844_f32),
+        sf!(-0.131_425_11_f32),
+        sf!(-0.028_449_72_f32),
+        sf!(1.074_200_5_f32),
     ];
 }

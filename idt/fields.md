@@ -63,12 +63,14 @@ Absence is a specification, not a gap. Every field below has a defined reading w
 1. **No `view_transform`** — no ops. Display as characterized.
 2. **No `curve`** — the entry's matrix is the characterization, bounded to its fit set. See [tiers.md](tiers.md#what-a-tier-is-not).
 3. **Sample encoding** — a plane without `encoding` is **gamma 2**, encoded with the square root and decoded with the square, per [`colour.md`](../colour.md) and the reference implementation. Float planes are linear. (There are no float planes yet; `samples` is integer-only.) *Since 2026-10-09 every writer says which:* a `plane.*` section in the visual container ([`image.md`](image.md)) always carries `encoding = linear | gamma2`, and the legacy `spectral_image` section reads as **linear** — its only writer, opsin, wrote linear counts — so the absence rule is reached only by a plane written by hand.
+4. **No `primaries`** on a plane — VSF RGB, or camera counts that the characterization maps. *Since format v12.*
+5. **No `prior`** on a plane — nothing was done to the samples before the file. A writer that cannot tell writes `creative` instead, because absence is the stronger claim. *Since format v12.*
 
 > **Note on direction.** The reference implementation in `src/colour/convert.rs` encodes with `sqrt` and decodes with the square — `let encoded = linear.sqrt()` — and lumis and opsin do the same. `colour.md` said the reverse until 2026-10-08; it now agrees with the code, and the code was always authoritative.
 
 ## `transfer` is vestigial
 
-`ProfileEntry::transfer` was designed in with the colour_profile section (vsf 0.9.2) so a display-referred ingest could store a JPEG's sRGB-encoded values as-is and let the *reader* linearize. No writer took that path: opsin linearizes at ingest and stores linear planes, so every writer emits `linear` and nothing anywhere reads it back — the only reader is vsf's own parser, round-tripping it. Its own doc calls it "the transfer the *samples* carry," which is a property of the plane, stored on the entry. That misplacement is the reason identity entries kept being invented: they were the only place to say "this plane is linear." It is superseded by the plane's `encoding` (implemented 2026-10-09, [`image.md`](image.md)); the entry field is still written and read for the legacy section and ignored.
+`ProfileEntry::transfer` was designed in with the colour_profile section (vsf 0.9.2) so a display-referred ingest could store a JPEG's sRGB-encoded values as-is and let the *reader* linearize. No writer took that path: opsin linearizes at ingest and stores linear planes, so every writer emits `linear` and nothing anywhere reads it back — the only reader is vsf's own parser, round-tripping it. Its own doc calls it "the transfer the *samples* carry," which is a property of the plane, stored on the entry. That misplacement is the reason identity entries kept being invented: they were the only place to say "this plane is linear." It is superseded by the plane's `encoding` (implemented 2026-10-09, [`image.md`](image.md)); the entry field is still written and read for the legacy section and ignored. The path it was designed for, a JPEG's values stored as they came, exists since format v12, on the plane where it belongs: `primaries` and a source `encoding` ([below](#untouched-sources-and-prior--implemented-2026-10-20)). An encoding is not a characterization, so it needs no entry and no tier.
 
 ## Proposed additions — 2026-09-22
 
@@ -103,6 +105,8 @@ Status: **proposed**. Fixed by [`output.md`](output.md) and the maker's-crop wor
 | `medium` | `illuminant` | EXIF LightSource code the white and black were measured under — a brightener's white depends on the lamp's UV | proposed |
 | `medium` | `geometry` | the measurement geometry (45/0, specular…) — gloss is a direction | proposed |
 | `medium` | `tier` | `unit` (this sheet, this panel) \| `model` (the stock's datasheet) \| `assumed` (took 1 and 0) | proposed |
+| `medium` | `peak_area`, `peak_luminance` | `t_f5 [n]` each, emissive only: a white window's fraction of the screen on black → the luminance it reached, cd/m², at the standard window sizes (1, 2, 5, 10, 25, 50, 100 %). An OLED or a local-dimming LCD reaches its peak only in a small window; this curve is how a renderer knows what a given picture can have ([`output.md`](output.md#peak-brightness-depends-on-how-much-is-lit)). Proposed 2026-10-20; the arithmetic is implemented (`colour::display::abl_peak`, `abl_headroom`) | proposed |
+| `medium` | `peak_sustained` | `t_f5 [n]`: the same windows after the panel's long-duration limiting; absent ⇒ unknown | proposed |
 | `plane.*` | `maker_crop` | `[x, y, w, h]` in sensor pixels: the maker's recommended crop (DNG `DefaultCropOrigin`/`Size` offset by `ActiveArea`, or a body's published crop). A **suggestion**, never applied — the plane and the view show everything recorded, masked borders included; opsin's crop tool starts here. Technical by nature; distinct from the `crop` op, which is the operator's | **implemented 2026-10-09** on the plane ([`image.md`](image.md#planetrackseqname)) |
 
 ### DNG carriage — decided 2026-10-08
@@ -150,6 +154,24 @@ From the chameleon `spectral.rs` study and Nick's direction: *encode the spectra
 | `capture` | `spd` | a measured illuminant spectrum for the shot, verbatim, when one exists — what `relight` prefers under structured lights (LED, fluorescent), which a chart scan cannot fully resolve | proposed, optional |
 
 What the study established (three Sigma fp frames + one Canon): the transform built from recovered curves over an ensemble matches the direct 21-patch fit on held-out patches within 0.1–0.4 % of white; a new frame's transform from three neutral patches alone landed within 0.7 % of white of its full-chart fit under broadband light (a study result, not a paste path); the two routes differ by 2–3 % of white on the chart and 3–4.5 % on spectra the chart lacks; quadratic smoothness priors produce two-humped curves no dye set has, the shortest-curve prior does not, and the data cannot tell them apart — so the prior is stated. Structured lights remain the limit of chart-free relighting and are why `spd` exists.
+
+## Untouched sources and prior — implemented 2026-10-20
+
+Format v12. A plane can hold a source's samples exactly as written, and says what was done to them before the file existed. Decided with Nick that day: keep a source's samples untouched and change VSF to accommodate them. The reasoning is in [README](README.md#encodings-are-not-transforms).
+
+| where | field | what | status |
+|---|---|---|---|
+| `plane.*` | `primaries` | `a` closed: `vsf` \| `srgb` (BT.709 primaries, D65) \| `display_p3` (DCI-P3 primaries, D65) \| `adobe_rgb` (D65) \| `prophoto` (ROMM RGB, D50) \| `rec2020` (BT.2020, D65). **Absent ⇒ `vsf`**, and written only when it is not. Anything but `vsf` requires a planar plane of three channels | **implemented** (`vsf::visual::Primaries`) |
+| `plane.*` | `encoding` | gains a source's own transfers, each named for the specification that defines it: `srgb` (IEC 61966-2-1; also Display P3's), `bt1886` (the BT.709/BT.2020 SDR reference display, a 2.4 power), `adobe_rgb`, `prophoto` (1.8 with a linear toe), `pq` and `hlg` (BT.2100, diffuse white at 1.0 per BT.2408). A source's codes run 0 to 2ⁿ − 1 with white at the top code; VSF's own (`linear`, `gamma2`, `g2t`) keep ×2ⁿ, bucket bottom. The flat `image` section, which has no primaries, takes VSF's own only | **implemented** (`Encoding::light`) |
+| `plane.*` | `prior` | `a` closed, an IDT class: what was done to the samples before the file and is not recorded in it. Absent ⇒ nothing; `technical` ⇒ mechanics only (demosaic, a frame merge); `creative` ⇒ a look (white balance, tone mapping: every camera JPEG). Mixed steps take the weakest claim; a writer that cannot tell writes `creative` | **implemented** |
+| `graph` op | `decode` | Technical, arity 1, no params: its operand, a plane in foreign primaries, decoded by the plane's encoding and taken into VSF RGB by its primaries' matrix. Placed after `black_white` and before `idt` in a still's default graph. The plane says which primaries; the op says where in the program; the two cannot disagree | **implemented** (`OP_DECODE`) |
+| `colour::legacy::constants` | `DISPLAY_P3_2VSF_RGB`, `PROPHOTO2VSF_RGB` and inverses | generated like sRGB's and Adobe RGB's: thru 1931 XYZ, the encoding's white carried to Illuminant E by von Kries scaling in Stockman & Sharpe 2000 10° LMS | **implemented** (`tools/generate_constants.rs`) |
+| importer | `prior` from evidence | an importer sets `prior` from what it can show: `creative` for a camera JPEG or when nothing says otherwise; `technical` or absent when a signed manifest (C2PA's action list) or the writer's own knowledge says so. The evidence itself goes to provenance | opsin, next |
+| `Plane::encoded` | — | the constructor for an encoded source: planar RGB, `black` 0, `white` the top code, role `display`, name `main`, `prior = creative` | **implemented** |
+
+What `prior` deliberately does not hold: the device (that is `capture`), the event and its evidence (provenance: `attest`, `witness`, `run` from `lumis/docs/provenance.md`, and per-generation `change`), and whether the scene was real. Provenance can inform `prior`; `prior` never feeds provenance. Two tests keep the split honest: with provenance stripped, a reader still renders correctly and says what it cannot vouch for; with colour ignored, signatures still verify and the history still reads.
+
+A derived picture, such as a JPEG exported from a signed lumis capture, is `prior = creative` in its own file even though its rendering is fully recorded in the parent: `prior` means "not recorded *in this file*". Provenance can point at the parent plane by its hash, which tells a reader where the steps are written down without changing the class.
 
 ## Migration
 

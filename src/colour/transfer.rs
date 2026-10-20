@@ -11,6 +11,7 @@
 //! use vsf::colour::legacy::transfer::*;
 //! ```
 
+#[cfg(not(feature = "std"))]
 use num_traits::Float;
 
 // ==================== Rec.2020 TRANSFER FUNCTIONS ====================
@@ -58,6 +59,40 @@ pub fn hlg_light(signal: f32) -> f32 {
     let e = signal.clamp(0., 1.);
     let scene = if e <= 0.5 { e * e / 3. } else { (((e - C) / A).exp() + B) / 12. };
     scene / WHITE
+}
+
+// ==================== SDR SIGNALS OF OTHER ENCODINGS ====================
+//
+// What a plane kept exactly as its source encoded it decodes thru (`visual::Encoding`, `idt/fields.md`). sRGB and Adobe RGB use the legacy module's curves; these two have no copy there.
+
+/// BT.1886 reference display, black level 0: a BT.709 or BT.2020 SDR signal, 0 to 1, → display light, white = 1. A 2.4 power. This is the display's curve, not the camera's (BT.709's OETF): a plane in this encoding holds a picture already rendered for that display.
+pub fn bt1886_light(signal: f32) -> f32 {
+    signal.clamp(0., 1.).powf(2.4)
+}
+
+/// ProPhoto RGB (ROMM RGB, ISO 22028-2) signal, 0 to 1, → light, white = 1: a 1.8 power with a linear toe of slope 16 below 1/512 of light (signal 1/32), continuous where they meet.
+pub fn prophoto_light(signal: f32) -> f32 {
+    let e = signal.clamp(0., 1.);
+    if e < 1. / 32. {
+        e / 16.
+    } else {
+        e.powf(1.8)
+    }
+}
+
+#[cfg(test)]
+mod sdr_signal_tests {
+    use super::*;
+
+    #[test]
+    fn white_is_one_and_prophoto_toe_meets_its_power() {
+        assert_eq!(bt1886_light(1.), 1.);
+        assert_eq!(prophoto_light(1.), 1.);
+        assert_eq!(bt1886_light(0.), 0.);
+        let toe = prophoto_light(1. / 32. - 1e-7);
+        let power = prophoto_light(1. / 32.);
+        assert!((toe - 1. / 512.).abs() < 1e-6 && (power - 1. / 512.).abs() < 1e-6, "toe {toe} power {power}");
+    }
 }
 
 #[cfg(test)]

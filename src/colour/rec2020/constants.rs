@@ -9,9 +9,9 @@
 /// Converts linear VSF RGB (703nm, 523nm, 462nm primaries, Illuminant E white) to linear Rec.2020 RGB (630nm, 532nm, 467nm primaries, D65 white point).
 ///
 /// Matrix layout (column-major):
-/// - Indices 0-2: Red channel contributions from [red, green, blue]
-/// - Indices 3-5: Green channel contributions from [red, green, blue]
-/// - Indices 6-8: Blue channel contributions from [red, green, blue]
+/// - Indices 0-2: Red channel contributions from `[red, green, blue]`
+/// - Indices 3-5: Green channel contributions from `[red, green, blue]`
+/// - Indices 6-8: Blue channel contributions from `[red, green, blue]`
 pub const VSF_RGB2REC2020: [f32; 9] = [
     1.190_846_4_f32,
     -0.053_325_053_f32,
