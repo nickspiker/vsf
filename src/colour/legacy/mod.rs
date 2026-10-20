@@ -21,6 +21,9 @@
 
 pub mod constants;
 
+/// Camera gamuts, ACES, broadcast, print and legacy spaces ↔ VSF RGB (generated, colorimetric).
+pub mod primaries;
+
 #[deprecated(
     since = "0.2.0",
     note = "CIE 1931 xy-based colourspaces are deprecated. Use VSF RGB or Rec.2020 instead."
@@ -35,5 +38,6 @@ pub mod convert;
 
 // Re-export all legacy functions for backward compatibility
 pub use constants::*;
+pub use primaries::*;
 pub use convert::*;
 pub use transfer::*;

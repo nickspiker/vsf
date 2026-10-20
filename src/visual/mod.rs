@@ -63,11 +63,34 @@ macro_rules! closed_vocab {
 closed_vocab!(TrackKind { Beam => "beam", Wave => "wave", Timecode => "timecode", Annotation => "annotation", Data => "data" }, "track kind");
 closed_vocab!(TrackRole { Capture => "capture", Derived => "derived", Display => "display", Preview => "preview", Calibration => "calibration" }, "track role");
 closed_vocab!(PlaneRole { Sensor => "sensor", Display => "display", Preview => "preview", Depth => "depth", Ir => "ir", Uv => "uv", Confidence => "confidence", Motion => "motion", Matte => "matte", Mask => "mask", Alpha => "alpha", Dark => "dark", Flat => "flat", Bias => "bias", Derived => "derived" }, "plane role");
-closed_vocab!(Encoding { Linear => "linear", Gamma2 => "gamma2", Gamma2Tanh => "g2t" | "gamma2tanh", Srgb => "srgb", Bt1886 => "bt1886", AdobeRgb => "adobe_rgb", Prophoto => "prophoto", Pq => "pq", Hlg => "hlg" }, "encoding");
-closed_vocab!(Primaries { Vsf => "vsf", Srgb => "srgb", DisplayP3 => "display_p3", AdobeRgb => "adobe_rgb", Prophoto => "prophoto", Rec2020 => "rec2020" }, "primaries");
+closed_vocab!(Encoding {
+    Linear => "linear", Gamma2 => "gamma2", Gamma2Tanh => "g2t" | "gamma2tanh",
+    Srgb => "srgb", Bt1886 => "bt1886", AdobeRgb => "adobe_rgb", Prophoto => "prophoto", Pq => "pq", Hlg => "hlg",
+    Gamma18 => "gamma18", Gamma22 => "gamma22", Gamma26 => "gamma26", Bt709 => "bt709", Smpte240m => "smpte240m", Dcdm => "dcdm",
+    Slog => "slog", Slog2 => "slog2", Slog3 => "slog3", Logc3 => "logc3", Logc4 => "logc4", Vlog => "vlog",
+    Clog => "clog", Clog2 => "clog2", Clog3 => "clog3", Flog => "flog", Flog2 => "flog2", Nlog => "nlog", Dlog => "dlog", Llog => "llog",
+    AppleLog => "apple_log", MiLog => "mi_log", Log3g10 => "log3g10", Log3g12 => "log3g12", Acescc => "acescc", Acescct => "acescct",
+    Cineon => "cineon", Protune => "protune", Tlog => "tlog", DavinciIntermediate => "davinci_intermediate", BmdFilmGen5 => "bmd_film_gen5",
+}, "encoding");
+closed_vocab!(Primaries {
+    Vsf => "vsf", Srgb => "srgb", DisplayP3 => "display_p3", DciP3 => "dci_p3", AdobeRgb => "adobe_rgb", AdobeWideGamut => "adobe_wide_gamut",
+    Prophoto => "prophoto", Rec2020 => "rec2020" | "f_gamut" | "n_gamut", Bt601Pal => "bt601_625", Bt601Ntsc => "bt601_525", Ntsc1953 => "ntsc1953",
+    AcesAp0 => "aces_ap0", AcesAp1 => "aces_ap1",
+    SGamut3 => "s_gamut3" | "s_gamut", SGamut3Cine => "s_gamut3_cine", VeniceSGamut3 => "venice_s_gamut3", VeniceSGamut3Cine => "venice_s_gamut3_cine",
+    ArriWideGamut3 => "arri_wide_gamut3", ArriWideGamut4 => "arri_wide_gamut4", VGamut => "v_gamut", CinemaGamut => "cinema_gamut",
+    RedWideGamut => "red_wide_gamut", DavinciWideGamut => "davinci_wide_gamut", BlackmagicWideGamut => "blackmagic_wide_gamut",
+    EGamut => "e_gamut", EGamut2 => "e_gamut2", DGamut => "d_gamut", ProtuneNative => "protune_native",
+    AppleRgb => "apple_rgb", ColormatchRgb => "colormatch_rgb", EciRgbV2 => "eci_rgb_v2", CieRgb => "cie_rgb", Xyz => "xyz",
+}, "primaries");
 closed_vocab!(Purpose { Default => "default", Preview => "preview", Print => "print", Technical => "technical" }, "view purpose");
 
-/// What light a code holds. VSF's own encodings (`linear`, `gamma2`, `g2t`) quantise ×2ⁿ with a code at the bottom of its bucket. The rest are a source's own transfer, kept so a plane can hold a JPEG, a TIFF or an AVIF exactly as it was written: their codes run 0 to 2ⁿ − 1 with white at the top code (the import rule of `idt/layers.md`), and each is named for the specification that defines it — `srgb` (IEC 61966-2-1, also Display P3's), `bt1886` (the BT.709/BT.2020 SDR reference display), `adobe_rgb`, `prophoto` (ROMM RGB), `pq` and `hlg` (BT.2100, diffuse white at 1.0 per BT.2408, so their light runs above 1).
+/// What light a code holds. VSF's own encodings (`linear`, `gamma2`, `g2t`) quantise ×2ⁿ with a code at the bottom of its bucket. The rest are a source's own transfer, kept so a plane can hold a JPEG, a TIFF, an AVIF, a film scan or camera log footage exactly as it was written, each named for the specification that defines it:
+/// - stills and displays: `srgb` (IEC 61966-2-1, also Display P3's), `bt1886` (BT.709/BT.2020 SDR reference display), `adobe_rgb` (563/256), `prophoto` (ROMM RGB), `gamma18`, `gamma22`, `gamma26`, `smpte240m`, `dcdm` (cinema X'Y'Z', white at 48 cd/m²);
+/// - HDR: `pq`, `hlg` (BT.2100, diffuse white per BT.2408);
+/// - cameras: `bt709` (the BT.709/601 camera curve, scene light), `slog`, `slog2`, `slog3`, `logc3` (EI 800), `logc4`, `vlog`, `clog`, `clog2`, `clog3`, `flog`, `flog2`, `nlog`, `dlog`, `llog`, `apple_log`, `mi_log`, `log3g10`, `log3g12`, `protune`, `tlog`, `bmd_film_gen5`;
+/// - grading and film: `acescc`, `acescct`, `davinci_intermediate`, `cineon`.
+///
+/// Every one decodes to light with 1.0 at diffuse white (for a camera log, a perfect diffuse reflector), so light above white is kept. A source encoding's signal is its code normalised by the plane's `black` and `white` (`Plane::encoded` sets 0 and the top code); the logs expect the normalised code value their specification defines, so an importer leaves black 0 and white at the top code for them too.
 impl Encoding {
     /// One of VSF's own encodings, quantised ×2ⁿ, bucket bottom.
     pub fn is_vsf(self) -> bool {
@@ -91,6 +114,37 @@ impl Encoding {
             Encoding::Prophoto => transfer::prophoto_light(signal),
             Encoding::Pq => transfer::pq_light(signal),
             Encoding::Hlg => transfer::hlg_light(signal),
+            Encoding::Gamma18 => transfer::gamma_light(signal, 1.8),
+            Encoding::Gamma22 => transfer::gamma_light(signal, 2.2),
+            Encoding::Gamma26 => transfer::gamma_light(signal, 2.6),
+            Encoding::Bt709 => transfer::bt709_scene_light(signal),
+            Encoding::Smpte240m => transfer::smpte240m_light(signal),
+            Encoding::Dcdm => transfer::dcdm_light(signal),
+            Encoding::Slog => transfer::slog_light(signal),
+            Encoding::Slog2 => transfer::slog2_light(signal),
+            Encoding::Slog3 => transfer::slog3_light(signal),
+            Encoding::Logc3 => transfer::logc3_light(signal),
+            Encoding::Logc4 => transfer::logc4_light(signal),
+            Encoding::Vlog => transfer::vlog_light(signal),
+            Encoding::Clog => transfer::clog_light(signal),
+            Encoding::Clog2 => transfer::clog2_light(signal),
+            Encoding::Clog3 => transfer::clog3_light(signal),
+            Encoding::Flog => transfer::flog_light(signal),
+            Encoding::Flog2 => transfer::flog2_light(signal),
+            Encoding::Nlog => transfer::nlog_light(signal),
+            Encoding::Dlog => transfer::dlog_light(signal),
+            Encoding::Llog => transfer::llog_light(signal),
+            Encoding::AppleLog => transfer::apple_log_light(signal),
+            Encoding::MiLog => transfer::mi_log_light(signal),
+            Encoding::Log3g10 => transfer::log3g10_light(signal),
+            Encoding::Log3g12 => transfer::log3g12_light(signal),
+            Encoding::Acescc => transfer::acescc_light(signal),
+            Encoding::Acescct => transfer::acescct_light(signal),
+            Encoding::Cineon => transfer::cineon_light(signal),
+            Encoding::Protune => transfer::protune_light(signal),
+            Encoding::Tlog => transfer::tlog_light(signal),
+            Encoding::DavinciIntermediate => transfer::davinci_intermediate_light(signal),
+            Encoding::BmdFilmGen5 => transfer::bmd_film_gen5_light(signal),
         }
     }
 
@@ -105,11 +159,17 @@ impl Encoding {
     }
 }
 
-/// The primaries a plane's samples are in, each with the white its specification states. `vsf` is VSF RGB, and also camera counts that a characterization maps (the characterization says what they are). Every other value marks a planar RGB plane kept exactly as a source wrote it: `srgb` (BT.709 primaries, D65), `display_p3` (DCI-P3 primaries, D65), `adobe_rgb` (D65), `prophoto` (ROMM RGB, D50, two primaries outside the spectral locus), `rec2020` (BT.2020, D65, also BT.2100's). They are encodings, not characterizations: a definition, exact by its specification, with no class and no tier (`idt/README.md`, "Encodings are not transforms").
+/// The primaries a plane's samples are in, each with the white its specification states. `vsf` is VSF RGB, and also camera counts that a characterization maps (the characterization says what they are). Every other value marks a planar RGB plane kept exactly as a source wrote it:
+/// - stills, displays and print: `srgb` (BT.709 primaries, D65), `display_p3`, `dci_p3` (DCI white), `adobe_rgb`, `adobe_wide_gamut` (D50), `prophoto` (ROMM RGB, D50), `apple_rgb`, `colormatch_rgb` (D50), `eci_rgb_v2` (D50), `cie_rgb` (E), `xyz` (CIE XYZ, E);
+/// - broadcast: `rec2020` (BT.2020/2100, from its wavelengths; also spelled `f_gamut` and `n_gamut`, which are BT.2020), `bt601_625`, `bt601_525`, `ntsc1953` (Illuminant C);
+/// - ACES: `aces_ap0`, `aces_ap1` (ACES white);
+/// - cameras and grading: `s_gamut3` (also `s_gamut`, the same primaries), `s_gamut3_cine`, `venice_s_gamut3`, `venice_s_gamut3_cine`, `arri_wide_gamut3`, `arri_wide_gamut4`, `v_gamut`, `cinema_gamut`, `red_wide_gamut`, `davinci_wide_gamut`, `blackmagic_wide_gamut`, `e_gamut`, `e_gamut2`, `d_gamut`, `protune_native`.
+///
+/// They are encodings, not characterizations: a definition, exact by its specification, with no class and no tier (`idt/README.md`, "Encodings are not transforms"). Most camera gamuts put primaries outside the spectral locus, so their real colours can land outside VSF RGB.
 impl Primaries {
     /// Linear RGB in these primaries → linear VSF RGB, column-major for [`crate::colour::convert::apply_matrix_3x3_f32`]; `None` for `vsf`. Colorimetric, with no chromatic adaptation: the encoding's white is the light its specification names (D65, or D50 for ProPhoto) and lands where that light sits in VSF RGB, off the R = G = B axis; neutralising it is white balance, a Creative op. xy-defined spaces go thru CIE 1931 XYZ, the only observer an xy pair supports; Rec.2020 comes from its wavelengths under the Stockman & Sharpe 2000 10° fundamentals, 1931 not involved (`tools/generate_constants.rs`).
     pub fn to_vsf_rgb(self) -> Option<[f32; 9]> {
-        use crate::colour::legacy::constants as c;
+        use crate::colour::legacy as c;
         match self {
             Primaries::Vsf => None,
             Primaries::Srgb => Some(c::SRGB2VSF_RGB),
@@ -117,6 +177,33 @@ impl Primaries {
             Primaries::AdobeRgb => Some(c::ADOBE_RGB2VSF_RGB),
             Primaries::Prophoto => Some(c::PROPHOTO2VSF_RGB),
             Primaries::Rec2020 => Some(crate::colour::rec2020::REC2020_2VSF_RGB),
+            Primaries::DciP3 => Some(c::DCI_P32VSF_RGB),
+            Primaries::AdobeWideGamut => Some(c::ADOBE_WIDE_GAMUT2VSF_RGB),
+            Primaries::Bt601Pal => Some(c::BT601_6252VSF_RGB),
+            Primaries::Bt601Ntsc => Some(c::BT601_5252VSF_RGB),
+            Primaries::Ntsc1953 => Some(c::NTSC19532VSF_RGB),
+            Primaries::AcesAp0 => Some(c::ACES_AP02VSF_RGB),
+            Primaries::AcesAp1 => Some(c::ACES_AP12VSF_RGB),
+            Primaries::SGamut3 => Some(c::S_GAMUT32VSF_RGB),
+            Primaries::SGamut3Cine => Some(c::S_GAMUT3_CINE2VSF_RGB),
+            Primaries::VeniceSGamut3 => Some(c::VENICE_S_GAMUT32VSF_RGB),
+            Primaries::VeniceSGamut3Cine => Some(c::VENICE_S_GAMUT3_CINE2VSF_RGB),
+            Primaries::ArriWideGamut3 => Some(c::ARRI_WIDE_GAMUT32VSF_RGB),
+            Primaries::ArriWideGamut4 => Some(c::ARRI_WIDE_GAMUT42VSF_RGB),
+            Primaries::VGamut => Some(c::V_GAMUT2VSF_RGB),
+            Primaries::CinemaGamut => Some(c::CINEMA_GAMUT2VSF_RGB),
+            Primaries::RedWideGamut => Some(c::RED_WIDE_GAMUT2VSF_RGB),
+            Primaries::DavinciWideGamut => Some(c::DAVINCI_WIDE_GAMUT2VSF_RGB),
+            Primaries::BlackmagicWideGamut => Some(c::BLACKMAGIC_WIDE_GAMUT2VSF_RGB),
+            Primaries::EGamut => Some(c::E_GAMUT2VSF_RGB),
+            Primaries::EGamut2 => Some(c::E_GAMUT22VSF_RGB),
+            Primaries::DGamut => Some(c::D_GAMUT2VSF_RGB),
+            Primaries::ProtuneNative => Some(c::PROTUNE_NATIVE2VSF_RGB),
+            Primaries::AppleRgb => Some(c::APPLE_RGB2VSF_RGB),
+            Primaries::ColormatchRgb => Some(c::COLORMATCH_RGB2VSF_RGB),
+            Primaries::EciRgbV2 => Some(c::ECI_RGB_V22VSF_RGB),
+            Primaries::CieRgb => Some(c::CIE_RGB2VSF_RGB),
+            Primaries::Xyz => Some(c::XYZ2VSF_RGB),
         }
     }
 }
@@ -228,6 +315,21 @@ impl Plane {
         }
     }
 
+    /// Light of one sample: VSF's own encodings by their ×2ⁿ rule ([`Encoding::light`]); a source's encoding from its code normalised by this plane's `black` and `white` for that channel, so a narrow-range source (10-bit 64 to 940) decodes as it was written.
+    fn sample_light(&self, ch: usize, code: u32, bits: u32) -> f32 {
+        if self.encoding.is_vsf() {
+            return self.encoding.light(code, bits);
+        }
+        let (b, w) = (self.black.get(ch).copied().unwrap_or(0.), self.white.get(ch).copied().unwrap_or(((1u64 << bits) - 1) as f32));
+        self.encoding.light_f32((code as f32 - b) / (w - b))
+    }
+
+    /// The channel of sample `i`: by plane for a planar `[k, h, w]` layout, channel 0 otherwise (a source's encoding on a mosaic plane is decoded with its first channel's levels).
+    fn channel_of(&self, i: usize) -> usize {
+        let n = self.width * self.height;
+        if self.layout == PlaneLayout::Planar && n > 0 { (i / n).min(self.black.len().saturating_sub(1)) } else { 0 }
+    }
+
     /// A plane in foreign primaries must be planar RGB: the primaries are a 3 × 3 matrix's worth of meaning.
     fn check_primaries(&self) -> Result<(), VisualError> {
         if self.primaries != Primaries::Vsf && (self.channels.len() != 3 || self.layout != PlaneLayout::Planar) {
@@ -246,7 +348,7 @@ impl Plane {
             return Err(bad(format!("{}-bit {} plane: encoded planes are 1 to 16 bits", t.bit_depth, self.encoding.as_str())));
         }
         let bits = t.bit_depth as u32;
-        let light: Vec<f32> = t.unpack_u16().into_iter().map(|c| self.encoding.light(c as u32, bits)).collect();
+        let light: Vec<f32> = t.unpack_u16().into_iter().enumerate().map(|(i, c)| self.sample_light(self.channel_of(i), c as u32, bits)).collect();
         let (counts, white) = pack_light(&light);
         let k = self.white.len().max(1);
         Ok((BitPackedTensor::pack(16, t.shape.clone(), &counts), vec![0.; k], vec![white; k]))
@@ -268,7 +370,7 @@ impl Plane {
         let bits = t.bit_depth as u32;
         let light = |ch: usize, c: u16| match self.encoding {
             Encoding::Linear => (c as f32 - self.black[ch]) / (self.white[ch] - self.black[ch]),
-            e => e.light(c as u32, bits),
+            _ => self.sample_light(ch, c as u32, bits),
         };
         let mut out = vec![0f32; 3 * n];
         for i in 0..n {

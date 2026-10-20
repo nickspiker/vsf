@@ -110,7 +110,7 @@ fn foreign_primaries_need_planar_rgb() {
 #[test]
 fn unknown_values_fail_loud() {
     assert!(Primaries::parse("srgb_linear").is_err());
-    assert!(Encoding::parse("gamma22").is_err());
+    assert!(Encoding::parse("gamma23").is_err());
 }
 
 #[test]
