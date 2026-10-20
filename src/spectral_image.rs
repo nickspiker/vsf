@@ -179,7 +179,7 @@ pub struct ProfileEntry {
     pub tier: ProfileTier,
     /// EXIF LightSource code of the light a Relative entry was solved under; 0 = unknown. For choosing among stored entries only: never chromatic adaptation, and never a source of exposure (an exposure derived from it would be a look read off a measurement). An Absolute entry has no illuminant in its transform and leaves this 0.
     pub illuminant: u16,
-    /// Vestigial (`idt/fields.md`): no longer written, read as `Linear` when absent.
+    /// The curve the samples this entry applies to arrive in. Live: photon's beam colour entry carries each camera's curve here (`srgb` for a webcam, `gamma2` for a phone) and the receiver decodes frames with it. Where it belongs long-term (the entry, or the plane's `encoding`) is open (`idt/fields.md`). Read as `Linear` when absent.
     pub transfer: Transfer,
     /// The entry's magnitude, when measured. `None` ⇒ `matrix` carries magnitude itself (v9).
     pub scale: Option<EntryScale>,
@@ -429,6 +429,7 @@ pub fn profile_fields(profile: &ColourProfile) -> Vec<(String, VsfType)> {
     let mut classes: Vec<&str> = Vec::with_capacity(n);
     let mut tiers: Vec<&str> = Vec::with_capacity(n);
     let mut illuminants: Vec<u16> = Vec::with_capacity(n);
+    let mut transfers: Vec<&str> = Vec::with_capacity(n);
     let (mut sensitivities, mut gain_refs, mut units): (Vec<f32>, Vec<f32>, Vec<&str>) = (Vec::new(), Vec::new(), Vec::new());
     for e in &profile.entries {
         matrices.extend_from_slice(&e.matrix);
@@ -436,6 +437,7 @@ pub fn profile_fields(profile: &ColourProfile) -> Vec<(String, VsfType)> {
         classes.push(e.class.as_str());
         tiers.push(e.tier.as_str());
         illuminants.push(e.illuminant);
+        transfers.push(e.transfer.as_str());
         // An entry without a scale writes zeros and an empty unit: a zero sensitivity or gain is physically meaningless, so it cannot be mistaken for a measurement.
         match &e.scale {
             Some(sc) => {
@@ -458,6 +460,7 @@ pub fn profile_fields(profile: &ColourProfile) -> Vec<(String, VsfType)> {
         ("classes".to_string(), VsfType::a(classes.join("\n"))),
         ("tiers".to_string(), VsfType::a(tiers.join("\n"))),
         ("illuminants".to_string(), VsfType::t_u4(Tensor::new(vec![n], illuminants))),
+        ("transfers".to_string(), VsfType::a(transfers.join("\n"))),
     ];
     if profile.entries.iter().any(|e| e.scale.is_some()) {
         fields.push(("sensitivities".to_string(), VsfType::t_f5(Tensor::new(vec![n, 3], sensitivities))));
@@ -598,7 +601,7 @@ pub fn profile_from_fields(sec: &[VsfField]) -> Result<ColourProfile, SpectralIm
     let sources = split_n(&take_string(sec, "sources")?, n, "colour_profile sources")?;
     let classes = split_n(&take_string(sec, "classes")?, n, "colour_profile classes")?;
     let tiers = split_n(&take_string(sec, "tiers")?, n, "colour_profile tiers")?;
-    // Vestigial: v9 writers always wrote it; absent ⇒ every entry linear.
+    // Written by every writer; absent ⇒ every entry linear.
     let transfers = match take_string_opt(sec, "transfers") {
         Some(t) => split_n(&t, n, "colour_profile transfers")?,
         None => vec!["linear".to_string(); n],

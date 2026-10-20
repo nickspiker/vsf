@@ -34,10 +34,12 @@ fn the_unit_must_fit_the_class() {
     assert!(round_trip(vec![entry(IdtClass::Creative, Some(reflect))]).is_err(), "a look has no physical scale");
 }
 
+/// photon's beam colour entry carries the camera's curve in `transfer`; it must survive a round trip.
 #[test]
-fn transfers_are_no_longer_written_and_read_as_linear() {
-    let back = round_trip(vec![entry(IdtClass::Relative, None)]).unwrap();
-    assert_eq!(back.entries[0].transfer, Transfer::Linear);
+fn the_transfer_round_trips() {
+    let mut e = entry(IdtClass::Absolute, None);
+    e.transfer = Transfer::Srgb;
+    assert_eq!(round_trip(vec![e]).unwrap().entries[0].transfer, Transfer::Srgb);
 }
 
 #[test]

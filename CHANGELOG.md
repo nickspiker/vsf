@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ColourValue` gains two required methods, `to_linear_gamma2tanh` and `from_linear_gamma2tanh` (breaking for implementors outside this crate).
 - `Encoding` gains six variants and `Plane` gains `primaries` and `prior` (breaking for exhaustive matches and struct literals outside this crate). `Graph::default_still` takes the plane's `primaries`.
 - `colour::display::scene_light_u8` decodes thru `Encoding::light`, unchanged for VSF's own encodings.
-- `ProfileEntry` gains `scale` (breaking for struct literals: add `scale: None`). Its `illuminant` is for choosing among entries only, never for adaptation or for deriving an exposure. `transfers` is no longer written and reads as `linear` when absent.
+- `ProfileEntry` gains `scale` (breaking for struct literals: add `scale: None`). Its `illuminant` is for choosing among entries only, never for adaptation or for deriving an exposure. `transfers` stays written: photon's beam colour entry carries each camera's curve in it.
 - The flat `image` section refuses a source encoding on write and read: it has no primaries, so it is always VSF RGB.
 
 ### Fixed
