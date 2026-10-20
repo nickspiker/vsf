@@ -40,4 +40,6 @@ Crates that depend on vsf (manifestus, tohu, kete, toka, fluor, fgtw, limbus, op
 1. `vsf-derive`, then `vsf`
 2. `manifestus`, `tohu`, `fluor`, `fgtw`, `limbus`
 3. `kete` (needs manifestus, tohu), `toka` (needs fluor)
-4. `opsin` (needs fluor, limbus)
+4. `opsin` (needs fluor, limbus), with `scripts/publish.sh` in the opsin repo, not `cargo publish`: its `calibrate` feature depends on chameleon, which is closed source and not on crates.io, and the script publishes without that feature while leaving it in place for local builds.
+
+Not on crates.io: photon (an app, kept off), chameleon (closed source). Left out of the v10 release: cairn (does not build against the current manifestus), custodes (only its README changed), ihi and waihanga (unchanged since their last publish).
