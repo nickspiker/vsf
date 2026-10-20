@@ -114,7 +114,7 @@ The Absolute IDT cannot have this problem, because it has no slot in which a loo
 
 ## Open decisions
 
-0. **What 1.0 means.** VSF RGB output is floating point, so this is only a scale. SI — W·sr⁻¹·m⁻²·nm⁻¹ at each primary — is the honest interim; values will be small and that is fine. The intended home is the base-unit system in [`units.md`](../units.md), once it carries symbols.
+0. **What 1.0 means.** VSF RGB output is floating point, so this is only a scale. SI — W·sr⁻¹·m⁻²·nm⁻¹ at each primary — is the honest interim; values will be small and that is fine. *Decided 2026-10-20:* the entry's `unit` is `si_radiance` until the base-unit system in [`units.md`](../units.md) carries symbols, which will add a value to the closed vocabulary.
 1. **Where `shading` lives.** It is a tensor per lens. Its own section, or a reference to a sidecar.
 
 Everything else in the chain is determined. The one thing to resist is any field that makes step 4 implicit. The moment a viewer must guess how bright to show absolute radiance, a look has leaked into the measurement, and that is the ACES mistake again.

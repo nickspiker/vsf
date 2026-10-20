@@ -12,7 +12,7 @@ fn samples() -> Vec<u16> {
 fn profile() -> ColourProfile {
     ColourProfile {
         target: "vsf_rgb".into(),
-        entries: vec![ProfileEntry { matrix: [1.2, -0.3, -0.1, -0.5, 1.6, 0.26, -0.2, 0.38, 0.66], source: "magic9".into(), class: IdtClass::Relative, tier: ProfileTier::Unit, illuminant: 23, transfer: Transfer::Linear }],
+        entries: vec![ProfileEntry { matrix: [1.2, -0.3, -0.1, -0.5, 1.6, 0.26, -0.2, 0.38, 0.66], source: "magic9".into(), class: IdtClass::Relative, tier: ProfileTier::Unit, illuminant: 23, transfer: Transfer::Linear, scale: None }],
         dng_colormatrix: [Some(([1.5, -0.7, -0.2, -1.1, 2.2, 0.05, 0.08, -0.3, 1.6], 17)), None],
         patches: Some((vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6], vec![0.11, 0.21, 0.31, 0.41, 0.51, 0.61])),
         cal: Some(CalProvenance { target_type: 1, target_serial: 13, timestamp: "2026-07-01".into() }),

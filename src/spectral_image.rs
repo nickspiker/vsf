@@ -132,7 +132,44 @@ impl Transfer {
     }
 }
 
-/// One characterization: a camera→target matrix and the full account of where it came from and how far to trust it. `matrix` is row-major camera→VSF-RGB (linear in, linear out), UNSCALED — no display or illuminant normalization baked in, so the same entry serves any output space by concatenation.
+/// What 1.0 means in a scaled entry's output (`idt/absolute.md`, `idt/relative.md`). Closed. `Reflectance`: a perfect diffuse reflector under the light the entry was solved under — the only unit of a Relative entry. `SiRadiance`: W·sr⁻¹·m⁻²·nm⁻¹ at each primary — an Absolute entry's interim unit until `units.md` carries base units.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unit {
+    Reflectance,
+    SiRadiance,
+}
+
+impl Unit {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Unit::Reflectance => "reflectance",
+            Unit::SiRadiance => "si_radiance",
+        }
+    }
+    pub fn parse(s: &str) -> Result<Self, SpectralImageError> {
+        match s {
+            "reflectance" => Ok(Unit::Reflectance),
+            "si_radiance" => Ok(Unit::SiRadiance),
+            other => Err(SpectralImageError::BadField(format!("unknown unit '{}'", other))),
+        }
+    }
+    /// The one unit a class may carry: Relative is reflectance, Absolute is radiance; Creative and Technical entries make no physical claim and carry no scale.
+    pub fn fits(self, class: IdtClass) -> bool {
+        matches!((class, self), (IdtClass::Relative, Unit::Reflectance) | (IdtClass::Absolute, Unit::SiRadiance))
+    }
+}
+
+/// An entry's magnitude, factored out of its matrix so each fact has one home: the matrix holds the chromatic ratios, this says what a count means. The three travel together because none means anything alone.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EntryScale {
+    /// Per camera channel, what a count at that channel's white level is, in `unit`: Absolute — sensor-plane exposure, J·m⁻², monochromatic-equivalent at the channel curve's peak; Relative — the fraction of a perfect diffuse reflector under the solved light (the scalar `g` of `idt/relative.md`). Defined against white level, not saturation, so it does not depend on the storage range.
+    pub sensitivity: [f32; 3],
+    /// The gain `sensitivity` was measured at; a reader scales a shot by `gain_ref / capture.gain`.
+    pub gain_ref: f32,
+    pub unit: Unit,
+}
+
+/// One characterization: a camera→target matrix and the full account of where it came from and how far to trust it. `matrix` is row-major camera→VSF-RGB (linear in, linear out). Without `scale` it is UNSCALED, carrying magnitude as well as ratios (the v9 meaning, kept for every file that has no scale). With `scale` it is chromatic only: a Relative matrix maps a perfect diffuser under the solved light (every channel at 1 after `sensitivity`) to VSF white, so its rows sum to 1; an Absolute matrix maps channel radiance to VSF RGB radiance. No display or illuminant normalization is ever baked in, so the same entry serves any output space by concatenation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProfileEntry {
     pub matrix: [f32; 9],
@@ -140,9 +177,12 @@ pub struct ProfileEntry {
     pub source: String,
     pub class: IdtClass,
     pub tier: ProfileTier,
-    /// EXIF LightSource code of the characterization illuminant; 0 = unknown. For deriving a display exposure scalar only — never chromatic adaptation.
+    /// EXIF LightSource code of the light a Relative entry was solved under; 0 = unknown. For choosing among stored entries only: never chromatic adaptation, and never a source of exposure (an exposure derived from it would be a look read off a measurement). An Absolute entry has no illuminant in its transform and leaves this 0.
     pub illuminant: u16,
+    /// Vestigial (`idt/fields.md`): no longer written, read as `Linear` when absent.
     pub transfer: Transfer,
+    /// The entry's magnitude, when measured. `None` ⇒ `matrix` carries magnitude itself (v9).
+    pub scale: Option<EntryScale>,
 }
 
 /// magic-9 calibration provenance carried alongside a `unit`-tier entry: which target produced it.
@@ -389,14 +429,26 @@ pub fn profile_fields(profile: &ColourProfile) -> Vec<(String, VsfType)> {
     let mut classes: Vec<&str> = Vec::with_capacity(n);
     let mut tiers: Vec<&str> = Vec::with_capacity(n);
     let mut illuminants: Vec<u16> = Vec::with_capacity(n);
-    let mut transfers: Vec<&str> = Vec::with_capacity(n);
+    let (mut sensitivities, mut gain_refs, mut units): (Vec<f32>, Vec<f32>, Vec<&str>) = (Vec::new(), Vec::new(), Vec::new());
     for e in &profile.entries {
         matrices.extend_from_slice(&e.matrix);
         sources.push(&e.source);
         classes.push(e.class.as_str());
         tiers.push(e.tier.as_str());
         illuminants.push(e.illuminant);
-        transfers.push(e.transfer.as_str());
+        // An entry without a scale writes zeros and an empty unit: a zero sensitivity or gain is physically meaningless, so it cannot be mistaken for a measurement.
+        match &e.scale {
+            Some(sc) => {
+                sensitivities.extend_from_slice(&sc.sensitivity);
+                gain_refs.push(sc.gain_ref);
+                units.push(sc.unit.as_str());
+            }
+            None => {
+                sensitivities.extend_from_slice(&[0.; 3]);
+                gain_refs.push(0.);
+                units.push("");
+            }
+        }
     }
     let mut fields: Vec<(String, VsfType)> = vec![
         ("target".to_string(), VsfType::a(profile.target.clone())),
@@ -406,8 +458,12 @@ pub fn profile_fields(profile: &ColourProfile) -> Vec<(String, VsfType)> {
         ("classes".to_string(), VsfType::a(classes.join("\n"))),
         ("tiers".to_string(), VsfType::a(tiers.join("\n"))),
         ("illuminants".to_string(), VsfType::t_u4(Tensor::new(vec![n], illuminants))),
-        ("transfers".to_string(), VsfType::a(transfers.join("\n"))),
     ];
+    if profile.entries.iter().any(|e| e.scale.is_some()) {
+        fields.push(("sensitivities".to_string(), VsfType::t_f5(Tensor::new(vec![n, 3], sensitivities))));
+        fields.push(("gain_refs".to_string(), VsfType::t_f5(Tensor::new(vec![n], gain_refs))));
+        fields.push(("units".to_string(), VsfType::a(units.join("\n"))));
+    }
     for (i, name) in ["dng_colormatrix1", "dng_colormatrix2"].iter().enumerate() {
         if let Some((m, code)) = &profile.dng_colormatrix[i] {
             fields.push((name.to_string(), VsfType::t_f5(Tensor::new(vec![3, 3], m.to_vec()))));
@@ -542,7 +598,12 @@ pub fn profile_from_fields(sec: &[VsfField]) -> Result<ColourProfile, SpectralIm
     let sources = split_n(&take_string(sec, "sources")?, n, "colour_profile sources")?;
     let classes = split_n(&take_string(sec, "classes")?, n, "colour_profile classes")?;
     let tiers = split_n(&take_string(sec, "tiers")?, n, "colour_profile tiers")?;
-    let transfers = split_n(&take_string(sec, "transfers")?, n, "colour_profile transfers")?;
+    // Vestigial: v9 writers always wrote it; absent ⇒ every entry linear.
+    let transfers = match take_string_opt(sec, "transfers") {
+        Some(t) => split_n(&t, n, "colour_profile transfers")?,
+        None => vec!["linear".to_string(); n],
+    };
+    let scales = profile_scales(sec, n)?;
     let illuminants = take_u32_vec(sec, "illuminants")?;
     if illuminants.len() != n {
         return Err(SpectralImageError::BadField(format!("colour_profile illuminants carries {} values for {} entries", illuminants.len(), n)));
@@ -558,7 +619,14 @@ pub fn profile_from_fields(sec: &[VsfField]) -> Result<ColourProfile, SpectralIm
             tier: ProfileTier::parse(&tiers[i])?,
             illuminant: illuminants[i] as u16,
             transfer: Transfer::parse(&transfers[i])?,
+            scale: scales[i],
         });
+        if let Some(sc) = scales[i] {
+            let class = entries[i].class;
+            if !sc.unit.fits(class) {
+                return Err(SpectralImageError::BadField(format!("colour_profile entry {i}: a {} entry cannot carry unit '{}'", class.as_str(), sc.unit.as_str())));
+            }
+        }
     }
 
     let mut dng_colormatrix: [Option<([f32; 9], u16)>; 2] = [None, None];
@@ -595,6 +663,36 @@ pub fn profile_from_fields(sec: &[VsfField]) -> Result<ColourProfile, SpectralIm
     };
 
     Ok(ColourProfile { target, entries, dng_colormatrix, patches, cal })
+}
+
+/// The optional `sensitivities` `[n, 3]`, `gain_refs` `[n]` and `units` (one line per entry), all three or none. An entry with zero sensitivity, zero gain and an empty unit has no scale; any other mix of zero and non-zero fails loud.
+fn profile_scales(sec: &[VsfField], n: usize) -> Result<Vec<Option<EntryScale>>, SpectralImageError> {
+    let present = ["sensitivities", "gain_refs", "units"].map(|f| sec.iter().any(|x| x.name == f));
+    if present == [false; 3] {
+        return Ok(vec![None; n]);
+    }
+    if present != [true; 3] {
+        return Err(SpectralImageError::BadField("colour_profile carries some of sensitivities/gain_refs/units without the others".into()));
+    }
+    let sens = take_f32_vec(sec, "sensitivities")?;
+    let gains = take_f32_vec(sec, "gain_refs")?;
+    let units = split_n(&take_string(sec, "units")?, n, "colour_profile units")?;
+    if sens.len() != n * 3 || gains.len() != n {
+        return Err(SpectralImageError::BadField(format!("colour_profile scale arrays carry {} sensitivities and {} gains for {} entries", sens.len(), gains.len(), n)));
+    }
+    (0..n)
+        .map(|i| {
+            let s = [sens[i * 3], sens[i * 3 + 1], sens[i * 3 + 2]];
+            let none = s == [0.; 3] && gains[i] == 0. && units[i].is_empty();
+            if none {
+                return Ok(None);
+            }
+            if s.iter().any(|v| !(*v > 0.)) || !(gains[i] > 0.) || units[i].is_empty() {
+                return Err(SpectralImageError::BadField(format!("colour_profile entry {i}: a scale needs a positive sensitivity per channel, a positive gain_ref and a unit")));
+            }
+            Ok(Some(EntryScale { sensitivity: s, gain_ref: gains[i], unit: Unit::parse(&units[i])? }))
+        })
+        .collect()
 }
 
 /// Parse the optional `view_transform` section into a [`ViewTransform`]. Absent section ⇒ `None`. Params are sliced back by param_counts; a shortfall fails loud.
@@ -785,6 +883,7 @@ mod tests {
                     tier: ProfileTier::Unit,
                     illuminant: 21,
                     transfer: Transfer::Linear,
+                    scale: None,
                 },
                 ProfileEntry {
                     matrix: [0.8, 0.1, 0.05, 0.02, 0.95, 0.03, 0.01, 0.04, 1.1],
@@ -793,6 +892,7 @@ mod tests {
                     tier: ProfileTier::Model,
                     illuminant: 23,
                     transfer: Transfer::Linear,
+                    scale: None,
                 },
             ],
             dng_colormatrix: [Some(([1.0, 0.1, 0.0, 0.0, 1.0, 0.1, 0.0, 0.0, 1.0], 23)), None],

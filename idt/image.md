@@ -98,7 +98,7 @@ A plane's table-of-contents content hash is **the plane hash**: the identity lin
 | `shading` | `a` | the flat-field plane |
 
 ### `characterization`
-Today's `colour_profile` fields, byte for byte (`spectral_image::profile_fields`): `target`, `count`, `matrices [n,3,3]` best first, `sources` (open), `classes` and `tiers` (closed — [README](README.md), [tiers.md](tiers.md)), `illuminants`, `transfers` (vestigial), the verbatim `dng_colormatrix1/2` + `dng_illuminant1/2`, `patches_camera/reference`, `cal_target_type/serial/timestamp`. Plus:
+Today's `colour_profile` fields, byte for byte (`spectral_image::profile_fields`): `target`, `count`, `matrices [n,3,3]` best first, `sources` (open), `classes` and `tiers` (closed — [README](README.md), [tiers.md](tiers.md)), `illuminants` (for choosing among entries only), `transfers` (vestigial: read when present, no longer written), and per entry the optional scale `sensitivities [n,3]`, `gain_refs [n]`, `units` (closed: `reflectance` \| `si_radiance`, checked against the class; absent ⇒ the matrix carries magnitude, as in v9), the verbatim `dng_colormatrix1/2` + `dng_illuminant1/2`, `patches_camera/reference`, `cal_target_type/serial/timestamp`. Plus:
 
 | field | type | notes |
 |---|---|---|
