@@ -1,6 +1,6 @@
 # Input Device Transforms
 
-An Input Device Transform relates the light a sensor captured to the values a file hands you. That is the whole definition, and it is enough to force a taxonomy: a transform either preserves what the light was, preserves what the object was, deliberately departs from both, or makes no claim about the scene at all. Those are the four kinds. There is no fifth that isn't one of them wearing a hat.
+An Input Device Transform relates the light a sensor captured to the values a file hands you. That is the whole definition, and it is enough to force a taxonomy: a transform either preserves what the light was, preserves what the object was, deliberately departs from both, or makes no claim about the scene at all. Those are the four kinds. Every transform examined so far is one of the four.
 
 The relation runs both ways. A medium — a print, a panel, a slide — turns the values back into light, and the same four kinds describe that transform too; what changes is which of them the medium can physically keep. A print is the Relative case made of paper. See [`output.md`](output.md).
 

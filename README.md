@@ -8,9 +8,7 @@ A self-describing binary container, and a colour model that says what a picture 
 
 Use DNG. Use Protobuf. Write JSON. All of them work, and nothing here asks you to stop. What this repo is: a long stretch of work on making a better option exist, for anyone who wants one. Every value carries its type. Every file carries its hash. Every number is as wide as it needs to be and no wider, with no ceiling. Every colour entry says whether it was measured or guessed. None of that is new on its own. Having all of it in one open format, checked by default, is the point.
 
-This is for the people, not for Adobe.
-
-**Crate:** `vsf` 0.10.0, format v10, reads v9. **Docs and examples:** https://holdmyoscilloscope.com/vsf/
+**Crate:** `vsf` 0.10.1, format v10, reads v9. **Docs and examples:** https://holdmyoscilloscope.com/vsf/
 
 **In this repository:** [`colour.md`](colour.md), the VSF RGB colourspace · [`idt/`](idt/README.md), Input Device Transforms: the four classes, tiers, and the image field set · [`units.md`](units.md), the base-unit system · [`MEDIA-TYPE.md`](MEDIA-TYPE.md), the media type registrations.
 
@@ -38,7 +36,7 @@ Two problems, and no existing format solved both.
 
 **A camera matrix says nothing about itself.** A DNG's ColorMatrix, an ICC input profile and an ACES IDT are each a 3×K matrix fitted to a chart under a light or two. The file does not say whether it was measured on this unit or taken from the maker's datasheet, whether it is a characterization or a look, or what light it was fitted under. A guess reads as a measurement and a look reads as a characterization, by omission. [`idt/README.md`](idt/README.md) is the full argument, including why DNG was not extended and how this differs from ACES.
 
-**Every container has a ceiling.** TIFF offsets are 32 bits. Protobuf and MessagePack varints stop at 64 and cannot be skipped without reading every byte. JSON loses precision above 2^53. Length-prefixed formats have a length field with its own limit. The fix for the second problem is old and simple, and VSF builds on it rather than claiming it.
+**Most containers have a ceiling.** TIFF offsets are 32 bits. Protobuf and MessagePack varints stop at 64 bits, and a varint is read byte by byte to find its end. JSON numbers are commonly parsed as 64-bit floats, exact only up to 2^53. Length-prefixed formats have a length field with its own limit. The fix for the second problem is old and simple, and VSF builds on it rather than claiming it.
 
 ---
 

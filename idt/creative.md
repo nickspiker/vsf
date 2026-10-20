@@ -15,7 +15,7 @@ Creative ops live in the `view_transform` log, in order, after characterization.
 
 White balance is a diagonal scale in camera RGB: three multipliers, one per channel, chosen so some reference lands neutral. It removes the overall cast. It also gets the colours of individual objects wrong, because a diagonal is not a spectral solve — it cannot know that two surfaces reflecting the same camera RGB under tungsten would reflect differently under daylight.
 
-It is the naive version of what a [Relative IDT](relative.md) does properly. DSR divides the illuminant out spectrally; white balance scales three numbers and hopes. Nearly every camera ships white balance as its default rendering, which is why so few images anyone sees are faithful to the object. The format does not forbid it. It files it where it belongs.
+It is the naive version of what a [Relative IDT](relative.md) does properly. DSR divides the illuminant out spectrally; white balance scales three numbers and hopes. Nearly every camera ships white balance as its default rendering, so most images people see are white-balanced renderings rather than faithful to the object. The format does not forbid it. It files it where it belongs.
 
 ## Camera looks
 

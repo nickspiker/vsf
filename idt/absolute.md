@@ -108,7 +108,7 @@ So ISO is not the anchor. The emitter is. Define `sensitivity` radiometrically p
 
 DNG has one exposure concept, `BaselineExposure`, and its own spec describes it as producing "brighter default results" — a look. The same tag is also where a genuine calibration normalisation ends up, because there is nowhere else. One slot, two different claims, and a reader cannot tell which it holds.
 
-The cost is not theoretical. At least one major grading application applies `BaselineExposure` at decode and clamps to the container before anything downstream can see the result, so any positive value destroys every sample above white — permanently, before the node graph. If the tag held a preference, that cost a preference. If it held a measurement, it destroyed data.
+The ambiguity has a concrete cost. A reader that applies `BaselineExposure` at decode and clamps to its container before anything downstream sees the result loses every sample a positive value pushes above white, permanently. If the tag held a preference, that costs a preference. If it held a measurement, it destroys data.
 
 The Absolute IDT cannot have this problem, because it has no slot in which a look could be mistaken for a measurement. The sensitivity is inside the characterization and is Technical. Anything on top is Creative and is labelled so. A reader that clamps a Creative op has lost a preference, and the file says exactly that.
 
@@ -117,4 +117,4 @@ The Absolute IDT cannot have this problem, because it has no slot in which a loo
 0. **What 1.0 means.** VSF RGB output is floating point, so this is only a scale. SI — W·sr⁻¹·m⁻²·nm⁻¹ at each primary — is the honest interim; values will be small and that is fine. *Decided 2026-10-20:* the entry's `unit` is `si_radiance` until the base-unit system in [`units.md`](../units.md) carries symbols, which will add a value to the closed vocabulary.
 1. **Where `shading` lives.** It is a tensor per lens. Its own section, or a reference to a sidecar.
 
-Everything else in the chain is determined. The one thing to resist is any field that makes step 4 implicit. The moment a viewer must guess how bright to show absolute radiance, a look has leaked into the measurement, and that is the ACES mistake again.
+Everything else in the chain is determined. The one thing to resist is any field that makes step 4 implicit. The moment a viewer must guess how bright to show absolute radiance, a look has entered the measurement (the issue [README](README.md#relation-to-aces) describes under "Relation to ACES").

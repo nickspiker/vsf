@@ -2,17 +2,17 @@
 
 ## Executive Summary
 
-**VSF RGB is a spectrally-defined colourspace using monochromatic primaries at 703nm, 523nm, and 462nm.** These wavelengths represent the peak responses of the AGB geometric mean model derived from human cone fundamentals. Unlike legacy standards specified by xy chromaticity coordinates, VSF RGB primaries are defined by physics and remain constant regardless of observer model updates.
+**VSF RGB is a spectrally-defined colourspace using monochromatic primaries at 703nm, 523nm, and 462nm.** These wavelengths represent the peak responses of the AGB geometric mean model derived from human cone fundamentals. Unlike standards whose primaries are specified as xy chromaticity coordinates, VSF RGB's primaries are physical quantities, so they stay the same when observer models are updated.
 
 ## Why Spectral Definition Matters
 
-Every colour standard you've used (sRGB, Adobe RGB, DCI-P3, Rec.709, Rec.2020) specifies its primaries using CIE xy chromaticity coordinates derived from the 1931 Standard Observer. This creates three fundamental problems:
+The common colour standards (sRGB, Adobe RGB, DCI-P3, Rec.709, Rec.2020) specify their primaries as CIE xy chromaticity coordinates under the 1931 Standard Observer. That choice has three consequences.
 
-### 0. Observer Model Is Frozen
+### 0. The Observer Is Part of the Definition
 
-The 1931 xy coordinates ARE the specification. You cannot update to better observer models (like CIE 2006) without changing the colourspace itself. The limitations and inaccuracies of 1931 data are permanently baked into these standards.
+An xy pair is a 1931 chromaticity, so the 1931 observer is part of what these colourspaces are. Moving to newer colour-matching data (CIE 2006, Stockman & Sharpe) would change the colourspace itself, and the 1931 functions' known deviations, largest in the blue, stay part of these standards.
 
-### 1. Specification Is Ambiguous
+### 1. An xy Pair Names Many Spectra
 
 xy coordinates describe a perceptual response, not a physical stimulus. Multiple spectral power distributions can produce the same xy coordinate (metamerism). When a standard says "primary at xy (0.64, 0.33)", this doesn't uniquely specify which wavelengths to use.
 
@@ -45,7 +45,7 @@ The VSF primaries are the wavelengths where each **ratio** achieves maximum valu
 - 523nm: Peak of Gamma ratio (maximum M-cone dominance relative to L and S)
 - 462nm: Peak of Beta ratio (maximum S-cone dominance relative to M)
 
-These are not arbitrary choices or committee compromises - they are mathematical consequences of the geometric mean relationships in human cone spectral sensitivities. **These are not the peak sensitivities of individual cone types** - they are the wavelengths where each cone type achieves maximum relative dominance in its respective ratio.
+They follow from the geometric-mean relationships in the cone spectral sensitivities rather than being chosen. **They are not the peak sensitivities of the individual cone types**: they are the wavelengths where each cone class is most dominant in its ratio.
 
 ## White Point: Illuminant E
 
@@ -55,21 +55,19 @@ Illuminant E represents equal energy at all wavelengths. It is:
 - Mathematically defined (E(λ) = constant)
 - Independent of atmospheric conditions, geography, time of day, or weather
 
-D65 represents "north sky daylight at sea level thru Earth's atmosphere at approximately 6504K correlated colour temperature." You cannot reproduce D65 in a laboratory without simulating planetary atmospheric conditions. This makes it fundamentally unsuitable as a reference standard for any system claiming physical reproducibility.
+D65 is defined by a CIE table of relative spectral power derived from measured daylight, with a correlated colour temperature of about 6504 K. The table is exact; laboratories reproduce the light itself only approximately, with filtered lamps or LED simulators. Illuminant E is defined by a constant instead, so it is written down exactly in one line, which is why VSF uses it as the reference white. No physical lamp is perfectly flat either, so both are references, not light sources.
 
 ## Gamma: 2
 
 **VSF RGB uses gamma 2 (pure square and square root operations).**
 
-Not gamma 2.2. Not gamma 2.4. Not the sRGB piecewise abomination.
+Not gamma 2.2 or 2.4, and not a piecewise curve like sRGB's.
 
 ### Why Gamma 2?
 
-Human vision is logarithmic response all the way to zero. Power functions are continuous to zero. Piecewise functions with linear segments near black add:
-- Arbitrary thresholds (why 0.04045 in sRGB? why 0.081 in Rec.709?)
-- Branching (slower, breaks vectorization)
-- Complexity (more code, more bugs)
-- Zero perceptual benefit
+**Perceptually.** At low light the smallest visible step in luminance grows with the square root of the luminance (the de Vries–Rose law), which is exactly how a square-root encoding spaces its codes. At higher light the visible step grows faster, toward Weber's proportional law, so gamma 2 spends somewhat more codes on the brights than vision strictly needs; at 8 bits and above that is an affordable trade.
+
+**Near black.** sRGB and Rec.709 add a linear segment near black so the encoding's slope stays finite there and tiny values and noise are not stretched without bound. That costs a threshold (0.04045 in sRGB, 0.081 in Rec.709) and a branch per sample, which also gets in the way of vectorizing. Gamma 2 takes the square root's steep start instead: with ×256 truncation it is confined to the first code, which covers light below 1/65536 of white.
 
 **Computational cost (modern x86-64):**
 - Square (x²): ~3-5 cycles
@@ -204,7 +202,7 @@ The observer model establishes perceptual equivalence between colourspaces: "Wha
 
 **Key advantage of spectral definition:** When better observer models are published, VSF RGB can adopt them immediately. The primaries (703nm, 523nm, 462nm) never change. Only the transformation matrices get recalculated with improved cone fundamentals, yielding better perceptual accuracy.
 
-Legacy standards specified in xy coordinates cannot do this - their primaries ARE those 1931 xy values. Updating the observer model would change the colourspace itself.
+Standards specified in xy coordinates cannot do this: their primaries are those 1931 xy values, so updating the observer would change the colourspace itself.
 
 ## Converting Between Colourspaces
 
@@ -220,9 +218,9 @@ How a space's entry matrix is derived depends on how the space defines itself.
 
 **Wavelength-defined primaries (VSF RGB, Rec.2020):** evaluate each primary's L, M, S response under the SS2000 10° cone fundamentals, build the matrix in LMS, and solve into VSF RGB. 1931 never appears.
 
-**xy-defined primaries (sRGB/Rec.709, Display P3, Adobe RGB, ProPhoto, ...):** an xy pair is a 1931 chromaticity and nothing else. There is no spectrum to re-evaluate under a better observer, so these matrices are built the only way they can be: xy → 1931 XYZ, with VSF's primaries placed in 1931 XYZ by the same colour matching functions, so both sides of the matrix share one observer. This is the one place 1931 is unavoidable, and it is confined to the entry matrix of the legacy space.
+**xy-defined primaries (sRGB/Rec.709, Display P3, Adobe RGB, ProPhoto, ...):** an xy pair is a 1931 chromaticity and nothing else. There is no spectrum to re-evaluate under a better observer, so these matrices are built the only way they can be: xy → 1931 XYZ, with VSF's primaries placed in 1931 XYZ by the same colour matching functions, so both sides of the matrix share one observer. This is the one place 1931 is unavoidable, and it is confined to the entry matrix of that space.
 
-**No chromatic adaptation.** VSF RGB's white is Illuminant E; most legacy standards' is D65, and ProPhoto's is D50. Every entry matrix is colorimetric: a source's white is the light its specification says it is, and it lands where that light sits in VSF RGB. sRGB, Display P3 and Adobe RGB white come in at about VSF (0.91, 1.03, 1.09), bluer than E; Rec.2020's D65, evaluated under the 10° fundamentals rather than 1931, at (0.90, 1.03, 1.06); ProPhoto's D50 at (0.99, 1.01, 0.81), warmer. Luminance is held: each white has the photopic luminance of VSF white. Making a source's white neutral is white balance, a Creative op ([`idt/creative.md`](idt/creative.md#chromatic-adaptation-honestly-labelled)), and is recorded as one in the graph, never folded into an encoding's matrix. (From 2026-09-22 to 2026-10-20 the matrices did fold in a von Kries adaptation to E; files converted from a legacy space in that window hold adapted values.) Without it, D65 white lands off the R = G = B axis, and VSF's YCbCr pays for that in chroma on every frame.
+**No chromatic adaptation.** VSF RGB's white is Illuminant E; most xy-defined standards' is D65, and ProPhoto's is D50. Every entry matrix is colorimetric: a source's white is the light its specification says it is, and it lands where that light sits in VSF RGB. sRGB, Display P3 and Adobe RGB white come in at about VSF (0.91, 1.03, 1.09), bluer than E; Rec.2020's D65, evaluated under the 10° fundamentals rather than 1931, at (0.90, 1.03, 1.06); ProPhoto's D50 at (0.99, 1.01, 0.81), warmer. Luminance is held: each white has the photopic luminance of VSF white. Making a source's white neutral is white balance, a Creative op ([`idt/creative.md`](idt/creative.md#chromatic-adaptation-honestly-labelled)), and is recorded as one in the graph, never folded into an encoding's matrix. (From 2026-09-22 to 2026-10-20 the matrices did fold in a von Kries adaptation to E; files converted from an xy-defined space in that window hold adapted values.) Without it, D65 white lands off the R = G = B axis, and VSF's YCbCr pays for that in chroma on every frame.
 
 ICC profiles hand over XYZ adapted to D50, the profile connection space illuminant: the adaptation is the profile maker's, recorded in the profile's `chad` tag. The ICC path undoes it with that tag (or, for a profile with a non-D50 white and no `chad`, as most ICC v2 profiles are, with linear Bradford, the method such profiles were built with), which recovers the profile's own colorimetry, and then converts with the colorimetric `XYZ2VSF_RGB`. Undoing someone else's adaptation is not adapting: it adds no preference, it removes one.
 
@@ -248,46 +246,27 @@ Rec.2020 publishes both. Under the 1931 observer they agree, because the xy valu
 
 ## Laboratory Reproducibility
 
-Any laboratory with a spectrometer can verify VSF RGB:
+**VSF RGB's primaries** are wavelengths: produce or isolate light at 703, 523 and 462 nm and check it with a spectrometer. The definition does not depend on an observer, so it reads the same in any laboratory.
 
-**To reproduce VSF primaries:**
-0. Generate or isolate monochromatic light at 703nm, 523nm, 462nm
-1. Verify wavelengths with spectrometer
-2. Done
+**xy-defined primaries** such as sRGB's are reproduced thru the 1931 observer: take the published xy coordinates, place them in 1931 XYZ, and choose emitters whose output lands there. Many different spectra do, so two implementations can both match the definition and still emit different light, which some real viewers can see.
 
-**To reproduce sRGB primaries:**
-0. Find the latest version of CIE 1931 Standard Observer data
-1. Decide how to handle known flaws in 1931 data  
-2. Calculate XYZ tristimulus values for published xy coordinates
-3. Hope your implementation matches everyone else's
-4. Discover it doesn't
-5. Argue about which implementation is "correct"
-
-VSF RGB primaries are physics. You measure them. They don't change.
-
-**To reproduce D65 white point:**
-0. Build a model atmosphere at Earth sea level density
-1. Add appropriate aerosols and water vapor
-2. Position yourself at correct latitude during correct weather conditions
-3. Measure north sky daylight at the right time of day
-4. Realize this is insane and just use published tables
-5. Which version of D65 tables? There are several.
+**White points.** Illuminant E is equal power at every wavelength, so its definition is one constant. D65 is a CIE table of measured daylight, exact as a table and reproduced only approximately as light (see White Point, above).
 
 ## Why VSF RGB Exists
 
-VSF RGB is not a "better sRGB" or a "wider gamut version" of existing standards. The correct colourspace was always the physical one; sRGB is the impurity built on top of it. VSF RGB is what remains once that is removed:
+VSF RGB is not meant as a wider sRGB. It is a connection space chosen for what it is built from.
 
 ### Physical Specification
-Primaries are wavelengths that can be verified with instruments in any laboratory. No perceptual experiments. No committee votes. No accumulated historical baggage.
+Primaries are wavelengths, verifiable with instruments in any laboratory and independent of any observer model.
 
-### Future-Proof Architecture  
-Observer model updates improve conversion accuracy without changing the colourspace. Legacy standards are permanently locked to 1931 data.
+### Observer Updates Without a New Colourspace
+When better colour-matching data are published, VSF's conversion matrices are recomputed and the colourspace stays the same. A space defined by 1931 xy coordinates stays tied to the 1931 observer by its definition.
 
 ### Computational Simplicity
-Gamma 2 encoding is square/square root. No piecewise functions. No arbitrary thresholds. Several CPU cycles instead of hundreds.
+Gamma 2 is a square and a square root: no piecewise segment and no power function.
 
-### Mathematical Correctness
-Equal energy white point (Illuminant E) is mathematically defined and laboratory reproducible. D65 requires a planet with an atmosphere. Oh, and a very specific sun.
+### A White Defined by a Constant
+Illuminant E is equal energy at every wavelength, defined exactly by one number.
 
 ## Reference Implementation
 
@@ -298,9 +277,9 @@ The VSF Rust library provides:
 
 ## If You Want xy Coordinates
 
-If someone demands "What are the xy chromaticity coordinates of VSF RGB primaries?", the correct answer is:
+Asked for the xy chromaticity coordinates of VSF RGB's primaries, the answer is a question:
 
-**"Which observer model do you want to use?"**
+**"Under which observer?"**
 
 - CIE 1931 2°?
 - CIE 1964 10°?  
@@ -313,7 +292,7 @@ Calculate them yourself using your preferred observer. Different observers produ
 
 ## TL;DR
 
-VSF RGB uses monochromatic primaries at 703nm/523nm/462nm (derived from AGB geometric mean model of cone perception), Illuminant E white point, and gamma 2 encoding. Primaries are specified by wavelengths (physics), not xy coordinates (perception). VSF RGB is the connection space for all conversions. Spectral matrices use the Stockman & Sharpe 2000 10° cone fundamentals and can be recalculated as better observer models are published; xy-defined legacy spaces enter thru 1931 XYZ because that is the only observer their definition supports. This makes VSF RGB objectively reproducible in any laboratory and free of the ambiguities and frozen limitations of legacy colour standards.
+VSF RGB uses monochromatic primaries at 703nm/523nm/462nm (derived from AGB geometric mean model of cone perception), Illuminant E white point, and gamma 2 encoding. Primaries are specified by wavelengths (physical quantities), not xy coordinates (chromaticities under one observer). VSF RGB is the connection space for all conversions. Spectral matrices use the Stockman & Sharpe 2000 10° cone fundamentals and can be recalculated as better observer models are published; xy-defined spaces enter thru 1931 XYZ because that is the only observer their definition supports. The result reads the same in any laboratory and can adopt better observer data without becoming a different colourspace.
 ---
 
 ## Input Device Transforms

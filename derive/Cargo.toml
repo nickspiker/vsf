@@ -1,6 +1,6 @@
 [package]
 name = "vsf-derive"
-version = "0.10.0"
+version = "0.10.1"
 edition = "2021"
 description = "Derive macro for VSF section codecs — one struct definition, both codec halves"
 license = "MPL-2.0"

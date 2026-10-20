@@ -5,7 +5,7 @@ All notable changes to VSF will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.1] - 2026-10-20 · format v10, no code changes
 
 ### Changed
 
@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Docs
 
+- **A tone pass over the documentation**: facts and education, no sales and no digs at other formats. `colour.md`: the reproduction "recipes" for sRGB and D65 and the asides about D65 needing a planet, sRGB as an "impurity" and committee votes are replaced by what each definition actually requires; "legacy standards" is "xy-defined standards" where it described a choice rather than VSF's own old sections; the gamma 2 rationale is corrected (low-light sensitivity follows the square-root de Vries–Rose law rather than a logarithm, and the linear segments of sRGB and Rec.709 exist to keep the encoding's slope finite at black, which the text now says instead of "zero perceptual benefit"); the D65 description is the CIE table, not "north sky daylight". `idt/absolute.md` keeps the BaselineExposure point without an unverifiable claim about an unnamed application, and points to "Relation to ACES" instead of calling it "the ACES mistake". `idt/layers.md`, `idt/creative.md` and `idt/README.md` lose their asides. README: the "not for Adobe" line is gone, and "JSON loses precision above 2^53" is "JSON numbers are commonly parsed as 64-bit floats".
 - `idt/README.md`, "Why not extend DNG?": the size point says why there is no limit — the widest marker is a 2^35-bit integer, while counting every bit the observable universe could store takes about 406 — and that today's readers implement up to 128-bit widths.
 
 ## [0.10.0] - 2026-10-20 · format v10 (reads v9 unchanged)
