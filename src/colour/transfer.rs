@@ -11,6 +11,8 @@
 //! use vsf::colour::legacy::transfer::*;
 //! ```
 
+use num_traits::Float;
+
 // ==================== Rec.2020 TRANSFER FUNCTIONS ====================
 //
 // Rec.2020 is a spectral colourspace (primaries: 630nm, 532nm, 467nm) but it uses the Rec.709 transfer function for backwards compatibility.
