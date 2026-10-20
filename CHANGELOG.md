@@ -5,6 +5,17 @@ All notable changes to VSF will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Licensing.** The code (this crate, `vsf-derive`, the tools) is under the Mozilla Public License 2.0, where it was the custom VSF License 0.0; the specification (`MEDIA-TYPE.md`, `colour.md`, `units.md`, `idt/`) is under CC BY 4.0; and the name is covered by the new `TRADEMARK.md`: "VSF" may describe this repository, any implementation that conforms to the specification, and any product that reads or writes conforming files, but not a format that departs from it. Both manifests say `license = "MPL-2.0"`. Versions already published (up to 0.10.0) carry the licence they were published with.
+- **README rewritten** (1,052 lines to 290): it leads with the colour model and the container instead of the integer encoding, names BER and CBOR as prior art for width markers, separates what is built from what is reserved, and corrects several figures (the `Z` marker is 2^35 bits; readers handle markers up to `7`, 128 bits; 318 type variants; 32 source primaries and 37 transfer curves).
+
+### Docs
+
+- `idt/README.md`, "Why not extend DNG?": the size point now states the format's limit and today's readers' (2^35-bit and 128-bit widths) instead of "no maximum".
+
 ## [0.10.0] - 2026-10-20 · format v10 (reads v9 unchanged)
 
 ### Added
