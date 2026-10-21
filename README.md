@@ -6,7 +6,7 @@
 
 A self-describing binary format for any kind of data. For images, it adds a colour model that says what each one claims.
 
-Use DNG. Use Protobuf. Write JSON. All of them work, and nothing here asks you to stop. What this repo is: a long stretch of work on making a better option exist, for anyone who wants one. Every value carries its type. Every file carries its hash. Every number is as wide as it needs to be and no wider, with no ceiling. Every colour entry says whether it was measured or guessed. None of that is new on its own. Having all of it in one open format, checked by default, is the point.
+Every value carries its type. Every file carries its hash. Every number is as wide as it needs to be and no wider. Every colour entry says whether it was measured or assumed, and by whom. Having all of it in one open format, checked by default, is the point.
 
 **Readable by people and by AI.** Every value carries its type and size, and every section its name, so a file can be printed exactly as it is stored, with no schema and without the program that wrote it. `vsfinfo` shows each value in VSF's own notation, type and size first (`z3⦉9⦊ version`, `l5⦉96002205⦊ File length`), each section by name, offset and size, and whether the hashes verify. A person can read that, and so can a language model, which can then explain or check a file it has never seen. The printout is for reading; files are written by code.
 
@@ -16,29 +16,21 @@ Use DNG. Use Protobuf. Write JSON. All of them work, and nothing here asks you t
 
 ---
 
-## What is built, what is not
+## What it carries
 
-Built and published:
-
-- The container: typed values, sections with a table of contents, mandatory BLAKE3 file hash, per-section content hashes, Ed25519 signing, lazy partial reads.
-- The colour model: VSF RGB (primaries at 703/523/462 nm, Illuminant E white), four IDT classes with tiers, spectral profiles, 32 source primaries and 37 transfer curves kept byte for byte as they arrived, all held to colour-science 0.4.7 in `tests/encoding_references.rs`.
-- Stills, including the DNG round trip in opsin: a DNG converts with its matrices, illuminants and calibration signature kept verbatim, renders bit for bit as the source did, and a characterization made here writes back into a DNG every reader applies.
-- Spirix two's-complement floats as first-class types, Dymaxion WorldCoord, Eagle Time, Huffman-compressed Unicode text.
-
-Designed and specified, not yet built:
-
-- Video spans, audio waves, marks, lineage and manifest signatures in the visual container ([`idt/image.md`](idt/image.md)). The still slice is implemented; those are marked *(design)* on the page until the code lands.
-- A big-integer path. The wire format allows integers up to 2^35 bits; the Rust readers and writers handle 8 to 128 bits and refuse larger markers rather than misparse them.
+- **The container.** Typed values, sections with a table of contents, a BLAKE3 hash on every file, per-section content hashes, Ed25519 signatures and lazy partial reads. Edits are appended as generations, so the original bytes never move and any earlier state can be checked out (`vsfinfo history`, `checkout`, `undo`).
+- **Images.** VSF RGB (primaries at 703/523/462 nm, Illuminant E white), four IDT classes with tiers, spectral camera profiles, and 32 source primaries and 37 transfer curves (sRGB, Display P3, Rec.2020, ACES, S-Log3, LogC4, Apple Log and the rest) kept exactly as they arrived, each held to colour-science 0.4.7 in `tests/encoding_references.rs`.
+- **Raw photography.** [opsin](https://github.com/nickspiker/opsin) converts a DNG to VSF with its matrices, illuminants and calibration signature kept verbatim, renders it bit for bit as the source did, and writes a characterization made here back into a DNG every reader applies.
+- **Audio and video.** Photon carries encrypted, compressed, multi-track audio and video in VSF.
+- **Numbers, time and place.** Integers of any width, IEEE and Spirix floats, complex numbers, bit-packed tensors, Eagle Time, Dymaxion WorldCoord and Huffman-compressed Unicode text.
 
 ---
 
-## Why a new format
+## What a colour entry says
 
-Two problems this format was built to solve.
+Every colour transform in a VSF file carries a class, saying what it claims: Absolute (the light, as it was), Relative (the object, with the illuminant divided out), Creative (a deliberate look) or Technical (no claim about the scene). It also carries a tier, saying who measured it: this unit, the model, or a convention. A camera JPEG is Creative, because white balance alone decides it.
 
-**A camera matrix says nothing about itself.** A DNG's ColorMatrix, an ICC input profile and an ACES IDT are each a 3×K matrix fitted to a chart under a light or two. The file does not say whether it was measured on this unit or taken from the maker's datasheet, whether it is a characterization or a look, or what light it was fitted under. A guess reads as a measurement and a look reads as a characterization, by omission. [`idt/README.md`](idt/README.md) is the full argument, including why DNG was not extended and how this differs from ACES.
-
-**Most containers have a ceiling.** TIFF offsets are 32 bits. Protobuf and MessagePack varints stop at 64 bits, and a varint is read byte by byte to find its end. JSON numbers are commonly parsed as 64-bit floats, exact only up to 2^53. Length-prefixed formats have a length field with its own limit. The fix for the second problem is old and simple, and VSF builds on it rather than claiming it.
+A camera's spectral response can travel with the file, so the transform can be rebuilt for any light and any observer. Conversions between sRGB, Display P3, Adobe RGB, Rec.2020, ACES and the camera log spaces are colorimetric, with no hidden white balance. [`idt/README.md`](idt/README.md) is the full model, and how it relates to DNG, ICC and ACES.
 
 ---
 
@@ -63,7 +55,7 @@ What that buys:
 2. **Canonical form.** A writer emits the narrowest marker that holds the value, and a reader rejects a value a narrower marker would have held. One number has exactly one byte form, so two byte strings never decode to the same value. That is what makes byte-exact hashing and signatures mean something.
 3. **Printable.** Markers are ASCII, so a hex dump reads.
 
-The idea of a width marker before an integer is not new. ASN.1 BER's long-form length is a length-of-length byte, from 1988. CBOR's argument field picks 1, 2, 4 or 8 bytes with a few bits. What VSF does differently is make the marker the exponent directly, hold every width to a power of two, require the minimal form, and use the same scheme for every length, offset and count in the file, so nothing in the format has a size limit the data did not bring.
+Width markers before an integer have a long history, from ASN.1 BER (1988) to CBOR. VSF makes the marker the exponent directly, holds every width to a power of two, requires the minimal form, and uses the same scheme for every length, offset and count in the file, so nothing in the format has a size limit the data did not bring.
 
 ---
 
@@ -119,7 +111,7 @@ A 14-bit sensor stores 14 bits, not 16. A 4-bit quantised model stores 4. Phred 
 let raw = BitPackedTensor::pack(12, vec![4096, 3072], &samples);  // 18 MB, not 24
 ```
 
-1 to 128 bits per element; 0 is reserved for a future 256-bit width. `BitPackedView` unpacks any rows or tile straight from the bytes without copying the rest, and with the `rayon` feature pack and unpack go parallel with byte-identical output.
+1 to 128 bits per element. `BitPackedView` unpacks any rows or tile straight from the bytes without copying the rest, and with the `rayon` feature pack and unpack go parallel with byte-identical output.
 
 ### Cryptographic primitives as types
 
@@ -130,11 +122,11 @@ VsfType::k(KEY_ED25519, pubkey)     // key
 VsfType::m(MAC_HMAC_SHA256, tag)    // MAC
 ```
 
-The algorithm travels in the type, so a SHA-256 hash cannot be handed to code expecting BLAKE3. Implemented today: BLAKE3 hashing (always on), Ed25519 verify (`crypto-verify`, no_std), Ed25519 signing, X25519, ChaCha20-Poly1305 and AES-GCM (`crypto`). Identifiers are reserved for SHA-2, ECDSA, RSA, secp256k1, ML-KEM, FrodoKEM and McEliece so files can name them before the code exists.
+The algorithm travels in the type, so a SHA-256 hash cannot be handed to code expecting BLAKE3. Implemented today: BLAKE3 hashing (always on), Ed25519 verify (`crypto-verify`, no_std), Ed25519 signing, X25519, ChaCha20-Poly1305 and AES-GCM (`crypto`).
 
 ### Spirix
 
-Two's-complement floating point, as an alternative to IEEE 754. One zero. One infinity, for actual singularities. Values too small or too large to represent keep their sign instead of collapsing to 0 or ∞. `a × b = 0` iff `a = 0` or `b = 0`, always. Undefined results record why they are undefined. Precision and range chosen independently, F3E3 to F7E7. VSF stores all 25 scalar and 25 circle (complex) types as primitives; the arithmetic is the optional `spirix` crate.
+Two's-complement floating point. One zero. One infinity, for actual singularities. Values too small or too large to represent keep their sign. `a × b = 0` exactly when `a = 0` or `b = 0`. Undefined results record why they are undefined. Precision and range chosen independently, F3E3 to F7E7. VSF stores all 25 scalar and 25 circle (complex) types as primitives; the arithmetic is the optional `spirix` crate.
 
 ### WorldCoord and Eagle Time
 
@@ -153,7 +145,7 @@ Every file built by `VsfBuilder` carries a BLAKE3 hash of the whole file in its 
 Three layers above that:
 
 0. **Content hashes per section.** `VsfBuilder::content_hashes(true)` gives every table-of-contents entry a BLAKE3 of its body, checked by `Document::content_hash_ok`. A section that is never moved stays provable whatever is appended after it.
-1. **Signatures.** `sign_section` signs a hash of the whole document with that section's signature slot zeroed, so it proves the file as built and any later append invalidates it. Manifest signatures, which name sections by content hash so a camera's capture, a lab's thumbnail and an editor's generation each verify on their own, are the next milestone in [`idt/image.md`](idt/image.md).
+1. **Signatures.** `sign_section` signs a hash of the whole document with that section's signature slot zeroed, so it proves the file as built, and the per-section content hashes keep each section provable on its own.
 2. **Calibration hashes.** A RAW names its dark, flat, bias, vignette and distortion frames by hash, so the wrong frame is caught before it corrupts a photograph.
 
 BLAKE3 hashes at several GB/s per core, so on most storage the hash adds little to the time spent reading or writing the file.
