@@ -699,6 +699,400 @@ fn format_crypto_wrap(algo: u8, data: &[u8]) -> String {
     }
 }
 
+/// A wire number in notation: its size marker, then the value — `4⦉2048⦊`.
+fn number_literal(n: usize) -> String {
+    format!(
+        "{}{}{}{}",
+        tc(&size_marker(n).to_string(), col_punct()),
+        tc("⦉", col_punct()),
+        n.to_string().white(),
+        tc("⦊", col_punct())
+    )
+}
+
+/// Shape and data of a contiguous or strided tensor, so one formatter serves both.
+trait TensorParts<T> {
+    fn parts(&self) -> (&[usize], Option<&[usize]>, &[T]);
+}
+
+impl<T> TensorParts<T> for crate::types::Tensor<T> {
+    fn parts(&self) -> (&[usize], Option<&[usize]>, &[T]) {
+        (&self.shape, None, &self.data)
+    }
+}
+
+impl<T> TensorParts<T> for crate::types::StridedTensor<T> {
+    fn parts(&self) -> (&[usize], Option<&[usize]>, &[T]) {
+        (&self.shape, Some(&self.stride), &self.data)
+    }
+}
+
+fn el_bool(b: &bool) -> String {
+    u8::from(*b).to_string()
+}
+
+fn el_display<T: std::fmt::Display>(x: &T) -> String {
+    x.to_string()
+}
+
+/// Shortest round-trip form that keeps the decimal point (`1.0`, not `1`).
+fn el_float<T: std::fmt::Debug>(x: &T) -> String {
+    format!("{:?}", x)
+}
+
+fn el_complex<T: std::fmt::Debug>(c: &num_complex::Complex<T>) -> String {
+    format!("{:?}{:+?}i", c.re, c.im)
+}
+
+/// Values per row: the innermost dimension when it is short (an RGB triple, a 3×3 matrix), eight otherwise.
+fn tensor_row_len(shape: &[usize]) -> usize {
+    match shape {
+        [.., last] if shape.len() >= 2 && (1..=16).contains(last) => *last,
+        _ => 8,
+    }
+}
+
+/// How many values to show from each end: the hex elision counts (`VSF_HEX_HEAD` / `VSF_HEX_TAIL`), read as values and rounded down to whole rows. `None` when every value fits.
+fn tensor_elision(total: usize, row: usize) -> Option<(usize, usize)> {
+    let (max_head, max_tail) = hex_elision();
+    if total <= max_head.saturating_add(max_tail) {
+        return None;
+    }
+    let whole = |n: usize| if n >= row { n - n % row } else { n };
+    Some((whole(max_head), whole(max_tail)))
+}
+
+/// A tensor header followed by its values. Up to one row of values stays on the header line; longer tensors get a hint (`2048 f32`) and right-aligned rows, with the middle elided.
+fn tensor_rows(header: String, hint: String, total: usize, row: usize, head: Vec<String>, tail: Vec<String>) -> String {
+    if tail.is_empty() && head.len() == total && total <= row {
+        return format!("{} {}{}{}", header, tc("[", col_punct()), head.join(", ").white(), tc("]", col_punct()));
+    }
+    let width = head.iter().chain(&tail).map(|s| s.chars().count()).max().unwrap_or(0);
+    let render = |vals: &[String]| -> Vec<String> {
+        vals.chunks(row)
+            .map(|r| {
+                let cells: Vec<String> = r.iter().map(|v| format!("{:>width$}", v)).collect();
+                format!("        {}", cells.join("  ").white())
+            })
+            .collect()
+    };
+    let mut lines = vec![format!("{} {}", header, tc(&hint, col_hint()))];
+    lines.extend(render(&head));
+    let omitted = total - head.len() - tail.len();
+    if omitted > 0 {
+        lines.push(format!("        {}", format!("... {} values omitted ...", omitted).dimmed()));
+        lines.extend(render(&tail));
+    }
+    lines.join("\n")
+}
+
+/// Contiguous or strided tensor in wire order: `tn4⦉2048⦊f5` for one dimension (the compact form), `t3⦉2⦊u4 4⦉1920⦊4⦉1080⦊` for more, and `q` with its strides after the shape.
+fn tensor_literal<T>(
+    tensor: &impl TensorParts<T>,
+    ty: &str,
+    size: &str,
+    ty_col: (u8, u8, u8),
+    elem_name: &str,
+    fmt: impl Fn(&T) -> String,
+) -> String {
+    let (shape, stride, data) = tensor.parts();
+    let marker = format!("{}{}", trc(ty, ty_col), tc(size, col_punct()));
+    let dims = |d: &[usize]| d.iter().map(|&n| number_literal(n)).collect::<String>();
+    let header = match stride {
+        None if shape.len() == 1 => format!("{}{}{}", trc("tn", col_tensor()), number_literal(shape[0]), marker),
+        None => format!("{}{}{} {}", trc("t", col_tensor()), number_literal(shape.len()), marker, dims(shape)),
+        Some(s) => format!("{}{}{} {} {}", trc("q", col_tensor()), number_literal(shape.len()), marker, dims(shape), dims(s)),
+    };
+    let shape_str = shape.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("×");
+    let hint = format!("{} {}{}", shape_str, elem_name, if stride.is_some() { " strided" } else { "" });
+
+    let total = data.len();
+    let row = tensor_row_len(shape);
+    let (head, tail) = match tensor_elision(total, row) {
+        None => (data.iter().map(&fmt).collect(), vec![]),
+        Some((h, t)) => (data[..h].iter().map(&fmt).collect(), data[total - t..].iter().map(&fmt).collect()),
+    };
+    tensor_rows(header, hint, total, row, head, tail)
+}
+
+/// Bit-packed tensor: `p`, dimension count, bit depth, shape — then the samples unpacked, elided like any tensor. A 256-bit depth (0) has no integer type to unpack into, so it shows as hex.
+fn bitpacked_literal(t: &crate::types::BitPackedTensor) -> String {
+    let depth = if t.bit_depth == 0 { 256 } else { t.bit_depth as usize };
+    let header = format!(
+        "{}{}{}{}{} {}",
+        trc("p", col_tensor()),
+        number_literal(t.shape.len()),
+        tc("⦉", col_punct()),
+        t.bit_depth.to_string().white(),
+        tc("⦊", col_punct()),
+        t.shape.iter().map(|&n| number_literal(n)).collect::<String>()
+    );
+    let shape_str = t.shape.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("×");
+    let hint = format!("{} {}-bit", shape_str, depth);
+
+    let view = crate::types::BitPackedView::of(t).ok().filter(|_| t.bit_depth != 0);
+    let Some(view) = view else {
+        let (head, notice, tail) = format_hex_head_tail(&t.data);
+        let mut lines = vec![format!("{} {} {}", header, tc(&hint, col_hint()), tc("0x", col_punct()))];
+        lines.extend(head.iter().map(|l| format!("        {}", l.white())));
+        if let Some(n) = notice {
+            lines.push(format!("        {}", n.dimmed()));
+            lines.extend(tail.iter().map(|l| format!("        {}", l.white())));
+        }
+        return lines.join("\n");
+    };
+    let total = view.len();
+    let row = tensor_row_len(&t.shape);
+    let unpack = |first: usize, count: usize| -> Vec<String> {
+        view.unpack_range_u128(first, count)
+            .map(|v| v.iter().map(|x| x.to_string()).collect())
+            .unwrap_or_default()
+    };
+    let (head, tail) = match tensor_elision(total, row) {
+        None => (unpack(0, total), vec![]),
+        Some((h, tl)) => (unpack(0, h), unpack(total - tl, tl)),
+    };
+    tensor_rows(header, hint, total, row, head, tail)
+}
+
+/// Every `t_*` and `q_*` tensor in notation; `None` for anything else.
+fn tensor_variant_literal(vsf: &VsfType) -> Option<String> {
+    Some(match vsf {
+        VsfType::p(t) => bitpacked_literal(t),
+        VsfType::t_u0(t) => tensor_literal(t, "u", "0", col_uint(), "bool", el_bool),
+        VsfType::t_u3(t) => tensor_literal(t, "u", "3", col_uint(), "u8", el_display),
+        VsfType::t_u4(t) => tensor_literal(t, "u", "4", col_uint(), "u16", el_display),
+        VsfType::t_u5(t) => tensor_literal(t, "u", "5", col_uint(), "u32", el_display),
+        VsfType::t_u6(t) => tensor_literal(t, "u", "6", col_uint(), "u64", el_display),
+        VsfType::t_u7(t) => tensor_literal(t, "u", "7", col_uint(), "u128", el_display),
+        VsfType::t_i3(t) => tensor_literal(t, "i", "3", col_sint(), "i8", el_display),
+        VsfType::t_i4(t) => tensor_literal(t, "i", "4", col_sint(), "i16", el_display),
+        VsfType::t_i5(t) => tensor_literal(t, "i", "5", col_sint(), "i32", el_display),
+        VsfType::t_i6(t) => tensor_literal(t, "i", "6", col_sint(), "i64", el_display),
+        VsfType::t_i7(t) => tensor_literal(t, "i", "7", col_sint(), "i128", el_display),
+        VsfType::t_f5(t) => tensor_literal(t, "f", "5", col_float(), "f32", el_float),
+        VsfType::t_f6(t) => tensor_literal(t, "f", "6", col_float(), "f64", el_float),
+        VsfType::t_j5(t) => tensor_literal(t, "j", "5", col_float(), "complex f32", el_complex),
+        VsfType::t_j6(t) => tensor_literal(t, "j", "6", col_float(), "complex f64", el_complex),
+        VsfType::q_u0(t) => tensor_literal(t, "u", "0", col_uint(), "bool", el_bool),
+        VsfType::q_u3(t) => tensor_literal(t, "u", "3", col_uint(), "u8", el_display),
+        VsfType::q_u4(t) => tensor_literal(t, "u", "4", col_uint(), "u16", el_display),
+        VsfType::q_u5(t) => tensor_literal(t, "u", "5", col_uint(), "u32", el_display),
+        VsfType::q_u6(t) => tensor_literal(t, "u", "6", col_uint(), "u64", el_display),
+        VsfType::q_u7(t) => tensor_literal(t, "u", "7", col_uint(), "u128", el_display),
+        VsfType::q_i3(t) => tensor_literal(t, "i", "3", col_sint(), "i8", el_display),
+        VsfType::q_i4(t) => tensor_literal(t, "i", "4", col_sint(), "i16", el_display),
+        VsfType::q_i5(t) => tensor_literal(t, "i", "5", col_sint(), "i32", el_display),
+        VsfType::q_i6(t) => tensor_literal(t, "i", "6", col_sint(), "i64", el_display),
+        VsfType::q_i7(t) => tensor_literal(t, "i", "7", col_sint(), "i128", el_display),
+        VsfType::q_f5(t) => tensor_literal(t, "f", "5", col_float(), "f32", el_float),
+        VsfType::q_f6(t) => tensor_literal(t, "f", "6", col_float(), "f64", el_float),
+        VsfType::q_j5(t) => tensor_literal(t, "j", "5", col_float(), "complex f32", el_complex),
+        VsfType::q_j6(t) => tensor_literal(t, "j", "6", col_float(), "complex f64", el_complex),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s33(t) => tensor_literal(t, "s", "33", col_uint(), "ScalarF3E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s34(t) => tensor_literal(t, "s", "34", col_uint(), "ScalarF3E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s35(t) => tensor_literal(t, "s", "35", col_uint(), "ScalarF3E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s36(t) => tensor_literal(t, "s", "36", col_uint(), "ScalarF3E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s37(t) => tensor_literal(t, "s", "37", col_uint(), "ScalarF3E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s43(t) => tensor_literal(t, "s", "43", col_uint(), "ScalarF4E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s44(t) => tensor_literal(t, "s", "44", col_uint(), "ScalarF4E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s45(t) => tensor_literal(t, "s", "45", col_uint(), "ScalarF4E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s46(t) => tensor_literal(t, "s", "46", col_uint(), "ScalarF4E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s47(t) => tensor_literal(t, "s", "47", col_uint(), "ScalarF4E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s53(t) => tensor_literal(t, "s", "53", col_uint(), "ScalarF5E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s54(t) => tensor_literal(t, "s", "54", col_uint(), "ScalarF5E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s55(t) => tensor_literal(t, "s", "55", col_uint(), "ScalarF5E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s56(t) => tensor_literal(t, "s", "56", col_uint(), "ScalarF5E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s57(t) => tensor_literal(t, "s", "57", col_uint(), "ScalarF5E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s63(t) => tensor_literal(t, "s", "63", col_uint(), "ScalarF6E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s64(t) => tensor_literal(t, "s", "64", col_uint(), "ScalarF6E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s65(t) => tensor_literal(t, "s", "65", col_uint(), "ScalarF6E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s66(t) => tensor_literal(t, "s", "66", col_uint(), "ScalarF6E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s67(t) => tensor_literal(t, "s", "67", col_uint(), "ScalarF6E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s73(t) => tensor_literal(t, "s", "73", col_uint(), "ScalarF7E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s74(t) => tensor_literal(t, "s", "74", col_uint(), "ScalarF7E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s75(t) => tensor_literal(t, "s", "75", col_uint(), "ScalarF7E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s76(t) => tensor_literal(t, "s", "76", col_uint(), "ScalarF7E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_s77(t) => tensor_literal(t, "s", "77", col_uint(), "ScalarF7E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c33(t) => tensor_literal(t, "c", "33", col_uint(), "CircleF3E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c34(t) => tensor_literal(t, "c", "34", col_uint(), "CircleF3E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c35(t) => tensor_literal(t, "c", "35", col_uint(), "CircleF3E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c36(t) => tensor_literal(t, "c", "36", col_uint(), "CircleF3E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c37(t) => tensor_literal(t, "c", "37", col_uint(), "CircleF3E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c43(t) => tensor_literal(t, "c", "43", col_uint(), "CircleF4E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c44(t) => tensor_literal(t, "c", "44", col_uint(), "CircleF4E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c45(t) => tensor_literal(t, "c", "45", col_uint(), "CircleF4E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c46(t) => tensor_literal(t, "c", "46", col_uint(), "CircleF4E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c47(t) => tensor_literal(t, "c", "47", col_uint(), "CircleF4E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c53(t) => tensor_literal(t, "c", "53", col_uint(), "CircleF5E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c54(t) => tensor_literal(t, "c", "54", col_uint(), "CircleF5E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c55(t) => tensor_literal(t, "c", "55", col_uint(), "CircleF5E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c56(t) => tensor_literal(t, "c", "56", col_uint(), "CircleF5E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c57(t) => tensor_literal(t, "c", "57", col_uint(), "CircleF5E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c63(t) => tensor_literal(t, "c", "63", col_uint(), "CircleF6E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c64(t) => tensor_literal(t, "c", "64", col_uint(), "CircleF6E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c65(t) => tensor_literal(t, "c", "65", col_uint(), "CircleF6E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c66(t) => tensor_literal(t, "c", "66", col_uint(), "CircleF6E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c67(t) => tensor_literal(t, "c", "67", col_uint(), "CircleF6E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c73(t) => tensor_literal(t, "c", "73", col_uint(), "CircleF7E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c74(t) => tensor_literal(t, "c", "74", col_uint(), "CircleF7E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c75(t) => tensor_literal(t, "c", "75", col_uint(), "CircleF7E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c76(t) => tensor_literal(t, "c", "76", col_uint(), "CircleF7E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::t_c77(t) => tensor_literal(t, "c", "77", col_uint(), "CircleF7E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s33(t) => tensor_literal(t, "s", "33", col_uint(), "ScalarF3E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s34(t) => tensor_literal(t, "s", "34", col_uint(), "ScalarF3E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s35(t) => tensor_literal(t, "s", "35", col_uint(), "ScalarF3E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s36(t) => tensor_literal(t, "s", "36", col_uint(), "ScalarF3E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s37(t) => tensor_literal(t, "s", "37", col_uint(), "ScalarF3E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s43(t) => tensor_literal(t, "s", "43", col_uint(), "ScalarF4E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s44(t) => tensor_literal(t, "s", "44", col_uint(), "ScalarF4E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s45(t) => tensor_literal(t, "s", "45", col_uint(), "ScalarF4E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s46(t) => tensor_literal(t, "s", "46", col_uint(), "ScalarF4E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s47(t) => tensor_literal(t, "s", "47", col_uint(), "ScalarF4E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s53(t) => tensor_literal(t, "s", "53", col_uint(), "ScalarF5E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s54(t) => tensor_literal(t, "s", "54", col_uint(), "ScalarF5E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s55(t) => tensor_literal(t, "s", "55", col_uint(), "ScalarF5E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s56(t) => tensor_literal(t, "s", "56", col_uint(), "ScalarF5E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s57(t) => tensor_literal(t, "s", "57", col_uint(), "ScalarF5E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s63(t) => tensor_literal(t, "s", "63", col_uint(), "ScalarF6E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s64(t) => tensor_literal(t, "s", "64", col_uint(), "ScalarF6E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s65(t) => tensor_literal(t, "s", "65", col_uint(), "ScalarF6E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s66(t) => tensor_literal(t, "s", "66", col_uint(), "ScalarF6E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s67(t) => tensor_literal(t, "s", "67", col_uint(), "ScalarF6E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s73(t) => tensor_literal(t, "s", "73", col_uint(), "ScalarF7E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s74(t) => tensor_literal(t, "s", "74", col_uint(), "ScalarF7E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s75(t) => tensor_literal(t, "s", "75", col_uint(), "ScalarF7E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s76(t) => tensor_literal(t, "s", "76", col_uint(), "ScalarF7E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_s77(t) => tensor_literal(t, "s", "77", col_uint(), "ScalarF7E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c33(t) => tensor_literal(t, "c", "33", col_uint(), "CircleF3E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c34(t) => tensor_literal(t, "c", "34", col_uint(), "CircleF3E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c35(t) => tensor_literal(t, "c", "35", col_uint(), "CircleF3E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c36(t) => tensor_literal(t, "c", "36", col_uint(), "CircleF3E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c37(t) => tensor_literal(t, "c", "37", col_uint(), "CircleF3E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c43(t) => tensor_literal(t, "c", "43", col_uint(), "CircleF4E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c44(t) => tensor_literal(t, "c", "44", col_uint(), "CircleF4E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c45(t) => tensor_literal(t, "c", "45", col_uint(), "CircleF4E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c46(t) => tensor_literal(t, "c", "46", col_uint(), "CircleF4E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c47(t) => tensor_literal(t, "c", "47", col_uint(), "CircleF4E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c53(t) => tensor_literal(t, "c", "53", col_uint(), "CircleF5E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c54(t) => tensor_literal(t, "c", "54", col_uint(), "CircleF5E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c55(t) => tensor_literal(t, "c", "55", col_uint(), "CircleF5E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c56(t) => tensor_literal(t, "c", "56", col_uint(), "CircleF5E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c57(t) => tensor_literal(t, "c", "57", col_uint(), "CircleF5E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c63(t) => tensor_literal(t, "c", "63", col_uint(), "CircleF6E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c64(t) => tensor_literal(t, "c", "64", col_uint(), "CircleF6E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c65(t) => tensor_literal(t, "c", "65", col_uint(), "CircleF6E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c66(t) => tensor_literal(t, "c", "66", col_uint(), "CircleF6E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c67(t) => tensor_literal(t, "c", "67", col_uint(), "CircleF6E7", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c73(t) => tensor_literal(t, "c", "73", col_uint(), "CircleF7E3", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c74(t) => tensor_literal(t, "c", "74", col_uint(), "CircleF7E4", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c75(t) => tensor_literal(t, "c", "75", col_uint(), "CircleF7E5", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c76(t) => tensor_literal(t, "c", "76", col_uint(), "CircleF7E6", el_display),
+        #[cfg(feature = "spirix")]
+        VsfType::q_c77(t) => tensor_literal(t, "c", "77", col_uint(), "CircleF7E7", el_display),
+        _ => return None,
+    })
+}
+
 /// Get the VSF size marker for a length value Returns '3' for u8, '4' for u16, '5' for u32, '6' for u64, '7' for u128
 fn size_marker(len: usize) -> char {
     if len <= 255 {
@@ -837,6 +1231,9 @@ fn opcode_hint(a: u8, b: u8) -> Option<&'static str> {
 /// - `d3{5}"error"` for a dictionary key
 /// - `u3{42}` for an unsigned int
 pub fn format_value_literal(vsf: &VsfType) -> String {
+    if let Some(tensor) = tensor_variant_literal(vsf) {
+        return tensor;
+    }
     match vsf {
         // Text types: type + size_marker + {length} + "content"
         VsfType::d(s) => {
@@ -1116,58 +1513,6 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
             }
             // Fallback to existing crypto_wrap formatting for other algorithms
             format_crypto_wrap(*algo, data)
-        }
-
-        // Tensors: light blue Wire format: t3{dims}u3 + shape values + data e.g., t3{1}u3 3{16} [38,0,16,15,...] for a 16-element 1D u8 tensor
-        VsfType::t_u3(tensor) => {
-            let dims = tensor.shape.len();
-            // Build shape encoding: 3{dim0}3{dim1}...
-            let shape_encoded: String = tensor
-                .shape
-                .iter()
-                .map(|d| {
-                    format!(
-                        "{}{}{}{}",
-                        tc("3", col_punct()),
-                        tc("⦉", col_punct()),
-                        d.to_string().white(),
-                        tc("⦊", col_punct())
-                    )
-                })
-                .collect();
-
-            // Show u8 values as decimal (native representation)
-            let preview_len = tensor.data.len().min(32);
-            let values_preview: String = tensor.data[..preview_len]
-                .iter()
-                .map(|b| b.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            let ellipsis = if tensor.data.len() > 32 { ",..." } else { "" };
-
-            // Build shape hint like "16" or "24×71"
-            let shape_hint = tensor
-                .shape
-                .iter()
-                .map(|d| d.to_string())
-                .collect::<Vec<_>>()
-                .join("×");
-
-            format!(
-                "{}{}{}{}{}{} {} {}{}{}{}{}",
-                trc("t", col_tensor()),
-                tc("3", col_punct()),
-                tc("⦉", col_punct()),
-                dims.to_string().white(),
-                tc("⦊", col_punct()),
-                trc("u3", col_uint()),
-                shape_encoded,
-                tc("[", col_punct()),
-                values_preview.white(),
-                tc(ellipsis, col_punct()),
-                tc("]", col_punct()),
-                format!(" {}", tc(&format!("{} u8 tensor", shape_hint), col_hint()))
-            )
         }
 
         // Eagle Time: pink-magenta - show underlying type (e5/e6/e7/ef5/ef6)
@@ -2297,7 +2642,9 @@ pub fn format_value(vsf: &VsfType) -> String {
         #[cfg(feature = "spirix")]
         VsfType::c77(c) => format!("{}", c),
 
-        _ => format!("{:?}", vsf),
+        _ => tensor_variant_literal(vsf)
+            .map(|t| strip_ansi(&t))
+            .unwrap_or_else(|| format!("{:?}", vsf)),
     }
 }
 
@@ -3356,5 +3703,51 @@ mod hex_elision_tests {
         assert!(notice.contains(&format!("{} bytes omitted", 15791 - 16 - 16)));
         assert_eq!(head.join("").len(), 16 * 2); // 16 bytes of hex
         assert_eq!(tail.join("").len(), 16 * 2);
+    }
+
+    /// A tensor prints in VSF notation, wire order, with its values in rows and the middle elided — never as a `{:?}` dump of every element.
+    #[test]
+    fn tensors_print_in_notation_with_elided_rows() {
+        use crate::types::{BitPackedTensor, StridedTensor, Tensor};
+        set_hex_elision(16, 16);
+        let (h, t) = hex_elision();
+
+        // Long 1-D: the compact `tn` form, a hint, rows, and the omission notice.
+        let long = VsfType::t_f5(Tensor::new(vec![2048], (0..2048).map(|i| i as f32 * 0.5).collect()));
+        let shown = strip_ansi(&format_value_literal(&long));
+        assert!(shown.starts_with("tn4⦉2048⦊f5 2048 f32\n"), "{shown}");
+        assert!(shown.contains(&format!("... {} values omitted ...", 2048 - h - t)), "{shown}");
+        assert!(!shown.contains("Tensor"), "{shown}");
+        assert!(shown.lines().all(|l| l.chars().count() < 120), "{shown}");
+        assert!(shown.contains("1023.5") && !shown.contains("512.0"), "head and tail only: {shown}");
+
+        // One row or less stays on the header line; floats keep their decimal point.
+        let short = VsfType::t_f5(Tensor::new(vec![3], vec![0.3127, 0.329, 1.0]));
+        assert_eq!(strip_ansi(&format_value_literal(&short)), "tn3⦉3⦊f5 [0.3127, 0.329, 1.0]");
+
+        // N-D: dimension count, element type, then the shape; rows follow a short innermost dimension.
+        let rgb = VsfType::t_u4(Tensor::new(vec![4, 3], (0..12u16).collect()));
+        let shown = strip_ansi(&format_value_literal(&rgb));
+        assert!(shown.starts_with("t3⦉2⦊u4 3⦉4⦊3⦉3⦊ 4×3 u16\n"), "{shown}");
+        assert!(shown.lines().nth(1).unwrap().trim().split_whitespace().count() == 3, "{shown}");
+
+        // Strided: shape then strides.
+        let q = VsfType::q_i4(StridedTensor::new(vec![2, 2], vec![1, 2], vec![-1i16, 2, -3, 4]));
+        let shown = strip_ansi(&format_value_literal(&q));
+        assert!(shown.starts_with("q3⦉2⦊i4 3⦉2⦊3⦉2⦊ 3⦉1⦊3⦉2⦊ 2×2 i16 strided"), "{shown}");
+
+        let j = VsfType::t_j5(Tensor::new(vec![1], vec![num_complex::Complex::new(1.0f32, -2.5)]));
+        assert_eq!(strip_ansi(&format_value_literal(&j)), "tn3⦉1⦊j5 [1.0-2.5i]");
+        let b = VsfType::t_u0(Tensor::new(vec![2], vec![true, false]));
+        assert_eq!(strip_ansi(&format_value_literal(&b)), "tn3⦉2⦊u0 [1, 0]");
+
+        // Bit-packed: dimension count, bit depth, shape, then the samples unpacked.
+        let packed = VsfType::p(BitPackedTensor::pack_u16(12, vec![2, 3], &[0, 1, 4095, 7, 8, 9]));
+        let shown = strip_ansi(&format_value_literal(&packed));
+        assert!(shown.starts_with("p3⦉2⦊⦉12⦊ 3⦉2⦊3⦉3⦊ 2×3 12-bit\n"), "{shown}");
+        assert!(shown.contains("4095"), "{shown}");
+
+        // The plain formatter used by `vsfinfo get` gives the same, without colour.
+        assert!(!format_value(&q).contains("StridedTensor"));
     }
 }
