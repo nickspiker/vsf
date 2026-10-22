@@ -2149,18 +2149,16 @@ fn pack_rgb_565_linear_s44(r: S44, g: S44, b: S44) -> u16 {
 ///
 /// Calculated from VSF_RGB2LMS and LMS2PHOTOPIC for white point [1,1,1]
 const PHOTOPIC_WHITE_NORM: f32 = {
-    // L white = sum of first row
-    let l_white = VSF_RGB2LMS[0] + VSF_RGB2LMS[1] + VSF_RGB2LMS[2];
-    // M white = sum of second row
-    let m_white = VSF_RGB2LMS[3] + VSF_RGB2LMS[4] + VSF_RGB2LMS[5];
-    // S white = sum of third row
-    let s_white = VSF_RGB2LMS[6] + VSF_RGB2LMS[7] + VSF_RGB2LMS[8];
+    // VSF_RGB2LMS is column-major (a column per primary): each cone's white is the sum across the columns.
+    let l_white = VSF_RGB2LMS[0] + VSF_RGB2LMS[3] + VSF_RGB2LMS[6];
+    let m_white = VSF_RGB2LMS[1] + VSF_RGB2LMS[4] + VSF_RGB2LMS[7];
+    let s_white = VSF_RGB2LMS[2] + VSF_RGB2LMS[5] + VSF_RGB2LMS[8];
 
     // Photopic response for white point
     LMS2PHOTOPIC[0] * l_white + LMS2PHOTOPIC[1] * m_white + LMS2PHOTOPIC[2] * s_white
 };
 
-/// Convert linear VSF RGB to photopic luminance (0-1 range)
+/// Convert linear VSF RGB to photopic luminance (0-1 range): weights R 0.2584, G 0.6346, B 0.1070, white 1.
 ///
 /// This performs colourimetric conversion:
 /// 1. VSF RGB → LMS (cone responses using column-major matrix)
@@ -2168,9 +2166,9 @@ const PHOTOPIC_WHITE_NORM: f32 = {
 /// 3. Normalize so Illuminant E white [1,1,1] → 1.0
 pub fn vsf_rgb_to_photopic_f32(r: f32, g: f32, b: f32) -> f32 {
     // VSF RGB → LMS (matrix in column-major order)
-    let l = VSF_RGB2LMS[0] * r + VSF_RGB2LMS[1] * g + VSF_RGB2LMS[2] * b;
-    let m = VSF_RGB2LMS[3] * r + VSF_RGB2LMS[4] * g + VSF_RGB2LMS[5] * b;
-    let s = VSF_RGB2LMS[6] * r + VSF_RGB2LMS[7] * g + VSF_RGB2LMS[8] * b;
+    let l = VSF_RGB2LMS[0] * r + VSF_RGB2LMS[3] * g + VSF_RGB2LMS[6] * b;
+    let m = VSF_RGB2LMS[1] * r + VSF_RGB2LMS[4] * g + VSF_RGB2LMS[7] * b;
+    let s = VSF_RGB2LMS[2] * r + VSF_RGB2LMS[5] * g + VSF_RGB2LMS[8] * b;
 
     // LMS → Photopic luminance (raw)
     let photopic_raw = LMS2PHOTOPIC[0] * l + LMS2PHOTOPIC[1] * m + LMS2PHOTOPIC[2] * s;
@@ -2190,9 +2188,9 @@ pub fn vsf_rgb_to_photopic_s44(r: S44, g: S44, b: S44) -> S44 {
     use crate::colour::{LMS2PHOTOPIC_S44, VSF_RGB2LMS_S44};
     const PHOTOPIC_WHITE_NORM_S44: S44 = sf!(PHOTOPIC_WHITE_NORM);
 
-    let l = VSF_RGB2LMS_S44[0] * r + VSF_RGB2LMS_S44[1] * g + VSF_RGB2LMS_S44[2] * b;
-    let m = VSF_RGB2LMS_S44[3] * r + VSF_RGB2LMS_S44[4] * g + VSF_RGB2LMS_S44[5] * b;
-    let s = VSF_RGB2LMS_S44[6] * r + VSF_RGB2LMS_S44[7] * g + VSF_RGB2LMS_S44[8] * b;
+    let l = VSF_RGB2LMS_S44[0] * r + VSF_RGB2LMS_S44[3] * g + VSF_RGB2LMS_S44[6] * b;
+    let m = VSF_RGB2LMS_S44[1] * r + VSF_RGB2LMS_S44[4] * g + VSF_RGB2LMS_S44[7] * b;
+    let s = VSF_RGB2LMS_S44[2] * r + VSF_RGB2LMS_S44[5] * g + VSF_RGB2LMS_S44[8] * b;
 
     // LMS → Photopic luminance (raw)
     let photopic_raw = LMS2PHOTOPIC_S44[0] * l + LMS2PHOTOPIC_S44[1] * m + LMS2PHOTOPIC_S44[2] * s;
@@ -2868,5 +2866,18 @@ mod tests {
             s44_gamma2.to_f32(),
             u8_back
         );
+    }
+}
+
+#[cfg(test)]
+mod photopic_tests {
+    use super::*;
+
+    /// The matrix is column-major (a column per primary), so equal-energy white is L = M = S = 1 down the columns, and the photopic weights follow: R 0.2584, G 0.6346, B 0.1070 (2026-10-21: the rows had been read as columns, giving R 0.61, B 0.008).
+    #[test]
+    fn photopic_weights() {
+        assert!((vsf_rgb_to_photopic_f32(1., 1., 1.) - 1.).abs() < 1e-5);
+        let (r, g, b) = (vsf_rgb_to_photopic_f32(1., 0., 0.), vsf_rgb_to_photopic_f32(0., 1., 0.), vsf_rgb_to_photopic_f32(0., 0., 1.));
+        assert!((r - 0.2584).abs() < 5e-4 && (g - 0.6346).abs() < 5e-4 && (b - 0.1070).abs() < 5e-4, "{r} {g} {b}");
     }
 }
