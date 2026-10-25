@@ -15,7 +15,7 @@
 //!
 //! Callers downstream that use VSF for identity hashing (notably `ihi::handle_to_proof`) inherit café-stability automatically: there is no way to construct an `x`-encoded byte stream that distinguishes NFC from NFD input.
 
-use std::collections::HashMap;
+use std::sync::OnceLock;
 use unicode_normalization::UnicodeNormalization;
 
 /// A Huffman code pattern (bits + length)
@@ -73,72 +73,55 @@ impl BitVec {
     }
 }
 
-/// Load pre-computed Huffman codes from build-time generated file
-///
-/// Returns empty HashMap if huffman_codes.bin is not available (e.g., docs.rs builds)
-fn load_huffman_codes() -> HashMap<char, BitPattern> {
-    // Only include the file if it exists at build time This allows docs.rs builds to succeed even when Huffman tables aren't generated
-    #[cfg(huffman_available)]
-    {
-        const DATA: &[u8] = include_bytes!("../huffman_codes.bin");
+/// The codebook as built (`huffman_codes.bin`): a 12-byte header (`HUFF`, a version, the entry count), then 8 bytes an entry, the codepoint and its code (right-aligned in the low 24 bits, the length in bits 24..29), one entry for every Unicode scalar value in codepoint order.
+/// Read where it lies: no table is built from it for encoding, and decoding keeps only an ordering of it (2026-10-25: the HashMap of all 1,112,064 codes and a pointer tree over them cost 80 MB, and a Pixel 3a was killed for memory the first time it read a place name).
+#[cfg(huffman_available)]
+const DATA: &[u8] = include_bytes!("../huffman_codes.bin");
+#[cfg(not(huffman_available))]
+const DATA: &[u8] = &[];
 
-        // Parse header
-        if &DATA[0..4] != b"HUFF" {
-            panic!("Invalid Huffman codes file");
-        }
-
-        let count = u32::from_le_bytes(DATA[8..12].try_into().unwrap()) as usize;
-        let mut codes = HashMap::with_capacity(count);
-
-        // Parse entries
-        for i in 0..count {
-            let offset = 12 + i * 8;
-            let codepoint = u32::from_le_bytes(DATA[offset..offset + 4].try_into().unwrap());
-            let packed = u32::from_le_bytes(DATA[offset + 4..offset + 8].try_into().unwrap());
-
-            let ch = char::from_u32(codepoint).unwrap();
-            let pattern = BitPattern {
-                bits: packed & 0x00FFFFFF,
-                length: ((packed >> 24) & 0x1F) as u8,
-            };
-
-            codes.insert(ch, pattern);
-        }
-
-        codes
+/// Entries in the codebook, 0 when it is missing (a docs.rs build).
+fn entries() -> usize {
+    if DATA.len() < 12 || &DATA[0..4] != b"HUFF" {
+        return 0;
     }
-
-    #[cfg(not(huffman_available))]
-    {
-        // Return empty HashMap - text encoding will panic with helpful message
-        HashMap::new()
-    }
+    (u32::from_le_bytes(DATA[8..12].try_into().unwrap()) as usize).min((DATA.len() - 12) / 8)
 }
 
-// Lazy-load codes at first use
-use std::sync::OnceLock;
-static ENCODE_TABLE: OnceLock<HashMap<char, BitPattern>> = OnceLock::new();
-static ASCII_LUT: OnceLock<[BitPattern; 128]> = OnceLock::new();
-
-fn get_encode_table() -> &'static HashMap<char, BitPattern> {
-    ENCODE_TABLE.get_or_init(load_huffman_codes)
+/// Entry `i`: its codepoint and its code.
+#[inline(always)]
+fn entry(i: usize) -> (u32, BitPattern) {
+    let o = 12 + i * 8;
+    let cp = u32::from_le_bytes([DATA[o], DATA[o + 1], DATA[o + 2], DATA[o + 3]]);
+    let packed = u32::from_le_bytes([DATA[o + 4], DATA[o + 5], DATA[o + 6], DATA[o + 7]]);
+    (cp, BitPattern { bits: packed & 0x00FF_FFFF, length: ((packed >> 24) & 0x1F) as u8 })
 }
 
-fn get_ascii_lut() -> &'static [BitPattern; 128] {
-    ASCII_LUT.get_or_init(|| {
-        let codes = get_encode_table();
-        let mut lut = [BitPattern { bits: 0, length: 0 }; 128];
-
-        for i in 0..128 {
-            if let Some(ch) = char::from_u32(i) {
-                if let Some(pattern) = codes.get(&ch) {
-                    lut[i as usize] = *pattern;
-                }
-            }
+/// A character's code, or a zero-length pattern when the codebook lacks it: at its own index (every scalar value is there, the 2048 surrogates excepted), else by binary search over the codepoint order.
+fn code_of(c: char) -> BitPattern {
+    let cp = c as u32;
+    let n = entries();
+    let i = if cp < 0xD800 { cp } else { cp - 0x800 } as usize;
+    if i < n {
+        let (got, p) = entry(i);
+        if got == cp {
+            return p;
         }
-
-        lut
-    })
+    }
+    let (mut lo, mut hi) = (0usize, n);
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        let (got, p) = entry(mid);
+        if got == cp {
+            return p;
+        }
+        if got < cp {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    BitPattern { bits: 0, length: 0 }
 }
 
 /// Encode Unicode text to Huffman-compressed bytes after NFC normalization.
@@ -152,7 +135,7 @@ fn get_ascii_lut() -> &'static [BitPattern; 128] {
 /// Input is NFC-normalized before encoding. Café/café-class identity splits are impossible at this boundary: any two strings that compare equal under NFC produce byte-identical output.
 ///
 /// # Performance
-/// Uses optimized ASCII fast path (direct array access) for characters 0-127, falling back to HashMap lookup for full Unicode. NFC over pure-ASCII input is the identity transform, so the ASCII hot path stays cheap.
+/// Each code is read from the codebook at its codepoint's own index (no table built). NFC over pure-ASCII input is the identity transform, so ASCII stays cheap.
 ///
 /// # VSF Integration
 /// The VSF x marker format is:
@@ -167,21 +150,12 @@ fn get_ascii_lut() -> &'static [BitPattern; 128] {
 /// // char_count == 5, encoded is ~3 bytes of Huffman bits (no internal header)
 /// ```
 pub fn encode_text(text: &str) -> (Vec<u8>, usize) {
-    let codes = get_encode_table();
-    let ascii_lut = get_ascii_lut();
     let mut bits = BitVec::new();
     let mut char_count = 0usize;
 
     for c in text.nfc() {
-        let pattern = if c.is_ascii() {
-            // Fast path: direct array access (~2-3 CPU cycles)
-            &ascii_lut[c as usize]
-        } else {
-            // Slow path: HashMap lookup for Unicode (~10-20 cycles). The codebook covers all 1,112,064 valid codepoints, so this lookup cannot fail for any character producible by NFC over a valid &str. If it does, the codebook itself is corrupted — fall thru to the .expect for a loud failure; huffman_codes.bin is BLAKE3-verified in build.rs, so the only real cause is a docs.rs-style build that skipped codebook generation.
-            codes
-                .get(&c)
-                .expect("huffman_codes.bin missing or codebook lookup table corrupted")
-        };
+        // Read from the codebook where it lies, ASCII and the rest alike. The codebook covers all 1,112,064 valid codepoints, so this cannot miss for any character producible by NFC over a valid &str.
+        let pattern = &code_of(c);
         // A zero-length code is impossible in a valid codebook (every codepoint gets ≥1 bit). It means the table never loaded (cfg(not(huffman_available)) build) — the ASCII LUT defaults to length 0 there, and extend_bits(_, 0) would silently emit NOTHING, producing an empty bitstream that claims to encode char_count characters. Refuse loudly instead.
         assert_ne!(
             pattern.length, 0,
@@ -195,133 +169,90 @@ pub fn encode_text(text: &str) -> (Vec<u8>, usize) {
     (bits.to_bytes(), char_count)
 }
 
-/// Fast two-tier decoder with ASCII + prefix caches
+/// The decoder: codes of 12 bits or fewer by every 12-bit window starting with them, and the codebook's entries in code order for the rest.
 struct FastDecoder {
-    // Tier 1: ASCII fast path (256 entries, 512 bytes) Covers: space, a-z, A-Z, 0-9, punctuation Expected hit rate: ~99.4% for English text
-    ascii_cache: [Option<(u8, u8)>; 256],
+    /// (codepoint << 5 | length) for each 12-bit window whose first bits are a code of 12 bits or fewer, 0 for none.
+    short: Vec<u32>,
+    /// The codebook's entry indices, in order of their codes left-aligned to 24 bits: a complete prefix code tiles the 24-bit windows, so the code a window starts with is the last at or below it (4.4 MB, against the 52 MB pointer tree it replaces).
+    order: Vec<u32>,
+}
 
-    // Tier 2: Common Unicode prefix table (4096 entries, ~20 KB) Covers: extended Latin (é,ñ,ü), common emoji, some CJK Expected hit rate: ~0.5% additional
-    prefix_cache: [Option<(char, u8)>; 4096],
-
-    // Tier 3: Tree walk for rare/long codes (>12 bits) Expected hit rate: <0.1%
-    tree: DecodeNode,
+/// An entry's code left-aligned to 24 bits.
+#[inline(always)]
+fn key_of(p: BitPattern) -> u32 {
+    p.bits << (24 - p.length as u32)
 }
 
 impl FastDecoder {
-    /// Build fast decoder from Huffman code table
-    fn from_codes(codes: &HashMap<char, BitPattern>) -> Self {
-        let mut ascii_cache = [None; 256];
-        let mut prefix_cache = [None; 4096];
-        let mut tree = DecodeNode::new();
-
-        for (ch, pattern) in codes {
-            let codepoint = *ch as u32;
-
-            // Tier 1: ASCII cache (codes ≤8 bits, char <128)
-            if codepoint < 128 && pattern.length <= 8 {
-                // Pre-compute all possible bit continuations
-                let base_code = pattern.bits;
-                let code_length = pattern.length;
-
-                // Fill all 8-bit patterns that start with this code
-                let num_suffixes = 1 << (8 - code_length);
-                for suffix in 0..num_suffixes {
-                    let key = (base_code << (8 - code_length)) | suffix;
-                    ascii_cache[key as usize] = Some((codepoint as u8, code_length));
+    fn new() -> Self {
+        let n = entries();
+        let mut short = vec![0u32; 1 << 12];
+        let mut order: Vec<u32> = (0..n as u32).collect();
+        for i in 0..n {
+            let (cp, p) = entry(i);
+            if p.length >= 1 && p.length <= 12 {
+                let base = (p.bits << (12 - p.length as u32)) as usize;
+                for s in 0..(1usize << (12 - p.length as u32)) {
+                    short[base + s] = cp << 5 | p.length as u32;
                 }
             }
-
-            // Tier 2: Prefix cache (codes ≤12 bits, any char)
-            if pattern.length <= 12 {
-                let base_code = pattern.bits;
-                let code_length = pattern.length;
-
-                // Fill all 12-bit patterns that start with this code
-                let num_suffixes = 1 << (12 - code_length);
-                for suffix in 0..num_suffixes {
-                    let key = (base_code << (12 - code_length)) | suffix;
-                    prefix_cache[key as usize] = Some((*ch, code_length));
-                }
-            }
-
-            // Tier 3: Always insert into tree (fallback)
-            tree.insert(*ch, pattern.bits, pattern.length);
         }
-
-        FastDecoder {
-            ascii_cache,
-            prefix_cache,
-            tree,
-        }
+        order.sort_unstable_by_key(|&i| key_of(entry(i as usize).1));
+        FastDecoder { short, order }
     }
 
-    /// Decode next character from bit stream
+    /// The 24 bits from `bit_idx`, zero past the end.
+    #[inline(always)]
+    fn window(bytes: &[u8], bit_idx: usize) -> u32 {
+        let b = bit_idx >> 3;
+        let mut w: u32 = 0;
+        for k in 0..4 {
+            w = (w << 8) | *bytes.get(b + k).unwrap_or(&0) as u32;
+        }
+        (w << (bit_idx & 7)) >> 8
+    }
+
+    /// The next character from the bit stream and the bits its code took.
     fn decode(&self, bytes: &[u8], bit_idx: usize) -> Result<(char, usize), &'static str> {
-        // FAST PATH 1: Try ASCII cache (8-bit prefix lookup)
-        if bit_idx + 8 <= bytes.len() * 8 {
-            let byte_prefix = Self::read_bits_u8(bytes, bit_idx, 8);
-
-            if let Some((ascii_char, bits_consumed)) = self.ascii_cache[byte_prefix as usize] {
-                // HOT: 99.4% of English text hits here
-                return Ok((ascii_char as char, bits_consumed as usize));
+        let avail = (bytes.len() * 8).saturating_sub(bit_idx);
+        let w = Self::window(bytes, bit_idx);
+        let s = self.short[(w >> 12) as usize];
+        let (cp, len) = if s != 0 {
+            (s >> 5, (s & 31) as usize)
+        } else {
+            // The last code at or below the window.
+            let (mut lo, mut hi) = (0usize, self.order.len());
+            while lo < hi {
+                let mid = (lo + hi) / 2;
+                if key_of(entry(self.order[mid] as usize).1) <= w {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
             }
-        }
-
-        // FAST PATH 2: Try prefix cache (12-bit prefix lookup)
-        if bit_idx + 12 <= bytes.len() * 8 {
-            let prefix_12 = Self::read_bits_u16(bytes, bit_idx, 12);
-
-            if let Some((ch, bits_consumed)) = self.prefix_cache[prefix_12 as usize] {
-                // WARM: Most remaining Unicode hits here
-                return Ok((ch, bits_consumed as usize));
+            if lo == 0 {
+                return Err("Invalid Huffman code");
             }
-        }
-
-        // SLOW PATH: Tree walk for rare Unicode (>12 bit codes) Only <0.1% of typical text hits this path
-        self.tree.decode(bytes, bit_idx)
-    }
-
-    /// Read N bits as u8 (for ASCII cache lookup)
-    fn read_bits_u8(bytes: &[u8], start_bit: usize, num_bits: usize) -> u8 {
-        let mut result = 0u8;
-        for i in 0..num_bits {
-            if Self::get_bit(bytes, start_bit + i) {
-                result |= 1 << (num_bits - 1 - i);
+            let (cp, p) = entry(self.order[lo - 1] as usize);
+            if p.length == 0 || (w >> (24 - p.length as u32)) != p.bits {
+                return Err("Invalid Huffman code");
             }
+            (cp, p.length as usize)
+        };
+        // A code running past the stream's end: the stream was cut short (never decoded as padding, which would let two streams decode alike).
+        if len > avail {
+            return Err("Premature end of Huffman bitstream");
         }
-        result
-    }
-
-    /// Read N bits as u16 (for prefix cache lookup)
-    fn read_bits_u16(bytes: &[u8], start_bit: usize, num_bits: usize) -> u16 {
-        let mut result = 0u16;
-        for i in 0..num_bits {
-            if Self::get_bit(bytes, start_bit + i) {
-                result |= 1 << (num_bits - 1 - i);
-            }
-        }
-        result
-    }
-
-    /// Get single bit from byte array
-    fn get_bit(bytes: &[u8], bit_idx: usize) -> bool {
-        let byte_idx = bit_idx / 8;
-        let bit_pos = 7 - (bit_idx % 8);
-        if byte_idx >= bytes.len() {
-            return false;
-        }
-        (bytes[byte_idx] >> bit_pos) & 1 != 0
+        let ch = char::from_u32(cp).ok_or("Invalid Huffman code")?;
+        Ok((ch, len))
     }
 }
 
-// Lazy-load fast decoder
+// Built at first decode.
 static FAST_DECODER: OnceLock<FastDecoder> = OnceLock::new();
 
 fn get_fast_decoder() -> &'static FastDecoder {
-    FAST_DECODER.get_or_init(|| {
-        let codes = get_encode_table();
-        FastDecoder::from_codes(codes)
-    })
+    FAST_DECODER.get_or_init(FastDecoder::new)
 }
 
 /// Decode Huffman-compressed bytes back to Unicode text
@@ -388,80 +319,45 @@ pub fn decode_text_with_size(
     Ok((result, bytes_consumed))
 }
 
-/// Huffman decode tree node
-struct DecodeNode {
-    value: Option<char>,
-    left: Option<Box<DecodeNode>>,
-    right: Option<Box<DecodeNode>>,
-}
-
-impl DecodeNode {
-    fn new() -> Self {
-        DecodeNode {
-            value: None,
-            left: None,
-            right: None,
-        }
-    }
-
-    fn insert(&mut self, ch: char, bits: u32, length: u8) {
-        let mut node = self;
-
-        // Walk the tree from MSB to LSB
-        for i in 0..length {
-            let bit = (bits >> (length - 1 - i)) & 1;
-
-            if bit == 0 {
-                node = node.left.get_or_insert_with(|| Box::new(DecodeNode::new()));
-            } else {
-                node = node
-                    .right
-                    .get_or_insert_with(|| Box::new(DecodeNode::new()));
-            }
-        }
-
-        node.value = Some(ch);
-    }
-
-    fn decode(&self, bytes: &[u8], start_bit: usize) -> Result<(char, usize), &'static str> {
-        // Walk tree to decode Huffman code
-        let mut node = self;
-        let mut consumed = 0;
-
-        loop {
-            if let Some(ch) = node.value {
-                return Ok((ch, consumed));
-            }
-
-            if start_bit + consumed >= bytes.len() * 8 {
-                // Premature end of stream — must error, not silently inject U+0000. Returning Ok(('\0', 0)) used to let truncated bitstreams decode to strings ending in U+0000 that then re-encoded to different bytes — a wire-format canonicalization break that an attacker could exploit to produce two distinct VSF capsules with the "same" decoded text.
-                return Err("Premature end of Huffman bitstream");
-            }
-
-            let bit = Self::get_bit(bytes, start_bit + consumed);
-            consumed += 1;
-
-            node = if !bit {
-                node.left.as_ref().ok_or("Invalid Huffman code")?
-            } else {
-                node.right.as_ref().ok_or("Invalid Huffman code")?
-            };
-        }
-    }
-
-    fn get_bit(bytes: &[u8], bit_idx: usize) -> bool {
-        let byte_idx = bit_idx / 8;
-        let bit_pos = 7 - (bit_idx % 8);
-        if byte_idx >= bytes.len() {
-            return false;
-        }
-        (bytes[byte_idx] >> bit_pos) & 1 != 0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every code in the codebook, both ways: the encoder reads exactly the code stored for each codepoint, and the decoder gives that codepoint back from it, alone and in a long mixed stream; a stream cut inside a code is refused (2026-10-25: the HashMap and the tree replaced by reading the codebook where it lies).
+    #[test]
+    fn every_code_both_ways() {
+        let n = entries();
+        if n == 0 {
+            return;
+        }
+        assert_eq!(n, 1_112_064, "every Unicode scalar value");
+        let mut stream = BitVec::new();
+        let mut sample = String::new();
+        for i in 0..n {
+            let (cp, p) = entry(i);
+            let c = char::from_u32(cp).expect("a scalar value");
+            let got = code_of(c);
+            assert_eq!((got.bits, got.length), (p.bits, p.length), "U+{cp:04X} encodes as stored");
+            let mut one = BitVec::new();
+            one.extend_bits(p.bits, p.length);
+            let bytes = one.to_bytes();
+            let (back, len) = get_fast_decoder().decode(&bytes, 0).expect("decodes");
+            assert_eq!((back, len), (c, p.length as usize), "U+{cp:04X} decodes from its code");
+            if i % 97 == 0 || cp < 0x300 {
+                stream.extend_bits(p.bits, p.length);
+                sample.push(c);
+            }
+        }
+        let count = sample.chars().count();
+        let bytes = stream.to_bytes();
+        let (text, _) = decode_text_with_size(&bytes, count).expect("the mixed stream decodes");
+        assert_eq!(text, sample);
+        // A code cut short at the stream's end.
+        let (_, long) = (0..n).map(entry).find(|(_, p)| p.length == 24).expect("a 24-bit code");
+        let mut cut = BitVec::new();
+        cut.extend_bits(long.bits >> 8, 16);
+        assert!(decode_text_with_size(&cut.to_bytes(), 1).is_err(), "a cut code is refused");
+    }
 
     #[test]
     fn test_bitvec() {
