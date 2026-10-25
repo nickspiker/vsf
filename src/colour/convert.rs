@@ -2043,9 +2043,10 @@ fn unpack_rgb_565_linear_f32(packed: u16) -> (f32, f32, f32) {
     let b5 = packed & 0x1F;
 
     // Normalize to 0-1 gamma-encoded, then linearize
-    let r_gamma = r5 as f32 / 32.;
-    let g_gamma = g6 as f32 / 64.;
-    let b_gamma = b5 as f32 / 32.;
+    // The top code is white (see the packer): divide by the top, not by the field's span.
+    let r_gamma = r5 as f32 / 31.;
+    let g_gamma = g6 as f32 / 63.;
+    let b_gamma = b5 as f32 / 31.;
 
     (
         linearize_gamma2_f32(r_gamma),
@@ -2061,9 +2062,11 @@ fn pack_rgb_565_linear_f32(r: f32, g: f32, b: f32) -> u16 {
     let g_gamma = delinearize_gamma2_f32(g);
     let b_gamma = delinearize_gamma2_f32(b);
 
-    let r5 = (r_gamma.min(1.) * 32.) as u16;
-    let g6 = (g_gamma.min(1.) * 64.) as u16;
-    let b5 = (b_gamma.min(1.) * 32.) as u16;
+    // FULL RANGE, rounded: the top code is white (31, 63, 31), the 6×7×6 format's rule. It scaled by 32 and 64, so white packed as 32/64/32 — each overflowing its field into the next, linear white encoding as r=1, g=1, b=0 (2026-10-25).
+    // WHY/PROOF: the caller's linear light may sit above white, and a code past the field's top would spill into its neighbour — the cap is the format's edge, not a guard on our math.
+    let r5 = ((r_gamma * 31. + 0.5) as u16).min(31);
+    let g6 = ((g_gamma * 63. + 0.5) as u16).min(63);
+    let b5 = ((b_gamma * 31. + 0.5) as u16).min(31);
 
     (r5 << 11) | (g6 << 5) | b5
 }
@@ -2113,9 +2116,10 @@ fn unpack_rgb_565_linear_s44(packed: u16) -> (S44, S44, S44) {
     let b5 = packed & 0x1F;
 
     // Normalize to 0-1 gamma-encoded, then linearize
-    let r_gamma = S44::from(r5) >> 5;
-    let g_gamma = S44::from(g6) >> 6;
-    let b_gamma = S44::from(b5) >> 5;
+    // The top code is white: divide by the top (31, 63), not by the field's span — a shift by 5 or 6 left white unreachable.
+    let r_gamma = S44::from(r5) / S44::from(31u16);
+    let g_gamma = S44::from(g6) / S44::from(63u16);
+    let b_gamma = S44::from(b5) / S44::from(31u16);
 
     (r_gamma * r_gamma, g_gamma * g_gamma, b_gamma * b_gamma)
 }
@@ -2128,17 +2132,14 @@ fn pack_rgb_565_linear_s44(r: S44, g: S44, b: S44) -> u16 {
     let g_gamma = g.sqrt();
     let b_gamma = b.sqrt();
 
-    let r_clamped: S44 = r_gamma.min(1);
-    let g_clamped: S44 = g_gamma.min(1);
-    let b_clamped: S44 = b_gamma.min(1);
-
-    let r_scaled: S44 = r_clamped * 32;
-    let g_scaled: S44 = g_clamped * 64;
-    let b_scaled: S44 = b_clamped * 32;
-
-    let r5: u16 = r_scaled.to_u16();
-    let g6: u16 = g_scaled.to_u16();
-    let b5: u16 = b_scaled.to_u16();
+    // Full range, rounded, the top code white — the f32 packer's rule; the cap is the field's edge (light above white).
+    let half = S44::from(1u16) >> 1;
+    let r_scaled: S44 = r_gamma * 31 + half;
+    let g_scaled: S44 = g_gamma * 63 + half;
+    let b_scaled: S44 = b_gamma * 31 + half;
+    let r5: u16 = r_scaled.to_u16().min(31);
+    let g6: u16 = g_scaled.to_u16().min(63);
+    let b5: u16 = b_scaled.to_u16().min(31);
 
     (r5 << 11) | (g6 << 5) | b5
 }
@@ -2879,5 +2880,23 @@ mod photopic_tests {
         assert!((vsf_rgb_to_photopic_f32(1., 1., 1.) - 1.).abs() < 1e-5);
         let (r, g, b) = (vsf_rgb_to_photopic_f32(1., 0., 0.), vsf_rgb_to_photopic_f32(0., 1., 0.), vsf_rgb_to_photopic_f32(0., 0., 1.));
         assert!((r - 0.2584).abs() < 5e-4 && (g - 0.6346).abs() < 5e-4 && (b - 0.1070).abs() < 5e-4, "{r} {g} {b}");
+    }
+}
+
+#[cfg(test)]
+mod rgb565_tests {
+    use super::*;
+
+    /// 5-6-5 is full range: white packs to every bit set and comes back white, black to zero, and no channel spills into its neighbour (white once packed as r=1, g=1, b=0).
+    #[test]
+    fn white_and_black_round_trip_in_5_6_5() {
+        assert_eq!(pack_rgb_565_linear_f32(1., 1., 1.), 0xFFFF);
+        assert_eq!(pack_rgb_565_linear_f32(0., 0., 0.), 0);
+        assert_eq!(pack_rgb_565_linear_f32(4., 4., 4.), 0xFFFF, "light above white caps at the top code, never spills");
+        let (r, g, b) = unpack_rgb_565_linear_f32(0xFFFF);
+        assert!((r - 1.).abs() < 1e-6 && (g - 1.).abs() < 1e-6 && (b - 1.).abs() < 1e-6, "the top code is white: {r} {g} {b}");
+        assert_eq!(pack_rgb_565_linear_f32(1., 0., 0.), 0b11111_000000_00000);
+        assert_eq!(pack_rgb_565_linear_f32(0., 1., 0.), 0b00000_111111_00000);
+        assert_eq!(pack_rgb_565_linear_f32(0., 0., 1.), 0b00000_000000_11111);
     }
 }
