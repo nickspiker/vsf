@@ -224,6 +224,7 @@ impl<S: ByteSource> Document<S> {
     fn checked_span(&self, entry: &HeaderField) -> Result<(u64, u64), ContainerError> {
         let (off, len) = self.span(entry);
         let size = self.source.len();
+        // WHY/PROOF: off and len are an entry's offset and size read from the header bytes — their sum can overflow u64 and wrap under size without this.
         if off.checked_add(len).map_or(true, |e| e > size) {
             return Err(ContainerError::Truncated { entry: entry.name.clone(), offset: off, len, size });
         }
@@ -315,6 +316,7 @@ impl<S: ByteSource> Document<S> {
     pub fn packed_range_u16(&self, span: &PackedSpan, first: usize, count: usize) -> Result<Vec<u16>, ContainerError> {
         let bits = span.bit_depth as usize;
         let n: usize = span.shape.iter().product();
+        // WHY/PROOF: first and count are a caller's request against a plane located in a file — first + count can overflow usize and wrap under n without this.
         let end = first.checked_add(count).filter(|&e| e <= n).ok_or_else(|| ContainerError::Parse(format!("samples {first}..{first}+{count} outside 0..{n}")))?;
         let b0 = first * bits;
         let b1 = end * bits;
@@ -451,6 +453,7 @@ fn find_generation_after<S: ByteSource>(source: &S, from: u64, size: u64) -> Res
     while at < size {
         let len = (size - at).min(WINDOW + magic.len() as u64 - 1);
         let chunk = source.read_vec(at, len)?;
+        // WHY/PROOF: the last window of a file can be shorter than the magic — a plain subtraction would underflow there.
         for i in 0..chunk.len().saturating_sub(magic.len() - 1) {
             if &chunk[i..i + magic.len()] != magic {
                 continue;

@@ -36,6 +36,7 @@ fn eof(what: &str) -> DecodeError {
     DecodeError::UnexpectedEofMsg(what.into())
 }
 
+// WHY/PROOF: every byte this module reads is untrusted file or network input — each `.get` and checked end below is the end-of-buffer test that turns a truncated or forged section into an Err instead of an out-of-bounds panic.
 /// Advance past one value, locating a `p` or `v` payload without copying it.
 pub fn skip_value(data: &[u8], ptr: &mut usize) -> Result<ValueKind, DecodeError> {
     let start = *ptr;

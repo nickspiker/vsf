@@ -350,6 +350,7 @@ impl ShutterTime {
         const OPS: u64 = crate::types::eagle_time::OSCILLATIONS_PER_SECOND;
         // Split num = q·den + r so the product only overflows when the answer itself would. PROOF: r < den, so r·OPS/den < OPS and the second term adds less than one second.
         let (q, r) = (num / den, num % den);
+        // WHY/PROOF: num and den are caller or camera-metadata values of any u64 — q·OPS, r·OPS or their sum can exceed u64 and would wrap to a short wrong exposure without these checks.
         let whole = q
             .checked_mul(OPS)
             .ok_or("Exposure time overflows 64 bits of oscillations")?;
@@ -412,6 +413,7 @@ impl Aperture {
             return Self::from_n_squared(n2n, n2d);
         }
         // PROOF: m is reduced, so num² / den² is reduced too (a common factor of the squares would divide num and den).
+        // WHY/PROOF: the marking is a caller or camera-metadata value of any u64 — its square can exceed u64 and would wrap to a wrong f-number without these checks.
         let n2n = m.num.checked_mul(m.num).ok_or("Aperture N² overflows 64 bits")?;
         let n2d = m.den.checked_mul(m.den).ok_or("Aperture N² overflows 64 bits")?;
         Self::from_n_squared(n2n, n2d)
@@ -507,6 +509,7 @@ impl StopSetting {
             return None;
         }
         // PROOF: den divides 12, so den is 1, 2, 3, 4, 6 or 12 and 12/den is a small positive integer.
+        // WHY/PROOF: num is read from the file (from_values) and may be any i64 — num·(12/den) can exceed i64 and would wrap without this check.
         self.num.checked_mul((12 / self.den) as i64)
     }
 

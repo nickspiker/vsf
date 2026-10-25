@@ -81,6 +81,7 @@ impl<'a> BitPackedView<'a> {
     /// The byte range of `data` that samples `first..first+count` touch, so a caller fetching from a file knows what to read; `(byte_start, byte_len, bit_base_within)`.
     pub fn byte_window(&self, first: usize, count: usize) -> Result<(usize, usize, usize), String> {
         let n = self.len();
+        // WHY/PROOF: first and count are a caller's request against a tensor read from a file — first + count can overflow usize and wrap under n without this.
         let end = first.checked_add(count).filter(|&e| e <= n).ok_or_else(|| format!("samples {first}..{first}+{count} outside 0..{n}"))?;
         let bits = self.bit_depth as usize;
         let b0 = self.bit_base + first * bits;

@@ -83,7 +83,8 @@ fn map_for_display(img: &mut DecodedImage, headroom: f32) {
     let light = crate::colour::display::display_lut_u8(img.encoding, headroom, peak);
     let mut code = [0u32; 256];
     for (c, out) in code.iter_mut().enumerate() {
-        *out = (light[c].sqrt() * 256.).min(255.) as u32;
+        // display_light is 0 to 1 and never NaN, so this is 0 to 256, and the saturating u8 cast holds white at 255.
+        *out = (light[c].sqrt() * 256.) as u8 as u32;
     }
     for p in img.pixels.iter_mut() {
         let dark = |shift: u32| (255 - code[(255 - ((*p >> shift) & 0xFF)) as usize]) << shift;

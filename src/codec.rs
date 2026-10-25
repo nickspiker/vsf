@@ -64,6 +64,7 @@ impl Encoder {
             let carry = (self.low >> 32) as u8;
             let mut temp = self.cache;
             loop {
+                // The range coder carry: 0xFF + 1 wraps to 0 and the carry moves on, by design.
                 self.out.push(temp.wrapping_add(carry));
                 temp = 0xFF;
                 self.cache_size -= 1;
@@ -120,6 +121,7 @@ impl<'a> Decoder<'a> {
     }
 
     fn byte(&mut self) -> u8 {
+        // WHY/PROOF: the coded bytes are untrusted and may end early — past the end the decoder reads zeros, as a range decoder must at a stream's flushed tail, and overrun() refuses the result when it read past.
         let b = self.data.get(self.pos).copied().unwrap_or(0);
         self.pos += 1;
         b
@@ -170,8 +172,9 @@ impl Golomb {
         if n < 32 {
             e.bit(&mut self.prefix[n as usize], false);
         }
+        // PROOF: w ≤ 2^32 so n ≤ 32, and j < n keeps n − 1 − j inside the 32 suffix slots of its row.
         for j in (0..n).rev() {
-            e.bit(&mut self.suffix[(n as usize) * 32 + (n - 1 - j).min(31) as usize], (w >> j) & 1 == 1);
+            e.bit(&mut self.suffix[(n as usize) * 32 + (n - 1 - j) as usize], (w >> j) & 1 == 1);
         }
     }
 
@@ -180,9 +183,10 @@ impl Golomb {
         while n < 32 && d.bit(&mut self.prefix[n as usize]) {
             n += 1;
         }
+        // PROOF: the prefix loop stops at n = 32, so j < 32 stays inside the 32 suffix slots of its row.
         let mut w: u64 = 1;
         for j in 0..n {
-            w = (w << 1) | d.bit(&mut self.suffix[(n as usize) * 32 + j.min(31) as usize]) as u64;
+            w = (w << 1) | d.bit(&mut self.suffix[(n as usize) * 32 + j as usize]) as u64;
         }
         u32::try_from(w - 1).ok()
     }
@@ -213,6 +217,7 @@ impl RasterModel {
 
 /// The value to the left (above at a row's start), two to the left, and above; 0 off the tensor. And their agreement as a context.
 #[inline(always)]
+// PROOF: width is the tensor's last dimension (1 for no shape); a zero one makes the product, and so the element count, 0, and this is never called.
 fn neighbours(v: &[u32], i: usize, width: usize) -> (u32, u32, u32, usize) {
     let x = i % width;
     let u = if i >= width { v[i - width] } else { 0 };
@@ -277,6 +282,7 @@ fn levels(n: usize, roots: usize) -> Option<Vec<usize>> {
     let mut offsets = vec![0usize];
     let (mut total, mut size) = (0usize, roots);
     while total < n {
+        // WHY/PROOF: n and roots come from a parsed vc header (or a caller tensor) — a huge roots makes total + size or size · 4 overflow usize and wrap into a false level table without these checks.
         total = total.checked_add(size)?;
         offsets.push(total);
         size = size.checked_mul(4)?;
@@ -311,6 +317,7 @@ fn pyramid_encode(c: &[i32], roots: usize, offsets: &[usize], reference: Option<
     let nl = offsets.len() - 1;
     let mut m = PyramidModel::new(nl);
     let mut e = Encoder::new();
+    // WHY/PROOF: levels(0, roots) accepts an empty tensor for any roots — slicing c[..roots] would panic on it without the min.
     for &v in &c[..roots.min(c.len())] {
         m.roots.put(&mut e, zigzag(v));
     }
@@ -365,6 +372,7 @@ fn series_encode(v: &[u32]) -> Vec<u8> {
     let mut e = Encoder::new();
     let mut last = 0u32;
     for &x in v {
+        // The delta is taken mod 2^32 by design: the decoder wraps it back the same way.
         g.put(&mut e, zigzag(x.wrapping_sub(last) as i32));
         last = x;
     }
@@ -467,7 +475,7 @@ pub fn encode(value: &VsfType, model: Model, reference: Option<&[i32]>) -> Resul
         Model::Raster => {
             out.extend_from_slice(&0usize.encode_number());
             out.push(0);
-            raster_encode(&v, shape.last().copied().unwrap_or(1).max(1))
+            raster_encode(&v, shape.last().copied().unwrap_or(1))
         }
         Model::Series => {
             out.extend_from_slice(&0usize.encode_number());
@@ -542,6 +550,7 @@ pub fn decode(value: &VsfType, reference: Option<&[i32]>) -> Result<VsfType, Dec
         return Err(DecodeError::InvalidDataMsg(format!("not a vc value: {}", short(value))));
     };
     let h = head(payload)?;
+    // WHY/PROOF: the shape is read from the vc header bytes — its product can overflow usize and wrap to a small n that passes the 2^30 check without this.
     let n = h.shape.iter().try_fold(1usize, |a, &d| a.checked_mul(d)).ok_or_else(|| DecodeError::InvalidDataMsg("vc: shape overflows".into()))?;
     // A plane of a billion values from a few bytes is a forged header, not a picture.
     if n > (1 << 30) {
@@ -550,7 +559,7 @@ pub fn decode(value: &VsfType, reference: Option<&[i32]>) -> Result<VsfType, Dec
     let bytes = &payload[h.start..];
     let short_stream = || DecodeError::UnexpectedEofMsg("vc: coded bytes end early".into());
     let v: Vec<u32> = match h.model {
-        1 => raster_decode(bytes, n, h.shape.last().copied().unwrap_or(1).max(1)).ok_or_else(short_stream)?,
+        1 => raster_decode(bytes, n, h.shape.last().copied().unwrap_or(1)).ok_or_else(short_stream)?,
         3 => series_decode(bytes, n).ok_or_else(short_stream)?,
         2 => {
             let offsets = levels(n, h.param).ok_or_else(|| DecodeError::InvalidDataMsg("vc: not a quadtree stream".into()))?;

@@ -66,8 +66,8 @@ impl Keypair {
             parse(&bytes, &mut ptr).map_err(|e| format!("Parse section name: {}", e))?;
 
         // Parse fields until ']'
-        use alloc::collections::BTreeMap;
-        let mut fields: BTreeMap<String, VsfType> = BTreeMap::new();
+        // A handful of fields: a Vec searched from the back, so a repeated name resolves to its last value as a map insert would.
+        let mut fields: Vec<(String, VsfType)> = Vec::new();
 
         while ptr < bytes.len() && bytes[ptr] != b']' {
             if bytes[ptr] == b'(' {
@@ -86,7 +86,7 @@ impl Keypair {
                     ptr += 1;
                     let value =
                         parse(&bytes, &mut ptr).map_err(|e| format!("Parse field value: {}", e))?;
-                    fields.insert(field_name, value);
+                    fields.push((field_name, value));
                 }
 
                 // Skip ')'
@@ -99,7 +99,7 @@ impl Keypair {
         }
 
         // Extract secret and public keys from fields
-        let secret_bytes = match fields.get("secret") {
+        let secret_bytes = match fields.iter().rev().find(|(n, _)| n == "secret").map(|(_, v)| v) {
             Some(VsfType::ke(bytes)) => {
                 if bytes.len() != 32 {
                     return Err("Secret key must be 32 bytes".to_string());
@@ -109,7 +109,7 @@ impl Keypair {
             _ => return Err("Secret key not found".to_string()),
         };
 
-        let public_bytes = match fields.get("public") {
+        let public_bytes = match fields.iter().rev().find(|(n, _)| n == "public").map(|(_, v)| v) {
             Some(VsfType::ke(bytes)) => {
                 if bytes.len() != 32 {
                     return Err("Public key must be 32 bytes".to_string());

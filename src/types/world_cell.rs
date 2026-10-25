@@ -261,6 +261,7 @@ fn prefix_mask(depth: u8) -> u64 {
     }
 }
 
+// WHY/PROOF: u or v is exactly 1 on a diamond's far edge, giving steps, one past the last cell (and rounding can land a hair outside 0 to 1) — without this the index carries into the bit above the axis and spread drops it, wrapping the point to the opposite edge.
 fn quantize(x: f64, steps: u64) -> u64 {
     ((x * steps as f64) as i64).clamp(0, steps as i64 - 1) as u64
 }

@@ -43,6 +43,7 @@ pub trait ByteSource {
 }
 
 fn range_of(size: u64, offset: u64, len: u64) -> Result<(usize, usize), SourceError> {
+    // WHY/PROOF: offset and len are header offsets read from the file (or a caller's request) — their sum can overflow u64 and wrap under size without this.
     let end = offset.checked_add(len).filter(|&e| e <= size).ok_or(SourceError::OutOfRange { offset, len, size })?;
     match (usize::try_from(offset), usize::try_from(end)) {
         (Ok(a), Ok(b)) => Ok((a, b)),

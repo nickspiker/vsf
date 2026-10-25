@@ -344,6 +344,7 @@ fn append_log_record(level: LogLevel, msg: &str, vals: &[LogValue]) {
         let now = crate::eagle_time_oscillations();
         let oldest = LOG_OLDEST_OSC.load(Ordering::Relaxed);
         let trigger = LOG_AGE_TRIGGER_OSC.load(Ordering::Relaxed);
+        // WHY/PROOF: oldest is read back from the log file (first_record_osc, or i64::MIN for a record with no time) and may be any i64 — now − oldest can overflow i64 and panic in a debug build without this.
         let aged = oldest != i64::MAX && now.saturating_sub(oldest) > trigger;
         if total > LOG_CAP_BYTES || aged {
             if let Some((trimmed, new_size, new_oldest)) = trim_log_file(now) {
@@ -362,9 +363,10 @@ fn trim_log_file(now_osc: i64) -> Option<(std::fs::File, u64, i64)> {
     use std::io::Write;
     let path = log_dir()?.join(log_name());
     let bytes = std::fs::read(&path).ok()?;
-    let age_cutoff = now_osc.saturating_sub(jitter(LOG_AGE_KEEP_BASE_OSC));
+    let age_cutoff = now_osc - jitter(LOG_AGE_KEEP_BASE_OSC);
     let (keep, new_oldest) = log_keep_offset(&bytes, LOG_TRIM_TO_BYTES, age_cutoff);
-    let kept = &bytes[keep.min(bytes.len())..];
+    // PROOF: log_keep_offset returns an offset inside its loop (offset < bytes.len()) or bytes.len() itself.
+    let kept = &bytes[keep..];
     let mut w = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -382,6 +384,7 @@ fn trim_log_file(now_osc: i64) -> Option<(std::fs::File, u64, i64)> {
 #[cfg(feature = "logging")]
 fn log_keep_offset(bytes: &[u8], trim_to_size: u64, age_cutoff_osc: i64) -> (usize, i64) {
     let total = bytes.len();
+    // WHY/PROOF: the log file on disk may already be shorter than trim_to_size — then there is nothing to drop for size, and a plain subtraction would underflow.
     let size_drop = (total as u64).saturating_sub(trim_to_size) as usize;
     let mut offset = 0usize;
     while offset < total {
@@ -609,6 +612,7 @@ mod tests {
         let (keep, _oldest) = log_keep_offset(&bytes, trim_to, i64::MIN);
         assert!(starts.contains(&keep), "cut at {keep} is not a record boundary");
         assert!(keep > 0);
+        // PROOF: log_keep_offset returns an offset inside its loop (offset < bytes.len()) or bytes.len() itself.
         let kept = &bytes[keep..];
         assert!(kept.len() as u64 <= trim_to && !kept.is_empty());
         let mut off = 0usize;

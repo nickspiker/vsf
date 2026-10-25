@@ -539,7 +539,7 @@ fn encode_av1(linear_vsf: &[f32], width: usize, height: usize) -> Result<Vec<u8>
         let g = vsf_rgb[idx + 1];
         let b = vsf_rgb[idx + 2];
         let y = (r + 2.0 * g + b) / 4.0;
-        y_plane[i] = (y * 255.0).clamp(0.0, 255.0) as u8;
+        y_plane[i] = (y * 255.0) as u8;
     }
     frame.planes[0].copy_from_raw_u8(&y_plane, width, 1);
 
@@ -566,8 +566,8 @@ fn encode_av1(linear_vsf: &[f32], width: usize, height: usize) -> Result<Vec<u8>
             let y = (r + 2.0 * g + b) / 4.0;
             let cb = (b - y) / 2.0 + 0.5;
             let cr = (r - y) / 2.0 + 0.5;
-            cb_plane[cy * chroma_w + cx] = (cb * 255.0).clamp(0.0, 255.0) as u8;
-            cr_plane[cy * chroma_w + cx] = (cr * 255.0).clamp(0.0, 255.0) as u8;
+            cb_plane[cy * chroma_w + cx] = (cb * 255.0) as u8;
+            cr_plane[cy * chroma_w + cx] = (cr * 255.0) as u8;
         }
     }
     frame.planes[1].copy_from_raw_u8(&cb_plane, chroma_w, 1);

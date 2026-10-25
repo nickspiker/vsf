@@ -150,6 +150,7 @@ impl Encoding {
 
     /// Light (diffuse white = 1.0) of an integer `code` at `bits` depth: a VSF encoding ×2ⁿ, bucket bottom; a source's encoding `code / (2ⁿ − 1)`, white at the top code.
     pub fn light(self, code: u32, bits: u32) -> f32 {
+        // WHY/PROOF: bits is a plane's bit depth read from the file, and a depth byte of 0 reaches here — 2⁰ − 1 = 0 would divide every code by zero, and a depth of 32 or more would overflow the shift.
         let bits = bits.clamp(1, 31);
         match self {
             Encoding::Gamma2Tanh => crate::colour::convert::linearize_gamma2tanh_bits_f32(code, bits),
@@ -300,6 +301,7 @@ impl Plane {
     /// A planar RGB plane kept exactly as a source encoded it — an sRGB or Display P3 JPEG, an Adobe RGB TIFF, a PQ AVIF. `samples` is `[3, height, width]`; `primaries` and `encoding` say what its codes mean; `black` is 0 and `white` the top code (`idt/layers.md`, the import rule); role `display`, name `main`. `prior` starts as `creative`, the weaker claim, since a picture in a display encoding has almost always been rendered by whatever made it; a writer that knows better (a drawing, a render with no tone map) clears it.
     pub fn encoded(track: &str, seq: &str, width: usize, height: usize, primaries: Primaries, encoding: Encoding, samples: BitPackedTensor) -> Self {
         let depth = samples.bit_depth;
+        // WHY/PROOF: depth is the caller tensor's bit-depth byte, up to 255 — a shift of 64 or more overflows u64 and panics without the min.
         let top = ((1u64 << depth.min(63)) - 1) as f32;
         let channels = ["R", "G", "B"].iter().map(|n| SpectralChannel { name: (*n).into(), curve: None }).collect();
         Plane { track: track.into(), seq: seq.into(), name: "main".into(), role: PlaneRole::Display, width, height, channels, layout: PlaneLayout::Planar, black: vec![0.; 3], white: vec![top; 3], encoding, primaries, prior: Some(IdtClass::Creative), depth, samples: Samples::Packed(samples), maker_crop: None, orientation: 1, at: None, parent: None, program: String::new() }
@@ -327,6 +329,7 @@ impl Plane {
     /// The channel of sample `i`: by plane for a planar `[k, h, w]` layout, channel 0 otherwise (a source's encoding on a mosaic plane is decoded with its first channel's levels).
     fn channel_of(&self, i: usize) -> usize {
         let n = self.width * self.height;
+        // WHY/PROOF: black is read from the file and its length is not checked against the planes on parse — the min keeps a plane past it on the last level set, and saturating_sub covers an empty one.
         if self.layout == PlaneLayout::Planar && n > 0 { (i / n).min(self.black.len().saturating_sub(1)) } else { 0 }
     }
 
@@ -367,6 +370,10 @@ impl Plane {
         if codes.len() != 3 * n {
             return Err(bad(format!("plane {}: {} samples for 3 × {} × {}", self.section_name(), codes.len(), self.width, self.height)));
         }
+        // WHY/PROOF: black and white come from the file with no length check at parse, and the linear decode below indexes three channels of each — a plane naming fewer panicked any reader on a crafted file.
+        if self.encoding == Encoding::Linear && (self.black.len() < 3 || self.white.len() < 3) {
+            return Err(bad(format!("plane {}: a linear three-channel plane needs three black and white levels, has {} and {}", self.section_name(), self.black.len(), self.white.len())));
+        }
         let bits = t.bit_depth as u32;
         let light = |ch: usize, c: u16| match self.encoding {
             Encoding::Linear => (c as f32 - self.black[ch]) / (self.white[ch] - self.black[ch]),
@@ -389,7 +396,8 @@ impl Plane {
 fn pack_light(light: &[f32]) -> (Vec<u16>, f32) {
     let peak = light.iter().copied().fold(1f32, f32::max);
     let white = 65535. / peak;
-    (light.iter().map(|&l| (l * white + 0.5).min(65535.) as u16).collect(), white)
+    // The peak lands on 65535.5 and truncates to the top count; the u16 cast saturates anything past it.
+    (light.iter().map(|&l| (l * white + 0.5) as u16).collect(), white)
 }
 
 /// The capture facts: the exposure triangle, the optics, when and where, the body and lens, the mode and the stack recipe — what EXIF and DNG carry today, with Eagle time and a `WorldCoord` where a string and a sexagesimal triple used to be.
@@ -1038,6 +1046,7 @@ impl Graph {
             ops.push(GraphOp { name: names[i].clone(), class: IdtClass::parse(&classes[i]).map_err(|e| bad(e.to_string()))?, arity: arity[i] as u8, params: params[cursor..cursor + n].to_vec(), reference: if refs[i] == "-" { String::new() } else { refs[i].clone() } });
             cursor += n;
         }
+        // WHY/PROOF: m is the op count read from the file and may be 0 — m − 1 would underflow there.
         let root = s.uint("root").map(|r| r as usize).unwrap_or(m.saturating_sub(1));
         if root >= m && m > 0 {
             return Err(bad(format!("graph root {root} outside {m} ops")));

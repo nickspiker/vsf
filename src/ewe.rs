@@ -82,6 +82,7 @@ fn fits_signed(v: i128, bits: usize) -> bool {
 
 /// Read the marker and its bytes, returning the marker and the big-endian payload.
 fn read_raw<'a>(data: &'a [u8], pointer: &mut usize) -> Result<(u8, &'a [u8]), DecodeError> {
+    // WHY/PROOF: pointer and the marker's width are positions in untrusted bytes — the two `.get`s refuse a buffer that ends inside the integer instead of indexing past it.
     let Some(&marker) = data.get(*pointer) else {
         return Err(DecodeError::UnexpectedEofMsg("Not enough data for size marker".into()));
     };

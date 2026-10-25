@@ -755,6 +755,7 @@ fn tensor_row_len(shape: &[usize]) -> usize {
 /// How many values to show from each end: the hex elision counts (`VSF_HEX_HEAD` / `VSF_HEX_TAIL`), read as values and rounded down to whole rows. `None` when every value fits.
 fn tensor_elision(total: usize, row: usize) -> Option<(usize, usize)> {
     let (max_head, max_tail) = hex_elision();
+    // WHY/PROOF: the head and tail counts are read from the VSF_HEX_HEAD and VSF_HEX_TAIL environment variables and may be any usize — their sum can overflow and panic in a debug build without this.
     if total <= max_head.saturating_add(max_tail) {
         return None;
     }

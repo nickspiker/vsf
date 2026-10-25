@@ -5,20 +5,19 @@
 use super::section::SectionSchema;
 use super::validate::{ValidationError, ValidationResult};
 use crate::prelude::*;
-use alloc::collections::BTreeMap;
 use spin::{Once, RwLock};
 
-/// Registry of official VSF section schemas. Backed by `spin::RwLock<BTreeMap>` so this works under `no_std + alloc`; the global singleton is a `spin::Once` and exposes a `&'static SchemaRegistry`.
+/// Registry of official VSF section schemas. Backed by `spin::RwLock` over a Vec sorted by name (a handful of schemas: binary search, no tree), so this works under `no_std + alloc`; the global singleton is a `spin::Once` and exposes a `&'static SchemaRegistry`.
 #[derive(Debug)]
 pub struct SchemaRegistry {
-    schemas: RwLock<BTreeMap<String, SectionSchema>>,
+    schemas: RwLock<Vec<SectionSchema>>,
 }
 
 impl SchemaRegistry {
     /// Create new registry
     pub fn new() -> Self {
         Self {
-            schemas: RwLock::new(BTreeMap::new()),
+            schemas: RwLock::new(Vec::new()),
         }
     }
 
@@ -35,16 +34,19 @@ impl SchemaRegistry {
     /// Register a schema
     pub fn register(&self, schema: SectionSchema) {
         let mut schemas = self.schemas.write();
-        schemas.insert(schema.name.clone(), schema);
+        match schemas.binary_search_by(|s| s.name.as_str().cmp(schema.name.as_str())) {
+            Ok(i) => schemas[i] = schema,
+            Err(i) => schemas.insert(i, schema),
+        }
     }
 
     /// Get a schema by name
     pub fn get(&self, name: &str) -> ValidationResult<SectionSchema> {
         let schemas = self.schemas.read();
         schemas
-            .get(name)
-            .cloned()
-            .ok_or_else(|| ValidationError::UnknownSection {
+            .binary_search_by(|s| s.name.as_str().cmp(name))
+            .map(|i| schemas[i].clone())
+            .map_err(|_| ValidationError::UnknownSection {
                 name: name.to_string(),
             })
     }
@@ -52,7 +54,7 @@ impl SchemaRegistry {
     /// List all registered schema names
     pub fn list(&self) -> Vec<String> {
         let schemas = self.schemas.read();
-        schemas.keys().cloned().collect()
+        schemas.iter().map(|s| s.name.clone()).collect()
     }
 }
 

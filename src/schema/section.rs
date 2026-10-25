@@ -643,6 +643,7 @@ impl SectionBuilder {
             })?;
 
         // Bounds-check the field's byte range against the document.
+        // WHY/PROOF: offset_bytes and size_bytes are read from the document's TOC — their sum can overflow usize and wrap to a small end that passes the bounds check without this.
         let start = field.offset_bytes;
         let end = field.offset_bytes.checked_add(field.size_bytes).ok_or_else(|| {
             ValidationError::Custom(format!(

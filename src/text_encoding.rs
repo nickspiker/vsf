@@ -563,7 +563,7 @@ mod tests {
         let unicode_count = mixed.chars().filter(|c| !c.is_ascii()).count();
 
         println!(
-            "Mixed text: {} ASCII chars (fast path), {} Unicode chars (HashMap)",
+            "Mixed text: {} ASCII chars (fast path), {} Unicode chars (codebook)",
             ascii_count, unicode_count
         );
     }
