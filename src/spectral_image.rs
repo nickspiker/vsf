@@ -110,6 +110,8 @@ pub enum Transfer {
     Srgb,
     Gamma2,
     Gamma22,
+    /// `g2t` (`visual::Encoding::Gamma2Tanh`, colour.md): γ2 with headroom — code = tanh(√light), diffuse white at 194 of 255, light past white kept up to 9.7×. A stream that carries HDR (photon's beams, docs/beams.md).
+    Gamma2Tanh,
 }
 
 impl Transfer {
@@ -119,6 +121,7 @@ impl Transfer {
             Transfer::Srgb => "srgb",
             Transfer::Gamma2 => "gamma2",
             Transfer::Gamma22 => "gamma22",
+            Transfer::Gamma2Tanh => "g2t",
         }
     }
     pub fn parse(s: &str) -> Result<Self, SpectralImageError> {
@@ -127,6 +130,7 @@ impl Transfer {
             "srgb" => Ok(Transfer::Srgb),
             "gamma2" => Ok(Transfer::Gamma2),
             "gamma22" => Ok(Transfer::Gamma22),
+            "g2t" => Ok(Transfer::Gamma2Tanh),
             other => Err(SpectralImageError::BadField(format!("unknown transfer '{}'", other))),
         }
     }
