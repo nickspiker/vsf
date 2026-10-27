@@ -1390,7 +1390,7 @@ pub fn read_verified(
 ///
 /// # Security
 /// Signs the FILE HASH, not the provenance hash directly. This prevents extension attacks where content could be added after the signed portion.
-#[cfg(feature = "crypto")]
+#[cfg(feature = "crypto-verify")]
 pub fn sign_file(mut vsf_bytes: Vec<u8>, signing_key: &[u8; 32]) -> Result<Vec<u8>, String> {
     use ed25519_dalek::{Signer, SigningKey};
 
@@ -1424,7 +1424,7 @@ pub fn sign_file(mut vsf_bytes: Vec<u8>, signing_key: &[u8; 32]) -> Result<Vec<u
     Ok(vsf_bytes)
 }
 
-#[cfg(feature = "crypto")]
+#[cfg(feature = "crypto-verify")]
 /// Sign a document whose header carries a MULTI-SCHEME slot (`gm`, reserved by `VsfBuilder::signed_only_eggs`).
 ///
 /// vsf does not hold post-quantum signing code, so the signer is a closure: it receives the 32-byte file hash — computed with `hp` filled and the whole `gm` value zeroed, exactly what a verifier recomputes — and returns the egg list. Every returned egg must match a reserved slot in scheme and length, so the patched file is the same length as the placeholder and the hash still holds. The Ed25519 egg is required: it is the anchor every reader can check.
