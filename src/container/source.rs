@@ -119,3 +119,17 @@ impl ByteSource for std::fs::File {
         Ok(())
     }
 }
+
+/// Targets with no positional-read API (ferros, wasm): seek, then read, through `&File`. This moves the file's shared cursor, so concurrent reads of one `File` can interleave — it exists so `Document<File>` type-checks everywhere, not for speed.
+#[cfg(all(feature = "std", not(any(unix, windows))))]
+impl ByteSource for std::fs::File {
+    fn len(&self) -> u64 {
+        self.metadata().map(|m| m.len()).unwrap_or(0)
+    }
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<(), SourceError> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut f = self;
+        f.seek(SeekFrom::Start(offset)).map_err(|e| SourceError::Io(e.to_string()))?;
+        f.read_exact(buf).map_err(|e| SourceError::Io(e.to_string()))
+    }
+}
