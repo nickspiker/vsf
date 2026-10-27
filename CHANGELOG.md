@@ -5,6 +5,18 @@ All notable changes to VSF will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A file's `y` is computed from what it holds.** `y` is the oldest reader that reads the file correctly; until now every writer wrote the build constant `VSF_BACKWARD_COMPAT`. `src/types/since.rs` gives every `VsfType` the version its current bytes and meaning arrived in (one line per type, an exhaustive match, so a new variant without one does not compile), plus `HEADER_SINCE` for the header and section framing. `VsfBuilder` and `Appender` write the latest of those across the file; a generation never goes below the previous one. Everything that exists today is marked 9 (tracking starts there: earlier eras changed bytes, and pre-v9 readers cannot read today's header), so every file still writes `y9`, byte for byte as before. New API: `VsfType::since` / `own_since` (nested values in renderable objects included), `VsfField::since`, `VsfSection::since`, `VsfBuilder::floor` / `requires`, `Appender::floor` / `requires`, `types::{Since, HEADER_SINCE, SINCE_TABLE}`. `requires(v)` is for what a writer sees only as bytes: pass `section.since().version` for a section you encrypt. `.version(z, y)` still sets `y`, but as a minimum: a lower request is raised to what the values need.
+- **`tests/since.rs`**: one sample of every type and wire form (393 across the default, `spirix` and `text-encode` builds), its bytes pinned in `tests/fixtures/since.txt` beside its version. A byte change fails the test, and `VSF_BLESS=1` refuses it unless that type's version rose. A compile-time assertion keeps every version at or below `VSF_VERSION`. Changes of meaning in unchanged bytes (as with the dymaxion re-orientation) cannot be detected this way and are raised by hand.
+- **vsfinfo** names what sets the floor on the `y` line (`y3⦉9⦊ backward compat set by header`), says when `y` was declared above the contents (expected for encrypted sections), and flags a `y` below what the contents need. `verify` adds a `floor (y)` line, kept out of the verdict: a low `y` is a writer bug, not tampering. `inspect::contents_floor` computes it.
+
+### Fixed
+
+- **vsfinfo printed tensors as Rust debug dumps.** Only `t_u3` had a formatter, so every other `t_*` / `q_*` tensor and bit-packed `p` printed every element on one line (a 2048-value spectrum ran to 20,000 characters). Every element type now prints in notation, wire order, with values in aligned rows and the middle elided by `VSF_HEX_HEAD` / `VSF_HEX_TAIL`.
+
 ## [0.10.1] - 2026-10-20 · format v10, no code changes
 
 ### Changed

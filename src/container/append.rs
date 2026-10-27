@@ -14,7 +14,7 @@ use crate::container::{ByteSource, ContainerError, Document};
 use crate::encoding::hash_placeholder;
 use crate::file_format::{HeaderField, VsfField, VsfSection};
 use crate::prelude::*;
-use crate::types::VsfType;
+use crate::types::{Since, VsfType};
 use crate::vsf_builder::SectionMeta;
 
 /// The last 16 bytes of a document with generations: `">\xC3\x85R\0VSF\n"` then the latest header's offset, big-endian u64 — fixed width on purpose, because the format's own integers are not.
@@ -52,12 +52,13 @@ pub struct Appender {
     tool: String,
     action: String,
     creation_time: Option<VsfType>,
+    requires: usize,
 }
 
 impl Appender {
     /// `tool` names the writer, `action` what it did (free text, e.g. "opsin", "paste idt") — both ride in the generation header.
     pub fn new(tool: impl Into<String>, action: impl Into<String>) -> Self {
-        Self { sections: Vec::new(), unboxed: Vec::new(), supersede: Vec::new(), tool: tool.into(), action: action.into(), creation_time: None }
+        Self { sections: Vec::new(), unboxed: Vec::new(), supersede: Vec::new(), tool: tool.into(), action: action.into(), creation_time: None, requires: 0 }
     }
 
     pub fn creation_time_oscillations(mut self, oscillations: i64) -> Self {
@@ -89,6 +90,21 @@ impl Appender {
         self
     }
 
+    /// Ask for a reader of at least `version`, for content the appender sees only as bytes (an encrypted section's plaintext, a blob that is itself VSF).
+    pub fn requires(mut self, version: usize) -> Self {
+        self.requires = self.requires.max(version);
+        self
+    }
+
+    /// The `y` this generation writes: the previous generation's — the carried sections were read under it — raised by the new sections, the creation time, the keys and anything [`Appender::requires`] names.
+    pub fn floor<S: ByteSource>(&self, doc: &Document<S>) -> Since {
+        let previous = Since { version: doc.header().backward_compat, by: "previous generation" };
+        let keys = self.sections.iter().map(|(_, m)| m).chain(self.unboxed.iter().map(|(_, _, m)| m)).filter_map(|m| m.key.as_ref());
+        let values = self.creation_time.iter().chain(keys).map(VsfType::since);
+        let sections = self.sections.iter().map(|(s, _)| s.since());
+        values.chain(sections).fold(Since::HEADER.max(previous), Since::max)
+    }
+
     /// Drop a live section from the new table of contents. Its bytes stay — a tombstone in the TOC, never a deletion — and every earlier generation still lists it.
     pub fn supersede(mut self, name: impl Into<String>) -> Self {
         self.supersede.push(name.into());
@@ -103,6 +119,7 @@ impl Appender {
         let prev_bytes = doc.source().read_vec(prev_offset, doc.header_len())?;
         let prev_hash = *blake3::hash(&prev_bytes).as_bytes();
         let gen = doc.generation() + 1;
+        let floor = self.floor(doc).version.max(self.requires);
 
         // New bodies, far form, laid end to end from `base`.
         let mut bodies: Vec<u8> = Vec::new();
@@ -158,7 +175,7 @@ impl Appender {
         for guess in 0..8u32 {
             let _ = guess;
             let total = header_offset + header.len() as u64 + TRAILER_LEN as u64;
-            let candidate = encode_header(self.creation_time.as_ref(), gen, base, prev_offset, &prev_hash, &self.tool, &self.action, &carried, &new_entries, header.len(), total as usize);
+            let candidate = encode_header(floor, self.creation_time.as_ref(), gen, base, prev_offset, &prev_hash, &self.tool, &self.action, &carried, &new_entries, header.len(), total as usize);
             if candidate.len() == header.len() {
                 header = candidate;
                 break;
@@ -188,12 +205,12 @@ impl Appender {
 
 /// One generation header, the builder's byte order. `header_len`/`file_len` are the values to encode for `b` and `l`; the caller iterates until the encoded length stops changing.
 #[allow(clippy::too_many_arguments)]
-fn encode_header(creation_time: Option<&VsfType>, gen: u32, start: u64, prev_offset: u64, prev_hash: &[u8; 32], tool: &str, action: &str, carried: &[HeaderField], new_entries: &[HeaderField], header_len: usize, file_len: usize) -> Vec<u8> {
+fn encode_header(floor: usize, creation_time: Option<&VsfType>, gen: u32, start: u64, prev_offset: u64, prev_hash: &[u8; 32], tool: &str, action: &str, carried: &[HeaderField], new_entries: &[HeaderField], header_len: usize, file_len: usize) -> Vec<u8> {
     let mut h = Vec::new();
     h.extend_from_slice("RÅ".as_bytes());
     h.push(b'<');
     h.extend_from_slice(&VsfType::z(crate::VSF_VERSION).flatten());
-    h.extend_from_slice(&VsfType::y(crate::VSF_BACKWARD_COMPAT).flatten());
+    h.extend_from_slice(&VsfType::y(floor).flatten());
     h.extend_from_slice(&VsfType::b(header_len, true).flatten());
     h.extend_from_slice(&VsfType::l(file_len, true).flatten());
     if let Some(e) = creation_time {

@@ -251,11 +251,11 @@ File I/O is out of scope on purpose. The crate gives you bytes; a file, a socket
 
 ## Versioning
 
-From 0.8.0 the crate minor is the format version: vsf 0.10.x writes v10 files. Any breaking change, wire or API, bumps both. The backward-compatibility floor lives in every file header and is enforced by the reader by name ("file is v7, this build reads v9+"), never by misparsing.
+From 0.8.0 the crate minor is the format version: vsf 0.10.x writes v10 files. Any breaking change, wire or API, bumps both. Every file header carries two numbers: `z`, the version that wrote it, and `y`, the oldest reader that reads it correctly. A writer works `y` out from what the file holds: each type records the version its current bytes arrived in ([`src/types/since.rs`](src/types/since.rs)), and `y` is the latest of those across the file. A file using only v9 types says `y9` whatever wrote it, so a v9 reader opens it. Readers enforce both numbers by name ("file is v7, this build reads v9+"), never by misparsing.
 
 The 0.6 lane (`0.6.42`) is the frozen encoder for [ihi](https://crates.io/crates/ihi): byte-identical to 0.8.0, published so the identity-critical `x` encoder can never move under handle-proof derivation. Do not pin `"0.6"` unless you are ihi. It changes only for coordinated encoder emergencies.
 
-Yank policy: a release that wrote wrong bytes is yanked (0.4.0, 0.4.1). A release that misread valid files but never wrote a bad byte is superseded and left in history (0.4.2, 0.5.0). `tests/frozen_wire.rs` pins the exact bytes of `x`, `a` and `d` so a wire break can never ship silently again. Full history in [`CHANGELOG.md`](CHANGELOG.md).
+Yank policy: a release that wrote wrong bytes is yanked (0.4.0, 0.4.1). A release that misread valid files but never wrote a bad byte is superseded and left in history (0.4.2, 0.5.0). `tests/frozen_wire.rs` pins the exact bytes of `x`, `a` and `d`, and `tests/since.rs` pins every type's bytes beside its version, refusing a byte change unless that type's version rises with it. Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 

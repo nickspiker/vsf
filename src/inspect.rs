@@ -2820,6 +2820,31 @@ pub fn try_parse_section_fields(data: &[u8], offset: usize) -> Result<Vec<VsfFie
 }
 
 /// Convert VsfHeader fields to LabelInfo for display
+/// The oldest reader a file's contents need, and the type that sets it: the header framing, the header's own values, and every value in every section this reader can parse. An encrypted section is opaque here, so its plaintext counts only through the `y` its writer declared — a declared `y` above this is expected for such files; one below it is a writer that under-claimed.
+pub fn contents_floor(data: &[u8], header: &VsfHeader) -> crate::types::Since {
+    use crate::types::Since;
+    let header_values = header.creation_time.iter().chain(&header.signer_pubkey).chain(&header.signature).chain(&header.rolling_hash).chain(Some(&header.provenance_hash));
+    let entry_values = header.fields.iter().flat_map(|f| f.hash.iter().chain(&f.signature).chain(&f.key).chain(&f.inline_values));
+    let mut floor = header_values.chain(entry_values).map(VsfType::since).fold(Since::HEADER, Since::max);
+    for label in labels_from_header(header).iter().filter(|l| l.child_count > 0) {
+        if let Ok(fields) = parse_section_fields(data, label) {
+            floor = fields.iter().filter_map(VsfField::since).fold(floor, Since::max);
+        }
+    }
+    floor
+}
+
+/// The `y` line's note: what sets the floor, or that the file claims less than it holds.
+fn floor_note(declared: usize, floor: crate::types::Since) -> String {
+    if declared < floor.version {
+        format!("{}", format!("too low: {} needs v{}", floor.by, floor.version).truecolor(255, 0, 0))
+    } else if declared > floor.version {
+        format!("{}", tc(&format!("declared; contents need v{} ({})", floor.version, floor.by), col_hint()))
+    } else {
+        format!("{}", tc(&format!("set by {}", floor.by), col_hint()))
+    }
+}
+
 pub fn labels_from_header(header: &VsfHeader) -> Vec<LabelInfo> {
     header
         .fields
@@ -2916,7 +2941,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         tc("⦉", col_punct()),
         header.backward_compat.to_string().white(),
         tc("⦊", col_punct()),
-        tc("backward compat", col_tree())
+        format!("{} {}", tc("backward compat", col_tree()), floor_note(header.backward_compat, contents_floor(data, &header)))
     ));
 
     // Creation time: et{timestamp} - time (pink-magenta). creation_time is Option<VsfType>; absent when the producing device had no clock.

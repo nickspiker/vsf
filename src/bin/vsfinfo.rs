@@ -361,6 +361,15 @@ fn print_verification_summary(data: &[u8]) {
         print_anchor("signature  (ge)", None);
     }
 
+    // floor (y) — the file's declared oldest reader against what its contents need. A low y is a writer bug, not tampering, so it stays out of the verdict.
+    let floor = vsf::inspect::contents_floor(data, &header);
+    let floor_status = if header.backward_compat >= floor.version {
+        format!("{} (y{}, contents need v{}: {})", "PASS".truecolor(0, 255, 0), header.backward_compat, floor.version, floor.by)
+    } else {
+        format!("{} (y{}, but {} needs v{})", "LOW".truecolor(255, 0, 0), header.backward_compat, floor.by, floor.version)
+    };
+    println!(" {} {}", "floor      (y):".cyan(), floor_status);
+
     // Overall verdict, matching read_verified's semantics: hp alone verifies an unsigned doc; every PRESENT anchor must pass.
     let sig_ok: Option<bool> = if is_signed {
         #[cfg(feature = "crypto")]

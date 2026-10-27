@@ -8,7 +8,8 @@ use crate::encoding::hash_placeholder;
 use crate::file_format::VsfSection;
 use crate::prelude::*;
 use crate::types::VsfType;
-use crate::{VSF_BACKWARD_COMPAT, VSF_VERSION};
+use crate::types::Since;
+use crate::VSF_VERSION;
 
 /// Per-section cryptographic metadata for header fields
 ///
@@ -33,7 +34,8 @@ impl SectionMeta {
 /// All VSF files automatically include a BLAKE3 hash for integrity verification.
 pub struct VsfBuilder {
     version: usize,
-    backward_compat: usize,
+    /// The least `y` the caller asks for, for what the builder cannot see (an encrypted section's plaintext, a blob that is itself VSF). The written `y` is this or the floor the values set, whichever is later.
+    requires: usize,
     /// Creation timestamp. `None` means the device cannot know the current time (no clock, no network) and the header omits the `e` field entirely rather than emitting a fake/zero value — see the README and `pipe_message` schema docs. `Some(VsfType::e(…))` writes a standard `eu6` / `ef5` / `ef6` field.
     creation_time: Option<VsfType>,
     sections: Vec<(VsfSection, SectionMeta)>, // Section with optional crypto metadata
@@ -54,7 +56,7 @@ impl VsfBuilder {
     pub fn new() -> Self {
         Self {
             version: VSF_VERSION,
-            backward_compat: VSF_BACKWARD_COMPAT,
+            requires: 0,
             creation_time: None,
             sections: Vec::new(),
             unboxed: Vec::new(),
@@ -165,11 +167,27 @@ impl VsfBuilder {
         self
     }
 
-    /// Set version numbers
+    /// Set the version (`z`) and the least backward-compat floor (`y`). The written `y` never goes below what the file's values need ([`VsfBuilder::floor`]); a lower request is raised to it.
     pub fn version(mut self, version: usize, backward_compat: usize) -> Self {
         self.version = version;
-        self.backward_compat = backward_compat;
+        self.requires = backward_compat;
         self
+    }
+
+    /// Ask for a reader of at least `version`, for content the builder sees only as bytes: pass `section.since().version` for a section you encrypt, or the `y` of a VSF document carried as a blob.
+    pub fn requires(mut self, version: usize) -> Self {
+        self.requires = self.requires.max(version);
+        self
+    }
+
+    /// The oldest reader this file needs and what sets it: the header framing, every value in every section and inline field, the header's own values. Blobs count only through [`VsfBuilder::requires`].
+    pub fn floor(&self) -> Since {
+        let header_values = self.creation_time.iter().chain(&self.signer_pubkey).chain(self.signature.iter().map(|(t, _)| t));
+        let keys = self.sections.iter().map(|(_, m)| m).chain(self.unboxed.iter().map(|(_, _, m)| m)).filter_map(|m| m.key.as_ref());
+        let inline = self.inline_fields.iter().flat_map(|(_, vs)| vs);
+        let values = header_values.chain(keys).chain(inline).map(VsfType::since);
+        let sections = self.sections.iter().map(|(s, _)| s.since());
+        values.chain(sections).fold(Since::HEADER, Since::max)
     }
 
     /// Add a structured section with name and items
@@ -266,7 +284,7 @@ impl VsfBuilder {
         vsf.push(VsfType::z(self.version).flatten());
 
         // Backward compat version
-        vsf[header_index].extend_from_slice(&VsfType::y(self.backward_compat).flatten());
+        vsf[header_index].extend_from_slice(&VsfType::y(self.floor().version.max(self.requires)).flatten());
 
         // Placeholder for header length (now we know how to encode it!)
         let header_length_index = vsf.len();
