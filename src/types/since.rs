@@ -76,7 +76,7 @@ since_table! {
         ge => 9, gm => 9, gp => 9, gd => 9, gs => 9, gf => 9, gH => 9, gr => 9,
         // Keys
         ke => 9, kx => 9, kp => 9, kk => 9, kc => 9, ka => 9, km => 9, kf => 9, kl => 9, kn => 9, kh => 9, kd => 9, kb => 9,
-        kvf => 9, kvs => 9, ksx => 9, ksp => 9, ksk => 9, ksf => 9, ksn => 9, ksl => 9, ksh => 9, ksm => 9,
+        kvf => 9, kvs => 9, kvr => 10, kgr => 10, ksx => 9, ksp => 9, ksk => 9, ksf => 9, ksn => 9, ksl => 9, ksh => 9, ksm => 9,
         // MACs
         mh => 9, mp => 9, mb => 9, mc => 9,
         // Numbers

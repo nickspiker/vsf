@@ -613,6 +613,11 @@ fn format_hex_head_tail(data: &[u8]) -> (Vec<String>, Option<String>, Vec<String
     }
 }
 
+/// A signing key (kg*): its type and length, never its bytes — an inspector's output ends up in logs and terminals.
+fn format_secret(type_name: &str, data: &[u8]) -> String {
+    format!("{}{{{}}} (secret, not shown)", type_name, data.len())
+}
+
 /// Format crypto literal (no colours) with head+tail truncation
 fn format_crypto_literal(type_name: &str, data: &[u8]) -> String {
     let (head, notice, tail) = format_hex_head_tail(data);
@@ -1473,6 +1478,8 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         VsfType::kd(k) => format_crypto_hex("kd", k), // Dilithium/ML-DSA
         VsfType::kvf(k) => format_crypto_hex("kvf", k), // Falcon verification key
         VsfType::kvs(k) => format_crypto_hex("kvs", k), // SPHINCS+ verification key
+        VsfType::kvr(k) => format_crypto_hex("kvr", k), // RSA verification key (legacy)
+        VsfType::kgr(k) => format_secret("kgr", k), // RSA signing key: never shown
         VsfType::km(k) => format_crypto_hex("km", k), // ML-KEM
         VsfType::kb(k) => format_crypto_hex("kb", k), // BIKE
         // Shared secrets (typed by algorithm)
@@ -2486,6 +2493,8 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::ge(sig) => format_crypto_literal("ge", sig),
         VsfType::gp(sig) => format_crypto_literal("gp", sig),
         VsfType::gr(sig) => format_crypto_literal("gr", sig),
+        VsfType::kvr(key) => format_crypto_literal("kvr", key),
+        VsfType::kgr(key) => format_secret("kgr", key),
         VsfType::ke(key) => format_crypto_literal("ke", key),
         VsfType::kx(key) => format_crypto_literal("kx", key),
         VsfType::kp(key) => format_crypto_literal("kp", key),
@@ -2702,6 +2711,8 @@ pub fn format_value_short(vsf: &VsfType) -> String {
         VsfType::ge(sig) => format_crypto_hex("ge", sig),
         VsfType::gp(sig) => format_crypto_hex("gp", sig),
         VsfType::gr(sig) => format_crypto_hex("gr", sig),
+        VsfType::kvr(key) => format_crypto_hex("kvr", key),
+        VsfType::kgr(key) => format_secret("kgr", key),
         VsfType::v(algo, data) => {
             // Check if this is a Toka Tree type (algo == b't')
             #[cfg(feature = "spirix")]

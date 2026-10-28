@@ -557,6 +557,10 @@ pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeErro
     if algo == b'v' {
         return parse_verify_key(data, pointer);
     }
+    // Signing keys (kg*) — the same shape, third byte the letter of the signature the key makes
+    if algo == b'g' {
+        return parse_signing_key(data, pointer);
+    }
 
     // Read length (stored as len-1) using standard VSF variable-length encoding
     let length = decode_usize(data, pointer)? + 1; // Add 1 back
@@ -612,8 +616,35 @@ pub fn parse_verify_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, Dec
     match algo {
         b'f' => Ok(VsfType::kvf(key)), // Falcon
         b's' => Ok(VsfType::kvs(key)), // SPHINCS+ / SLH-DSA
+        b'r' => Ok(VsfType::kvr(key)), // RSA (legacy)
         _ => Err(DecodeError::InvalidDataMsg(format!(
             "Unknown verification key algorithm: {}",
+            algo as char
+        ))),
+    }
+}
+
+/// Parse a signing key (kg* types - 3-byte prefix; the third byte is the letter of the signature it makes)
+pub fn parse_signing_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
+    if *pointer >= data.len() {
+        return Err(DecodeError::UnexpectedEofMsg(
+            "Not enough data for signing key algorithm".into(),
+        ));
+    }
+    let algo = data[*pointer];
+    *pointer += 1;
+    let length = decode_usize(data, pointer)? + 1; // stored as len-1
+    if *pointer + length > data.len() {
+        return Err(DecodeError::UnexpectedEofMsg(
+            "Not enough data for signing key".into(),
+        ));
+    }
+    let key = data[*pointer..*pointer + length].to_vec();
+    *pointer += length;
+    match algo {
+        b'r' => Ok(VsfType::kgr(key)), // RSA (legacy)
+        _ => Err(DecodeError::InvalidDataMsg(format!(
+            "Unknown signing key algorithm: {}",
             algo as char
         ))),
     }

@@ -412,7 +412,7 @@ impl VsfHeader {
                                 field_signature = Some(value.clone());
                             }
                             // Key types
-                            VsfType::ke(_) | VsfType::kx(_) | VsfType::kc(_) | VsfType::ka(_) | VsfType::kvf(_) | VsfType::kvs(_) => {
+                            VsfType::ke(_) | VsfType::kx(_) | VsfType::kc(_) | VsfType::ka(_) | VsfType::kvf(_) | VsfType::kvs(_) | VsfType::kvr(_) => {
                                 key = Some(value.clone());
                             }
                             // Offset - indicates this field points to a section body

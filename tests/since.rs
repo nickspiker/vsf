@@ -58,7 +58,7 @@ fn samples() -> Vec<(String, VsfType)> {
         ("ge", VsfType::ge), ("gm", VsfType::gm), ("gp", VsfType::gp), ("gd", VsfType::gd), ("gs", VsfType::gs), ("gf", VsfType::gf), ("gH", VsfType::gH), ("gr", VsfType::gr),
         ("ke", VsfType::ke), ("kx", VsfType::kx), ("kp", VsfType::kp), ("kk", VsfType::kk), ("kc", VsfType::kc), ("ka", VsfType::ka), ("km", VsfType::km), ("kf", VsfType::kf),
         ("kl", VsfType::kl), ("kn", VsfType::kn), ("kh", VsfType::kh), ("kd", VsfType::kd), ("kb", VsfType::kb),
-        ("kvf", VsfType::kvf), ("kvs", VsfType::kvs), ("ksx", VsfType::ksx), ("ksp", VsfType::ksp), ("ksk", VsfType::ksk), ("ksf", VsfType::ksf), ("ksn", VsfType::ksn),
+        ("kvf", VsfType::kvf), ("kvs", VsfType::kvs), ("kvr", VsfType::kvr), ("kgr", VsfType::kgr), ("ksx", VsfType::ksx), ("ksp", VsfType::ksp), ("ksk", VsfType::ksk), ("ksf", VsfType::ksf), ("ksn", VsfType::ksn),
         ("ksl", VsfType::ksl), ("ksh", VsfType::ksh), ("ksm", VsfType::ksm),
         ("mh", VsfType::mh), ("mp", VsfType::mp), ("mb", VsfType::mb), ("mc", VsfType::mc),
     ];

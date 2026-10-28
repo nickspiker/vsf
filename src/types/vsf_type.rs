@@ -190,6 +190,18 @@ pub enum VsfType {
     // Signature verification keys — `kv` + the signature's letter, for schemes whose two-letter `k` slot is taken (`kf` is FrodoKEM, `ks` is the shared-secret prefix). `ke`/`kd` keep their two-letter forms.
     kvf(Vec<u8>), // Falcon public key (897B for 512, 1793B for 1024 - size disambiguates); verifies `gf`
     kvs(Vec<u8>), // SPHINCS+ / SLH-DSA public key (32/48/64B for 128/192/256 - size disambiguates); verifies `gs`
+    #[deprecated(
+        since = "0.10.3",
+        note = "RSA is legacy - for verifiers that take nothing else (a phone bootloader's avb_custom_key); prefer Ed25519 or a post-quantum scheme"
+    )]
+    kvr(Vec<u8>), // RSA public key: the modulus n, big-endian (256/512/1024B for RSA-2048/4096/8192 - size disambiguates), e = 65537; verifies `gr`
+
+    // Signing keys — `kg` + the signature's letter: the private key that makes that signature. Secret: for a keys directory or an encrypted section, never the open wire.
+    #[deprecated(
+        since = "0.10.3",
+        note = "RSA is legacy - for verifiers that take nothing else (a phone bootloader's avb_custom_key); prefer Ed25519 or a post-quantum scheme"
+    )]
+    kgr(Vec<u8>), // RSA private key: its primes p ‖ q, each big-endian and half the length (256/512/1024B for RSA-2048/4096/8192), e = 65537; makes `gr`
 
     // Shared secrets
     ksx(Vec<u8>), // X25519 shared secret (32B)
@@ -1134,7 +1146,7 @@ impl VsfType {
 
     /// Extract as byte slice
     ///
-    /// Supports: v (wrapped bytes), t_u3 (a tensor of bytes, 1-D or not), the standard hash family (hp/hb/hs/hm/hg/hc/hk), the application-specific Photon hashes (hP/hR/hI/hV), public/symmetric keys (ke/kx/kc/ka), and signatures (ge/gp). Photon reads handle-proofs as `hP` and blobs as `ge`, so those two must be covered here.
+    /// Supports: v (wrapped bytes), t_u3 (a tensor of bytes, 1-D or not), the standard hash family (hp/hb/hs/hm/hg/hc/hk), the application-specific Photon hashes (hP/hR/hI/hV), public/symmetric keys (ke/kx/kc/ka, the verification keys kvf/kvs/kvr, the RSA signing key kgr), and signatures (ge/gp). Photon reads handle-proofs as `hP` and blobs as `ge`, so those two must be covered here.
     pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             VsfType::v(_, bytes) => Some(bytes),
@@ -1156,6 +1168,8 @@ impl VsfType {
             | VsfType::ka(bytes)
             | VsfType::kvf(bytes)
             | VsfType::kvs(bytes)
+            | VsfType::kvr(bytes)
+            | VsfType::kgr(bytes)
             | VsfType::ge(bytes)
             | VsfType::gp(bytes)
             | VsfType::gm(bytes)

@@ -451,6 +451,8 @@ impl FromVsfType for Vec<u8> {
             VsfType::ka(bytes) => Ok(bytes.clone()),
             VsfType::kvf(bytes) => Ok(bytes.clone()),
             VsfType::kvs(bytes) => Ok(bytes.clone()),
+            VsfType::kvr(bytes) => Ok(bytes.clone()),
+            VsfType::kgr(bytes) => Ok(bytes.clone()),
             VsfType::ge(bytes) => Ok(bytes.clone()),
             VsfType::gp(bytes) => Ok(bytes.clone()),
             VsfType::gm(bytes) => Ok(bytes.clone()),
