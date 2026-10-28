@@ -71,6 +71,10 @@ pub enum TypeConstraint {
     Curve25519Key,
     /// AES key (ka)
     AesKey,
+    /// RSA verification key (kvr) — legacy, deprecated with the type
+    RsaVerificationKey,
+    /// RSA signing key (kgr) — legacy, deprecated with the type; a secret
+    RsaSigningKey,
 
     // === SIGNATURE TYPES ===
     /// Any signature type (ge, gp)
@@ -232,6 +236,8 @@ impl TypeConstraint {
             TypeConstraint::EcdsaP256Key => matches!(value, VsfType::kp(_)),
             TypeConstraint::Curve25519Key => matches!(value, VsfType::kc(_)),
             TypeConstraint::AesKey => matches!(value, VsfType::ka(_)),
+            TypeConstraint::RsaVerificationKey => matches!(value, VsfType::kvr(_)),
+            TypeConstraint::RsaSigningKey => matches!(value, VsfType::kgr(_)),
 
             TypeConstraint::AnySignature => matches!(value, VsfType::ge(_) | VsfType::gp(_) | VsfType::gm(_) | VsfType::gf(_) | VsfType::gs(_) | VsfType::gd(_)),
 
@@ -400,6 +406,8 @@ impl TypeConstraint {
             TypeConstraint::EcdsaP256Key => "ECDSA P-256 key (kp)".into(),
             TypeConstraint::Curve25519Key => "Curve25519 key (kc)".into(),
             TypeConstraint::AesKey => "AES key (ka)".into(),
+            TypeConstraint::RsaVerificationKey => "RSA verification key (kvr)".into(),
+            TypeConstraint::RsaSigningKey => "RSA signing key (kgr)".into(),
             TypeConstraint::AnySignature => "any signature".into(),
             TypeConstraint::Ed25519Sig => "Ed25519 signature (ge)".into(),
             TypeConstraint::EcdsaP256Sig => "ECDSA P-256 signature (gp)".into(),
