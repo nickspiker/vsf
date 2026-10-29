@@ -74,7 +74,7 @@ since_table! {
         hp => 9, hb => 9, hs => 9, hm => 9, hg => 9, hc => 9, hk => 9, hP => 9, hR => 9, hI => 9, hV => 9,
         // Signatures
         ge => 9, gm => 9, gp => 9, gd => 9, gs => 9, gf => 9, gH => 9, gr => 9,
-        // Keys
+        // Keys. kvr and kgr arrived after 0.10.2 shipped and are still marked 10 (Nick, 2026-10-28: not worth a version number for keys only a bootloader uses). 0.10.0–0.10.2 readers refuse a file holding one with an unknown-key error; they never misread it.
         ke => 9, kx => 9, kp => 9, kk => 9, kc => 9, ka => 9, km => 9, kf => 9, kl => 9, kn => 9, kh => 9, kd => 9, kb => 9,
         kvf => 9, kvs => 9, kvr => 10, kgr => 10, ksx => 9, ksp => 9, ksk => 9, ksf => 9, ksn => 9, ksl => 9, ksh => 9, ksm => 9,
         // MACs
