@@ -139,7 +139,7 @@ pub fn parse(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
 /// Format: 4 bytes total - opening brace, two lowercase letters, closing brace
 fn parse_opcode(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // Need 3 more bytes: a, b, }
-    if *pointer + 3 > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, 3) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Incomplete opcode (need 3 more bytes after '{'.into())".into(),
         ));
@@ -176,7 +176,7 @@ fn parse_opcode(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError
 #[cfg(feature = "spirix")]
 fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // Already consumed 'r', now expect 'o' and type letter
-    if *pointer + 2 > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, 2) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Incomplete renderable object (need 2 more bytes after 'r'.into())".into(),
         ));
@@ -382,7 +382,7 @@ fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
 
 #[cfg(feature = "spirix")]
 fn parse_c44(data: &[u8], pointer: &mut usize) -> Result<spirix::CircleF4E4, DecodeError> {
-    if *pointer + 6 > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, 6) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for c44".into(),
         ));
@@ -400,7 +400,7 @@ fn parse_c44(data: &[u8], pointer: &mut usize) -> Result<spirix::CircleF4E4, Dec
 
 #[cfg(feature = "spirix")]
 fn parse_s44(data: &[u8], pointer: &mut usize) -> Result<spirix::ScalarF4E4, DecodeError> {
-    if *pointer + 4 > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, 4) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for s44".into(),
         ));
@@ -443,7 +443,7 @@ fn parse_text_style(
             b'r' => style.align = Some(2), // right (no value bytes)
             b'f' => {
                 // font hash: 32 bytes
-                if *pointer + 32 > data.len() {
+                if crate::decoding::helpers::short(data, *pointer, 32) {
                     return Err(DecodeError::UnexpectedEofMsg(
                         "TextStyle: truncated font hash".into(),
                     ));
@@ -528,7 +528,7 @@ fn parse_option_stroke(data: &[u8], pointer: &mut usize) -> Result<Option<Stroke
             let width = parse_s44(data, pointer)?;
             let colour = parse(data, pointer)?;
 
-            if *pointer + 2 > data.len() {
+            if crate::decoding::helpers::short(data, *pointer, 2) {
                 return Err(DecodeError::UnexpectedEofMsg(
                     "Not enough data for stroke properties".into(),
                 ));
@@ -1006,7 +1006,7 @@ fn parse_network_address(data: &[u8], pointer: &mut usize) -> Result<VsfType, De
         }
         b'h' => Ok(VsfType::nh(read_str(data, pointer)?)),
         b'i' => {
-            if *pointer + 4 > data.len() {
+            if crate::decoding::helpers::short(data, *pointer, 4) {
                 return Err(DecodeError::UnexpectedEofMsg("ni".into()));
             }
             let a = [
@@ -1019,7 +1019,7 @@ fn parse_network_address(data: &[u8], pointer: &mut usize) -> Result<VsfType, De
             Ok(VsfType::ni(a))
         }
         b'j' => {
-            if *pointer + 16 > data.len() {
+            if crate::decoding::helpers::short(data, *pointer, 16) {
                 return Err(DecodeError::UnexpectedEofMsg("nj".into()));
             }
             let mut a = [0u8; 16];
@@ -1037,7 +1037,7 @@ fn parse_network_address(data: &[u8], pointer: &mut usize) -> Result<VsfType, De
             Ok(VsfType::nc(addr, prefix))
         }
         b'm' => {
-            if *pointer + 6 > data.len() {
+            if crate::decoding::helpers::short(data, *pointer, 6) {
                 return Err(DecodeError::UnexpectedEofMsg("nm".into()));
             }
             let mut a = [0u8; 6];
@@ -1046,7 +1046,7 @@ fn parse_network_address(data: &[u8], pointer: &mut usize) -> Result<VsfType, De
             Ok(VsfType::nm(a))
         }
         b'p' => {
-            if *pointer + 2 > data.len() {
+            if crate::decoding::helpers::short(data, *pointer, 2) {
                 return Err(DecodeError::UnexpectedEofMsg("np".into()));
             }
             let p = u16::from_be_bytes([data[*pointer], data[*pointer + 1]]);
@@ -1055,7 +1055,7 @@ fn parse_network_address(data: &[u8], pointer: &mut usize) -> Result<VsfType, De
         }
         b's' => {
             let host = read_str(data, pointer)?;
-            if *pointer + 2 > data.len() {
+            if crate::decoding::helpers::short(data, *pointer, 2) {
                 return Err(DecodeError::UnexpectedEofMsg("ns port".into()));
             }
             let port = u16::from_be_bytes([data[*pointer], data[*pointer + 1]]);

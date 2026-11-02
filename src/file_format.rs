@@ -360,6 +360,10 @@ impl VsfHeader {
 
         while ptr < data.len() && data[ptr] != b'>' {
             match data[ptr] {
+                // ONE key, ONE signature, ONE rolling hash: a second of any is refused, never "the last one wins" (security audit VSF-04: the verifier reads the FIRST `ke`, so a header carrying the attacker's key first and the victim's second verified under the attacker's key while this decode named the victim as signer).
+                b'k' | b'g' | b'h' if (data[ptr] == b'k' && signer_pubkey.is_some()) || (data[ptr] == b'g' && signature.is_some()) || (data[ptr] == b'h' && rolling_hash.is_some()) => {
+                    return Err(format!("header carries a second '{}' item", data[ptr] as char));
+                }
                 b'k' => {
                     // Key type (ke, kx, etc.)
                     signer_pubkey = Some(
@@ -642,11 +646,12 @@ impl VsfHeader {
                     entry.name, entry.size_bytes, entry.child_count
                 ));
             }
-            return Ok(VsfSection::new(entry.name.clone()));
+            return VsfSection::try_new(entry.name.clone());
         }
         let mut ptr = header_end;
         let mut section = VsfSection::parse(data, &mut ptr)?;
         if section.name.is_empty() {
+            validate_name(&entry.name)?;
             section.name = entry.name.clone();
         }
         Ok(section)
@@ -657,7 +662,7 @@ impl VsfHeader {
         let mut out = Vec::with_capacity(self.fields.len());
         for entry in &self.fields {
             if entry.size_bytes == 0 && entry.child_count == 0 {
-                out.push(VsfSection::new(entry.name.clone()));
+                out.push(VsfSection::try_new(entry.name.clone())?);
                 continue;
             }
             // TOC offsets are from file start; fall back to header_end for legacy zero-offset entries (the primary_section shape).
@@ -670,6 +675,7 @@ impl VsfHeader {
             }
             let mut section = VsfSection::parse(data, &mut ptr)?;
             if section.name.is_empty() {
+                validate_name(&entry.name)?;
                 section.name = entry.name.clone();
             }
             out.push(section);
@@ -829,6 +835,13 @@ impl VsfField {
 impl VsfSection {
     /// Create new section with validated name
     ///
+    /// A section named by bytes someone else wrote (a parsed table of contents): the name is checked and refused, never panicked on (security audit VSF-03: a TOC entry named `Abc` passed `read_verified`, then `primary_section` panicked in [`Self::new`]).
+    pub fn try_new(name: impl Into<String>) -> Result<Self, String> {
+        let name_str = name.into();
+        validate_name(&name_str).map_err(|e| format!("Invalid section name: {e}"))?;
+        Ok(Self { name: name_str, fields: Vec::new(), length_hint: None, count_hint: None })
+    }
+
     /// # Panics
     /// Panics if the section name contains invalid characters
     pub fn new(name: impl Into<String>) -> Self {

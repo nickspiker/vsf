@@ -51,7 +51,7 @@ pub fn parse_bitpacked_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfTyp
     let byte_count = total_bits.div_ceil(8);
 
     // Read packed data
-    if *pointer + byte_count > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(format!(
             "Not enough data for bitpacked tensor: need {} bytes, have {}",
             byte_count,
@@ -96,7 +96,7 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
     };
 
     // Parse element type markers (same position in both formats)
-    if *pointer + 2 > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, 2) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for element type".into(),
         ));
@@ -304,7 +304,7 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
     let ndim = decode_usize(data, pointer)?;
 
     // Parse element type markers
-    if *pointer + 2 > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, 2) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for element type".into(),
         ));
@@ -565,7 +565,7 @@ pub fn parse_tensor_data_u0(
 ) -> Result<VsfType, DecodeError> {
     // Bitpacked: 8 bools per byte
     let byte_count = total_elements.div_ceil(8);
-    if *pointer + byte_count > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for u0 tensor".into(),
         ));
@@ -600,7 +600,7 @@ pub fn parse_tensor_data_u8(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    if *pointer + total_elements > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, total_elements) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for u8 tensor".into(),
         ));
@@ -616,8 +616,8 @@ pub fn parse_tensor_data_u16(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 2;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 2)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for u16 tensor".into(),
         ));
@@ -638,8 +638,8 @@ pub fn parse_tensor_data_u32(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for u32 tensor".into(),
         ));
@@ -665,8 +665,8 @@ pub fn parse_tensor_data_u64(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for u64 tensor".into(),
         ));
@@ -696,8 +696,8 @@ pub fn parse_tensor_data_u128(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 16;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 16)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for u128 tensor".into(),
         ));
@@ -736,7 +736,7 @@ pub fn parse_tensor_data_i8(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    if *pointer + total_elements > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, total_elements) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for i8 tensor".into(),
         ));
@@ -755,8 +755,8 @@ pub fn parse_tensor_data_i16(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 2;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 2)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for i16 tensor".into(),
         ));
@@ -777,8 +777,8 @@ pub fn parse_tensor_data_i32(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for i32 tensor".into(),
         ));
@@ -804,8 +804,8 @@ pub fn parse_tensor_data_i64(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for i64 tensor".into(),
         ));
@@ -835,8 +835,8 @@ pub fn parse_tensor_data_i128(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 16;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 16)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for i128 tensor".into(),
         ));
@@ -875,8 +875,8 @@ pub fn parse_tensor_data_f32(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for f32 tensor".into(),
         ));
@@ -902,8 +902,8 @@ pub fn parse_tensor_data_f64(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for f64 tensor".into(),
         ));
@@ -934,8 +934,8 @@ pub fn parse_tensor_data_j32(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 8; // 2 f32s per complex
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 8)?; // 2 f32s per complex
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for Complex<f32> tensor".into(),
         ));
@@ -967,8 +967,8 @@ pub fn parse_tensor_data_j64(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 16; // 2 f64s per complex
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 16)?; // 2 f64s per complex
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for Complex<f64> tensor".into(),
         ));
@@ -1011,7 +1011,7 @@ pub fn parse_vector_data_u0(
 ) -> Result<VsfType, DecodeError> {
     // Bitpacked: 8 bools per byte
     let byte_count = count.div_ceil(8);
-    if *pointer + byte_count > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for u0 vector".into(),
         ));
@@ -1042,7 +1042,7 @@ pub fn parse_vector_data_u8(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    if *pointer + count > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for u8 vector".into(),
         ));
@@ -1060,8 +1060,8 @@ pub fn parse_vector_data_u16(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = count * 2;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(count, 2)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for u16 vector".into(),
         ));
@@ -1081,8 +1081,8 @@ pub fn parse_vector_data_u32(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = count * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(count, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for u32 vector".into(),
         ));
@@ -1107,8 +1107,8 @@ pub fn parse_vector_data_u64(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = count * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(count, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for u64 vector".into(),
         ));
@@ -1137,8 +1137,8 @@ pub fn parse_vector_data_u128(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = count * 16;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(count, 16)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for u128 vector".into(),
         ));
@@ -1175,7 +1175,7 @@ pub fn parse_vector_data_i8(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    if *pointer + count > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for i8 vector".into(),
         ));
@@ -1193,8 +1193,8 @@ pub fn parse_vector_data_i16(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = count * 2;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(count, 2)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for i16 vector".into(),
         ));
@@ -1214,8 +1214,8 @@ pub fn parse_vector_data_i32(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = count * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(count, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for i32 vector".into(),
         ));
@@ -1240,8 +1240,8 @@ pub fn parse_vector_data_i64(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = count * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(count, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for i64 vector".into(),
         ));
@@ -1270,8 +1270,8 @@ pub fn parse_vector_data_i128(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = count * 16;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(count, 16)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for i128 vector".into(),
         ));
@@ -1308,8 +1308,8 @@ pub fn parse_vector_data_f32(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = count * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(count, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for f32 vector".into(),
         ));
@@ -1334,8 +1334,8 @@ pub fn parse_vector_data_f64(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = count * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(count, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for f64 vector".into(),
         ));
@@ -1364,8 +1364,8 @@ pub fn parse_vector_data_j32(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = count * 8; // 2 f32s per complex
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(count, 8)?; // 2 f32s per complex
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for Complex<f32> vector".into(),
         ));
@@ -1396,8 +1396,8 @@ pub fn parse_vector_data_j64(
     pointer: &mut usize,
     count: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = count * 16; // 2 f64s per complex
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(count, 16)?; // 2 f64s per complex
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for Complex<f64> vector".into(),
         ));
@@ -1442,7 +1442,7 @@ pub fn parse_strided_tensor_data_u0(
 ) -> Result<VsfType, DecodeError> {
     // Bitpacked: 8 bools per byte
     let byte_count = total_elements.div_ceil(8);
-    if *pointer + byte_count > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided u0 tensor".into(),
         ));
@@ -1475,7 +1475,7 @@ pub fn parse_strided_tensor_data_u8(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    if *pointer + total_elements > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, total_elements) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided u8 tensor".into(),
         ));
@@ -1492,8 +1492,8 @@ pub fn parse_strided_tensor_data_u16(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 2;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 2)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided u16 tensor".into(),
         ));
@@ -1515,8 +1515,8 @@ pub fn parse_strided_tensor_data_u32(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided u32 tensor".into(),
         ));
@@ -1543,8 +1543,8 @@ pub fn parse_strided_tensor_data_u64(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided u64 tensor".into(),
         ));
@@ -1575,8 +1575,8 @@ pub fn parse_strided_tensor_data_u128(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 16;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 16)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided u128 tensor".into(),
         ));
@@ -1615,7 +1615,7 @@ pub fn parse_strided_tensor_data_i8(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    if *pointer + total_elements > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, total_elements) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided i8 tensor".into(),
         ));
@@ -1635,8 +1635,8 @@ pub fn parse_strided_tensor_data_i16(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 2;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 2)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided i16 tensor".into(),
         ));
@@ -1658,8 +1658,8 @@ pub fn parse_strided_tensor_data_i32(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided i32 tensor".into(),
         ));
@@ -1686,8 +1686,8 @@ pub fn parse_strided_tensor_data_i64(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided i64 tensor".into(),
         ));
@@ -1718,8 +1718,8 @@ pub fn parse_strided_tensor_data_i128(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 16;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 16)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided i128 tensor".into(),
         ));
@@ -1758,8 +1758,8 @@ pub fn parse_strided_tensor_data_f32(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided f32 tensor".into(),
         ));
@@ -1786,8 +1786,8 @@ pub fn parse_strided_tensor_data_f64(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided f64 tensor".into(),
         ));
@@ -1818,8 +1818,8 @@ pub fn parse_strided_tensor_data_j32(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 8; // 2 floats per complex
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 8)?; // 2 floats per complex
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided Complex<f32> tensor".into(),
         ));
@@ -1852,8 +1852,8 @@ pub fn parse_strided_tensor_data_j64(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 16; // 2 floats per complex
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 16)?; // 2 floats per complex
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided Complex<f64> tensor".into(),
         ));
@@ -1895,8 +1895,8 @@ pub fn parse_tensor_data_s33(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 2;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 2)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF3E3 tensor".into(),
         ));
@@ -1921,8 +1921,8 @@ pub fn parse_tensor_data_s34(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 3;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 3)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF3E4 tensor".into(),
         ));
@@ -1947,8 +1947,8 @@ pub fn parse_tensor_data_s35(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 5;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 5)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF3E5 tensor".into(),
         ));
@@ -1973,8 +1973,8 @@ pub fn parse_tensor_data_s36(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 9;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 9)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF3E6 tensor".into(),
         ));
@@ -1999,8 +1999,8 @@ pub fn parse_tensor_data_s37(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 17;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 17)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF3E7 tensor".into(),
         ));
@@ -2025,8 +2025,8 @@ pub fn parse_tensor_data_s43(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 3;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 3)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF4E3 tensor".into(),
         ));
@@ -2051,8 +2051,8 @@ pub fn parse_tensor_data_s44(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF4E4 tensor".into(),
         ));
@@ -2077,8 +2077,8 @@ pub fn parse_tensor_data_s45(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 6;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 6)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF4E5 tensor".into(),
         ));
@@ -2103,8 +2103,8 @@ pub fn parse_tensor_data_s46(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 10;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 10)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF4E6 tensor".into(),
         ));
@@ -2129,8 +2129,8 @@ pub fn parse_tensor_data_s47(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 18;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 18)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF4E7 tensor".into(),
         ));
@@ -2155,8 +2155,8 @@ pub fn parse_tensor_data_s53(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 5;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 5)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF5E3 tensor".into(),
         ));
@@ -2181,8 +2181,8 @@ pub fn parse_tensor_data_s54(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 6;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 6)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF5E4 tensor".into(),
         ));
@@ -2207,8 +2207,8 @@ pub fn parse_tensor_data_s55(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF5E5 tensor".into(),
         ));
@@ -2233,8 +2233,8 @@ pub fn parse_tensor_data_s56(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 12;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 12)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF5E6 tensor".into(),
         ));
@@ -2259,8 +2259,8 @@ pub fn parse_tensor_data_s57(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 20;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 20)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF5E7 tensor".into(),
         ));
@@ -2285,8 +2285,8 @@ pub fn parse_tensor_data_s63(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 9;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 9)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF6E3 tensor".into(),
         ));
@@ -2311,8 +2311,8 @@ pub fn parse_tensor_data_s64(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 10;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 10)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF6E4 tensor".into(),
         ));
@@ -2337,8 +2337,8 @@ pub fn parse_tensor_data_s65(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 12;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 12)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF6E5 tensor".into(),
         ));
@@ -2363,8 +2363,8 @@ pub fn parse_tensor_data_s66(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 16;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 16)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF6E6 tensor".into(),
         ));
@@ -2389,8 +2389,8 @@ pub fn parse_tensor_data_s67(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 24;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 24)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF6E7 tensor".into(),
         ));
@@ -2415,8 +2415,8 @@ pub fn parse_tensor_data_s73(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 17;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 17)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF7E3 tensor".into(),
         ));
@@ -2441,8 +2441,8 @@ pub fn parse_tensor_data_s74(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 18;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 18)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF7E4 tensor".into(),
         ));
@@ -2467,8 +2467,8 @@ pub fn parse_tensor_data_s75(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 20;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 20)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF7E5 tensor".into(),
         ));
@@ -2493,8 +2493,8 @@ pub fn parse_tensor_data_s76(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 24;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 24)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF7E6 tensor".into(),
         ));
@@ -2519,8 +2519,8 @@ pub fn parse_tensor_data_s77(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 32;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 32)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ScalarF7E7 tensor".into(),
         ));
@@ -2547,8 +2547,8 @@ pub fn parse_tensor_data_c33(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 3;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 3)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF3E3 tensor".into(),
         ));
@@ -2573,8 +2573,8 @@ pub fn parse_tensor_data_c34(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF3E4 tensor".into(),
         ));
@@ -2599,8 +2599,8 @@ pub fn parse_tensor_data_c35(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 6;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 6)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF3E5 tensor".into(),
         ));
@@ -2625,8 +2625,8 @@ pub fn parse_tensor_data_c36(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 10;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 10)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF3E6 tensor".into(),
         ));
@@ -2651,8 +2651,8 @@ pub fn parse_tensor_data_c37(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 18;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 18)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF3E7 tensor".into(),
         ));
@@ -2677,8 +2677,8 @@ pub fn parse_tensor_data_c43(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 5;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 5)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF4E3 tensor".into(),
         ));
@@ -2703,8 +2703,8 @@ pub fn parse_tensor_data_c44(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 6;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 6)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF4E4 tensor".into(),
         ));
@@ -2729,8 +2729,8 @@ pub fn parse_tensor_data_c45(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF4E5 tensor".into(),
         ));
@@ -2755,8 +2755,8 @@ pub fn parse_tensor_data_c46(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 12;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 12)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF4E6 tensor".into(),
         ));
@@ -2781,8 +2781,8 @@ pub fn parse_tensor_data_c47(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 20;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 20)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF4E7 tensor".into(),
         ));
@@ -2807,8 +2807,8 @@ pub fn parse_tensor_data_c53(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 9;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 9)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF5E3 tensor".into(),
         ));
@@ -2833,8 +2833,8 @@ pub fn parse_tensor_data_c54(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 10;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 10)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF5E4 tensor".into(),
         ));
@@ -2859,8 +2859,8 @@ pub fn parse_tensor_data_c55(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 12;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 12)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF5E5 tensor".into(),
         ));
@@ -2885,8 +2885,8 @@ pub fn parse_tensor_data_c56(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 16;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 16)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF5E6 tensor".into(),
         ));
@@ -2911,8 +2911,8 @@ pub fn parse_tensor_data_c57(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 24;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 24)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF5E7 tensor".into(),
         ));
@@ -2937,8 +2937,8 @@ pub fn parse_tensor_data_c63(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 17;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 17)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF6E3 tensor".into(),
         ));
@@ -2963,8 +2963,8 @@ pub fn parse_tensor_data_c64(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 18;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 18)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF6E4 tensor".into(),
         ));
@@ -2989,8 +2989,8 @@ pub fn parse_tensor_data_c65(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 20;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 20)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF6E5 tensor".into(),
         ));
@@ -3015,8 +3015,8 @@ pub fn parse_tensor_data_c66(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 24;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 24)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF6E6 tensor".into(),
         ));
@@ -3041,8 +3041,8 @@ pub fn parse_tensor_data_c67(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 32;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 32)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF6E7 tensor".into(),
         ));
@@ -3067,8 +3067,8 @@ pub fn parse_tensor_data_c73(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 33;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 33)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF7E3 tensor".into(),
         ));
@@ -3093,8 +3093,8 @@ pub fn parse_tensor_data_c74(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 34;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 34)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF7E4 tensor".into(),
         ));
@@ -3119,8 +3119,8 @@ pub fn parse_tensor_data_c75(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 36;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 36)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF7E5 tensor".into(),
         ));
@@ -3145,8 +3145,8 @@ pub fn parse_tensor_data_c76(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 40;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 40)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF7E6 tensor".into(),
         ));
@@ -3171,8 +3171,8 @@ pub fn parse_tensor_data_c77(
     shape: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 48;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 48)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for CircleF7E7 tensor".into(),
         ));
@@ -3200,8 +3200,8 @@ pub fn parse_strided_tensor_data_s33(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 2;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 2)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF3E3 tensor".into(),
         ));
@@ -3227,8 +3227,8 @@ pub fn parse_strided_tensor_data_s34(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 3;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 3)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF3E4 tensor".into(),
         ));
@@ -3254,8 +3254,8 @@ pub fn parse_strided_tensor_data_s35(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 5;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 5)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF3E5 tensor".into(),
         ));
@@ -3281,8 +3281,8 @@ pub fn parse_strided_tensor_data_s36(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 9;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 9)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF3E6 tensor".into(),
         ));
@@ -3308,8 +3308,8 @@ pub fn parse_strided_tensor_data_s37(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 17;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 17)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF3E7 tensor".into(),
         ));
@@ -3335,8 +3335,8 @@ pub fn parse_strided_tensor_data_s43(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 3;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 3)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF4E3 tensor".into(),
         ));
@@ -3362,8 +3362,8 @@ pub fn parse_strided_tensor_data_s44(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF4E4 tensor".into(),
         ));
@@ -3389,8 +3389,8 @@ pub fn parse_strided_tensor_data_s45(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 6;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 6)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF4E5 tensor".into(),
         ));
@@ -3416,8 +3416,8 @@ pub fn parse_strided_tensor_data_s46(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 10;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 10)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF4E6 tensor".into(),
         ));
@@ -3443,8 +3443,8 @@ pub fn parse_strided_tensor_data_s47(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 18;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 18)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF4E7 tensor".into(),
         ));
@@ -3470,8 +3470,8 @@ pub fn parse_strided_tensor_data_s53(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 5;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 5)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF5E3 tensor".into(),
         ));
@@ -3497,8 +3497,8 @@ pub fn parse_strided_tensor_data_s54(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 6;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 6)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF5E4 tensor".into(),
         ));
@@ -3524,8 +3524,8 @@ pub fn parse_strided_tensor_data_s55(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF5E5 tensor".into(),
         ));
@@ -3551,8 +3551,8 @@ pub fn parse_strided_tensor_data_s56(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 12;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 12)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF5E6 tensor".into(),
         ));
@@ -3578,8 +3578,8 @@ pub fn parse_strided_tensor_data_s57(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 20;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 20)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF5E7 tensor".into(),
         ));
@@ -3605,8 +3605,8 @@ pub fn parse_strided_tensor_data_s63(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 9;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 9)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF6E3 tensor".into(),
         ));
@@ -3632,8 +3632,8 @@ pub fn parse_strided_tensor_data_s64(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 10;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 10)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF6E4 tensor".into(),
         ));
@@ -3659,8 +3659,8 @@ pub fn parse_strided_tensor_data_s65(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 12;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 12)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF6E5 tensor".into(),
         ));
@@ -3686,8 +3686,8 @@ pub fn parse_strided_tensor_data_s66(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 16;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 16)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF6E6 tensor".into(),
         ));
@@ -3713,8 +3713,8 @@ pub fn parse_strided_tensor_data_s67(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 24;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 24)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF6E7 tensor".into(),
         ));
@@ -3740,8 +3740,8 @@ pub fn parse_strided_tensor_data_s73(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 17;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 17)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF7E3 tensor".into(),
         ));
@@ -3767,8 +3767,8 @@ pub fn parse_strided_tensor_data_s74(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 18;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 18)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF7E4 tensor".into(),
         ));
@@ -3794,8 +3794,8 @@ pub fn parse_strided_tensor_data_s75(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 20;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 20)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF7E5 tensor".into(),
         ));
@@ -3821,8 +3821,8 @@ pub fn parse_strided_tensor_data_s76(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 24;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 24)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF7E6 tensor".into(),
         ));
@@ -3848,8 +3848,8 @@ pub fn parse_strided_tensor_data_s77(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 32;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 32)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided ScalarF7E7 tensor".into(),
         ));
@@ -3877,8 +3877,8 @@ pub fn parse_strided_tensor_data_c33(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 3;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 3)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF3E3 tensor".into(),
         ));
@@ -3904,8 +3904,8 @@ pub fn parse_strided_tensor_data_c34(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 4;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 4)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF3E4 tensor".into(),
         ));
@@ -3931,8 +3931,8 @@ pub fn parse_strided_tensor_data_c35(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 6;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 6)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF3E5 tensor".into(),
         ));
@@ -3958,8 +3958,8 @@ pub fn parse_strided_tensor_data_c36(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 10;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 10)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF3E6 tensor".into(),
         ));
@@ -3985,8 +3985,8 @@ pub fn parse_strided_tensor_data_c37(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 18;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 18)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF3E7 tensor".into(),
         ));
@@ -4012,8 +4012,8 @@ pub fn parse_strided_tensor_data_c43(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 5;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 5)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF4E3 tensor".into(),
         ));
@@ -4039,8 +4039,8 @@ pub fn parse_strided_tensor_data_c44(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 6;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 6)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF4E4 tensor".into(),
         ));
@@ -4066,8 +4066,8 @@ pub fn parse_strided_tensor_data_c45(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 8;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 8)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF4E5 tensor".into(),
         ));
@@ -4093,8 +4093,8 @@ pub fn parse_strided_tensor_data_c46(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 12;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 12)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF4E6 tensor".into(),
         ));
@@ -4120,8 +4120,8 @@ pub fn parse_strided_tensor_data_c47(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 20;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 20)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF4E7 tensor".into(),
         ));
@@ -4147,8 +4147,8 @@ pub fn parse_strided_tensor_data_c53(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 9;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 9)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF5E3 tensor".into(),
         ));
@@ -4174,8 +4174,8 @@ pub fn parse_strided_tensor_data_c54(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 10;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 10)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF5E4 tensor".into(),
         ));
@@ -4201,8 +4201,8 @@ pub fn parse_strided_tensor_data_c55(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 12;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 12)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF5E5 tensor".into(),
         ));
@@ -4228,8 +4228,8 @@ pub fn parse_strided_tensor_data_c56(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 16;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 16)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF5E6 tensor".into(),
         ));
@@ -4255,8 +4255,8 @@ pub fn parse_strided_tensor_data_c57(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 24;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 24)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF5E7 tensor".into(),
         ));
@@ -4282,8 +4282,8 @@ pub fn parse_strided_tensor_data_c63(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 17;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 17)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF6E3 tensor".into(),
         ));
@@ -4309,8 +4309,8 @@ pub fn parse_strided_tensor_data_c64(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 18;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 18)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF6E4 tensor".into(),
         ));
@@ -4336,8 +4336,8 @@ pub fn parse_strided_tensor_data_c65(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 20;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 20)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF6E5 tensor".into(),
         ));
@@ -4363,8 +4363,8 @@ pub fn parse_strided_tensor_data_c66(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 24;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 24)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF6E6 tensor".into(),
         ));
@@ -4390,8 +4390,8 @@ pub fn parse_strided_tensor_data_c67(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 32;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 32)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF6E7 tensor".into(),
         ));
@@ -4417,8 +4417,8 @@ pub fn parse_strided_tensor_data_c73(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 33;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 33)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF7E3 tensor".into(),
         ));
@@ -4444,8 +4444,8 @@ pub fn parse_strided_tensor_data_c74(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 34;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 34)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF7E4 tensor".into(),
         ));
@@ -4471,8 +4471,8 @@ pub fn parse_strided_tensor_data_c75(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 36;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 36)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF7E5 tensor".into(),
         ));
@@ -4498,8 +4498,8 @@ pub fn parse_strided_tensor_data_c76(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 40;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 40)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF7E6 tensor".into(),
         ));
@@ -4525,8 +4525,8 @@ pub fn parse_strided_tensor_data_c77(
     stride: Vec<usize>,
     total_elements: usize,
 ) -> Result<VsfType, DecodeError> {
-    let byte_count = total_elements * 48;
-    if *pointer + byte_count > data.len() {
+    let byte_count = crate::decoding::helpers::elements_bytes(total_elements, 48)?;
+    if crate::decoding::helpers::short(data, *pointer, byte_count) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for strided CircleF7E7 tensor".into(),
         ));

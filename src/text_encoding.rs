@@ -292,9 +292,13 @@ pub fn decode_text_with_size(
 
     // Use fast decoder
     let decoder = get_fast_decoder();
+    let max_bits = bytes.len() << 3; // Convert bytes to bits
+    // Every character costs at least one bit, so a count beyond the bits present cannot decode; refused before anything is reserved for it (security audit VSF-02: a count of 2^62 aborted the process in the allocator).
+    if char_count > max_bits {
+        return Err("character count exceeds the bits present");
+    }
     let mut result = String::with_capacity(char_count);
     let mut bit_idx = 0;
-    let max_bits = bytes.len() << 3; // Convert bytes to bits
 
     // Decode exactly char_count characters
     let mut decoded_count = 0;

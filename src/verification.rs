@@ -154,6 +154,10 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
         };
 
     // Parse each header field using helper function
+    // A header field takes several bytes, so a count beyond the bytes left is refused before anything is reserved for it (security audit VSF-02).
+    if crate::decoding::helpers::short(data, ptr, field_count) {
+        return Err(format!("header claims {field_count} fields, more than the bytes left"));
+    }
     let mut fields = Vec::with_capacity(field_count);
     for _ in 0..field_count {
         fields.push(parse_header_field(data, &mut ptr)?);

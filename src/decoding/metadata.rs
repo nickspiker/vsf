@@ -58,7 +58,7 @@ pub fn parse_eagle_time(data: &[u8], pointer: &mut usize) -> Result<VsfType, Dec
     match time_type {
         b'5' => {
             // e5: 32-bit signed oscillation count, 4 bytes BE
-            if *pointer + 4 > data.len() {
+            if crate::decoding::helpers::short(data, *pointer, 4) {
                 return Err(DecodeError::UnexpectedEofMsg(
                     "Not enough data for e5".into(),
                 ));
@@ -74,7 +74,7 @@ pub fn parse_eagle_time(data: &[u8], pointer: &mut usize) -> Result<VsfType, Dec
         }
         b'6' => {
             // e6: 64-bit signed oscillation count, 8 bytes BE (canonical form)
-            if *pointer + 8 > data.len() {
+            if crate::decoding::helpers::short(data, *pointer, 8) {
                 return Err(DecodeError::UnexpectedEofMsg(
                     "Not enough data for e6".into(),
                 ));
@@ -94,7 +94,7 @@ pub fn parse_eagle_time(data: &[u8], pointer: &mut usize) -> Result<VsfType, Dec
         }
         b'7' => {
             // e7: 128-bit signed oscillation count, 16 bytes BE
-            if *pointer + 16 > data.len() {
+            if crate::decoding::helpers::short(data, *pointer, 16) {
                 return Err(DecodeError::UnexpectedEofMsg(
                     "Not enough data for e7".into(),
                 ));
@@ -141,7 +141,7 @@ pub fn parse_eagle_time(data: &[u8], pointer: &mut usize) -> Result<VsfType, Dec
             *pointer += 1;
             match precision {
                 b'5' => {
-                    if *pointer + 4 > data.len() {
+                    if crate::decoding::helpers::short(data, *pointer, 4) {
                         return Err(DecodeError::UnexpectedEofMsg(
                             "Not enough data for ef5".into(),
                         ));
@@ -156,7 +156,7 @@ pub fn parse_eagle_time(data: &[u8], pointer: &mut usize) -> Result<VsfType, Dec
                     Ok(VsfType::e(EtType::f5(value)))
                 }
                 b'6' => {
-                    if *pointer + 8 > data.len() {
+                    if crate::decoding::helpers::short(data, *pointer, 8) {
                         return Err(DecodeError::UnexpectedEofMsg(
                             "Not enough data for ef6".into(),
                         ));
@@ -205,7 +205,7 @@ pub fn parse_world_coord(
             )))
         }
     };
-    if *pointer + bytes_needed > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, bytes_needed) {
         return Err(DecodeError::UnexpectedEofMsg(format!(
             "Not enough data for w{}",
             size_byte as char
@@ -238,7 +238,7 @@ pub fn parse_world_cell(data: &[u8], pointer: &mut usize) -> Result<VsfType, Dec
             )))
         }
     };
-    if *pointer + bytes_needed > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, bytes_needed) {
         return Err(DecodeError::UnexpectedEofMsg(format!(
             "Not enough data for wm{}",
             size_byte as char
@@ -253,7 +253,7 @@ pub fn parse_world_cell(data: &[u8], pointer: &mut usize) -> Result<VsfType, Dec
 
 pub fn parse_dtype(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     let length = decode_usize(data, pointer)?;
-    if *pointer + length > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, length) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for dtype".into(),
         ));
@@ -275,7 +275,7 @@ pub fn parse_dtype(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeEr
 
 pub fn parse_ascii(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     let length = decode_usize(data, pointer)?;
-    if *pointer + length > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, length) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for ASCII text".into(),
         ));
@@ -327,7 +327,7 @@ pub fn parse_backward_version(data: &[u8], pointer: &mut usize) -> Result<VsfTyp
 /// Format: 3 bytes total - 'r', 'c', colour letter Examples: rcn (green), rcr (red), rcb (blue), etc.
 pub fn parse_colour_constant(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // Already consumed 'r', now expect 'c' and colour letter
-    if *pointer + 2 > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, 2) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Incomplete colour constant (need 2 more bytes after 'r'.into())".into(),
         ));
@@ -376,7 +376,7 @@ pub fn parse_colour_array(
     match colour_type {
         b'a' => {
             // ra: [u8; 4] RGBA
-            if *pointer + 4 > data.len() {
+            if crate::decoding::helpers::short(data, *pointer, 4) {
                 return Err(DecodeError::UnexpectedEofMsg(
                     "Incomplete ra colour (need 4 bytes.into())".into(),
                 ));
@@ -392,7 +392,7 @@ pub fn parse_colour_array(
         }
         b't' => {
             // rt: [u16; 4] RGBA
-            if *pointer + 8 > data.len() {
+            if crate::decoding::helpers::short(data, *pointer, 8) {
                 return Err(DecodeError::UnexpectedEofMsg(
                     "Incomplete rt colour (need 8 bytes.into())".into(),
                 ));
@@ -408,7 +408,7 @@ pub fn parse_colour_array(
         }
         b'p' => {
             // rp: u16 RGB565
-            if *pointer + 2 > data.len() {
+            if crate::decoding::helpers::short(data, *pointer, 2) {
                 return Err(DecodeError::UnexpectedEofMsg(
                     "Incomplete rp colour (need 2 bytes.into())".into(),
                 ));
@@ -435,10 +435,10 @@ pub fn parse_mac(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeErro
     *pointer += 1;
 
     // Read length (stored as len-1) using standard VSF variable-length encoding
-    let length = decode_usize(data, pointer)? + 1; // Add 1 back
+    let length = crate::decoding::helpers::decode_len_minus_one(data, pointer)?; // Add 1 back
 
     // Read MAC tag data
-    if *pointer + length > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, length) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for MAC tag".into(),
         ));
@@ -470,10 +470,10 @@ pub fn parse_hash(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeErr
     *pointer += 1;
 
     // Read length (stored as len-1) using standard VSF variable-length encoding
-    let length = decode_usize(data, pointer)? + 1; // Add 1 back
+    let length = crate::decoding::helpers::decode_len_minus_one(data, pointer)?; // Add 1 back
 
     // Read hash data
-    if *pointer + length > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, length) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for hash".into(),
         ));
@@ -510,10 +510,10 @@ pub fn parse_signature(data: &[u8], pointer: &mut usize) -> Result<VsfType, Deco
     *pointer += 1;
 
     // Read length (stored as len-1) using standard VSF variable-length encoding
-    let length = decode_usize(data, pointer)? + 1; // Add 1 back
+    let length = crate::decoding::helpers::decode_len_minus_one(data, pointer)?; // Add 1 back
 
     // Read signature data
-    if *pointer + length > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, length) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for signature".into(),
         ));
@@ -563,10 +563,10 @@ pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeErro
     }
 
     // Read length (stored as len-1) using standard VSF variable-length encoding
-    let length = decode_usize(data, pointer)? + 1; // Add 1 back
+    let length = crate::decoding::helpers::decode_len_minus_one(data, pointer)?; // Add 1 back
 
     // Read key data
-    if *pointer + length > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, length) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for key".into(),
         ));
@@ -605,8 +605,8 @@ pub fn parse_verify_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, Dec
     }
     let algo = data[*pointer];
     *pointer += 1;
-    let length = decode_usize(data, pointer)? + 1; // stored as len-1
-    if *pointer + length > data.len() {
+    let length = crate::decoding::helpers::decode_len_minus_one(data, pointer)?; // stored as len-1
+    if crate::decoding::helpers::short(data, *pointer, length) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for verification key".into(),
         ));
@@ -633,8 +633,8 @@ pub fn parse_signing_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, De
     }
     let algo = data[*pointer];
     *pointer += 1;
-    let length = decode_usize(data, pointer)? + 1; // stored as len-1
-    if *pointer + length > data.len() {
+    let length = crate::decoding::helpers::decode_len_minus_one(data, pointer)?; // stored as len-1
+    if crate::decoding::helpers::short(data, *pointer, length) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for signing key".into(),
         ));
@@ -662,10 +662,10 @@ pub fn parse_shared_secret(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
     *pointer += 1;
 
     // Read length (stored as len-1) using standard VSF variable-length encoding
-    let length = decode_usize(data, pointer)? + 1; // Add 1 back
+    let length = crate::decoding::helpers::decode_len_minus_one(data, pointer)?; // Add 1 back
 
     // Read secret data
-    if *pointer + length > data.len() {
+    if crate::decoding::helpers::short(data, *pointer, length) {
         return Err(DecodeError::UnexpectedEofMsg(
             "Not enough data for shared secret".into(),
         ));
@@ -756,7 +756,7 @@ pub fn parse_preamble(
             b'h' => {
                 // Parse hash
                 let hash_len = decode_usize(data, pointer)?;
-                if *pointer + hash_len > data.len() {
+                if crate::decoding::helpers::short(data, *pointer, hash_len) {
                     return Err(DecodeError::UnexpectedEofMsg(
                         "Preamble hash extends beyond data".into(),
                     ));
@@ -767,7 +767,7 @@ pub fn parse_preamble(
             b'g' => {
                 // Parse signature
                 let sig_len = decode_usize(data, pointer)?;
-                if *pointer + sig_len > data.len() {
+                if crate::decoding::helpers::short(data, *pointer, sig_len) {
                     return Err(DecodeError::UnexpectedEofMsg(
                         "Preamble signature extends beyond data".into(),
                     ));

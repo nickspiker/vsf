@@ -241,12 +241,13 @@ impl<S: ByteSource> Document<S> {
     pub fn section(&self, entry: &HeaderField) -> Result<VsfSection, ContainerError> {
         let (off, len) = self.checked_span(entry)?;
         if len == 0 {
-            return Ok(VsfSection::new(entry.name.clone()));
+            return VsfSection::try_new(entry.name.clone()).map_err(ContainerError::Parse);
         }
         let bytes = self.source.read_vec(off, len)?;
         let mut ptr = 0;
         let mut s = VsfSection::parse(&bytes, &mut ptr).map_err(ContainerError::Parse)?;
         if s.name.is_empty() {
+            crate::file_format::validate_name(&entry.name).map_err(ContainerError::Parse)?;
             s.name = entry.name.clone();
         }
         Ok(s)
