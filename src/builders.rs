@@ -1270,6 +1270,9 @@ pub fn lumis_raw_capture(samples: Vec<u64>, iso: u64, exposure_osc: u64) -> Resu
 /// AV1 encoding marker for v-wrapped data
 pub const ENCODING_AV1: u8 = b'a';
 
+/// H.264 (MPEG-4 AVC) encoding marker for v-wrapped data: one Annex B access unit per value (a Photon beam's video track, kept only when the user opts in).
+pub const ENCODING_H264: u8 = b'm';
+
 /// Build a compressed image (AV1 payload in VSF RGB colourspace)
 ///
 /// Creates a minimal VSF file with:

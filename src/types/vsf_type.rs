@@ -275,6 +275,7 @@ pub enum VsfType {
     /// - `b` = Binary blob (raw bytes, no encoding, vb#⦉size of blob in BITS⦊ where # represents the 2^# bits of the size field itself — 100 bytes is `vb4⦉800⦊`)
     /// - `a` = AV1 video codec (image/video compression)
     /// - `o` = Opus audio packet (one packet per value; an empty value is a declared hole, so a stream keeps its timing)
+    /// - `m` = H.264 (MPEG-4 AVC) video access unit, Annex B byte stream, one access unit per value (Photon beams, kept only when the user opts in — Nick 2026-11-01)
     /// - `z` = zstd compression
     /// - `r` = Reed-Solomon error correction
     /// - `x` = XZ/LZMA compression
