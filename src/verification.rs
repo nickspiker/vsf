@@ -353,6 +353,16 @@ fn rebuild_with_header(
 /// # Returns 32-byte BLAKE3 hash
 ///
 pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
+    provenance_hash_zeroing(vsf_bytes, zero_header_signatures)
+}
+
+/// PROVENANCE PIN (2026-11-03, delete at v169): the hash as every file before that day computed it, with the whole-file signature scan. READ ONLY, never written: [`is_original`] falls back to it so the vaults, chains, records and frames written under it stay readable while they are rewritten under the header-only rule.
+/// Carrying it keeps the old hole open for exactly as long as the pin stands: a file crafted to pass this rule still passes [`is_original`].
+pub fn compute_provenance_hash_legacy(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
+    provenance_hash_zeroing(vsf_bytes, zero_all_signatures_legacy)
+}
+
+fn provenance_hash_zeroing(vsf_bytes: &[u8], zero_signatures: fn(&mut [u8]) -> Result<(), String>) -> Result<[u8; 32], String> {
     // Verify magic number
     if vsf_bytes.len() < 4 {
         return Err("File too small to be valid VSF".to_string());
@@ -437,8 +447,8 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
                 }
             }
 
-            // Every signature slot the HEADER holds, found by walking the header's own structure, and nothing past its '>' (security audit VSF-10: the scan this replaced ran over section bodies too, so body bytes that happened to parse as a signature were left out of the hash).
-            zero_header_signatures(&mut temp_bytes)?;
+            // The rule in force: every signature slot the HEADER holds, found by walking the header's own structure, and nothing past its '>' (security audit VSF-10: the scan before it ran over section bodies too, so body bytes that happened to parse as a signature were left out of the hash). The legacy reader hands in the scan instead.
+            zero_signatures(&mut temp_bytes)?;
 
             // Compute BLAKE3 hash of entire file
             let computed_hash = blake3::hash(&temp_bytes);
@@ -446,6 +456,32 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
         }
         _ => Err("Expected BLAKE3 provenance hash (hp)".to_string()),
     }
+}
+
+/// PROVENANCE PIN (delete at v169): the retired rule, a byte scan of the WHOLE file for anything that parses as a signature, bodies included. Kept only for [`compute_provenance_hash_legacy`].
+fn zero_all_signatures_legacy(vsf_bytes: &mut [u8]) -> Result<(), String> {
+    let mut ptr = 0;
+    while ptr + 1 < vsf_bytes.len() {
+        if vsf_bytes[ptr] == b'g' && matches!(vsf_bytes[ptr + 1], b'e' | b'p' | b'r' | b'm' | b'f' | b's' | b'd') {
+            let sig_position = ptr;
+            let sig_type = match parse(vsf_bytes, &mut ptr) {
+                Ok(t) => t,
+                Err(_) => {
+                    ptr = sig_position + 1;
+                    continue;
+                }
+            };
+            let len = match sig_type {
+                VsfType::ge(s) | VsfType::gp(s) | VsfType::gr(s) | VsfType::gm(s) | VsfType::gf(s) | VsfType::gs(s) | VsfType::gd(s) => s.len(),
+                _ => continue,
+            };
+            // The value bytes end where the parse ended.
+            vsf_bytes[ptr - len..ptr].fill(0);
+        } else {
+            ptr += 1;
+        }
+    }
+    Ok(())
 }
 
 /// Zero every signature slot the header holds, walking the header's own structure: top-level values and the values inside each `(name:…)` field, each parsed as the typed value it is, up to the header's own `>`.
@@ -1193,10 +1229,13 @@ pub fn is_original(vsf_bytes: &[u8]) -> Result<(), String> {
     };
 
     if computed_hash.as_slice() == stored_hash.as_slice() {
-        Ok(())
-    } else {
-        Err("File has been modified - provenance hash does not match content".to_string())
+        return Ok(());
     }
+    // PROVENANCE PIN (delete at v169): a file hashed under the rule retired on 2026-11-03 still reads, so nothing written before that day is stranded while it is rewritten under the header-only rule. Writers never use this rule.
+    if compute_provenance_hash_legacy(vsf_bytes)?.as_slice() == stored_hash.as_slice() {
+        return Ok(());
+    }
+    Err("File has been modified - provenance hash does not match content".to_string())
 }
 
 /// Verify the rolling hash (hb) in a VSF header.

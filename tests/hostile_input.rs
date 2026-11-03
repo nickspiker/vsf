@@ -61,6 +61,28 @@ fn provenance_covers_body_bytes_that_look_like_a_signature() {
     assert!(vsf::verification::is_original(&a).is_ok(), "the file's own stored hash must still verify");
 }
 
+/// PROVENANCE PIN (delete at v169): a file hashed under the retired whole-file rule still reads, and a file hashed under the current rule reads first.
+#[test]
+fn a_legacy_provenance_hash_still_reads_until_the_pin() {
+    let mut looks_signed = b"ge3\x40".to_vec();
+    looks_signed.extend_from_slice(&[0x22u8; 64]);
+    let doc = vsf::VsfBuilder::new()
+        .creation_time_oscillations(1)
+        .provenance_only()
+        .add_section("blob", vec![("v".to_string(), VsfType::v(b'e', looks_signed))])
+        .build()
+        .expect("build");
+    assert!(vsf::verification::is_original(&doc).is_ok(), "a file under the current rule reads");
+    let legacy = vsf::verification::compute_provenance_hash_legacy(&doc).expect("legacy hash");
+    assert_ne!(legacy, vsf::verification::compute_provenance_hash(&doc).expect("hash"), "the two rules differ on this body");
+    let mut old = doc.clone();
+    vsf::verification::fill_provenance_hash(&mut old, &legacy).expect("fill");
+    assert!(vsf::verification::is_original(&old).is_ok(), "a file written under the retired rule still reads");
+    let last = old.len() - 1;
+    old[last] ^= 0xff;
+    assert!(vsf::verification::is_original(&old).is_err(), "a modified file reads as modified under either rule");
+}
+
 /// A section named by a table of contents is checked, never constructed with the panicking `new` (VSF-03).
 #[test]
 fn a_bad_section_name_is_an_error() {
