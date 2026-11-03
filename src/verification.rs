@@ -437,8 +437,8 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
                 }
             }
 
-            // Now we need to find and zero out any ge/gp/gr signatures in header fields This requires parsing the header fields which come after the field count For now, we'll scan for signature fields and zero them
-            zero_all_signatures(&mut temp_bytes)?;
+            // Every signature slot the HEADER holds, found by walking the header's own structure, and nothing past its '>' (security audit VSF-10: the scan this replaced ran over section bodies too, so body bytes that happened to parse as a signature were left out of the hash).
+            zero_header_signatures(&mut temp_bytes)?;
 
             // Compute BLAKE3 hash of entire file
             let computed_hash = blake3::hash(&temp_bytes);
@@ -448,55 +448,44 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     }
 }
 
-/// Zero out all signature fields (ge, gp, gr) in the VSF file
-fn zero_all_signatures(vsf_bytes: &mut Vec<u8>) -> Result<(), String> {
-    let mut ptr = 0;
-    while ptr < vsf_bytes.len() - 1 {
-        // Look for signature markers: ge, gp, gr, gm, gf, gs, gd
-        if vsf_bytes[ptr] == b'g' && matches!(vsf_bytes[ptr + 1], b'e' | b'p' | b'r' | b'm' | b'f' | b's' | b'd') {
-            let sig_position = ptr;
-            let sig_type = match parse(vsf_bytes, &mut ptr) {
-                Ok(t) => t,
-                Err(_) => {
-                    ptr = sig_position + 1;
+/// Zero every signature slot the header holds, walking the header's own structure: top-level values and the values inside each `(name:…)` field, each parsed as the typed value it is, up to the header's own `>`.
+/// Nothing past the header is touched: section bodies are content, and content is exactly what the provenance hash is for (security audit VSF-10).
+fn zero_header_signatures(vsf_bytes: &mut [u8]) -> Result<(), String> {
+    let mut pointer = 4; // Skip magic "RÅ<"
+    // A parsed signature's value bytes end where the parse ended; zero them in place.
+    let zero_if_signature = |value: &VsfType, end: usize, bytes: &mut [u8]| {
+        let len = match value {
+            VsfType::ge(s) | VsfType::gp(s) | VsfType::gr(s) | VsfType::gm(s) | VsfType::gf(s) | VsfType::gs(s) | VsfType::gd(s) => s.len(),
+            _ => return,
+        };
+        bytes[end - len..end].fill(0);
+    };
+    while pointer < vsf_bytes.len() && vsf_bytes[pointer] != b'>' {
+        if vsf_bytes[pointer] == b'(' {
+            pointer += 1;
+            let _name = parse(vsf_bytes, &mut pointer).map_err(|e| format!("Header field name at byte {}: {}", pointer, e))?;
+            if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b':' {
+                pointer += 1;
+            }
+            while pointer < vsf_bytes.len() && vsf_bytes[pointer] != b')' {
+                if vsf_bytes[pointer] == b',' {
+                    pointer += 1;
                     continue;
                 }
-            };
-
-            match sig_type {
-                VsfType::ge(sig_bytes) | VsfType::gp(sig_bytes) | VsfType::gr(sig_bytes) | VsfType::gm(sig_bytes) | VsfType::gf(sig_bytes) | VsfType::gs(sig_bytes) | VsfType::gd(sig_bytes) => {
-                    let sig_len = sig_bytes.len();
-                    if let Ok(sig_start) = find_signature_value_position(vsf_bytes, sig_position) {
-                        // Zero out signature
-                        for i in 0..sig_len {
-                            vsf_bytes[sig_start + i] = 0;
-                        }
-                    }
-                }
-                _ => {}
+                let value = parse(vsf_bytes, &mut pointer).map_err(|e| format!("Header field value at byte {}: {}", pointer, e))?;
+                zero_if_signature(&value, pointer, vsf_bytes);
+            }
+            if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b')' {
+                pointer += 1;
             }
         } else {
-            ptr += 1;
+            let value = parse(vsf_bytes, &mut pointer).map_err(|e| format!("Header value at byte {}: {}", pointer, e))?;
+            zero_if_signature(&value, pointer, vsf_bytes);
         }
     }
     Ok(())
 }
 
-/// Find the position of signature value bytes within the encoded signature type
-fn find_signature_value_position(data: &[u8], sig_marker_pos: usize) -> Result<usize, String> {
-    let mut pos = sig_marker_pos;
-    let sig_type =
-        parse(data, &mut pos).map_err(|e| format!("Failed to parse signature: {}", e))?;
-
-    match sig_type {
-        VsfType::ge(bytes) | VsfType::gp(bytes) | VsfType::gr(bytes) | VsfType::gm(bytes) | VsfType::gf(bytes) | VsfType::gs(bytes) | VsfType::gd(bytes) => {
-            // pos now points AFTER the signature Calculate where the signature bytes started
-            let sig_start = pos - bytes.len();
-            Ok(sig_start)
-        }
-        _ => Err("Expected signature type (ge/gp/gr/gm/gf/gs/gd)".to_string()),
-    }
-}
 
 /// Write computed provenance hash (hp) into the placeholder
 ///

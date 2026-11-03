@@ -38,6 +38,29 @@ fn a_tensor_shape_that_overflows_is_an_error() {
     assert!(vsf::Tensor::<u8>::try_new(vec![big, big], Vec::new()).is_err());
 }
 
+/// The provenance hash covers every body byte, including bytes that happen to spell a signature: the scan this replaced zeroed them before hashing, so two files differing only there shared a hash (VSF-10).
+#[test]
+fn provenance_covers_body_bytes_that_look_like_a_signature() {
+    // `ge`, a one-byte length marker, 64, then 64 bytes: the shape the old whole-file scan parsed as a signature and zeroed.
+    let mut looks_signed = b"ge3\x40".to_vec();
+    looks_signed.extend_from_slice(&[0x11u8; 64]);
+    let build = |body: &[u8]| {
+        vsf::VsfBuilder::new()
+            .creation_time_oscillations(1)
+            .provenance_only()
+            .add_section("blob", vec![("v".to_string(), VsfType::v(b'e', body.to_vec()))])
+            .build()
+            .expect("build")
+    };
+    let a = build(&looks_signed);
+    let mut other = looks_signed.clone();
+    other[10] ^= 0xff;
+    let b = build(&other);
+    let (ha, hb) = (vsf::verification::compute_provenance_hash(&a).expect("hash a"), vsf::verification::compute_provenance_hash(&b).expect("hash b"));
+    assert_ne!(ha, hb, "a body byte inside what looks like a signature must change the provenance hash");
+    assert!(vsf::verification::is_original(&a).is_ok(), "the file's own stored hash must still verify");
+}
+
 /// A section named by a table of contents is checked, never constructed with the panicking `new` (VSF-03).
 #[test]
 fn a_bad_section_name_is_an_error() {
