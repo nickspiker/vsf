@@ -113,7 +113,8 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
     } else {
         // Multi-dim: parse shape dimensions
         let shape = parse_shape(data, pointer, ndim)?;
-        let total_elements: usize = shape.iter().product();
+        // Checked: a product that wraps to a small number (security audit VSF-06: `[2^32, 2^32]` multiplied to 0 in release) would admit a tensor whose data cannot hold its shape.
+        let total_elements = crate::types::packed_view::shape_elements(&shape).map_err(DecodeError::InvalidTensor)?;
         (shape, total_elements)
     };
 
@@ -211,7 +212,8 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
         b's' => {
             // Spirix Scalar: elem_size is F marker, need to read E marker
             let f_marker = elem_size;
-            let e_marker = data[*pointer];
+            // WHY: the shape may end exactly at the buffer's end, so the byte after it is peer-supplied absence, not a slot (security audit VSF-05).
+            let e_marker = *data.get(*pointer).ok_or(DecodeError::UnexpectedEof { expected: *pointer + 1, got: data.len() })?;
             *pointer += 1;
             match (f_marker, e_marker) {
                 (b'3', b'3') => parse_tensor_data_s33(data, pointer, shape, total_elements),
@@ -253,7 +255,8 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
         b'c' => {
             // Spirix Circle: elem_size is F marker, need to read E marker
             let f_marker = elem_size;
-            let e_marker = data[*pointer];
+            // WHY: the shape may end exactly at the buffer's end, so the byte after it is peer-supplied absence, not a slot (security audit VSF-05).
+            let e_marker = *data.get(*pointer).ok_or(DecodeError::UnexpectedEof { expected: *pointer + 1, got: data.len() })?;
             *pointer += 1;
             match (f_marker, e_marker) {
                 (b'3', b'3') => parse_tensor_data_c33(data, pointer, shape, total_elements),
@@ -320,7 +323,8 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
     // Parse stride
     let stride = parse_shape(data, pointer, ndim)?; // Same format as shape
 
-    let total_elements: usize = shape.iter().product();
+    // Checked, as in `parse_tensor` (security audit VSF-06).
+    let total_elements = crate::types::packed_view::shape_elements(&shape).map_err(DecodeError::InvalidTensor)?;
 
     // Dispatch based on element type
     match elem_type {
@@ -367,7 +371,8 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
         b's' => {
             // Spirix Scalar: elem_size is F marker, need to read E marker
             let f_marker = elem_size;
-            let e_marker = data[*pointer];
+            // WHY: the shape may end exactly at the buffer's end, so the byte after it is peer-supplied absence, not a slot (security audit VSF-05).
+            let e_marker = *data.get(*pointer).ok_or(DecodeError::UnexpectedEof { expected: *pointer + 1, got: data.len() })?;
             *pointer += 1;
             match (f_marker, e_marker) {
                 (b'3', b'3') => {
@@ -459,7 +464,8 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
         b'c' => {
             // Spirix Circle: elem_size is F marker, need to read E marker
             let f_marker = elem_size;
-            let e_marker = data[*pointer];
+            // WHY: the shape may end exactly at the buffer's end, so the byte after it is peer-supplied absence, not a slot (security audit VSF-05).
+            let e_marker = *data.get(*pointer).ok_or(DecodeError::UnexpectedEof { expected: *pointer + 1, got: data.len() })?;
             *pointer += 1;
             match (f_marker, e_marker) {
                 (b'3', b'3') => {

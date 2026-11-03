@@ -35,7 +35,12 @@ pub trait ByteSource {
         if let Some(s) = self.slice(offset, len) {
             return Ok(s.to_vec());
         }
-        let n = usize::try_from(len).map_err(|_| SourceError::OutOfRange { offset, len, size: self.len() })?;
+        // WHY: offset and len come from the file; the range is held to the source before anything is reserved for it, or a header naming 2^64 bytes aborted the process in the allocator (security audit VSF-09).
+        let size = self.len();
+        if offset.checked_add(len).is_none_or(|end| end > size) {
+            return Err(SourceError::OutOfRange { offset, len, size });
+        }
+        let n = usize::try_from(len).map_err(|_| SourceError::OutOfRange { offset, len, size })?;
         let mut v = vec![0u8; n];
         self.read_at(offset, &mut v)?;
         Ok(v)

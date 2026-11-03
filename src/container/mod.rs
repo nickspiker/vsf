@@ -130,7 +130,8 @@ impl<S: ByteSource> Document<S> {
         if size >= (TRAILER_LEN as u64) + 8 {
             let tail = source.read_vec(size - TRAILER_LEN as u64, TRAILER_LEN as u64)?;
             if let Some(off) = append::parse_trailer(&tail) {
-                if off + 8 < size {
+                // WHY: the offset is trailer-supplied; a value near u64::MAX wrapped the sum below the size and passed (security audit VSF-09).
+                if off.checked_add(8).is_some_and(|end| end < size) {
                     if let Ok((header, hlen, hend)) = read_header_at(&source, off) {
                         if header.file_length as u64 == size {
                             let generation = inline_u64(&header, append::FIELD_GEN).unwrap_or(0) as u32;
@@ -418,7 +419,9 @@ impl<S: ByteSource> Document<S> {
             }
             return Ok(Some(false));
         }
-        let bodies = self.source.read_vec(g.start, g.header_offset - g.start)?;
+        // WHY: both offsets come from the file; a header offset before its generation's start underflowed to a huge length (security audit VSF-09).
+        let body_len = g.header_offset.checked_sub(g.start).ok_or_else(|| ContainerError::Header("generation header before its start".into()))?;
+        let bodies = self.source.read_vec(g.start, body_len)?;
         let mut head = self.source.read_vec(g.header_offset, g.header_len)?;
         crate::verification::fill_provenance_hash(&mut head, &[0u8; 32]).map_err(ContainerError::Header)?;
         let head = crate::verification::write_file_hash(head, &[0u8; 32]).map_err(ContainerError::Header)?;
@@ -503,7 +506,8 @@ fn read_header_at<S: ByteSource>(source: &S, offset: u64) -> Result<(VsfHeader, 
         VsfType::b(len, _) => len as u64,
         other => return Err(ContainerError::Header(format!("expected the header length (b), found {other:?}"))),
     };
-    if header_len < 8 || offset + header_len > size {
+    // WHY: the header length is file-supplied; a value near u64::MAX wrapped the sum below the size, passed, and the read then reserved the whole address space (security audit VSF-09).
+    if header_len < 8 || offset.checked_add(header_len).is_none_or(|end| end > size) {
         return Err(ContainerError::Header(format!("header length {header_len} at {offset} is impossible for a {size}-byte source")));
     }
     let header_bytes = source.read_vec(offset, header_len)?;

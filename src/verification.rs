@@ -163,8 +163,8 @@ pub fn parse_full_header(data: &[u8]) -> Result<ParsedHeader, String> {
         fields.push(parse_header_field(data, &mut ptr)?);
     }
 
-    // Find header end
-    if data[ptr] != b'>' {
+    // Find header end — a header cut off right after its last field has no byte here (security audit VSF-07).
+    if data.get(ptr) != Some(&b'>') {
         return Err("Expected '>' at end of header".to_string());
     }
     ptr += 1;
@@ -1173,79 +1173,6 @@ fn write_section_signature(
     vsf_bytes[sig_position..sig_position + 64].copy_from_slice(signature);
 
     Ok(vsf_bytes)
-}
-
-/// Add encryption metadata to a section's header field
-///
-/// This function:
-/// 0. Finds the specified section in the header
-/// 1. Adds encryption algorithm (v) and key (k) to the header field
-/// 2. Rebuilds the file with updated header
-/// 3. Updates file hash
-///
-/// data BEFORE building the VSF file. This just adds metadata to the header.
-///
-/// # Arguments
-/// * `vsf_bytes` - Complete VSF file bytes * `section_name` - Name of the section (e.g., "sensitive") * `algorithm` - Encryption algorithm ID (e.g., b'c' for ChaCha20) * `encryption_key` - Encryption key bytes
-///
-/// # Returns
-/// Modified VSF bytes with encryption metadata in header field
-///
-/// # Example
-/// ```ignore
-/// // 1. Encrypt data first let encrypted_data = encrypt_with_chacha20(&plaintext, &key);
-///
-/// // 2. Build VSF with encrypted data let vsf = VsfBuilder::new() .add_section("sensitive", vec![("data", encrypted_data)]) .build()?;
-///
-/// // 3. Add encryption metadata to header let vsf = add_encryption_metadata(vsf, "sensitive", b'c', &key)?;
-/// ```
-pub fn add_encryption_metadata(
-    vsf_bytes: Vec<u8>,
-    section_name: &str,
-    algorithm: u8,
-    encryption_key: &[u8],
-) -> Result<Vec<u8>, String> {
-    // Parse complete header
-    let header = parse_full_header(&vsf_bytes)?;
-
-    // Find target section and add encryption metadata
-    let mut new_fields = header.fields.clone();
-    let mut found = false;
-
-    for field in &mut new_fields {
-        if field.name == section_name {
-            use crate::crypto_algorithms::{WRAP_AES256_GCM, WRAP_CHACHA20POLY1305};
-
-            // Add encryption key based on algorithm
-            let key_vsf = match algorithm {
-                WRAP_CHACHA20POLY1305 => VsfType::kc(encryption_key.to_vec()),
-                WRAP_AES256_GCM => VsfType::ka(encryption_key.to_vec()),
-                _ => {
-                    return Err(format!(
-                        "Unsupported encryption algorithm: {}",
-                        algorithm as char
-                    ))
-                }
-            };
-            field.key = Some(key_vsf);
-            found = true;
-            break;
-        }
-    }
-
-    if !found {
-        return Err(format!("Section '{}' not found", section_name));
-    }
-
-    // Rebuild file with modified header Preserve original rolling hash setting
-    rebuild_with_header(
-        &vsf_bytes,
-        new_fields,
-        header.version,
-        header.backward_compat,
-        header.header_end,
-        header.rolling_hash.is_some(),
-    )
 }
 
 /// Check if a VSF file is an unmodified original by verifying the provenance hash (hp).

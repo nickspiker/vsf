@@ -174,7 +174,36 @@ fn parse_opcode(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError
 ///
 /// Format: 3+ bytes - 'r', 'o', type letter, then type-specific data
 #[cfg(feature = "spirix")]
+/// How deep renderable objects may nest. Every object kind parses its children thru `parse`, which comes back here, so a stream of `rom` repeated a few hundred thousand times once ran the stack out and aborted the process (security audit VSF-08). No real scene nests this deep.
+const MAX_RENDERABLE_DEPTH: u32 = 1 << 6;
+
+thread_local! {
+    static RENDERABLE_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// One level of renderable nesting, released on every exit including errors.
+struct DepthGuard;
+
+impl DepthGuard {
+    fn enter() -> Result<DepthGuard, DecodeError> {
+        RENDERABLE_DEPTH.with(|d| {
+            if d.get() >= MAX_RENDERABLE_DEPTH {
+                return Err(DecodeError::InvalidDataMsg(format!("renderable objects nested deeper than {MAX_RENDERABLE_DEPTH}")));
+            }
+            d.set(d.get() + 1);
+            Ok(DepthGuard)
+        })
+    }
+}
+
+impl Drop for DepthGuard {
+    fn drop(&mut self) {
+        RENDERABLE_DEPTH.with(|d| d.set(d.get() - 1));
+    }
+}
+
 fn parse_renderable_object(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
+    let _depth = DepthGuard::enter()?;
     // Already consumed 'r', now expect 'o' and type letter
     if crate::decoding::helpers::short(data, *pointer, 2) {
         return Err(DecodeError::UnexpectedEofMsg(

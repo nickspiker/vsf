@@ -10,7 +10,7 @@ use rav1d::include::dav1d::data::Dav1dData;
 use rav1d::include::dav1d::dav1d::{Dav1dContext, Dav1dSettings};
 use rav1d::include::dav1d::picture::Dav1dPicture;
 use rav1d::src::lib::{
-    dav1d_close, dav1d_data_create, dav1d_default_settings, dav1d_get_picture, dav1d_open,
+    dav1d_close, dav1d_data_create, dav1d_data_unref, dav1d_default_settings, dav1d_get_picture, dav1d_open,
     dav1d_picture_unref, dav1d_send_data,
 };
 use std::ptr::NonNull;
@@ -178,8 +178,14 @@ fn from_rgb_tensor(shape: Vec<usize>, bytes: Vec<u8>) -> Result<DecodedImage, Im
     if shape.len() != 3 || shape[2] != 3 {
         return Err(ImageError::BadTensorShape(shape));
     }
-    let h = shape[0] as u32;
-    let w = shape[1] as u32;
+    // WHY: the shape is file-supplied; a dimension past u32, or one whose product does not match the bytes given, would make the packer read past the buffer (security audit VSF-06).
+    let (Ok(h), Ok(w)) = (u32::try_from(shape[0]), u32::try_from(shape[1])) else {
+        return Err(ImageError::BadTensorShape(shape));
+    };
+    let expected = (h as usize).checked_mul(w as usize).and_then(|n| n.checked_mul(3));
+    if expected != Some(bytes.len()) {
+        return Err(ImageError::BadTensorShape(shape));
+    }
     let pixels = pack_alpha_darkness(&bytes, w, h);
     Ok(DecodedImage { width: w, height: h, pixels, encoding: crate::visual::Encoding::Gamma2 })
 }
@@ -192,6 +198,8 @@ fn from_av1(av1: &[u8]) -> Result<DecodedImage, ImageError> {
     // Single-threaded, single-frame: the OS-less wasm target can't spawn threads (default auto-threading would panic at runtime), and an avatar/icon is one keyframe — no worker pool or frame-delay buffering needed. Also keeps native decode instant for small images.
     settings.n_threads = 1;
     settings.max_frame_delay = 1;
+    // The largest picture decoded here, in pixels (2048 square): rav1d's default is unlimited, and a header naming a huge frame would otherwise reserve its planes before a byte of it is checked (security audit VSF-12).
+    settings.frame_size_limit = 1 << 22;
 
     let mut ctx: Option<Dav1dContext> = None;
     let open = unsafe {
@@ -213,30 +221,44 @@ fn from_av1(av1: &[u8]) -> Result<DecodedImage, ImageError> {
     }
     unsafe { std::ptr::copy_nonoverlapping(av1.as_ptr(), data_ptr, av1.len()) };
 
-    loop {
-        let r = unsafe { dav1d_send_data(Some(ctx), NonNull::new(&mut d)) };
-        if r.0 == 0 {
+    // dav1d answers with a negated errno; EAGAIN is 35 on the BSD family and 11 elsewhere, and rav1d passes the host's value thru.
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))]
+    const EAGAIN: i32 = -35;
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")))]
+    const EAGAIN: i32 = -11;
+    // Send/drain rounds before giving up: a one-picture stream needs two or three; a stream that never yields one ends here instead of spinning.
+    const MAX_ROUNDS: u32 = 1 << 6;
+    // THE CANONICAL LOOP (security audit VSF-12): send what is left; whether or not the decoder took it all, ask for a picture. The old pair of loops retried a send that answered EAGAIN without ever draining, and waited forever on a get that answered EAGAIN after a stream too short to hold a frame (two bytes were enough).
+    let mut pic = Dav1dPicture::default();
+    let mut outcome: Result<(), ImageError> = Err(ImageError::Av1Decode("no picture in the stream".into()));
+    for _ in 0..MAX_ROUNDS {
+        if d.sz > 0 {
+            let sent = unsafe { dav1d_send_data(Some(ctx), NonNull::new(&mut d)) };
+            if sent.0 < 0 && sent.0 != EAGAIN {
+                outcome = Err(ImageError::Av1Decode(format!("dav1d_send_data: {}", sent.0)));
+                break;
+            }
+        }
+        let got = unsafe { dav1d_get_picture(Some(ctx), NonNull::new(&mut pic)) };
+        if got.0 == 0 {
+            outcome = Ok(());
             break;
-        } else if r.0 == -11 {
-            continue;
-        } else if r.0 < 0 {
-            unsafe { dav1d_close(NonNull::new(&mut Some(ctx) as *mut _)) };
-            return Err(ImageError::Av1Decode(format!("dav1d_send_data: {}", r.0)));
+        }
+        if got.0 != EAGAIN {
+            outcome = Err(ImageError::Av1Decode(format!("dav1d_get_picture: {}", got.0)));
+            break;
+        }
+        // Everything sent and still nothing to get: with one thread and no frame delay, nothing is coming.
+        if d.sz == 0 {
+            break;
         }
     }
-
-    let mut pic = Dav1dPicture::default();
-    loop {
-        let r = unsafe { dav1d_get_picture(Some(ctx), NonNull::new(&mut pic)) };
-        if r.0 == 0 {
-            break;
-        } else if r.0 == -11 {
-            std::thread::yield_now();
-            continue;
-        } else {
-            unsafe { dav1d_close(NonNull::new(&mut Some(ctx) as *mut _)) };
-            return Err(ImageError::Av1Decode(format!("dav1d_get_picture: {}", r.0)));
+    if let Err(e) = outcome {
+        unsafe {
+            dav1d_data_unref(NonNull::new(&mut d));
+            dav1d_close(NonNull::new(&mut Some(ctx) as *mut _));
         }
+        return Err(e);
     }
 
     let width = pic.p.w as usize;

@@ -67,7 +67,8 @@ impl<T> Tensor<T> {
 
     /// Create a new contiguous tensor with given shape and data
     pub fn new(shape: Vec<usize>, data: Vec<T>) -> Self {
-        let expected_len: usize = shape.iter().product();
+        // A shape whose product does not fit a usize is a caller bug like a wrong length, said as loudly (security audit VSF-06: an unchecked product wrapped to 0 and matched empty data).
+        let expected_len = crate::types::packed_view::shape_elements(&shape).expect("tensor shape overflows a usize");
         assert_eq!(
             data.len(),
             expected_len,

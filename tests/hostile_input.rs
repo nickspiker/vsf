@@ -21,6 +21,23 @@ fn huge_lengths_and_counts_are_errors() {
     }
 }
 
+/// Renderable objects nested past any real scene are refused instead of running the stack out: 200,000 repetitions of `rom` once aborted the process (VSF-08).
+#[cfg(feature = "spirix")]
+#[test]
+fn deep_renderable_nesting_is_an_error_not_an_abort() {
+    let input: Vec<u8> = b"rom".iter().copied().cycle().take(3 * 200_000).collect();
+    let r = std::panic::catch_unwind(|| parse(&input, &mut 0));
+    assert!(r.is_ok(), "deep nesting panicked");
+    assert!(r.unwrap().is_err(), "deep nesting parsed");
+}
+
+/// A tensor whose shape multiplies past a usize is refused, not admitted with the wrapped product (VSF-06).
+#[test]
+fn a_tensor_shape_that_overflows_is_an_error() {
+    let big = 1usize << 32;
+    assert!(vsf::Tensor::<u8>::try_new(vec![big, big], Vec::new()).is_err());
+}
+
 /// A section named by a table of contents is checked, never constructed with the panicking `new` (VSF-03).
 #[test]
 fn a_bad_section_name_is_an_error() {
