@@ -356,7 +356,7 @@ pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     provenance_hash_zeroing(vsf_bytes, zero_header_signatures)
 }
 
-/// PROVENANCE PIN (2026-11-03, delete at v169): the hash as every file before that day computed it, with the whole-file signature scan. READ ONLY, never written: [`is_original`] falls back to it so the vaults, chains, records and frames written under it stay readable while they are rewritten under the header-only rule.
+/// PROVENANCE PIN (2026-11-03, delete not before 2027-02-01): the hash as every file before that day computed it, with the whole-file signature scan. READ ONLY, never written: [`is_original`] falls back to it so the vaults, chains, records and frames written under it stay readable while they are rewritten under the header-only rule.
 /// Carrying it keeps the old hole open for exactly as long as the pin stands: a file crafted to pass this rule still passes [`is_original`].
 pub fn compute_provenance_hash_legacy(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
     provenance_hash_zeroing(vsf_bytes, zero_all_signatures_legacy)
@@ -458,7 +458,7 @@ fn provenance_hash_zeroing(vsf_bytes: &[u8], zero_signatures: fn(&mut [u8]) -> R
     }
 }
 
-/// PROVENANCE PIN (delete at v169): the retired rule, a byte scan of the WHOLE file for anything that parses as a signature, bodies included. Kept only for [`compute_provenance_hash_legacy`].
+/// PROVENANCE PIN (delete not before 2027-02-01): the retired rule, a byte scan of the WHOLE file for anything that parses as a signature, bodies included. Kept only for [`compute_provenance_hash_legacy`].
 fn zero_all_signatures_legacy(vsf_bytes: &mut [u8]) -> Result<(), String> {
     let mut ptr = 0;
     while ptr + 1 < vsf_bytes.len() {
@@ -1231,7 +1231,7 @@ pub fn is_original(vsf_bytes: &[u8]) -> Result<(), String> {
     if computed_hash.as_slice() == stored_hash.as_slice() {
         return Ok(());
     }
-    // PROVENANCE PIN (delete at v169): a file hashed under the rule retired on 2026-11-03 still reads, so nothing written before that day is stranded while it is rewritten under the header-only rule. Writers never use this rule.
+    // PROVENANCE PIN (delete not before 2027-02-01): a file hashed under the rule retired on 2026-11-03 still reads, so nothing written before that day is stranded while it is rewritten under the header-only rule. Writers never use this rule.
     if compute_provenance_hash_legacy(vsf_bytes)?.as_slice() == stored_hash.as_slice() {
         return Ok(());
     }
