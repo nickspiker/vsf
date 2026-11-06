@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`vsf::raster`, a reference rasterizer for renderable objects** (feature `raster`, no dependencies beyond libm, no_std). A scene in, premultiplied linear VSF RGB out: boxes with squircle corners, ellipses, sectors, rings and ring segments, paths (lines, quadratic and cubic Béziers, elliptical arcs) under nonzero or even-odd, polylines, NURBS, nodes with frames and masks, solid and gradient paint, strokes with joins and caps. Curves are flattened within ⅛ px with area-preserving vertices (an inscribed polygon would shrink every shape), and filled with exact horizontal coverage on 16 sub-scanlines a pixel. Text, widgets, images and surfaces are not drawn and are named in `Rendered::skipped`. `Image::planar_u16_over` composites onto a background as opsin ingests.
+- **Vector documents**: a scene lives in a `vector` section, field `scene`, one drawable object, normally a node whose `view` says what to show. `renderable::read_scene`, `scene_section`, `SCENE_SECTION`, `SCENE_FIELD`.
 - **`wl`, a human language (v11).** `w l` then three big-endian u16, 8 bytes: the ISO 639-3 letters packed base 26 (a = 0 … z = 25, first letter most significant; `spa` = 12558), the ISO 15924 numeric script, the ISO 3166-1 numeric region, 0 for an absent script or region. A reader refuses a language past 17575 and a script or region past 999. `Language::new(*b"spa").with_script(215).with_region(724)`, `code()`, `packed()`, `script()`, `region()`; `VsfType::wl`; `TypeConstraint::Language`.
 - **RSA keys, deprecated on arrival: `kvr` and `kgr` (v10).** Legacy, for verifiers that take nothing else: ferros's phone bootloader holds its owner's key in `avb_custom_key`, and AVB takes only RSA.
   - `kvr` is an RSA verification key: the modulus, big-endian, with e = 65537. It joins the `kv` family (`kv` + the letter of the signature it verifies, here the existing deprecated `gr`) and is accepted as a header key field.
@@ -25,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The outermost frame's +y points down the display** (image-row order, as SVG and fluor draw), so a positive angle turns clockwise on screen unless a node mirrors its frame. Until now the direction was the consumer's, and the same file could draw mirrored. No bytes change.
 - **The renderable objects (`ro*`) are redesigned (v11, breaking).** They had no user, so nothing was kept for compatibility. The whole family is in `types::renderable`.
   - **Any numeric type.** Every number is a VSF value carrying its own marker: one number is a `Num` (`u3`–`u7`, `i3`–`i7`, `f5`, `f6`, Spirix `s33`–`s77`), several are a `Nums` tensor whose element type is chosen once for the slot (contiguous `t_*` of those types, or a bit-packed `p` of any width). Geometry can be Spirix F7E7 or a 1-bit grid.
   - **Frames, not a window.** Coordinates are in the containing node's units; a node (`ron`) maps its frame into its parent's by translate, rotation and scale (one number or one per axis), may declare `view` (the region it means to show), and may carry a mask. The fixed −1…+1 window is gone.
@@ -38,11 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`rt` and `rp` colours read back.** They were written big-endian, as all of VSF is, and read little-endian.
 - **Spirix tensors read back.** The encoder writes a Spirix element type as `s`/`c`, F, E, then the shape; the reader took E from after the shape, as the first dimension, so no `t_s*`, `t_c*`, `q_s*` or `q_c*` value could be read. The reader now follows the encoder; the bytes are unchanged.
 - **Circle tensors at F6E4** (`t_c64`, `q_c64`) went to the complex reader.
 - **Strided circle tensors** (`q_c*`) wrote their element type as a scalar (`s`). They now write `c`; marked 11 in `since.rs`, since the bytes changed (no reader could read the old ones).
 - **Renderable lists of 256 or more** (path commands, points, knots, stops) wrote a one-byte count that wrapped and corrupted the rest of the file. Counts are tensor shapes now.
-- **`tests/since.rs` reads every sample back**, not only its bytes. That is how the Spirix tensor faults were found; the samples that still do not read back are listed in `NOT_YET_READ` (the hashes `hc` and `hk`, the address `wa`, and most colour types: `r`, `re`, `rx`, `rz`, `ri`, `ru`, `rs`, `rf`, `rh`, `rm`, `rd`, `rb`, `rw`, `rq` have no reader, and `rp`, `rt` read back changed). The test fails when one starts reading back, so the list shrinks as each is fixed.
+- **`tests/since.rs` reads every sample back**, not only its bytes. That is how the Spirix tensor faults were found; the samples that still do not read back are listed in `NOT_YET_READ` (the hashes `hc` and `hk`, the address `wa`, and most colour types: `r`, `re`, `rx`, `rz`, `ri`, `ru`, `rs`, `rf`, `rh`, `rm`, `rd`, `rb`, `rw`, `rq` have no reader). The test fails when one starts reading back, so the list shrinks as each is fixed.
 - **vsfinfo printed tensors as Rust debug dumps.** Only `t_u3` had a formatter, so every other `t_*` / `q_*` tensor and bit-packed `p` printed every element on one line (a 2048-value spectrum ran to 20,000 characters). Every element type now prints in notation, wire order, with values in aligned rows and the middle elided by `VSF_HEX_HEAD` / `VSF_HEX_TAIL`.
 
 ## [0.10.1] - 2026-10-20 · format v10, no code changes

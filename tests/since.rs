@@ -321,7 +321,7 @@ fn bytes_change_only_with_the_version() {
 const READS_BACK_NORMALISED: &[&str] = &["u", "u/wide", "i", "b/inclusive", "l/inclusive"];
 
 /// Samples that do not read back today: readers missing or wrong, found 2026-11-05 when this test was added. Each is a bug; remove its label here when it is fixed (the test fails if a listed sample starts reading back, so the list cannot go stale).
-const NOT_YET_READ: &[&str] = &["hc", "hk", "wa", "r", "re", "rx", "rz", "ri", "rp", "ru", "rs", "rf", "rt", "rh", "rm", "rd", "rb", "rw", "rq"];
+const NOT_YET_READ: &[&str] = &["hc", "hk", "wa", "r", "re", "rx", "rz", "ri", "ru", "rs", "rf", "rh", "rm", "rd", "rb", "rw", "rq"];
 
 /// Every sample reads back as it was built: pinned bytes alone never caught that no Spirix tensor could be read (fixed in v11).
 #[test]

@@ -398,10 +398,10 @@ pub fn parse_colour_array(
                 ));
             }
             let rt_rgba = [
-                u16::from_le_bytes([data[*pointer], data[*pointer + 1]]),
-                u16::from_le_bytes([data[*pointer + 2], data[*pointer + 3]]),
-                u16::from_le_bytes([data[*pointer + 4], data[*pointer + 5]]),
-                u16::from_le_bytes([data[*pointer + 6], data[*pointer + 7]]),
+                u16::from_be_bytes([data[*pointer], data[*pointer + 1]]),
+                u16::from_be_bytes([data[*pointer + 2], data[*pointer + 3]]),
+                u16::from_be_bytes([data[*pointer + 4], data[*pointer + 5]]),
+                u16::from_be_bytes([data[*pointer + 6], data[*pointer + 7]]),
             ];
             *pointer += 8;
             Ok(VsfType::rt(rt_rgba))
@@ -413,7 +413,7 @@ pub fn parse_colour_array(
                     "Incomplete rp colour (need 2 bytes.into())".into(),
                 ));
             }
-            let rgb565 = u16::from_le_bytes([data[*pointer], data[*pointer + 1]]);
+            let rgb565 = u16::from_be_bytes([data[*pointer], data[*pointer + 1]]);
             *pointer += 2;
             Ok(VsfType::rp(rgb565))
         }

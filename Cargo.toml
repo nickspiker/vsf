@@ -157,6 +157,8 @@ image-tools = [
 # an α+darkness buffer. Just rav1d + std, no encode deps — light enough to ship into toka.wasm.
 # Off by default; the fgtw-bootstrap worker (size-critical) never enables it.
 image-decode = ["std", "dep:rav1d"]
+# raster: the reference rasterizer for renderable objects (vsf::raster). No extra dependencies; works without std.
+raster = []
 
 [build-dependencies]
 # BLAKE3 for verifying frequencies.bin and huffman_codes.bin integrity at build time.

@@ -391,6 +391,10 @@ pub mod inspect;
 #[cfg(feature = "image-decode")]
 pub mod image;
 
+// Reference rasterizer for renderable objects (ro*): a scene to linear VSF RGB, for previews and tests. No dependencies beyond libm; no_std.
+#[cfg(feature = "raster")]
+pub mod raster;
+
 // VSF-Image v0 — spectral-first raw image container (K channels of sensor counts + per-channel spectral response + ihi provenance ingredients). Pure VSF types, no heavy deps, so it's unconditional. Consumed by opsin (viewer/converter) and chameleon.
 pub mod spectral_image;
 

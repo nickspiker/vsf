@@ -2,9 +2,9 @@
 //!
 //! **Numbers.** Every number is a VSF value with its own type marker, so its precision is whatever the writer chose: an `f5`, an `i3`, a Spirix `s77` for extreme precision, or a bit-packed `p` grid of a few bits for almost none. A slot that holds one number takes a [`Num`]; a slot that holds several (a shape's geometry, a path's points) takes a [`Nums`], one tensor whose element type is chosen once for the slot. Readers convert to their own working type when they draw; nothing assumes a width.
 //!
-//! **Frames.** Coordinates and lengths are in the units of the containing [`Node`]: a node maps its own frame into its parent's by translate, rotate and scale, and the outermost frame is whatever the consumer holding the scene says it is. There is no fixed −1…+1 window. A node may declare `view`, the region of its own frame it means to show, which is how a consumer fits a scene it did not write.
+//! **Frames.** Coordinates and lengths are in the units of the containing [`Node`]: a node maps its own frame into its parent's by translate, rotate and scale, and the outermost frame's units are whatever the consumer holding the scene says they are, with its +y pointing down the display (image-row order, as SVG and fluor draw). There is no fixed −1…+1 window. A node may declare `view`, the region of its own frame it means to show, which is how a consumer fits a scene it did not write.
 //!
-//! **Angles** are in turns, everywhere: rotations, arc starts and sweeps, text tilt, conic gradient starts. Binary fractions of a turn are exact in every float and Spirix type. A positive angle turns from the frame's +x axis toward its +y axis, whichever way the consumer draws y.
+//! **Angles** are in turns, everywhere: rotations, arc starts and sweeps, text tilt, conic gradient starts. Binary fractions of a turn are exact in every float and Spirix type. A positive angle turns from the frame's +x axis toward its +y axis: clockwise on the display, unless a node's scale mirrors its frame.
 //!
 //! **Wire.** `r o <letter>`, then the body's length in bits (an EWE number, as `v` writes its length), then the body: the type's required values in its fixed order, then any number of optional attributes, each one lowercase ASCII tag byte followed by one VSF value. Attribute order is free; an attribute appears at most once unless the type says it repeats (children, gradient colours). A reader knows each body's extent before parsing it, so it can step over an object whole. Enumerated codes (join, cap, fill rule, …) are `u3` values; a reader refuses a code it does not know.
 //!
@@ -16,6 +16,32 @@ use crate::types::{BitPackedTensor, Tensor, VsfType};
 
 /// How deep renderable objects may nest. Each level costs a stack frame, and a stream of nested nodes a few hundred thousand deep once ran the stack out (security audit VSF-08). No real scene nests this deep.
 pub const MAX_DEPTH: u32 = 1 << 6;
+
+// ==================== DOCUMENTS ====================
+
+/// The section a vector document keeps its scene in.
+pub const SCENE_SECTION: &str = "vector";
+
+/// The field of [`SCENE_SECTION`] holding the scene's root: one drawable object, normally a [`Node`] whose `view` says what region to show.
+pub const SCENE_FIELD: &str = "scene";
+
+/// The scene of a vector document, or why the bytes hold none.
+pub fn read_scene(bytes: &[u8]) -> Result<VsfType, String> {
+    let doc = crate::container::Document::open(bytes).map_err(|e| format!("{e}"))?;
+    let entry = doc.entry(SCENE_SECTION).ok_or_else(|| format!("no '{SCENE_SECTION}' section"))?;
+    let section = doc.section(entry).map_err(|e| format!("{e}"))?;
+    let field = section.fields.iter().find(|f| f.name == SCENE_FIELD).ok_or_else(|| format!("no '{SCENE_FIELD}' field in '{SCENE_SECTION}'"))?;
+    match field.values.as_slice() {
+        [v] if is_drawable(v) => Ok(v.clone()),
+        [v] => Err(format!("'{SCENE_FIELD}' is {}, not a drawable object", value_name(v))),
+        vs => Err(format!("'{SCENE_FIELD}' holds {} values, not one", vs.len())),
+    }
+}
+
+/// A vector document's section: the scene under [`SCENE_FIELD`], ready for [`crate::vsf_builder::VsfBuilder::add_section`].
+pub fn scene_section(scene: VsfType) -> (String, Vec<(String, VsfType)>) {
+    (SCENE_SECTION.into(), vec![(SCENE_FIELD.into(), scene)])
+}
 
 // ==================== NUMBERS ====================
 
