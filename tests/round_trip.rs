@@ -113,3 +113,27 @@ fn scalars_read_back_as_built() {
         }
     }
 }
+
+/// Spirix tensors, every shape the generator makes. Until v11 none of them read back: the reader took a Spirix tensor's E marker from after the shape, a circle F6E4 tensor went to the complex reader, and a strided circle tensor wrote its element type as a scalar.
+#[cfg(feature = "spirix")]
+#[test]
+fn spirix_tensors_read_back_as_built() {
+    use spirix::{CircleF3E3, CircleF4E4, CircleF7E7, ScalarF3E3, ScalarF4E4, ScalarF7E7};
+    use vsf::types::StridedTensor;
+    let mut rng = Rng(0x5EED_5_7A_11);
+    for _ in 0..100 {
+        let r = &mut rng;
+        let x = |r: &mut Rng| (r.next() as i16 as f64) / 7.;
+        round_trips(tensor_of!(r, t_s33, |r: &mut Rng| ScalarF3E3::from(x(r))));
+        round_trips(tensor_of!(r, t_s44, |r: &mut Rng| ScalarF4E4::from(x(r))));
+        round_trips(tensor_of!(r, t_s77, |r: &mut Rng| ScalarF7E7::from(x(r))));
+        round_trips(tensor_of!(r, t_c33, |r: &mut Rng| CircleF3E3::from((x(r), x(r)))));
+        round_trips(tensor_of!(r, t_c44, |r: &mut Rng| CircleF4E4::from((x(r), x(r)))));
+        round_trips(tensor_of!(r, t_c64, |r: &mut Rng| spirix::CircleF6E4::from((x(r), x(r)))));
+        round_trips(tensor_of!(r, t_c77, |r: &mut Rng| CircleF7E7::from((x(r), x(r)))));
+    }
+    let s: Vec<ScalarF4E4> = [0.5, -1.5, 3., 0.].map(ScalarF4E4::from).to_vec();
+    round_trips(VsfType::q_s44(StridedTensor::new(vec![2, 2], vec![2, 1], s)));
+    let c: Vec<CircleF4E4> = [(0.5, 1.), (-1.5, 0.), (3., 3.), (0., 0.)].map(CircleF4E4::from).to_vec();
+    round_trips(VsfType::q_c44(StridedTensor::new(vec![2, 2], vec![2, 1], c)));
+}

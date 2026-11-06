@@ -62,12 +62,8 @@ use super::network::WaAddress;
 use super::tensor::{BitPackedTensor, StridedTensor, Tensor};
 use super::world_cell::WorldCell;
 use super::world_coord::WorldCoord;
-
-#[cfg(feature = "spirix")]
-use super::toka_tree::{
-    ButtonVariant, Fill, GradientStop, GradientVariant, PathCommand, SplineType, Stroke, StrokeCap,
-    StrokeJoin, TextStyle, Transform,
-};
+use super::language::Language;
+use super::renderable::{Button, Ellipse, Gradient, Grid, Image, Input, Node, Nurbs, Path, Polyline, Rect, Stroke, Surface, Text};
 
 /// Main VSF type enum representing all supported data types
 ///
@@ -250,6 +246,7 @@ pub enum VsfType {
     e(EtType),     // Eagle Time
     w(WorldCoord), // World coordinate (Dymaxion icosahedral) — wire: w[3-7] + 2^N bytes
     wm(WorldCell), // World cell (Morton-coded Dymaxion) — wire: wm[3-7] + 2^(N-3) bytes, truncation-nested: prefix = enclosing cell
+    wl(Language),  // Human language (v11): ISO 639-3 packed base 26, ISO 15924 script, ISO 3166-1 region — wire: wl + three big-endian u16
 
     // ==================== WORLD ADDRESS FAMILY (w + lowercase) ==================== w + digit (w3..w7) = WorldCoord at 2^N-bit resolution w + lowercase letter = other world types (wa = postal address)
     wa(WaAddress), // World address: structured postal address (all fields optional)
@@ -414,62 +411,21 @@ pub enum VsfType {
     rm(usize, usize, Vec<f32>, f32), // rm(input_channels, output_channels, matrix_NxM, gamma)
     // Where: input_channels - Number of input colour channels (N) output_channels - Number of output colour channels (M, usually 3 for LMS) matrix_NxM - Flattened N×M matrix as Vec<f32> gamma - Gamma correction value as f32
 
-    // ==================== RENDERABLE OBJECT TYPES ==================== Scene graph primitives - everything you can draw (ro* prefix - 3 letters)
-    //
-    // These types expand the 'r' (renderable) family to include drawing primitives alongside colours. They form the foundation of the Toka scene graph system.
-    //
-    // Coordinate system: All positions/sizes use Spirix CircleF4E4 (window coords: -1 to +1) Fill/Stroke: Use Fill/Stroke types from toka_tree module
-    #[cfg(feature = "spirix")]
-    // Shape primitives
-    rob(CircleF4E4, CircleF4E4, Fill, Option<Stroke>, Vec<VsfType>), // Box: pos, size, fill, stroke, children
-    #[cfg(feature = "spirix")]
-    roc(CircleF4E4, ScalarF4E4, Fill, Option<Stroke>), // Circle: center, radius, fill, stroke
-    #[cfg(feature = "spirix")]
-    roe(CircleF4E4, CircleF4E4, Fill, Option<Stroke>), // Ellipse: center, size, fill, stroke
-    #[cfg(feature = "spirix")]
-    rol(CircleF4E4, CircleF4E4, ScalarF4E4, Box<VsfType>), // Line: start, end, width, colour
-    #[cfg(feature = "spirix")]
-    rop(Vec<PathCommand>, Fill, Option<Stroke>), // Path: commands, fill, stroke
-    #[cfg(feature = "spirix")]
-    roo(Vec<CircleF4E4>, ScalarF4E4, Box<VsfType>, bool), // Polyline: points, width, colour, closed
-    #[cfg(feature = "spirix")]
-    ror(Vec<CircleF4E4>, Vec<ScalarF4E4>, u8, Fill, Option<Stroke>), // NURBS: control_points, knots, degree, fill, stroke
-    #[cfg(feature = "spirix")]
-    rox(Vec<CircleF4E4>, SplineType, Fill, Option<Stroke>), // Spline: control_points, type, fill, stroke
-
-    #[cfg(feature = "spirix")]
-    // UI/Content primitives
-    rot(
-        CircleF4E4,
-        Box<VsfType>,
-        ScalarF4E4,
-        Box<VsfType>,
-        Option<TextStyle>,
-    ), // Text: pos, text (l or x), size, colour, style
-    #[cfg(feature = "spirix")]
-    rou(CircleF4E4, CircleF4E4, String, ButtonVariant, Box<VsfType>), // Button: pos, size, label, variant, colour
-    #[cfg(feature = "spirix")]
-    roq(CircleF4E4, CircleF4E4, String, Box<VsfType>), // TextInput: pos, size, placeholder, colour
-    #[cfg(feature = "spirix")]
-    roa(usize, usize, Vec<VsfType>), // Array/SubTable: cols, rows, children
-    #[cfg(feature = "spirix")]
-    roi(CircleF4E4, CircleF4E4, u64, Box<VsfType>), // Image: pos, size, handle, tint
-    #[cfg(feature = "spirix")]
-    rof(CircleF4E4, CircleF4E4, u64), // Surface: pos, size, handle
-
-    #[cfg(feature = "spirix")]
-    // Container/Effect primitives
-    ron(CircleF4E4, CircleF4E4, Vec<VsfType>), // Node: pos, size, children
-    #[cfg(feature = "spirix")]
-    rom(Box<VsfType>, Vec<VsfType>), // Mask: shape, children
-    #[cfg(feature = "spirix")]
-    row(Transform, Vec<VsfType>), // Group: transform, children
-
-    #[cfg(feature = "spirix")]
-    // Style types (used within other ro* types)
-    rog(GradientVariant, Vec<GradientStop>), // Gradient: variant, stops
-    #[cfg(feature = "spirix")]
-    rok(ScalarF4E4, Box<VsfType>, StrokeJoin, StrokeCap), // Stroke: width, colour, join, cap
+    // ==================== RENDERABLE OBJECTS (v11) ==================== The ro* family: shapes, containers, UI elements and their paint. Every number is any VSF numeric type, coordinates are in the containing node's frame, angles are in turns, and every object is length-prefixed. See `types::renderable` for the wire grammar and each object's fields.
+    rob(Box<Rect>),     // Box: sharp, rounded, squircle-cornered, pill, superellipse
+    roe(Box<Ellipse>),  // Ellipse: circle, ellipse, pie sector, ring, ring segment
+    rop(Box<Path>),     // Path: lines, Béziers, elliptical arcs
+    rol(Box<Polyline>), // Polyline or polygon
+    ror(Box<Nurbs>),    // NURBS curve
+    ron(Box<Node>),     // Node: a frame (translate, rotate, scale), an optional mask, children
+    roa(Box<Grid>),     // Grid of cells
+    rot(Box<Text>),     // Text
+    rou(Box<Button>),   // Button
+    roq(Box<Input>),    // Text input
+    roi(Box<Image>),    // Image held by the consumer
+    rof(Box<Surface>),  // Pixel surface held by the consumer
+    rog(Box<Gradient>), // Gradient paint
+    rok(Box<Stroke>),   // Stroke
 
     // ==================== SPIRIX SCALARS ====================
     #[cfg(feature = "spirix")]
@@ -1016,6 +972,42 @@ impl core::fmt::Display for VsfType {
 }
 
 impl VsfType {
+    /// True for a colour value: every `r` type except the renderable objects (`ro*`) and the colour matrix (`rm`).
+    pub fn is_colour(&self) -> bool {
+        #[cfg(feature = "spirix")]
+        if matches!(self, VsfType::rd(_) | VsfType::rb(_) | VsfType::rw(_) | VsfType::rq(..)) {
+            return true;
+        }
+        matches!(
+            self,
+            VsfType::r(..)
+                | VsfType::rcb
+                | VsfType::rcc
+                | VsfType::rcg
+                | VsfType::rcj
+                | VsfType::rck
+                | VsfType::rcl
+                | VsfType::rcn
+                | VsfType::rco
+                | VsfType::rcq
+                | VsfType::rcr
+                | VsfType::rcv
+                | VsfType::rcw
+                | VsfType::rcy
+                | VsfType::re(_)
+                | VsfType::rx(_)
+                | VsfType::rz(_)
+                | VsfType::ri(_)
+                | VsfType::rp(_)
+                | VsfType::ru(_)
+                | VsfType::rs(_)
+                | VsfType::rf(_)
+                | VsfType::ra(_)
+                | VsfType::rt(_)
+                | VsfType::rh(_)
+        )
+    }
+
     /// The narrowest unsigned VSF type that holds `value`, using exponential-width encoding: `u3` ≤ 255, `u4` ≤ 65535, `u5` ≤ 2³²−1, otherwise `u6`. Pass one `u64` and the value is stored at minimal width without choosing a size marker by hand — unlike `IntoVsfType for u64`, which is fixed at `u6`.
     pub fn uint(value: u64) -> VsfType {
         if value <= u8::MAX as u64 {

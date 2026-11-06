@@ -258,6 +258,12 @@ impl VsfType {
                 flat
             }
 
+            VsfType::wl(lang) => {
+                let mut flat = vec![b'w', b'l'];
+                flat.extend_from_slice(&lang.to_wire());
+                flat
+            }
+
             // ==================== COLOUR TYPES ====================
 
             // General format: r[channels_base36][depth_exp][data]
@@ -403,672 +409,21 @@ impl VsfType {
                 flat
             }
 
-            // ==================== RENDERABLE OBJECT TYPES ==================== Scene graph primitives (ro* prefix - 3 letters)
-            #[cfg(feature = "spirix")]
-            VsfType::rob(pos, size, fill, stroke, children) => {
-                let mut flat = vec![b'r', b'o', b'b'];
-                // Encode pos (c44)
-                flat.extend_from_slice(&pos.real.to_be_bytes());
-                flat.extend_from_slice(&pos.imaginary.to_be_bytes());
-                flat.extend_from_slice(&pos.exponent.to_be_bytes());
-                // Encode size (c44)
-                flat.extend_from_slice(&size.real.to_be_bytes());
-                flat.extend_from_slice(&size.imaginary.to_be_bytes());
-                flat.extend_from_slice(&size.exponent.to_be_bytes());
-                // Encode fill
-                match fill {
-                    crate::types::Fill::Solid(colour) => {
-                        flat.push(0x00);
-                        flat.extend_from_slice(&colour.flatten());
-                    }
-                    crate::types::Fill::Gradient(grad) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&grad.flatten());
-                    }
-                }
-                // Encode stroke (Option)
-                match stroke {
-                    None => flat.push(0x00),
-                    Some(s) => {
-                        flat.push(0x01);
-                        // Encode stroke: width, colour, join, cap
-                        flat.extend_from_slice(&s.width.fraction.to_be_bytes());
-                        flat.extend_from_slice(&s.width.exponent.to_be_bytes());
-                        flat.extend_from_slice(&s.colour.flatten());
-                        flat.push(match s.join {
-                            crate::types::StrokeJoin::Miter => 0,
-                            crate::types::StrokeJoin::Round => 1,
-                            crate::types::StrokeJoin::Bevel => 2,
-                        });
-                        flat.push(match s.cap {
-                            crate::types::StrokeCap::Butt => 0,
-                            crate::types::StrokeCap::Round => 1,
-                            crate::types::StrokeCap::Square => 2,
-                        });
-                    }
-                }
-                // Encode children with parentheses (no count needed)
-                flat.push(b'(');
-                for child in children {
-                    flat.extend_from_slice(&child.flatten());
-                }
-                flat.push(b')');
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::roc(center, radius, fill, stroke) => {
-                let mut flat = vec![b'r', b'o', b'c'];
-                // Encode center (c44)
-                flat.extend_from_slice(&center.real.to_be_bytes());
-                flat.extend_from_slice(&center.imaginary.to_be_bytes());
-                flat.extend_from_slice(&center.exponent.to_be_bytes());
-                // Encode radius (s44)
-                flat.extend_from_slice(&radius.fraction.to_be_bytes());
-                flat.extend_from_slice(&radius.exponent.to_be_bytes());
-                // Encode fill and stroke (same as rob)
-                match fill {
-                    crate::types::Fill::Solid(colour) => {
-                        flat.push(0x00);
-                        flat.extend_from_slice(&colour.flatten());
-                    }
-                    crate::types::Fill::Gradient(grad) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&grad.flatten());
-                    }
-                }
-                match stroke {
-                    None => flat.push(0x00),
-                    Some(s) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&s.width.fraction.to_be_bytes());
-                        flat.extend_from_slice(&s.width.exponent.to_be_bytes());
-                        flat.extend_from_slice(&s.colour.flatten());
-                        flat.push(match s.join {
-                            crate::types::StrokeJoin::Miter => 0,
-                            crate::types::StrokeJoin::Round => 1,
-                            crate::types::StrokeJoin::Bevel => 2,
-                        });
-                        flat.push(match s.cap {
-                            crate::types::StrokeCap::Butt => 0,
-                            crate::types::StrokeCap::Round => 1,
-                            crate::types::StrokeCap::Square => 2,
-                        });
-                    }
-                }
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::rog(variant, stops) => {
-                let mut flat = vec![b'r', b'o', b'g'];
-                // Encode variant type and parameters
-                match variant {
-                    crate::types::GradientVariant::Linear { start, end } => {
-                        flat.push(0);
-                        flat.extend_from_slice(&start.real.to_be_bytes());
-                        flat.extend_from_slice(&start.imaginary.to_be_bytes());
-                        flat.extend_from_slice(&start.exponent.to_be_bytes());
-                        flat.extend_from_slice(&end.real.to_be_bytes());
-                        flat.extend_from_slice(&end.imaginary.to_be_bytes());
-                        flat.extend_from_slice(&end.exponent.to_be_bytes());
-                    }
-                    crate::types::GradientVariant::Radial { center, radius } => {
-                        flat.push(1);
-                        flat.extend_from_slice(&center.real.to_be_bytes());
-                        flat.extend_from_slice(&center.imaginary.to_be_bytes());
-                        flat.extend_from_slice(&center.exponent.to_be_bytes());
-                        flat.extend_from_slice(&radius.fraction.to_be_bytes());
-                        flat.extend_from_slice(&radius.exponent.to_be_bytes());
-                    }
-                    crate::types::GradientVariant::Conic { center, angle } => {
-                        flat.push(2);
-                        flat.extend_from_slice(&center.real.to_be_bytes());
-                        flat.extend_from_slice(&center.imaginary.to_be_bytes());
-                        flat.extend_from_slice(&center.exponent.to_be_bytes());
-                        flat.extend_from_slice(&angle.fraction.to_be_bytes());
-                        flat.extend_from_slice(&angle.exponent.to_be_bytes());
-                    }
-                }
-                // Encode stops
-                flat.push(stops.len() as u8);
-                for stop in stops {
-                    flat.extend_from_slice(&stop.offset.fraction.to_be_bytes());
-                    flat.extend_from_slice(&stop.offset.exponent.to_be_bytes());
-                    for channel in &stop.colour {
-                        flat.extend_from_slice(&channel.fraction.to_be_bytes());
-                        flat.extend_from_slice(&channel.exponent.to_be_bytes());
-                    }
-                }
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::ron(pos, size, children) => {
-                let mut flat = vec![b'r', b'o', b'n'];
-                // Encode pos and size (same as rob)
-                flat.extend_from_slice(&pos.real.to_be_bytes());
-                flat.extend_from_slice(&pos.imaginary.to_be_bytes());
-                flat.extend_from_slice(&pos.exponent.to_be_bytes());
-                flat.extend_from_slice(&size.real.to_be_bytes());
-                flat.extend_from_slice(&size.imaginary.to_be_bytes());
-                flat.extend_from_slice(&size.exponent.to_be_bytes());
-                // Encode children with parentheses (same as rob, row, etc.)
-                flat.push(b'(');
-                for child in children {
-                    flat.extend_from_slice(&child.flatten());
-                }
-                flat.push(b')');
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::roe(center, size, fill, stroke) => {
-                let mut flat = vec![b'r', b'o', b'e'];
-                // Encode center (c44)
-                flat.extend_from_slice(&center.real.to_be_bytes());
-                flat.extend_from_slice(&center.imaginary.to_be_bytes());
-                flat.extend_from_slice(&center.exponent.to_be_bytes());
-                // Encode size (c44)
-                flat.extend_from_slice(&size.real.to_be_bytes());
-                flat.extend_from_slice(&size.imaginary.to_be_bytes());
-                flat.extend_from_slice(&size.exponent.to_be_bytes());
-                // Encode fill
-                match fill {
-                    crate::types::Fill::Solid(colour) => {
-                        flat.push(0x00);
-                        flat.extend_from_slice(&colour.flatten());
-                    }
-                    crate::types::Fill::Gradient(grad) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&grad.flatten());
-                    }
-                }
-                // Encode stroke
-                match stroke {
-                    None => flat.push(0x00),
-                    Some(s) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&s.width.fraction.to_be_bytes());
-                        flat.extend_from_slice(&s.width.exponent.to_be_bytes());
-                        flat.extend_from_slice(&s.colour.flatten());
-                        flat.push(match s.join {
-                            crate::types::StrokeJoin::Miter => 0,
-                            crate::types::StrokeJoin::Round => 1,
-                            crate::types::StrokeJoin::Bevel => 2,
-                        });
-                        flat.push(match s.cap {
-                            crate::types::StrokeCap::Butt => 0,
-                            crate::types::StrokeCap::Round => 1,
-                            crate::types::StrokeCap::Square => 2,
-                        });
-                    }
-                }
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::rol(start, end, width, colour) => {
-                let mut flat = vec![b'r', b'o', b'l'];
-                // Encode start (c44)
-                flat.extend_from_slice(&start.real.to_be_bytes());
-                flat.extend_from_slice(&start.imaginary.to_be_bytes());
-                flat.extend_from_slice(&start.exponent.to_be_bytes());
-                // Encode end (c44)
-                flat.extend_from_slice(&end.real.to_be_bytes());
-                flat.extend_from_slice(&end.imaginary.to_be_bytes());
-                flat.extend_from_slice(&end.exponent.to_be_bytes());
-                // Encode width (s44)
-                flat.extend_from_slice(&width.fraction.to_be_bytes());
-                flat.extend_from_slice(&width.exponent.to_be_bytes());
-                // Encode colour
-                flat.extend_from_slice(&colour.flatten());
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::rop(commands, fill, stroke) => {
-                let mut flat = vec![b'r', b'o', b'p'];
-                // Encode command count
-                flat.push(commands.len() as u8);
-                // Encode each command
-                for cmd in commands {
-                    match cmd {
-                        crate::types::PathCommand::MoveTo(pos) => {
-                            flat.push(0);
-                            flat.extend_from_slice(&pos.real.to_be_bytes());
-                            flat.extend_from_slice(&pos.imaginary.to_be_bytes());
-                            flat.extend_from_slice(&pos.exponent.to_be_bytes());
-                        }
-                        crate::types::PathCommand::LineTo(pos) => {
-                            flat.push(1);
-                            flat.extend_from_slice(&pos.real.to_be_bytes());
-                            flat.extend_from_slice(&pos.imaginary.to_be_bytes());
-                            flat.extend_from_slice(&pos.exponent.to_be_bytes());
-                        }
-                        crate::types::PathCommand::QuadraticTo(ctrl, end) => {
-                            flat.push(2);
-                            flat.extend_from_slice(&ctrl.real.to_be_bytes());
-                            flat.extend_from_slice(&ctrl.imaginary.to_be_bytes());
-                            flat.extend_from_slice(&ctrl.exponent.to_be_bytes());
-                            flat.extend_from_slice(&end.real.to_be_bytes());
-                            flat.extend_from_slice(&end.imaginary.to_be_bytes());
-                            flat.extend_from_slice(&end.exponent.to_be_bytes());
-                        }
-                        crate::types::PathCommand::CubicTo(ctrl1, ctrl2, end) => {
-                            flat.push(3);
-                            flat.extend_from_slice(&ctrl1.real.to_be_bytes());
-                            flat.extend_from_slice(&ctrl1.imaginary.to_be_bytes());
-                            flat.extend_from_slice(&ctrl1.exponent.to_be_bytes());
-                            flat.extend_from_slice(&ctrl2.real.to_be_bytes());
-                            flat.extend_from_slice(&ctrl2.imaginary.to_be_bytes());
-                            flat.extend_from_slice(&ctrl2.exponent.to_be_bytes());
-                            flat.extend_from_slice(&end.real.to_be_bytes());
-                            flat.extend_from_slice(&end.imaginary.to_be_bytes());
-                            flat.extend_from_slice(&end.exponent.to_be_bytes());
-                        }
-                        crate::types::PathCommand::Close => {
-                            flat.push(4);
-                        }
-                    }
-                }
-                // Encode fill
-                match fill {
-                    crate::types::Fill::Solid(colour) => {
-                        flat.push(0x00);
-                        flat.extend_from_slice(&colour.flatten());
-                    }
-                    crate::types::Fill::Gradient(grad) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&grad.flatten());
-                    }
-                }
-                // Encode stroke
-                match stroke {
-                    None => flat.push(0x00),
-                    Some(s) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&s.width.fraction.to_be_bytes());
-                        flat.extend_from_slice(&s.width.exponent.to_be_bytes());
-                        flat.extend_from_slice(&s.colour.flatten());
-                        flat.push(match s.join {
-                            crate::types::StrokeJoin::Miter => 0,
-                            crate::types::StrokeJoin::Round => 1,
-                            crate::types::StrokeJoin::Bevel => 2,
-                        });
-                        flat.push(match s.cap {
-                            crate::types::StrokeCap::Butt => 0,
-                            crate::types::StrokeCap::Round => 1,
-                            crate::types::StrokeCap::Square => 2,
-                        });
-                    }
-                }
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::roo(points, width, colour, closed) => {
-                let mut flat = vec![b'r', b'o', b'o'];
-                // Encode point count
-                flat.push(points.len() as u8);
-                // Encode each point (c44)
-                for point in points {
-                    flat.extend_from_slice(&point.real.to_be_bytes());
-                    flat.extend_from_slice(&point.imaginary.to_be_bytes());
-                    flat.extend_from_slice(&point.exponent.to_be_bytes());
-                }
-                // Encode width (s44)
-                flat.extend_from_slice(&width.fraction.to_be_bytes());
-                flat.extend_from_slice(&width.exponent.to_be_bytes());
-                // Encode colour
-                flat.extend_from_slice(&colour.flatten());
-                // Encode closed flag
-                flat.push(if *closed { 1 } else { 0 });
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::ror(control_points, knots, degree, fill, stroke) => {
-                let mut flat = vec![b'r', b'o', b'r'];
-                // Encode control point count
-                flat.push(control_points.len() as u8);
-                // Encode each control point (c44)
-                for point in control_points {
-                    flat.extend_from_slice(&point.real.to_be_bytes());
-                    flat.extend_from_slice(&point.imaginary.to_be_bytes());
-                    flat.extend_from_slice(&point.exponent.to_be_bytes());
-                }
-                // Encode knot count
-                flat.push(knots.len() as u8);
-                // Encode each knot (s44)
-                for knot in knots {
-                    flat.extend_from_slice(&knot.fraction.to_be_bytes());
-                    flat.extend_from_slice(&knot.exponent.to_be_bytes());
-                }
-                // Encode degree
-                flat.push(*degree);
-                // Encode fill
-                match fill {
-                    crate::types::Fill::Solid(colour) => {
-                        flat.push(0x00);
-                        flat.extend_from_slice(&colour.flatten());
-                    }
-                    crate::types::Fill::Gradient(grad) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&grad.flatten());
-                    }
-                }
-                // Encode stroke
-                match stroke {
-                    None => flat.push(0x00),
-                    Some(s) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&s.width.fraction.to_be_bytes());
-                        flat.extend_from_slice(&s.width.exponent.to_be_bytes());
-                        flat.extend_from_slice(&s.colour.flatten());
-                        flat.push(match s.join {
-                            crate::types::StrokeJoin::Miter => 0,
-                            crate::types::StrokeJoin::Round => 1,
-                            crate::types::StrokeJoin::Bevel => 2,
-                        });
-                        flat.push(match s.cap {
-                            crate::types::StrokeCap::Butt => 0,
-                            crate::types::StrokeCap::Round => 1,
-                            crate::types::StrokeCap::Square => 2,
-                        });
-                    }
-                }
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::rox(control_points, spline_type, fill, stroke) => {
-                let mut flat = vec![b'r', b'o', b'x'];
-                // Encode control point count
-                flat.push(control_points.len() as u8);
-                // Encode each control point (c44)
-                for point in control_points {
-                    flat.extend_from_slice(&point.real.to_be_bytes());
-                    flat.extend_from_slice(&point.imaginary.to_be_bytes());
-                    flat.extend_from_slice(&point.exponent.to_be_bytes());
-                }
-                // Encode spline type
-                flat.push(match spline_type {
-                    crate::types::SplineType::Bezier => 0,
-                    crate::types::SplineType::Cubic => 1,
-                    crate::types::SplineType::CatmullRom => 2,
-                });
-                // Encode fill
-                match fill {
-                    crate::types::Fill::Solid(colour) => {
-                        flat.push(0x00);
-                        flat.extend_from_slice(&colour.flatten());
-                    }
-                    crate::types::Fill::Gradient(grad) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&grad.flatten());
-                    }
-                }
-                // Encode stroke
-                match stroke {
-                    None => flat.push(0x00),
-                    Some(s) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&s.width.fraction.to_be_bytes());
-                        flat.extend_from_slice(&s.width.exponent.to_be_bytes());
-                        flat.extend_from_slice(&s.colour.flatten());
-                        flat.push(match s.join {
-                            crate::types::StrokeJoin::Miter => 0,
-                            crate::types::StrokeJoin::Round => 1,
-                            crate::types::StrokeJoin::Bevel => 2,
-                        });
-                        flat.push(match s.cap {
-                            crate::types::StrokeCap::Butt => 0,
-                            crate::types::StrokeCap::Round => 1,
-                            crate::types::StrokeCap::Square => 2,
-                        });
-                    }
-                }
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::rot(pos, text, size, colour, style) => {
-                let mut flat = vec![b'r', b'o', b't'];
-                // Encode pos (c44)
-                flat.extend_from_slice(&pos.real.to_be_bytes());
-                flat.extend_from_slice(&pos.imaginary.to_be_bytes());
-                flat.extend_from_slice(&pos.exponent.to_be_bytes());
-                // Encode text (already a VsfType - l or x)
-                flat.extend_from_slice(&text.flatten());
-                // Encode size (s44)
-                flat.extend_from_slice(&size.fraction.to_be_bytes());
-                flat.extend_from_slice(&size.exponent.to_be_bytes());
-                // Encode colour
-                flat.extend_from_slice(&colour.flatten());
-                // Encode optional TextStyle — tagged fields, terminated by 0x00. Tags: b'l'=left, b'r'=right (no value), b'f'+32=font hash, b'e'/b'k'/b'w'/b'i'/b'x' + s44 (4 bytes each). Absence of l/r tag = center (default).
-                match style {
-                    None => flat.push(0x00),
-                    Some(s) => {
-                        if let Some(hash) = &s.font {
-                            flat.push(b'f');
-                            flat.extend_from_slice(hash);
-                        }
-                        match s.align {
-                            Some(1) => flat.push(b'l'),
-                            Some(2) => flat.push(b'r'),
-                            _ => {} // center = default, no tag needed
-                        }
-                        if let Some(v) = s.leading {
-                            flat.push(b'e');
-                            flat.extend_from_slice(&v.fraction.to_be_bytes());
-                            flat.extend_from_slice(&v.exponent.to_be_bytes());
-                        }
-                        if let Some(v) = s.kerning {
-                            flat.push(b'k');
-                            flat.extend_from_slice(&v.fraction.to_be_bytes());
-                            flat.extend_from_slice(&v.exponent.to_be_bytes());
-                        }
-                        if let Some(v) = s.weight {
-                            flat.push(b'w');
-                            flat.extend_from_slice(&v.fraction.to_be_bytes());
-                            flat.extend_from_slice(&v.exponent.to_be_bytes());
-                        }
-                        if let Some(v) = s.tilt {
-                            flat.push(b'i');
-                            flat.extend_from_slice(&v.fraction.to_be_bytes());
-                            flat.extend_from_slice(&v.exponent.to_be_bytes());
-                        }
-                        if let Some(v) = s.wrap {
-                            flat.push(b'x');
-                            flat.extend_from_slice(&v.fraction.to_be_bytes());
-                            flat.extend_from_slice(&v.exponent.to_be_bytes());
-                        }
-                        flat.push(0x00); // terminator
-                    }
-                }
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::rou(pos, size, label, variant, colour) => {
-                let mut flat = vec![b'r', b'o', b'u'];
-                // Encode pos (c44)
-                flat.extend_from_slice(&pos.real.to_be_bytes());
-                flat.extend_from_slice(&pos.imaginary.to_be_bytes());
-                flat.extend_from_slice(&pos.exponent.to_be_bytes());
-                // Encode size (c44)
-                flat.extend_from_slice(&size.real.to_be_bytes());
-                flat.extend_from_slice(&size.imaginary.to_be_bytes());
-                flat.extend_from_slice(&size.exponent.to_be_bytes());
-                // Encode label (ASCII string)
-                let label_vsf = VsfType::a(label.clone());
-                flat.extend_from_slice(&label_vsf.flatten());
-                // Encode variant
-                flat.push(match variant {
-                    crate::types::ButtonVariant::Filled => 0,
-                    crate::types::ButtonVariant::Outlined => 1,
-                    crate::types::ButtonVariant::Text => 2,
-                });
-                // Encode colour
-                flat.extend_from_slice(&colour.flatten());
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::roq(pos, size, placeholder, colour) => {
-                let mut flat = vec![b'r', b'o', b'q'];
-                // Encode pos (c44)
-                flat.extend_from_slice(&pos.real.to_be_bytes());
-                flat.extend_from_slice(&pos.imaginary.to_be_bytes());
-                flat.extend_from_slice(&pos.exponent.to_be_bytes());
-                // Encode size (c44)
-                flat.extend_from_slice(&size.real.to_be_bytes());
-                flat.extend_from_slice(&size.imaginary.to_be_bytes());
-                flat.extend_from_slice(&size.exponent.to_be_bytes());
-                // Encode placeholder (ASCII, no Huffman dependency)
-                let placeholder_vsf = VsfType::a(placeholder.clone());
-                flat.extend_from_slice(&placeholder_vsf.flatten());
-                // Encode colour
-                flat.extend_from_slice(&colour.flatten());
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::roa(cols, rows, children) => {
-                let mut flat = vec![b'r', b'o', b'a'];
-                flat.extend_from_slice(&cols.encode_number());
-                flat.extend_from_slice(&rows.encode_number());
-                flat.extend_from_slice(&children.len().encode_number());
-                for child in children {
-                    flat.extend_from_slice(&child.flatten());
-                }
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::roi(pos, size, handle, tint) => {
-                let mut flat = vec![b'r', b'o', b'i'];
-                // Encode pos (c44)
-                flat.extend_from_slice(&pos.real.to_be_bytes());
-                flat.extend_from_slice(&pos.imaginary.to_be_bytes());
-                flat.extend_from_slice(&pos.exponent.to_be_bytes());
-                // Encode size (c44)
-                flat.extend_from_slice(&size.real.to_be_bytes());
-                flat.extend_from_slice(&size.imaginary.to_be_bytes());
-                flat.extend_from_slice(&size.exponent.to_be_bytes());
-                // Encode handle (u64 as u6)
-                let handle_vsf = VsfType::u6(*handle);
-                flat.extend_from_slice(&handle_vsf.flatten());
-                // Encode tint colour
-                flat.extend_from_slice(&tint.flatten());
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::rof(pos, size, handle) => {
-                let mut flat = vec![b'r', b'o', b'f'];
-                // Encode pos (c44)
-                flat.extend_from_slice(&pos.real.to_be_bytes());
-                flat.extend_from_slice(&pos.imaginary.to_be_bytes());
-                flat.extend_from_slice(&pos.exponent.to_be_bytes());
-                // Encode size (c44)
-                flat.extend_from_slice(&size.real.to_be_bytes());
-                flat.extend_from_slice(&size.imaginary.to_be_bytes());
-                flat.extend_from_slice(&size.exponent.to_be_bytes());
-                // Encode handle (u64 as u6)
-                let handle_vsf = VsfType::u6(*handle);
-                flat.extend_from_slice(&handle_vsf.flatten());
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::rom(shape, children) => {
-                let mut flat = vec![b'r', b'o', b'm'];
-                // Encode shape (any VsfType)
-                flat.extend_from_slice(&shape.flatten());
-                // Encode children with parentheses (no count needed)
-                flat.push(b'(');
-                for child in children {
-                    flat.extend_from_slice(&child.flatten());
-                }
-                flat.push(b')');
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::row(transform, children) => {
-                let mut flat = vec![b'r', b'o', b'w'];
-                // Encode transform translate (Option<c44>)
-                match &transform.translate {
-                    None => flat.push(0x00),
-                    Some(t) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&t.real.to_be_bytes());
-                        flat.extend_from_slice(&t.imaginary.to_be_bytes());
-                        flat.extend_from_slice(&t.exponent.to_be_bytes());
-                    }
-                }
-                // rotate (Option<s44>)
-                match &transform.rotate {
-                    None => flat.push(0x00),
-                    Some(r) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&r.fraction.to_be_bytes());
-                        flat.extend_from_slice(&r.exponent.to_be_bytes());
-                    }
-                }
-                // scale (Option<c44>)
-                match &transform.scale {
-                    None => flat.push(0x00),
-                    Some(s) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&s.real.to_be_bytes());
-                        flat.extend_from_slice(&s.imaginary.to_be_bytes());
-                        flat.extend_from_slice(&s.exponent.to_be_bytes());
-                    }
-                }
-                // origin (Option<c44>)
-                match &transform.origin {
-                    None => flat.push(0x00),
-                    Some(o) => {
-                        flat.push(0x01);
-                        flat.extend_from_slice(&o.real.to_be_bytes());
-                        flat.extend_from_slice(&o.imaginary.to_be_bytes());
-                        flat.extend_from_slice(&o.exponent.to_be_bytes());
-                    }
-                }
-                // Encode children with parentheses (no count needed)
-                flat.push(b'(');
-                for child in children {
-                    flat.extend_from_slice(&child.flatten());
-                }
-                flat.push(b')');
-                flat
-            }
-
-            #[cfg(feature = "spirix")]
-            VsfType::rok(width, colour, join, cap) => {
-                let mut flat = vec![b'r', b'o', b'k'];
-                // Encode width (s44)
-                flat.extend_from_slice(&width.fraction.to_be_bytes());
-                flat.extend_from_slice(&width.exponent.to_be_bytes());
-                // Encode colour
-                flat.extend_from_slice(&colour.flatten());
-                // Encode join
-                flat.push(match join {
-                    crate::types::StrokeJoin::Miter => 0,
-                    crate::types::StrokeJoin::Round => 1,
-                    crate::types::StrokeJoin::Bevel => 2,
-                });
-                // Encode cap
-                flat.push(match cap {
-                    crate::types::StrokeCap::Butt => 0,
-                    crate::types::StrokeCap::Round => 1,
-                    crate::types::StrokeCap::Square => 2,
-                });
-                flat
-            }
+            // ==================== RENDERABLE OBJECTS ==================== Each object writes itself: `r o letter`, its body length in bits, its body (see types::renderable).
+            VsfType::rob(v) => v.encode(),
+            VsfType::roe(v) => v.encode(),
+            VsfType::rop(v) => v.encode(),
+            VsfType::rol(v) => v.encode(),
+            VsfType::ror(v) => v.encode(),
+            VsfType::ron(v) => v.encode(),
+            VsfType::roa(v) => v.encode(),
+            VsfType::rot(v) => v.encode(),
+            VsfType::rou(v) => v.encode(),
+            VsfType::roq(v) => v.encode(),
+            VsfType::roi(v) => v.encode(),
+            VsfType::rof(v) => v.encode(),
+            VsfType::rog(v) => v.encode(),
+            VsfType::rok(v) => v.encode(),
 
             // VSF Metadata
             VsfType::d(value) => {
@@ -4148,7 +3503,7 @@ impl VsfType {
             VsfType::q_c33(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'3');
                 flat.push(b'3');
 
@@ -4172,7 +3527,7 @@ impl VsfType {
             VsfType::q_c34(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'3');
                 flat.push(b'4');
 
@@ -4196,7 +3551,7 @@ impl VsfType {
             VsfType::q_c35(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'3');
                 flat.push(b'5');
 
@@ -4220,7 +3575,7 @@ impl VsfType {
             VsfType::q_c36(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'3');
                 flat.push(b'6');
 
@@ -4244,7 +3599,7 @@ impl VsfType {
             VsfType::q_c37(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'3');
                 flat.push(b'7');
 
@@ -4268,7 +3623,7 @@ impl VsfType {
             VsfType::q_c43(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'4');
                 flat.push(b'3');
 
@@ -4292,7 +3647,7 @@ impl VsfType {
             VsfType::q_c44(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'4');
                 flat.push(b'4');
 
@@ -4316,7 +3671,7 @@ impl VsfType {
             VsfType::q_c45(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'4');
                 flat.push(b'5');
 
@@ -4340,7 +3695,7 @@ impl VsfType {
             VsfType::q_c46(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'4');
                 flat.push(b'6');
 
@@ -4364,7 +3719,7 @@ impl VsfType {
             VsfType::q_c47(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'4');
                 flat.push(b'7');
 
@@ -4388,7 +3743,7 @@ impl VsfType {
             VsfType::q_c53(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'5');
                 flat.push(b'3');
 
@@ -4412,7 +3767,7 @@ impl VsfType {
             VsfType::q_c54(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'5');
                 flat.push(b'4');
 
@@ -4436,7 +3791,7 @@ impl VsfType {
             VsfType::q_c55(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'5');
                 flat.push(b'5');
 
@@ -4460,7 +3815,7 @@ impl VsfType {
             VsfType::q_c56(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'5');
                 flat.push(b'6');
 
@@ -4484,7 +3839,7 @@ impl VsfType {
             VsfType::q_c57(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'5');
                 flat.push(b'7');
 
@@ -4508,7 +3863,7 @@ impl VsfType {
             VsfType::q_c63(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'6');
                 flat.push(b'3');
 
@@ -4532,7 +3887,7 @@ impl VsfType {
             VsfType::q_c64(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'6');
                 flat.push(b'4');
 
@@ -4556,7 +3911,7 @@ impl VsfType {
             VsfType::q_c65(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'6');
                 flat.push(b'5');
 
@@ -4580,7 +3935,7 @@ impl VsfType {
             VsfType::q_c66(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'6');
                 flat.push(b'6');
 
@@ -4604,7 +3959,7 @@ impl VsfType {
             VsfType::q_c67(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'6');
                 flat.push(b'7');
 
@@ -4628,7 +3983,7 @@ impl VsfType {
             VsfType::q_c73(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'7');
                 flat.push(b'3');
 
@@ -4652,7 +4007,7 @@ impl VsfType {
             VsfType::q_c74(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'7');
                 flat.push(b'4');
 
@@ -4676,7 +4031,7 @@ impl VsfType {
             VsfType::q_c75(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'7');
                 flat.push(b'5');
 
@@ -4700,7 +4055,7 @@ impl VsfType {
             VsfType::q_c76(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'7');
                 flat.push(b'6');
 
@@ -4724,7 +4079,7 @@ impl VsfType {
             VsfType::q_c77(tensor) => {
                 let mut flat = vec![b'q'];
                 flat.extend_from_slice(&tensor.ndim().encode_number());
-                flat.push(b's');
+                flat.push(b'c');
                 flat.push(b'7');
                 flat.push(b'7');
 

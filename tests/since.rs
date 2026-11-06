@@ -7,7 +7,7 @@
 //! Run once without and once with `--features spirix` (and `text-encode` for `x`): a configuration blesses only the samples it can build and keeps the rest of the fixture as it was.
 
 use std::collections::BTreeMap;
-use vsf::types::{BitPackedTensor, EtType, StridedTensor, Tensor, VsfType, WaAddress, WorldCell, WorldCoord, SINCE_TABLE};
+use vsf::types::{BitPackedTensor, EtType, Language, StridedTensor, Tensor, VsfType, WaAddress, WorldCell, WorldCoord, SINCE_TABLE};
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/since.txt");
 
@@ -97,6 +97,8 @@ fn samples() -> Vec<(String, VsfType)> {
     add("w", VsfType::w(WorldCoord::from_lat_lon(-36.8485, 174.7633)));
     add("wm", VsfType::wm(WorldCell::from_lat_lon(-36.8485, 174.7633)));
     add("wa", VsfType::wa(WaAddress::new().with_line1("1 Queen Street").with_city("Auckland")));
+    add("wl", VsfType::wl(Language::new(*b"spa").with_script(215).with_region(724)));
+    add("wl/bare", VsfType::wl(Language::new(*b"eng")));
 
     // Wrapped data
     add("v", VsfType::v(b'b', bytes(40)));
@@ -144,22 +146,50 @@ fn samples() -> Vec<(String, VsfType)> {
         t_j6 q_j6 [num_complex::Complex::new(1.0f64, -1.0), num_complex::Complex::new(0.5, 0.25), num_complex::Complex::new(-2.0, 0.0), num_complex::Complex::new(0.0, 3.0)];
     );
 
+    renderable_samples(&mut s);
     #[cfg(feature = "spirix")]
     spirix_samples(&mut s);
     s
 }
 
+/// Every renderable object, built only from types every configuration has.
+fn renderable_samples(s: &mut Vec<(String, VsfType)>) {
+    use vsf::types::{Align, Button, ButtonVariant, Cap, Ellipse, FillRule, Gradient, GradientKind, Grid, Image, Input, Join, Node, Num, Nums, Nurbs, Paint, Path, PerAxis, Polyline, Rect, Stroke, Surface, Text, Verb};
+
+    let red = || Some(Paint::colour(VsfType::rcr).unwrap());
+    let stroke = || Some(Stroke { width: Num::from(0.0625f32), paint: Paint::colour(VsfType::rcb).unwrap(), join: Some(Join::Round), cap: Some(Cap::Square), miter: None });
+    let circle = || VsfType::roe(Box::new(Ellipse { geometry: Nums::centre_half_f32([0., 0.], [0.25, 0.25]), rotation: None, start: None, sweep: None, fill: red(), stroke: None }));
+    let gradient = Gradient { kind: GradientKind::Linear, geometry: Nums::f32(vec![2, 2], vec![0., 0., 1., 1.]).unwrap(), offsets: Nums::f32(vec![2], vec![0., 1.]).unwrap(), colours: vec![VsfType::rcr, VsfType::rcb], angle: None };
+    let mut add = |label: &str, v: VsfType| s.push((label.to_string(), v));
+
+    add("rob", VsfType::rob(Box::new(Rect { geometry: Nums::centre_half_f32([0., 0.], [2., 1.]), rotation: None, corners: None, exponent: None, fill: red(), stroke: None })));
+    add("rob/squircle", VsfType::rob(Box::new(Rect { geometry: Nums::centre_half_f32([0., 0.], [2., 1.]), rotation: Some(Num::from(0.125f32)), corners: Some(Nums::f32(vec![4], vec![0.5, 0.25, 0.5, 0.25]).unwrap()), exponent: Some(PerAxis::Both(Num::from(3u8))), fill: red(), stroke: stroke() })));
+    add("roe", circle());
+    add("roe/ring-segment", VsfType::roe(Box::new(Ellipse { geometry: Nums::f32(vec![3, 2], vec![0., 0., 2., 1., 1., 0.5]).unwrap(), rotation: Some(Num::from(0.25f32)), start: Some(Num::from(0.125f32)), sweep: Some(Num::from(-0.5f32)), fill: Some(Paint::Gradient(Box::new(gradient.clone()))), stroke: stroke() })));
+    add("rop", VsfType::rop(Box::new(Path { points: Nums::points_f32(&[[0., 0.], [1., 0.], [1., 1.], [0., 1.], [0.5, 0.5], [0.25, 0.125]]), verbs: vec![Verb::Move, Verb::Line, Verb::Quad, Verb::Arc, Verb::Close], angles: Some(Nums::f32(vec![3], vec![0., 0.25, 0.5]).unwrap()), rule: Some(FillRule::EvenOdd), fill: red(), stroke: stroke() })));
+    add("rol", VsfType::rol(Box::new(Polyline { points: Nums::i16(vec![3, 2], vec![0, 0, 16, 16, 32, 0]).unwrap(), closed: true, fill: None, stroke: stroke() })));
+    add("ror", VsfType::ror(Box::new(Nurbs { points: Nums::points_f32(&[[0., 0.], [0.5, 1.], [1., 0.]]), degree: Num::from(2u8), knots: Nums::f32(vec![6], vec![0., 0., 0., 1., 1., 1.]).unwrap(), weights: Some(Nums::f32(vec![3], vec![1., 0.5, 1.]).unwrap()), fill: None, stroke: stroke() })));
+    add("ron", VsfType::ron(Box::new(Node { view: Some(Nums::centre_half_f32([0., 0.], [1., 1.])), translate: Some(Nums::f32(vec![2], vec![0.5, 0.25]).unwrap()), rotation: Some(Num::from(0.25f32)), scale: Some(PerAxis::Both(Num::from(-4i8))), mask: Some(Box::new(circle())), children: vec![circle(), circle()] })));
+    add("roa", VsfType::roa(Box::new(Grid { cols: Num::from(2u8), rows: Num::from(1u8), children: vec![circle(), circle()] })));
+    let mut text = Text::new(VsfType::a("octopus".into()), Nums::f32(vec![2], vec![0., 0.]).unwrap(), Num::from(0.0625f32), Paint::colour(VsfType::rcr).unwrap());
+    text.weight = Some(Num::from(700u16));
+    text.align = Some(Align::Left);
+    text.tilt = Some(Num::from(-0.03125f32));
+    add("rot", VsfType::rot(Box::new(text)));
+    add("rou", VsfType::rou(Box::new(Button { geometry: Nums::centre_half_f32([0., 0.], [0.25, 0.125]), label: Box::new(VsfType::a("OK".into())), variant: ButtonVariant::Outlined, paint: Paint::colour(VsfType::rcr).unwrap() })));
+    add("roq", VsfType::roq(Box::new(Input { geometry: Nums::centre_half_f32([0., 0.], [0.5, 0.125]), placeholder: Box::new(VsfType::a("name".into())), paint: Paint::colour(VsfType::rcr).unwrap() })));
+    add("roi", VsfType::roi(Box::new(Image { geometry: Nums::centre_half_f32([0., 0.], [0.5, 0.5]), handle: Num::uint(42), tint: red() })));
+    add("rof", VsfType::rof(Box::new(Surface { geometry: Nums::centre_half_f32([0., 0.], [0.5, 0.5]), handle: Num::uint(7) })));
+    add("rog", VsfType::rog(Box::new(gradient)));
+    add("rok", VsfType::rok(Box::new(Stroke { width: Num::from(0.0625f32), paint: Paint::colour(VsfType::rcb).unwrap(), join: Some(Join::Miter), cap: Some(Cap::Butt), miter: Some(Num::from(4u8)) })));
+    add("rol/packed", VsfType::rol(Box::new(Polyline { points: Nums::packed(4, vec![3, 2], &[0, 0, 15, 15, 15, 0]), closed: false, fill: None, stroke: stroke() })));
+}
+
 #[cfg(feature = "spirix")]
 fn spirix_samples(s: &mut Vec<(String, VsfType)>) {
     use spirix::*;
-    use vsf::types::{ButtonVariant, Fill, GradientStop, GradientVariant, PathCommand, SplineType, Stroke, StrokeCap, StrokeJoin, TextStyle, Transform};
 
     let sc = |x: f64| ScalarF4E4::from(x);
-    let ci = |r: f64, i: f64| CircleF4E4::from((r, i));
-    let colour = || Box::new(VsfType::rcr);
-    let fill = || Fill::Solid(colour());
-    let stroke = || Some(Stroke { width: sc(0.01), colour: Box::new(VsfType::rcb), join: StrokeJoin::Round, cap: StrokeCap::Square });
-    let leaf = || VsfType::roc(ci(0.0, 0.0), sc(0.1), fill(), None);
     let mut add = |label: &str, v: VsfType| s.push((label.to_string(), v));
 
     // Spirix colour
@@ -168,30 +198,8 @@ fn spirix_samples(s: &mut Vec<(String, VsfType)>) {
     add("rw", VsfType::rw([sc(0.25), sc(0.5), sc(0.75), sc(1.0)]));
     add("rq", VsfType::rq(4, 4, 3, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
 
-    // Renderable objects
-    add("rob", VsfType::rob(ci(0.0, 0.0), ci(0.5, 0.5), fill(), stroke(), vec![leaf()]));
-    add("roc", leaf());
-    add("roe", VsfType::roe(ci(0.1, 0.2), ci(0.3, 0.4), fill(), stroke()));
-    add("rol", VsfType::rol(ci(0.0, 0.0), ci(1.0, 1.0), sc(0.01), colour()));
-    add("rop", VsfType::rop(vec![PathCommand::MoveTo(ci(0.0, 0.0)), PathCommand::LineTo(ci(1.0, 0.0)), PathCommand::QuadraticTo(ci(1.0, 1.0), ci(0.0, 1.0)), PathCommand::CubicTo(ci(0.1, 0.1), ci(0.2, 0.2), ci(0.3, 0.3)), PathCommand::Close], fill(), stroke()));
-    add("roo", VsfType::roo(vec![ci(0.0, 0.0), ci(0.5, 0.5), ci(1.0, 0.0)], sc(0.02), colour(), true));
-    add("ror", VsfType::ror(vec![ci(0.0, 0.0), ci(0.5, 1.0), ci(1.0, 0.0)], vec![sc(0.0), sc(0.0), sc(0.0), sc(1.0), sc(1.0), sc(1.0)], 2, fill(), None));
-    add("rox", VsfType::rox(vec![ci(0.0, 0.0), ci(0.5, 1.0), ci(1.0, 0.0)], SplineType::CatmullRom, fill(), stroke()));
-    let mut style = TextStyle::default();
-    style.weight = Some(sc(700.0));
-    style.align = Some(1);
-    add("rot", VsfType::rot(ci(0.0, 0.0), Box::new(VsfType::a("octopus".into())), sc(0.05), colour(), Some(style)));
-    add("rot/nostyle", VsfType::rot(ci(0.0, 0.0), Box::new(VsfType::a("octopus".into())), sc(0.05), colour(), None));
-    add("rou", VsfType::rou(ci(0.0, 0.0), ci(0.2, 0.1), "OK".into(), ButtonVariant::Outlined, colour()));
-    add("roq", VsfType::roq(ci(0.0, 0.0), ci(0.4, 0.1), "name".into(), colour()));
-    add("roa", VsfType::roa(2, 1, vec![leaf(), leaf()]));
-    add("roi", VsfType::roi(ci(0.0, 0.0), ci(0.5, 0.5), 42, colour()));
-    add("rof", VsfType::rof(ci(0.0, 0.0), ci(0.5, 0.5), 7));
-    add("ron", VsfType::ron(ci(0.0, 0.0), ci(1.0, 1.0), vec![leaf()]));
-    add("rom", VsfType::rom(Box::new(leaf()), vec![leaf()]));
-    add("row", VsfType::row(Transform { translate: Some(ci(0.1, 0.2)), rotate: Some(sc(0.5)), scale: None, origin: None }, vec![leaf()]));
-    add("rog", VsfType::rog(GradientVariant::Linear { start: ci(0.0, 0.0), end: ci(1.0, 1.0) }, vec![GradientStop { offset: sc(0.0), colour: [sc(1.0), sc(0.0), sc(0.0), sc(1.0)] }, GradientStop { offset: sc(1.0), colour: [sc(0.0), sc(0.0), sc(1.0), sc(1.0)] }]));
-    add("rok", VsfType::rok(sc(0.01), colour(), StrokeJoin::Miter, StrokeCap::Butt));
+    // A renderable object numbered in Spirix: the geometry tensor and the rotation carry their own precision
+    add("roe/spirix", VsfType::roe(Box::new(vsf::types::Ellipse { geometry: vsf::types::Nums::new(VsfType::t_s44(Tensor::new(vec![2, 2], vec![sc(0.), sc(0.), sc(0.5), sc(0.25)]))).unwrap(), rotation: Some(vsf::types::Num::from(sc(0.125))), start: None, sweep: None, fill: Some(vsf::types::Paint::colour(VsfType::rcr).unwrap()), stroke: None })));
 
     // Scalars, circles, and their tensors at every fraction × exponent width
     macro_rules! spirix_family {
@@ -307,4 +315,38 @@ fn bytes_change_only_with_the_version() {
         "wire bytes differ from tests/fixtures/since.txt. If a type's bytes changed, raise its version in src/types/since.rs and run with VSF_BLESS=1:\n{}",
         problems.join("\n")
     );
+}
+
+/// Samples that read back as another, equal-meaning form by design: auto-sized integers come back at their encoded width, and the inclusive-length mode is a writer's choice the bytes do not record.
+const READS_BACK_NORMALISED: &[&str] = &["u", "u/wide", "i", "b/inclusive", "l/inclusive"];
+
+/// Samples that do not read back today: readers missing or wrong, found 2026-11-05 when this test was added. Each is a bug; remove its label here when it is fixed (the test fails if a listed sample starts reading back, so the list cannot go stale).
+const NOT_YET_READ: &[&str] = &["hc", "hk", "wa", "r", "re", "rx", "rz", "ri", "rp", "ru", "rs", "rf", "rt", "rh", "rm", "rd", "rb", "rw", "rq"];
+
+/// Every sample reads back as it was built: pinned bytes alone never caught that no Spirix tensor could be read (fixed in v11).
+#[test]
+fn every_sample_reads_back() {
+    let mut failures = Vec::new();
+    let mut fixed = Vec::new();
+    for (label, value) in samples() {
+        if READS_BACK_NORMALISED.contains(&label.as_str()) {
+            continue;
+        }
+        if NOT_YET_READ.contains(&label.as_str()) {
+            if vsf::parse(&value.flatten(), &mut 0).ok().as_ref() == Some(&value) {
+                fixed.push(label);
+            }
+            continue;
+        }
+        let bytes = value.flatten();
+        let mut ptr = 0;
+        match vsf::parse(&bytes, &mut ptr) {
+            Ok(back) if back == value && ptr == bytes.len() => {}
+            Ok(back) if ptr != bytes.len() => failures.push(format!("{label}: read {ptr} of {} bytes as {}", bytes.len(), back.own_since().by)),
+            Ok(back) => failures.push(format!("{label}: read back as a different {}", back.own_since().by)),
+            Err(e) => failures.push(format!("{label}: {e:?}")),
+        }
+    }
+    assert!(failures.is_empty(), "samples that do not read back:\n{}", failures.join("\n"));
+    assert!(fixed.is_empty(), "these now read back; take them off NOT_YET_READ: {fixed:?}");
 }

@@ -21,14 +21,23 @@ fn huge_lengths_and_counts_are_errors() {
     }
 }
 
-/// Renderable objects nested past any real scene are refused instead of running the stack out: 200,000 repetitions of `rom` once aborted the process (VSF-08).
-#[cfg(feature = "spirix")]
+/// Renderable objects nested past any real scene are refused instead of running the stack out: 200,000 repetitions of `rom` once aborted the process (VSF-08). Every object is length-prefixed now, so the chain is built honestly, innermost first, each node holding the next as its child (`c`) or its mask (`m`).
 #[test]
 fn deep_renderable_nesting_is_an_error_not_an_abort() {
-    let input: Vec<u8> = b"rom".iter().copied().cycle().take(3 * 200_000).collect();
-    let r = std::panic::catch_unwind(|| parse(&input, &mut 0));
-    assert!(r.is_ok(), "deep nesting panicked");
-    assert!(r.unwrap().is_err(), "deep nesting parsed");
+    for tag in [b'c', b'm'] {
+        let mut object: Vec<u8> = Vec::new();
+        for _ in 0..1 << 10 {
+            let mut body = vec![tag];
+            body.extend_from_slice(&object);
+            object = b"ron".to_vec();
+            object.extend_from_slice(&vsf::EncodeNumber::encode_number(&(body.len() << 3)));
+            object.extend_from_slice(&body);
+        }
+        let r = std::panic::catch_unwind(|| parse(&object, &mut 0));
+        assert!(r.is_ok(), "deep nesting panicked");
+        let err = r.unwrap().expect_err("deep nesting parsed");
+        assert!(format!("{err:?}").contains("nested deeper"), "{err:?}");
+    }
 }
 
 /// A tensor whose shape multiplies past a usize is refused, not admitted with the wrapped product (VSF-06).

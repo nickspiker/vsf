@@ -105,6 +105,16 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
     *pointer += 1;
     let elem_size = data[*pointer];
     *pointer += 1;
+    // A Spirix element type is three bytes, `s`/`c` then F then E, all before the shape: the order the encoder writes. Reading E after the shape (as this did until v11) took it for the first dimension, and no Spirix tensor ever read back.
+    // WHY: the element type may end exactly at the buffer's end, so the byte after it is peer-supplied absence, not a slot (security audit VSF-05).
+    #[cfg(feature = "spirix")]
+    let spirix_e = if matches!(elem_type, b's' | b'c') {
+        let e = *data.get(*pointer).ok_or(DecodeError::UnexpectedEof { expected: *pointer + 1, got: data.len() })?;
+        *pointer += 1;
+        e
+    } else {
+        0
+    };
 
     // Parse shape (only for multi-dim; 1D already has count)
     let (shape, total_elements) = if is_1d_format {
@@ -212,9 +222,7 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
         b's' => {
             // Spirix Scalar: elem_size is F marker, need to read E marker
             let f_marker = elem_size;
-            // WHY: the shape may end exactly at the buffer's end, so the byte after it is peer-supplied absence, not a slot (security audit VSF-05).
-            let e_marker = *data.get(*pointer).ok_or(DecodeError::UnexpectedEof { expected: *pointer + 1, got: data.len() })?;
-            *pointer += 1;
+            let e_marker = spirix_e;
             match (f_marker, e_marker) {
                 (b'3', b'3') => parse_tensor_data_s33(data, pointer, shape, total_elements),
                 (b'3', b'4') => parse_tensor_data_s34(data, pointer, shape, total_elements),
@@ -255,9 +263,7 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
         b'c' => {
             // Spirix Circle: elem_size is F marker, need to read E marker
             let f_marker = elem_size;
-            // WHY: the shape may end exactly at the buffer's end, so the byte after it is peer-supplied absence, not a slot (security audit VSF-05).
-            let e_marker = *data.get(*pointer).ok_or(DecodeError::UnexpectedEof { expected: *pointer + 1, got: data.len() })?;
-            *pointer += 1;
+            let e_marker = spirix_e;
             match (f_marker, e_marker) {
                 (b'3', b'3') => parse_tensor_data_c33(data, pointer, shape, total_elements),
                 (b'3', b'4') => parse_tensor_data_c34(data, pointer, shape, total_elements),
@@ -275,7 +281,7 @@ pub fn parse_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
                 (b'5', b'6') => parse_tensor_data_c56(data, pointer, shape, total_elements),
                 (b'5', b'7') => parse_tensor_data_c57(data, pointer, shape, total_elements),
                 (b'6', b'3') => parse_tensor_data_c63(data, pointer, shape, total_elements),
-                (b'6', b'4') => parse_tensor_data_j64(data, pointer, shape, total_elements),
+                (b'6', b'4') => parse_tensor_data_c64(data, pointer, shape, total_elements),
                 (b'6', b'5') => parse_tensor_data_c65(data, pointer, shape, total_elements),
                 (b'6', b'6') => parse_tensor_data_c66(data, pointer, shape, total_elements),
                 (b'6', b'7') => parse_tensor_data_c67(data, pointer, shape, total_elements),
@@ -316,6 +322,16 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
     *pointer += 1;
     let elem_size = data[*pointer];
     *pointer += 1;
+    // A Spirix element type is three bytes, `s`/`c` then F then E, all before the shape: the order the encoder writes. Reading E after the shape (as this did until v11) took it for the first dimension, and no Spirix tensor ever read back.
+    // WHY: the element type may end exactly at the buffer's end, so the byte after it is peer-supplied absence, not a slot (security audit VSF-05).
+    #[cfg(feature = "spirix")]
+    let spirix_e = if matches!(elem_type, b's' | b'c') {
+        let e = *data.get(*pointer).ok_or(DecodeError::UnexpectedEof { expected: *pointer + 1, got: data.len() })?;
+        *pointer += 1;
+        e
+    } else {
+        0
+    };
 
     // Parse shape
     let shape = parse_shape(data, pointer, ndim)?;
@@ -371,9 +387,7 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
         b's' => {
             // Spirix Scalar: elem_size is F marker, need to read E marker
             let f_marker = elem_size;
-            // WHY: the shape may end exactly at the buffer's end, so the byte after it is peer-supplied absence, not a slot (security audit VSF-05).
-            let e_marker = *data.get(*pointer).ok_or(DecodeError::UnexpectedEof { expected: *pointer + 1, got: data.len() })?;
-            *pointer += 1;
+            let e_marker = spirix_e;
             match (f_marker, e_marker) {
                 (b'3', b'3') => {
                     parse_strided_tensor_data_s33(data, pointer, shape, stride, total_elements)
@@ -464,9 +478,7 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
         b'c' => {
             // Spirix Circle: elem_size is F marker, need to read E marker
             let f_marker = elem_size;
-            // WHY: the shape may end exactly at the buffer's end, so the byte after it is peer-supplied absence, not a slot (security audit VSF-05).
-            let e_marker = *data.get(*pointer).ok_or(DecodeError::UnexpectedEof { expected: *pointer + 1, got: data.len() })?;
-            *pointer += 1;
+            let e_marker = spirix_e;
             match (f_marker, e_marker) {
                 (b'3', b'3') => {
                     parse_strided_tensor_data_c33(data, pointer, shape, stride, total_elements)
@@ -517,7 +529,7 @@ pub fn parse_strided_tensor(data: &[u8], pointer: &mut usize) -> Result<VsfType,
                     parse_strided_tensor_data_c63(data, pointer, shape, stride, total_elements)
                 }
                 (b'6', b'4') => {
-                    parse_strided_tensor_data_j64(data, pointer, shape, stride, total_elements)
+                    parse_strided_tensor_data_c64(data, pointer, shape, stride, total_elements)
                 }
                 (b'6', b'5') => {
                     parse_strided_tensor_data_c65(data, pointer, shape, stride, total_elements)

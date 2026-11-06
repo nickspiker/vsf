@@ -101,8 +101,12 @@ pub enum TypeConstraint {
     AnyCircle,
 
     // === COLOUR TYPES ===
-    /// Any colour type (r*)
+    /// Any colour type (the r family, not its renderable objects ro* or the colour matrix rm)
     AnyColour,
+
+    // === WORLD TYPES ===
+    /// A human language (wl)
+    Language,
 
     // === WRAPPED DATA ===
     /// Wrapped data with specific encoding byte
@@ -354,7 +358,9 @@ impl TypeConstraint {
                 )
             }
 
-            TypeConstraint::AnyColour => vsf_type_name(value).starts_with('r'),
+            TypeConstraint::AnyColour => value.is_colour(),
+
+            TypeConstraint::Language => matches!(value, VsfType::wl(_)),
 
             TypeConstraint::Wrapped(encoding) => {
                 if let VsfType::v(enc, _) = value {
@@ -421,6 +427,7 @@ impl TypeConstraint {
             #[cfg(feature = "spirix")]
             TypeConstraint::AnyCircle => "any Spirix circle".into(),
             TypeConstraint::AnyColour => "any colour type".into(),
+            TypeConstraint::Language => "a language (wl)".into(),
             TypeConstraint::Wrapped(enc) => format!("wrapped data (encoding {})", enc),
             TypeConstraint::AnyWrapped => "any wrapped data".into(),
             TypeConstraint::OneOf(constraints) => {
@@ -533,7 +540,7 @@ mod tests {
 
 /// Helper function to get human-readable type name for VsfType Used in error messages and debugging.
 ///
-/// With `errors-verbose` (default-on), uses Debug formatting and extracts the variant name prefix. Without it (embedded builds), returns `"?"` — this kills the `<VsfType as Debug>::fmt` chain (and its ~10 KB of IEEE-754 float-to-string code) from being linked. Callers that depend on the returned string for runtime classification (e.g. `AnyColour`'s `starts_with('r')` check) only work correctly under `errors-verbose`.
+/// With `errors-verbose` (default-on), uses Debug formatting and extracts the variant name prefix. Without it (embedded builds), returns `"?"` — this kills the `<VsfType as Debug>::fmt` chain (and its ~10 KB of IEEE-754 float-to-string code) from being linked.
 #[cfg(feature = "errors-verbose")]
 pub fn vsf_type_name(vsf: &VsfType) -> String {
     let debug_str = format!("{:?}", vsf);

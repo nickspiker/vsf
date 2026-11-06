@@ -101,13 +101,14 @@ since_table! {
         q_f5 => 9, q_f6 => 9, q_j5 => 9, q_j6 => 9,
         // Bit-packed tensors, opcodes
         p => 9, op => 9,
+        // Renderable objects: redesigned in v11 (any numeric type, frames from the containing node, angles in turns, length-prefixed bodies), and no longer behind the spirix feature
+        rob => 11, roe => 11, rop => 11, rol => 11, ror => 11, ron => 11, roa => 11, rot => 11, rou => 11, roq => 11, roi => 11, rof => 11, rog => 11, rok => 11,
+        // Human language
+        wl => 11,
     }
     spirix {
         // Spirix colour
         rd => 9, rb => 9, rw => 9, rq => 9,
-        // Renderable objects
-        rob => 9, roc => 9, roe => 9, rol => 9, rop => 9, roo => 9, ror => 9, rox => 9,
-        rot => 9, rou => 9, roq => 9, roa => 9, roi => 9, rof => 9, ron => 9, rom => 9, row => 9, rog => 9, rok => 9,
         // Scalars
         s33 => 9, s34 => 9, s35 => 9, s36 => 9, s37 => 9, s43 => 9, s44 => 9, s45 => 9, s46 => 9, s47 => 9,
         s53 => 9, s54 => 9, s55 => 9, s56 => 9, s57 => 9, s63 => 9, s64 => 9, s65 => 9, s66 => 9, s67 => 9,
@@ -128,39 +129,19 @@ since_table! {
         q_s33 => 9, q_s34 => 9, q_s35 => 9, q_s36 => 9, q_s37 => 9, q_s43 => 9, q_s44 => 9, q_s45 => 9, q_s46 => 9, q_s47 => 9,
         q_s53 => 9, q_s54 => 9, q_s55 => 9, q_s56 => 9, q_s57 => 9, q_s63 => 9, q_s64 => 9, q_s65 => 9, q_s66 => 9, q_s67 => 9,
         q_s73 => 9, q_s74 => 9, q_s75 => 9, q_s76 => 9, q_s77 => 9,
-        // Strided circle tensors
-        q_c33 => 9, q_c34 => 9, q_c35 => 9, q_c36 => 9, q_c37 => 9, q_c43 => 9, q_c44 => 9, q_c45 => 9, q_c46 => 9, q_c47 => 9,
-        q_c53 => 9, q_c54 => 9, q_c55 => 9, q_c56 => 9, q_c57 => 9, q_c63 => 9, q_c64 => 9, q_c65 => 9, q_c66 => 9, q_c67 => 9,
-        q_c73 => 9, q_c74 => 9, q_c75 => 9, q_c76 => 9, q_c77 => 9,
+        // Strided circle tensors: until v11 they wrote their element type as a scalar (`s`), so no reader could read one back
+        q_c33 => 11, q_c34 => 11, q_c35 => 11, q_c36 => 11, q_c37 => 11, q_c43 => 11, q_c44 => 11, q_c45 => 11, q_c46 => 11, q_c47 => 11,
+        q_c53 => 11, q_c54 => 11, q_c55 => 11, q_c56 => 11, q_c57 => 11, q_c63 => 11, q_c64 => 11, q_c65 => 11, q_c66 => 11, q_c67 => 11,
+        q_c73 => 11, q_c74 => 11, q_c75 => 11, q_c76 => 11, q_c77 => 11,
     }
 }
 
 impl VsfType {
     /// The oldest reader this value needs: its own type's version, or a nested value's if that is later (the children, fills and strokes of a renderable object).
     pub fn since(&self) -> Since {
-        let own = self.own_since();
-        #[cfg(feature = "spirix")]
-        {
-            use super::toka_tree::{Fill, Stroke};
-            let fill = |f: &Fill| match f {
-                Fill::Solid(v) | Fill::Gradient(v) => v.since(),
-            };
-            let stroke = |s: &Option<Stroke>| s.as_ref().map(|s| s.colour.since());
-            let all = |vs: &[VsfType]| vs.iter().map(VsfType::since).fold(own, Since::max);
-            let with = |a: Since, b: Option<Since>| b.map_or(a, |b| a.max(b));
-            return match self {
-                VsfType::rob(_, _, f, s, children) => with(all(children).max(fill(f)), stroke(s)),
-                VsfType::roc(_, _, f, s) | VsfType::roe(_, _, f, s) => with(own.max(fill(f)), stroke(s)),
-                VsfType::rop(_, f, s) | VsfType::ror(_, _, _, f, s) | VsfType::rox(_, _, f, s) => with(own.max(fill(f)), stroke(s)),
-                VsfType::rol(_, _, _, c) | VsfType::roo(_, _, c, _) | VsfType::rou(_, _, _, _, c) | VsfType::roq(_, _, _, c) | VsfType::roi(_, _, _, c) | VsfType::rok(_, c, _, _) => own.max(c.since()),
-                VsfType::rot(_, text, _, colour, _) => own.max(text.since()).max(colour.since()),
-                VsfType::roa(_, _, children) | VsfType::ron(_, _, children) | VsfType::row(_, children) => all(children),
-                VsfType::rom(mask, children) => all(children).max(mask.since()),
-                _ => own,
-            };
-        }
-        #[allow(unreachable_code)]
-        own
+        let mut latest = self.own_since();
+        super::renderable::visit(self, &mut |v| latest = latest.max(v.since()));
+        latest
     }
 }
 

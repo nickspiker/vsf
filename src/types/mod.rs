@@ -17,8 +17,8 @@ pub mod vsf_type;
 pub mod world_cell;
 pub mod world_coord;
 
-#[cfg(feature = "spirix")]
-pub mod toka_tree;
+pub mod language;
+pub mod renderable;
 
 // Re-export main types
 pub use eagle_time::{
@@ -37,10 +37,9 @@ pub use vsf_type::VsfType;
 pub use world_cell::WorldCell;
 pub use world_coord::WorldCoord;
 
-// Re-export ro* supporting types
-#[cfg(feature = "spirix")]
-pub use toka_tree::{
-    ButtonVariant, Fill, GradientStop, GradientVariant, Node, NodeKind, PathCommand, SplineType,
-    Stroke, StrokeCap, StrokeJoin, TextStyle, TokaBox, TokaButton, TokaCircle, TokaContainer,
-    TokaImage, TokaLine, TokaPath, TokaSurface, TokaText, Transform,
+pub use language::Language;
+
+// The ro* family's object and paint types.
+pub use renderable::{
+    Align, Button, ButtonVariant, Cap, Ellipse, FillRule, Gradient, GradientKind, Grid, Image, Input, Join, Node, Num, Nums, Nurbs, Paint, Path, PerAxis, Polyline, Rect, Stroke, Surface, Text, Verb,
 };

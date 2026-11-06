@@ -11,8 +11,6 @@ use crate::decoding::parse::parse;
 // vt hack support removed - use ro* types instead use crate::decoding::toka_tree::parse_vt_node;
 use crate::file_format::{VsfField, VsfHeader};
 use crate::themes::Theme;
-#[cfg(feature = "spirix")]
-use crate::types::Fill;
 use crate::types::{EagleTime, EtType, NaScheme, VsfType};
 use chrono::{Datelike, Local, Timelike};
 use colored::*;
@@ -364,11 +362,9 @@ fn col_wrap() -> (u8, u8, u8) {
 fn col_tensor() -> (u8, u8, u8) {
     THEME.binary
 } // t_*, v_*, q_*, p
-#[cfg(feature = "spirix")] // serves only the spirix-gated ro*/scene-graph arms below — ungated it warned dead for every non-spirix consumer
 fn col_colour() -> (u8, u8, u8) {
     THEME.colour
 } // r*, ra, rw
-#[cfg(feature = "spirix")] // serves only the spirix-gated ro*/scene-graph arms below — ungated it warned dead for every non-spirix consumer
 fn col_ro() -> (u8, u8, u8) {
     THEME.renderable
 } // ro* scene graph types
@@ -440,14 +436,12 @@ const RO_VERT: &str = "│"; // U+2502 Light vertical
 const RO_SPACE: &str = " "; // Continuation indent
 
 // Helper to format a field for ro* display: value first, label as hint
-#[cfg(feature = "spirix")] // serves only the spirix-gated ro*/scene-graph arms below — ungated it warned dead for every non-spirix consumer
 fn ro_field(value: String, label: &str) -> String {
     let (r, g, b) = col_hint();
     format!("  {} {}", value, label.truecolor(r, g, b))
 }
 
 // Helper to add semantic hint for colour types
-#[cfg(feature = "spirix")] // serves only the spirix-gated ro*/scene-graph arms below — ungated it warned dead for every non-spirix consumer
 fn colour_hint(vsf: &VsfType) -> &'static str {
     match vsf {
         VsfType::rcr => " VSF Red",
@@ -459,60 +453,74 @@ fn colour_hint(vsf: &VsfType) -> &'static str {
     }
 }
 
-// Helper to format Node compactly for vt types
-#[cfg(feature = "spirix")]
-#[allow(dead_code)]
-fn format_node_compact(node: &crate::types::Node) -> String {
-    use crate::types::NodeKind;
-
-    // Format node kind name
-    let kind_name = match &node.kind {
-        NodeKind::Box(_) => "Box",
-        NodeKind::Container(_) => "Container",
-        NodeKind::Circle(_) => "Circle",
-        NodeKind::Line(_) => "Line",
-        NodeKind::Text(_) => "Text",
-        NodeKind::Button(_) => "Button",
-        NodeKind::Path(_) => "Path",
-        NodeKind::Image(_) => "Image",
-        NodeKind::Surface(_) => "Surface",
-    };
-
-    // Build compact representation
-    let mut parts = vec![kind_name.to_string()];
-
-    // Add transform indicators if present
-    if !node.transform.is_identity() {
-        let mut transform_parts = Vec::new();
-        if node.transform.translate.is_some() {
-            transform_parts.push("translate");
-        }
-        if node.transform.rotate.is_some() {
-            transform_parts.push("rotate");
-        }
-        if node.transform.scale.is_some() {
-            transform_parts.push("scale");
-        }
-        if node.transform.origin.is_some() {
-            transform_parts.push("origin");
-        }
-        if !transform_parts.is_empty() {
-            parts.push(format!("[{}]", transform_parts.join(" + ")));
+/// An ro* object: its marker and name, then one field per line. A field whose value runs over several lines (a tensor) continues indented under it.
+fn ro_block(marker: &str, name: &str, fields: Vec<(String, &str)>) -> String {
+    let mut out = format!("{} {}", marker, trc(name, col_ro()));
+    for (value, label) in fields {
+        let mut lines = value.lines();
+        out.push_str(&format!("\n{}", ro_field(lines.next().unwrap_or("").to_string(), label)));
+        for line in lines {
+            out.push_str(&format!("\n    {line}"));
         }
     }
+    out
+}
 
-    // Add child count
-    match node.children.len() {
-        0 => {}
-        1 => parts.push("(1 child)".to_string()),
-        n => parts.push(format!("({} children)", n)),
+fn ro_opt(fields: &mut Vec<(String, &str)>, value: Option<&VsfType>, label: &'static str) {
+    if let Some(v) = value {
+        fields.push((format_value_literal(v), label));
     }
+}
 
-    parts.join(" ")
+fn ro_opt_num(fields: &mut Vec<(String, &str)>, value: &Option<crate::types::Num>, label: &'static str) {
+    ro_opt(fields, value.as_ref().map(|n| n.value()), label);
+}
+
+fn ro_per_axis(p: &crate::types::PerAxis) -> &VsfType {
+    match p {
+        crate::types::PerAxis::Both(n) => n.value(),
+        crate::types::PerAxis::Each(n) => n.value(),
+    }
+}
+
+fn ro_paint(p: &crate::types::Paint) -> String {
+    match p {
+        crate::types::Paint::Colour(c) => format!("{}{}", format_value_literal(c), trc(colour_hint(c), col_colour())),
+        crate::types::Paint::Gradient(g) => ro_gradient(g),
+    }
+}
+
+fn ro_style(fields: &mut Vec<(String, &str)>, fill: &Option<crate::types::Paint>, stroke: &Option<crate::types::Stroke>) {
+    if let Some(p) = fill {
+        fields.push((ro_paint(p), "fill"));
+    }
+    if let Some(s) = stroke {
+        fields.push((ro_stroke(s), "stroke"));
+    }
+}
+
+fn ro_gradient(g: &crate::types::Gradient) -> String {
+    let mut f = vec![(format!("{:?}", g.kind), "kind"), (format_value_literal(g.geometry.value()), "geometry"), (format_value_literal(g.offsets.value()), "offsets")];
+    ro_opt_num(&mut f, &g.angle, "angle (turns)");
+    for c in &g.colours {
+        f.push((format!("{}{}", format_value_literal(c), trc(colour_hint(c), col_colour())), "stop colour"));
+    }
+    ro_block("rog", "gradient", f)
+}
+
+fn ro_stroke(s: &crate::types::Stroke) -> String {
+    let mut f = vec![(format_value_literal(s.width.value()), "width"), (ro_paint(&s.paint), "paint")];
+    if let Some(j) = s.join {
+        f.push((format!("{j:?}"), "join"));
+    }
+    if let Some(c) = s.cap {
+        f.push((format!("{c:?}"), "cap"));
+    }
+    ro_opt_num(&mut f, &s.miter, "miter limit");
+    ro_block("rok", "stroke", f)
 }
 
 // Helper to format children with proper indentation
-#[cfg(feature = "spirix")] // serves only the spirix-gated ro*/scene-graph arms below — ungated it warned dead for every non-spirix consumer
 fn format_children(children: &[VsfType]) -> String {
     if children.is_empty() {
         return format!("{}{}", trc("(", col_punct()), trc(")", col_punct()));
@@ -1665,419 +1673,113 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         #[cfg(feature = "spirix")]
         VsfType::c77(c) => format!("{}{}", trc("c77", col_uint()), c),
 
-        // Renderable object types (ro* - scene graph primitives)
-        #[cfg(feature = "spirix")]
-        VsfType::rob(pos, size, fill, stroke, children) => {
-            let mut result = format!("rob {}", trc("rectangle", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
-            // Add fill with colour hint
-            let fill_str = match fill {
-                Fill::Solid(colour) => {
-                    format!(
-                        "Solid({}{})",
-                        match colour.as_ref() {
-                            VsfType::rcr => "rcr",
-                            VsfType::rcn => "rcn",
-                            VsfType::rcb => "rcb",
-                            VsfType::rcw => "rcw",
-                            VsfType::rck => "rck",
-                            _ => "?",
-                        },
-                        trc(colour_hint(colour.as_ref()), col_colour())
-                    )
-                }
-                _ => format!("{:?}", fill),
-            };
-            result.push_str(&format!("\n{}", ro_field(fill_str, "fill")));
-            if stroke.is_some() {
-                result.push_str(&format!(
-                    "\n{}",
-                    ro_field(format!("{:?}", stroke), "stroke")
-                ));
+        // Renderable objects (ro*): one line per field, value first, its name as a hint
+        VsfType::rob(r) => {
+            let mut f = vec![(format_value_literal(r.geometry.value()), "centre, half-size")];
+            ro_opt_num(&mut f, &r.rotation, "rotation (turns)");
+            ro_opt(&mut f, r.corners.as_ref().map(|c| c.value()), "corner radii");
+            ro_opt(&mut f, r.exponent.as_ref().map(ro_per_axis), "corner exponent");
+            ro_style(&mut f, &r.fill, &r.stroke);
+            ro_block("rob", "box", f)
+        }
+        VsfType::roe(e) => {
+            let what = if e.is_ring() { "centre, radii, inner radii" } else { "centre, radii" };
+            let mut f = vec![(format_value_literal(e.geometry.value()), what)];
+            ro_opt_num(&mut f, &e.rotation, "rotation (turns)");
+            ro_opt_num(&mut f, &e.start, "start (turns)");
+            ro_opt_num(&mut f, &e.sweep, "sweep (turns)");
+            ro_style(&mut f, &e.fill, &e.stroke);
+            ro_block("roe", "ellipse", f)
+        }
+        VsfType::rop(p) => {
+            let verbs = p.verbs.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(" ");
+            let mut f = vec![(format_value_literal(p.points.value()), "points"), (verbs, "verbs")];
+            ro_opt(&mut f, p.angles.as_ref().map(|a| a.value()), "angles (turns)");
+            if let Some(rule) = p.rule {
+                f.push((format!("{rule:?}"), "fill rule"));
             }
-            if !children.is_empty() {
-                result.push_str(&format!(
-                    "\n{}",
-                    ro_field(format_children(children), "children")
-                ));
+            ro_style(&mut f, &p.fill, &p.stroke);
+            ro_block("rop", "path", f)
+        }
+        VsfType::rol(l) => {
+            let mut f = vec![(format_value_literal(l.points.value()), "points")];
+            if l.closed {
+                f.push(("closed".to_string(), "polygon"));
             }
-            result
+            ro_style(&mut f, &l.fill, &l.stroke);
+            ro_block("rol", "polyline", f)
         }
-        #[cfg(feature = "spirix")]
-        VsfType::roc(center, radius, fill, stroke) => {
-            let mut result = format!("roc {}", trc("circle", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", center), "center")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", radius), "radius")));
-            // Add fill with colour hint
-            let fill_str = match fill {
-                Fill::Solid(colour) => {
-                    format!(
-                        "Solid({}{})",
-                        match colour.as_ref() {
-                            VsfType::rcr => "rcr",
-                            VsfType::rcn => "rcn",
-                            VsfType::rcb => "rcb",
-                            VsfType::rcw => "rcw",
-                            VsfType::rck => "rck",
-                            _ => "?",
-                        },
-                        trc(colour_hint(colour.as_ref()), col_colour())
-                    )
-                }
-                _ => format!("{:?}", fill),
-            };
-            result.push_str(&format!("\n{}", ro_field(fill_str, "fill")));
-            if stroke.is_some() {
-                result.push_str(&format!(
-                    "\n{}",
-                    ro_field(format!("{:?}", stroke), "stroke")
-                ));
+        VsfType::ror(r) => {
+            let mut f = vec![
+                (format_value_literal(r.points.value()), "control points"),
+                (format_value_literal(r.degree.value()), "degree"),
+                (format_value_literal(r.knots.value()), "knots"),
+            ];
+            ro_opt(&mut f, r.weights.as_ref().map(|w| w.value()), "weights");
+            ro_style(&mut f, &r.fill, &r.stroke);
+            ro_block("ror", "NURBS", f)
+        }
+        VsfType::ron(n) => {
+            let mut f = Vec::new();
+            ro_opt(&mut f, n.view.as_ref().map(|v| v.value()), "view: centre, half-size");
+            ro_opt(&mut f, n.translate.as_ref().map(|t| t.value()), "translate");
+            ro_opt_num(&mut f, &n.rotation, "rotation (turns)");
+            ro_opt(&mut f, n.scale.as_ref().map(ro_per_axis), "scale");
+            ro_opt(&mut f, n.mask.as_deref(), "mask");
+            let mut out = ro_block("ron", "node", f);
+            out.push_str(&format!("\n  {}", format_children(&n.children)));
+            out
+        }
+        VsfType::roa(g) => {
+            let f = vec![(format_value_literal(g.cols.value()), "columns"), (format_value_literal(g.rows.value()), "rows")];
+            let mut out = ro_block("roa", "grid", f);
+            out.push_str(&format!("\n  {}", format_children(&g.children)));
+            out
+        }
+        VsfType::rot(t) => {
+            let mut f = vec![
+                (format_value_literal(&t.text), "text"),
+                (format_value_literal(t.anchor.value()), "anchor"),
+                (format_value_literal(t.size.value()), "size"),
+                (ro_paint(&t.paint), "paint"),
+            ];
+            ro_opt(&mut f, t.font.as_deref(), "font");
+            ro_opt_num(&mut f, &t.leading, "leading");
+            ro_opt_num(&mut f, &t.spacing, "letter spacing");
+            ro_opt_num(&mut f, &t.weight, "weight");
+            ro_opt_num(&mut f, &t.tilt, "tilt (turns)");
+            ro_opt_num(&mut f, &t.wrap, "wrap width");
+            if let Some(a) = t.align {
+                f.push((format!("{a:?}"), "align"));
             }
-            result
+            ro_opt_num(&mut f, &t.rotation, "rotation (turns)");
+            ro_block("rot", "text", f)
         }
-        #[cfg(feature = "spirix")]
-        VsfType::ron(pos, size, children) => {
-            let mut result = format!("ron {}", trc("container", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format_children(children), "children")
-            ));
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::roe(center, size, fill, stroke) => {
-            let mut result = format!("roe {}", trc("ellipse", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", center), "center")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
-            let fill_str = match fill {
-                Fill::Solid(colour) => {
-                    format!(
-                        "Solid({}{})",
-                        match colour.as_ref() {
-                            VsfType::rcr => "rcr",
-                            VsfType::rcn => "rcn",
-                            VsfType::rcb => "rcb",
-                            VsfType::rcw => "rcw",
-                            VsfType::rck => "rck",
-                            _ => "?",
-                        },
-                        trc(colour_hint(colour.as_ref()), col_colour())
-                    )
-                }
-                _ => format!("{:?}", fill),
-            };
-            result.push_str(&format!("\n{}", ro_field(fill_str, "fill")));
-            if stroke.is_some() {
-                result.push_str(&format!(
-                    "\n{}",
-                    ro_field(format!("{:?}", stroke), "stroke")
-                ));
+        VsfType::rou(b) => ro_block(
+            "rou",
+            "button",
+            vec![
+                (format_value_literal(b.geometry.value()), "centre, half-size"),
+                (format_value_literal(&b.label), "label"),
+                (format!("{:?}", b.variant), "variant"),
+                (ro_paint(&b.paint), "paint"),
+            ],
+        ),
+        VsfType::roq(i) => ro_block(
+            "roq",
+            "text input",
+            vec![(format_value_literal(i.geometry.value()), "centre, half-size"), (format_value_literal(&i.placeholder), "placeholder"), (ro_paint(&i.paint), "paint")],
+        ),
+        VsfType::roi(i) => {
+            let mut f = vec![(format_value_literal(i.geometry.value()), "centre, half-size"), (format_value_literal(i.handle.value()), "handle")];
+            if let Some(t) = &i.tint {
+                f.push((ro_paint(t), "tint"));
             }
-            result
+            ro_block("roi", "image", f)
         }
-        #[cfg(feature = "spirix")]
-        VsfType::rol(start, end, width, colour) => {
-            let mut result = format!("rol {}", trc("line", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", start), "start")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", end), "end")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", width), "width")));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", colour), "colour")
-            ));
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::rop(commands, fill, stroke) => {
-            let mut result = format!("rop {}", trc("path", col_ro()));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", commands), "commands")
-            ));
-            let fill_str = match fill {
-                Fill::Solid(colour) => {
-                    format!(
-                        "Solid({}{})",
-                        match colour.as_ref() {
-                            VsfType::rcr => "rcr",
-                            VsfType::rcn => "rcn",
-                            VsfType::rcb => "rcb",
-                            VsfType::rcw => "rcw",
-                            VsfType::rck => "rck",
-                            _ => "?",
-                        },
-                        trc(colour_hint(colour.as_ref()), col_colour())
-                    )
-                }
-                _ => format!("{:?}", fill),
-            };
-            result.push_str(&format!("\n{}", ro_field(fill_str, "fill")));
-            if stroke.is_some() {
-                result.push_str(&format!(
-                    "\n{}",
-                    ro_field(format!("{:?}", stroke), "stroke")
-                ));
-            }
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::roo(points, width, colour, closed) => {
-            let mut result = format!("roo {}", trc("polyline", col_ro()));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", points), "points")
-            ));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", width), "width")));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", colour), "colour")
-            ));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", closed), "closed")));
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::ror(controls, knots, degree, fill, stroke) => {
-            let mut result = format!("ror {}", trc("NURBS", col_ro()));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", controls), "controls")
-            ));
-            result.push_str(&format!("\n{}", ro_field(format!("{:?}", knots), "knots")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", degree), "degree")));
-            let fill_str = match fill {
-                Fill::Solid(colour) => {
-                    format!(
-                        "Solid({}{})",
-                        match colour.as_ref() {
-                            VsfType::rcr => "rcr",
-                            VsfType::rcn => "rcn",
-                            VsfType::rcb => "rcb",
-                            VsfType::rcw => "rcw",
-                            VsfType::rck => "rck",
-                            _ => "?",
-                        },
-                        trc(colour_hint(colour.as_ref()), col_colour())
-                    )
-                }
-                _ => format!("{:?}", fill),
-            };
-            result.push_str(&format!("\n{}", ro_field(fill_str, "fill")));
-            if stroke.is_some() {
-                result.push_str(&format!(
-                    "\n{}",
-                    ro_field(format!("{:?}", stroke), "stroke")
-                ));
-            }
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::rox(points, spline_type, fill, stroke) => {
-            let mut result = format!("rox {}", trc("spline", col_ro()));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", points), "points")
-            ));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", spline_type), "type")
-            ));
-            let fill_str = match fill {
-                Fill::Solid(colour) => {
-                    format!(
-                        "Solid({}{})",
-                        match colour.as_ref() {
-                            VsfType::rcr => "rcr",
-                            VsfType::rcn => "rcn",
-                            VsfType::rcb => "rcb",
-                            VsfType::rcw => "rcw",
-                            VsfType::rck => "rck",
-                            _ => "?",
-                        },
-                        trc(colour_hint(colour.as_ref()), col_colour())
-                    )
-                }
-                _ => format!("{:?}", fill),
-            };
-            result.push_str(&format!("\n{}", ro_field(fill_str, "fill")));
-            if stroke.is_some() {
-                result.push_str(&format!(
-                    "\n{}",
-                    ro_field(format!("{:?}", stroke), "stroke")
-                ));
-            }
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::rot(pos, text, size, colour, style) => {
-            let mut result = format!("rot {}", trc("text", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
-            result.push_str(&format!("\n{}", ro_field(format!("{:?}", text), "text")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", colour), "colour")
-            ));
-            if let Some(s) = style {
-                let align_str = match s.align {
-                    Some(1) => "left",
-                    Some(2) => "right",
-                    _ => "center",
-                };
-                result.push_str(&format!("\n{}", ro_field(align_str.to_string(), "align")));
-                if let Some(v) = s.leading {
-                    result.push_str(&format!("\n{}", ro_field(format!("{}", v), "leading")));
-                }
-                if let Some(v) = s.kerning {
-                    result.push_str(&format!("\n{}", ro_field(format!("{}", v), "kerning")));
-                }
-                if let Some(v) = s.weight {
-                    result.push_str(&format!("\n{}", ro_field(format!("{}", v), "weight")));
-                }
-                if let Some(v) = s.tilt {
-                    result.push_str(&format!("\n{}", ro_field(format!("{}", v), "tilt")));
-                }
-                if let Some(v) = s.wrap {
-                    result.push_str(&format!("\n{}", ro_field(format!("{}", v), "wrap")));
-                }
-                if let Some(h) = s.font {
-                    result.push_str(&format!("\n{}", ro_field(hex::encode(h), "font hash")));
-                }
-            }
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::rou(pos, size, label, variant, colour) => {
-            let mut result = format!("rou {}", trc("button", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
-            result.push_str(&format!("\n{}", ro_field(format!("{:?}", label), "label")));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", variant), "variant")
-            ));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", colour), "colour")
-            ));
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::roq(pos, size, placeholder, colour) => {
-            let mut result = format!("roq {}", trc("text_input", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", placeholder), "placeholder")
-            ));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", colour), "colour")
-            ));
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::roa(cols, rows, children) => {
-            let mut result = format!("roa {}", trc("array", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", cols), "cols")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", rows), "rows")));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{}", children.len()), "children")
-            ));
-            for (i, child) in children.iter().enumerate() {
-                result.push_str(&format!(
-                    "\n{}",
-                    ro_field(format!("{:?}", child), &format!("[{}]", i))
-                ));
-            }
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::roi(pos, size, handle, tint) => {
-            let mut result = format!("roi {}", trc("image", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", handle), "handle")));
-            result.push_str(&format!("\n{}", ro_field(format!("{:?}", tint), "tint")));
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::rof(pos, size, handle) => {
-            let mut result = format!("rof {}", trc("surface", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", pos), "position")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", size), "size")));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", handle), "handle")));
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::rom(shape, children) => {
-            let mut result = format!("rom {}", trc("mask", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{:?}", shape), "shape")));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format_children(children), "children")
-            ));
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::row(transform, children) => {
-            let mut result = format!("row {}", trc("group", col_ro()));
-
-            // Format transform with Display instead of Debug for readable output
-            let transform_str = {
-                let mut parts = Vec::new();
-                if let Some(t) = &transform.translate {
-                    parts.push(format!("translate: {}", t));
-                }
-                if let Some(r) = &transform.rotate {
-                    parts.push(format!("rotate: {} rad", r));
-                }
-                if let Some(s) = &transform.scale {
-                    parts.push(format!("scale: {}", s));
-                }
-                if let Some(o) = &transform.origin {
-                    parts.push(format!("origin: {}", o));
-                }
-                if parts.is_empty() {
-                    "identity".to_string()
-                } else {
-                    parts.join(", ")
-                }
-            };
-
-            result.push_str(&format!("\n{}", ro_field(transform_str, "transform")));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format_children(children), "children")
-            ));
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::rog(variant, stops) => {
-            let mut result = format!("rog {}", trc("gradient", col_ro()));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", variant), "variant")
-            ));
-            result.push_str(&format!("\n{}", ro_field(format!("{:?}", stops), "stops")));
-            result
-        }
-        #[cfg(feature = "spirix")]
-        VsfType::rok(width, colour, join, cap) => {
-            let mut result = format!("rok {}", trc("stroke", col_ro()));
-            result.push_str(&format!("\n{}", ro_field(format!("{}", width), "width")));
-            result.push_str(&format!(
-                "\n{}",
-                ro_field(format!("{:?}", colour), "colour")
-            ));
-            result.push_str(&format!("\n{}", ro_field(format!("{:?}", join), "join")));
-            result.push_str(&format!("\n{}", ro_field(format!("{:?}", cap), "cap")));
-            result
-        }
+        VsfType::rof(s) => ro_block("rof", "surface", vec![(format_value_literal(s.geometry.value()), "centre, half-size"), (format_value_literal(s.handle.value()), "handle")]),
+        VsfType::rog(g) => ro_gradient(g),
+        VsfType::rok(s) => ro_stroke(s),
 
         // ==================== NETWORK FAMILY ====================
         VsfType::ni(b) => {
@@ -2188,6 +1890,7 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
                 tc("⦊", col_punct())
             )
         }
+        VsfType::wl(lang) => format!("{}{}{}{}", trc("wl", col_uint()), tc("⦉", col_punct()), lang, tc("⦊", col_punct())),
 
         // Fall back to debug for unhandled types
         _ => format!("{:?}", vsf),
@@ -2544,6 +2247,7 @@ pub fn format_value(vsf: &VsfType) -> String {
 
         // World address
         VsfType::wa(addr) => addr.to_string(),
+        VsfType::wl(lang) => lang.to_string(),
 
         // Opcodes
         VsfType::op(a, b) => format!("{{{}{}}}", char::from(*a), char::from(*b)),

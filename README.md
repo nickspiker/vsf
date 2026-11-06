@@ -87,17 +87,18 @@ d   o   l   x   a   e   w   v    single-letter types
 | `ks` | Shared secret | `ksx` `ksp` `ksk` `ksf` `ksn` `ksl` `ksh` `ksm` |
 | `m` | MAC | `mh` HMAC-SHA256 `mp` Poly1305 `mb` BLAKE3-keyed `mc` CMAC |
 | `n` | Network | `na` address `nh` host `ni` IPv4 `nj` IPv6 `nc` CIDR `nm` MAC address `np` port `ns` socket `nu` URL `nn` DNS name |
-| `r` | Colour / raster | `re` `ru` `ra` `rf` and the rest; `ro*` are drawable objects |
+| `r` | Colour / raster | `re` `ru` `ra` `rf` and the rest; `ro*` are drawable objects (shapes, nodes, paint) whose numbers take any numeric type, in the containing node's frame, angles in turns |
 | `t_` | Tensor, contiguous | one per element type |
 | `q_` | Tensor, strided | one per element type |
 | `p` | Bit-packed tensor | 1 to 128 bits per element |
 | `s`, `c` | Spirix scalar, circle | 25 each, F3 to F7 × E3 to E7 |
 | `d` `o` `l` | Dictionary key, offset, length | the container's own structure |
 | `a` `x` | ASCII text, Huffman Unicode | |
-| `e` `w` | Eagle Time, WorldCoord | |
+| `e` | Eagle Time | |
+| `w` | World | `w` coordinate `wm` cell `wa` postal address `wl` language (ISO 639-3, 15924, 3166-1) |
 | `op` | Opcode | executable bytecode |
 
-318 variants in `VsfType` today. The enum is the format: add a variant and the encoder, decoder and `vsfinfo` will not compile until they handle it. The code is Rust, with the usual Rust guarantees and no others; a format parser still has to bound what it allocates against what it was handed, and a bug report is the right response to one that does not.
+316 variants in `VsfType` today. The enum is the format: add a variant and the encoder, decoder and `vsfinfo` will not compile until they handle it. The code is Rust, with the usual Rust guarantees and no others; a format parser still has to bound what it allocates against what it was handed, and a bug report is the right response to one that does not.
 
 ---
 
