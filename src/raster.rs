@@ -106,14 +106,14 @@ impl Image {
         Image { width, height, rgba: vec![[0.; 4]; width * height] }
     }
 
-    /// Composite over an opaque background (linear VSF RGB) and return planar `[3, h, w]` u16, white at 65535: what opsin ingests.
-    pub fn planar_u16_over(&self, background: [f32; 3]) -> Vec<u16> {
+    /// Planar `[3, h, w]` u16 linear VSF RGB, white at 65535: what opsin ingests. The light is the premultiplied light drawn; where nothing was drawn there is none, so no background is added.
+    pub fn planar_u16(&self) -> Vec<u16> {
         let n = self.width * self.height;
         let mut out = vec![0u16; 3 * n];
         for (i, p) in self.rgba.iter().enumerate() {
             for ch in 0..3 {
                 // A float-to-int cast saturates: light past white holds at 65535 and nothing goes below 0, so no clamp is needed.
-                out[ch * n + i] = ((p[ch] + background[ch] * (1. - p[3])) * 65535.) as u16;
+                out[ch * n + i] = (p[ch] * 65535.) as u16;
             }
         }
         out
