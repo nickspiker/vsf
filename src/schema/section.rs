@@ -96,22 +96,25 @@ impl FieldValue {
     /// - Single: `(d"name":value)`
     /// - Multi: `(d"name":val1,val2,val3)`
     pub fn flatten(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
+        // The parts first, then one buffer of their exact length (grown as it was filled, the closing ')' after a large value doubled it).
+        let name = VsfType::d(self.name.clone()).flatten();
+        let values: Vec<Vec<u8>> = self.values.iter().map(|v| v.flatten()).collect();
+        let mut bytes = Vec::with_capacity(1 + name.len() + values.iter().map(|v| v.len() + 1).sum::<usize>() + 1);
 
         // Opening parenthesis
         bytes.push(b'(');
 
         // Field name as d-type
-        bytes.extend(VsfType::d(self.name.clone()).flatten());
+        bytes.extend_from_slice(&name);
 
         // Values (if any)
-        if !self.values.is_empty() {
+        if !values.is_empty() {
             bytes.push(b':');
-            for (i, value) in self.values.iter().enumerate() {
+            for (i, value) in values.iter().enumerate() {
                 if i > 0 {
                     bytes.push(b','); // Comma separator between values
                 }
-                bytes.extend(value.flatten());
+                bytes.extend_from_slice(value);
             }
         }
 
@@ -380,8 +383,9 @@ impl SectionBuilder {
             }
         }
 
-        // Build the section bytes
-        let mut bytes = Vec::new();
+        // Build the section bytes: the fields flattened first, then one buffer of the exact length (grown as it was filled, the closing ']' after a large field doubled it).
+        let fields: Vec<Vec<u8>> = self.fields.iter().map(|f| f.flatten()).collect();
+        let mut bytes = Vec::with_capacity(2 + fields.iter().map(|f| f.len()).sum::<usize>());
 
         // Section start marker
         bytes.push(b'[');
@@ -389,8 +393,8 @@ impl SectionBuilder {
         // NOTE: Section name is NOT included here for sections within 1MB of header. For sections >1MB away, the name would be required with metadata (not yet implemented).
 
         // Encode each field using FieldValue.flatten()
-        for field in &self.fields {
-            bytes.extend(field.flatten());
+        for field in fields {
+            bytes.extend_from_slice(&field);
         }
 
         // Section end marker

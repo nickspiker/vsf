@@ -740,19 +740,23 @@ impl VsfField {
     /// - ',' separates values from each other
     /// - ')' ends the field
     pub fn flatten(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
+        // The parts first, then one buffer of their exact length: grown as it was filled, the closing ')' pushed past a large value's exact fit doubled it (a 24 MB plane took a 48 MB buffer, 2026-11-08).
+        let name = VsfType::d(self.name.clone()).flatten();
+        let values: Vec<Vec<u8>> = self.values.iter().map(|v| v.flatten()).collect();
+        let len = 1 + name.len() + values.iter().map(|v| v.len() + 1).sum::<usize>() + 1;
+        let mut bytes = Vec::with_capacity(len);
 
         bytes.push(b'(');
-        bytes.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
+        bytes.extend_from_slice(&name);
 
-        if !self.values.is_empty() {
+        if !values.is_empty() {
             bytes.push(b':');
 
-            for (i, value) in self.values.iter().enumerate() {
+            for (i, value) in values.iter().enumerate() {
                 if i > 0 {
                     bytes.push(b',');
                 }
-                bytes.extend_from_slice(&value.flatten());
+                bytes.extend_from_slice(value);
             }
         }
 
@@ -1033,11 +1037,12 @@ impl VsfSection {
         if self.fields.is_empty() {
             return Vec::new();
         }
-        let mut bytes = Vec::new();
+        // No metadata suffix for near sections: the name lives only in the header TOC. The fields flattened first, then one buffer of the exact length (the closing ']' pushed past a large field's exact fit doubled it).
+        let fields: Vec<Vec<u8>> = self.fields.iter().map(|f| f.flatten()).collect();
+        let mut bytes = Vec::with_capacity(2 + fields.iter().map(|f| f.len()).sum::<usize>());
         bytes.push(b'[');
-        // No metadata suffix for near sections: the name lives only in the header TOC.
-        for field in &self.fields {
-            bytes.extend_from_slice(&field.flatten());
+        for field in fields {
+            bytes.extend_from_slice(&field);
         }
         bytes.push(b']');
         bytes
@@ -1050,25 +1055,18 @@ impl VsfSection {
             return Vec::new();
         }
 
-        let mut bytes = Vec::new();
-        bytes.push(b'[');
+        // Encode fields to know their size (each flattened once, joined only into the final buffer, which is allocated at its exact length: grown as it was filled, a large section doubled at its closing ']').
+        let fields: Vec<Vec<u8>> = self.fields.iter().map(|f| f.flatten()).collect();
+        let fields_len: usize = fields.iter().map(|f| f.len()).sum();
+        let name_bytes = VsfType::d(self.name.clone()).flatten();
+        let field_count = self.fields.len();
+        let mut bytes;
         {
-            bytes.extend_from_slice(&VsfType::d(self.name.clone()).flatten());
-
-            let field_count = self.fields.len();
-
-            // Encode fields to know their size
-            let mut fields_bytes = Vec::new();
-            for field in &self.fields {
-                fields_bytes.extend_from_slice(&field.flatten());
-            }
-
             // Use inclusive encoding for b{} - iterate until stable (adding b{} size might push us into a larger encoding class) Total = '[' + name + n{} + b{} + fields + ']'
-            let name_bytes = VsfType::d(self.name.clone()).flatten();
             let n_encoded = VsfType::n(field_count).flatten();
 
             // Start with base size, iterate until b{} encoding is stable
-            let base_without_b = 1 + name_bytes.len() + n_encoded.len() + fields_bytes.len() + 1;
+            let base_without_b = 1 + name_bytes.len() + n_encoded.len() + fields_len + 1;
             let mut b_encoded = VsfType::b(base_without_b, true).flatten();
 
             loop {
@@ -1081,9 +1079,14 @@ impl VsfSection {
                 b_encoded = new_b;
             }
 
+            bytes = Vec::with_capacity(base_without_b + b_encoded.len());
+            bytes.push(b'[');
+            bytes.extend_from_slice(&name_bytes);
             bytes.extend_from_slice(&n_encoded);
             bytes.extend_from_slice(&b_encoded);
-            bytes.extend_from_slice(&fields_bytes);
+            for field in fields {
+                bytes.extend_from_slice(&field);
+            }
         }
 
         bytes.push(b']');
