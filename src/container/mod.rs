@@ -260,9 +260,14 @@ impl<S: ByteSource> Document<S> {
         if len == 0 {
             return Ok(Vec::new());
         }
-        let bytes = self.source.read_vec(off, len)?;
-        let mut ptr = 0;
-        let (_, mut fields) = skip::skip_section(&bytes, &mut ptr).map_err(|e| ContainerError::Parse(e.to_string()))?;
+        // A small section, or one already in memory, walked whole; a large one through a window, its bulk payloads located by their headers and never read (a 24 MB plane read whole to find its samples took 24 MB of a 32 MiB heap, and the ferros display ran out, 2026-11-08).
+        let mut fields = if len <= WALK_WINDOW || self.source.slice(off, len).is_some() {
+            let bytes = self.source.read_vec(off, len)?;
+            let mut ptr = 0;
+            skip::skip_section(&bytes, &mut ptr).map_err(|e| ContainerError::Parse(e.to_string()))?.1
+        } else {
+            self.fields_walked(off, len)?
+        };
         let base = off as usize;
         for f in &mut fields {
             for v in &mut f.values {
@@ -272,6 +277,51 @@ impl<S: ByteSource> Document<S> {
                     ValueKind::Packed { data_start, .. } | ValueKind::Wrapped { data_start, .. } => *data_start += base,
                     ValueKind::Other(_) => {}
                 }
+            }
+        }
+        Ok(fields)
+    }
+
+    /// A large section's fields through a window of the source: the same walk as `skip::skip_section`, a step at a time, each step's bytes read as it needs them, and a `p` or `v` payload stepped over by the length its header gives. Positions relative to the section's start, as the whole walk gives them.
+    fn fields_walked(&self, off: u64, len: u64) -> Result<Vec<FieldSpan>, ContainerError> {
+        let mut w = Walker { source: &self.source, off, len, buf: Vec::new(), at: 0 };
+        let (_, mut pos) = w.run(0, |d, p, _| skip::section_open(d, p))?;
+        let mut fields = Vec::new();
+        loop {
+            match w.byte(pos)? {
+                None => return Err(ContainerError::Parse("section: unexpected end".into())),
+                Some(b']') => break,
+                Some(b'(') => {
+                    pos += 1;
+                    let (name, n) = w.run(pos, |d, p, _| skip::field_name(d, p))?;
+                    pos += n;
+                    let mut values = Vec::new();
+                    if w.byte(pos)? == Some(b':') {
+                        pos += 1;
+                        loop {
+                            match w.byte(pos)? {
+                                None => return Err(ContainerError::Parse("field: unexpected end".into())),
+                                Some(b')') => break,
+                                Some(b',') => pos += 1,
+                                Some(_) => {
+                                    let (mut kind, n) = w.run(pos, skip::skip_value_within)?;
+                                    match &mut kind {
+                                        ValueKind::Packed { data_start, .. } | ValueKind::Wrapped { data_start, .. } => *data_start += pos as usize,
+                                        ValueKind::Other(_) => {}
+                                    }
+                                    values.push(ValueSpan { start: pos as usize, end: (pos + n) as usize, kind });
+                                    pos += n;
+                                }
+                            }
+                        }
+                    }
+                    if w.byte(pos)? != Some(b')') {
+                        return Err(ContainerError::Parse(format!("expected ')' at {pos}")));
+                    }
+                    pos += 1;
+                    fields.push(FieldSpan { name, values });
+                }
+                Some(_) => pos += 1,
             }
         }
         Ok(fields)
@@ -483,6 +533,60 @@ fn find_generation_after<S: ByteSource>(source: &S, from: u64, size: u64) -> Res
 }
 
 /// Read and decode the header at `offset`: `(header, header_len, header_end)`. The header's own `b` says how long it is, so exactly that many bytes are read.
+/// How much of a large section a walk reads at a time; a section no larger is read whole.
+const WALK_WINDOW: u64 = 1 << 16;
+
+/// A window onto one section of a source: `buf` holds the section's bytes from `at` (relative to the section's start, `off` in the source), refilled as a walk moves past it.
+struct Walker<'a, S: ByteSource> {
+    source: &'a S,
+    off: u64,
+    len: u64,
+    buf: Vec<u8>,
+    at: u64,
+}
+
+impl<S: ByteSource> Walker<'_, S> {
+    /// The section's bytes from `pos`, at least `want` of them (fewer only where the section ends), read in if the window does not hold them.
+    fn view(&mut self, pos: u64, want: u64) -> Result<&[u8], ContainerError> {
+        // WHY: `pos` comes from lengths the file gave; past the section's end there is nothing to read (and `len - pos` would wrap).
+        if pos > self.len {
+            return Err(ContainerError::Parse(format!("a value runs past its section's end ({pos} of {})", self.len)));
+        }
+        let want = want.min(self.len - pos);
+        if pos < self.at || pos + want > self.at + self.buf.len() as u64 {
+            let n = want.max(WALK_WINDOW).min(self.len - pos);
+            self.buf = self.source.read_vec(self.off + pos, n)?;
+            self.at = pos;
+        }
+        Ok(&self.buf[(pos - self.at) as usize..])
+    }
+
+    /// The byte at `pos`, or None at the section's end.
+    fn byte(&mut self, pos: u64) -> Result<Option<u8>, ContainerError> {
+        Ok(self.view(pos, 1)?.first().copied())
+    }
+
+    /// One step of the walk at `pos`: `f` over the window from there (with the bytes left in the section, for a payload it steps over), the window doubled and the step run again while it fails on bytes the section has but the window did not; what it gave, and how far it moved.
+    fn run<T>(&mut self, pos: u64, f: impl Fn(&[u8], &mut usize, usize) -> Result<T, crate::decoding::traits::DecodeError>) -> Result<(T, u64), ContainerError> {
+        // WHY: `pos` comes from lengths the file gave; one past the section's end is refused before the subtraction (`view` refuses the same).
+        if pos > self.len {
+            return Err(ContainerError::Parse(format!("a value runs past its section's end ({pos} of {})", self.len)));
+        }
+        let left = self.len - pos;
+        let mut want = WALK_WINDOW;
+        loop {
+            let data = self.view(pos, want)?;
+            let held = data.len() as u64;
+            let mut p = 0;
+            match f(data, &mut p, left as usize) {
+                Ok(t) => return Ok((t, p as u64)),
+                Err(_) if held < left => want = held * 2,
+                Err(e) => return Err(ContainerError::Parse(e.to_string())),
+            }
+        }
+    }
+}
+
 fn read_header_at<S: ByteSource>(source: &S, offset: u64) -> Result<(VsfHeader, u64, u64), ContainerError> {
     let size = source.len();
     if offset >= size {

@@ -39,6 +39,11 @@ fn eof(what: &str) -> DecodeError {
 // WHY/PROOF: every byte this module reads is untrusted file or network input — each `.get` and checked end below is the end-of-buffer test that turns a truncated or forged section into an Err instead of an out-of-bounds panic.
 /// Advance past one value, locating a `p` or `v` payload without copying it.
 pub fn skip_value(data: &[u8], ptr: &mut usize) -> Result<ValueKind, DecodeError> {
+    skip_value_within(data, ptr, data.len())
+}
+
+/// `skip_value` over a window of a larger section: `limit` is where the section ends counted from the window's start, so a `p` or `v` payload may run past the bytes at hand (it is located, never read); everything else must be in `data`.
+pub fn skip_value_within(data: &[u8], ptr: &mut usize, limit: usize) -> Result<ValueKind, DecodeError> {
     let start = *ptr;
     match data.get(*ptr).copied() {
         None => Err(eof("value")),
@@ -60,7 +65,7 @@ pub fn skip_value(data: &[u8], ptr: &mut usize) -> Result<ValueKind, DecodeError
             let n = shape_elements(&shape).map_err(DecodeError::InvalidTensor)?;
             let data_len = packed_bytes(n, bit_depth).map_err(DecodeError::InvalidTensor)?;
             let data_start = *ptr;
-            let end = data_start.checked_add(data_len).filter(|&e| e <= data.len()).ok_or_else(|| eof("bit-packed samples"))?;
+            let end = data_start.checked_add(data_len).filter(|&e| e <= limit).ok_or_else(|| eof("bit-packed samples"))?;
             *ptr = end;
             Ok(ValueKind::Packed { bit_depth, shape, data_start, data_len })
         }
@@ -71,7 +76,7 @@ pub fn skip_value(data: &[u8], ptr: &mut usize) -> Result<ValueKind, DecodeError
             let bits = decode_usize(data, ptr)?;
             let data_len = bits.div_ceil(8);
             let data_start = *ptr;
-            let end = data_start.checked_add(data_len).filter(|&e| e <= data.len()).ok_or_else(|| eof("wrapped payload"))?;
+            let end = data_start.checked_add(data_len).filter(|&e| e <= limit).ok_or_else(|| eof("wrapped payload"))?;
             *ptr = end;
             Ok(ValueKind::Wrapped { code, data_start, data_len })
         }
@@ -88,10 +93,7 @@ pub fn skip_field(data: &[u8], ptr: &mut usize) -> Result<FieldSpan, DecodeError
         return Err(DecodeError::Other(format!("expected '(' at {}", *ptr)));
     }
     *ptr += 1;
-    let name = match crate::parse(data, ptr)? {
-        VsfType::d(s) => s,
-        other => return Err(DecodeError::Other(format!("expected a field name, found {other:?}"))),
-    };
+    let name = field_name(data, ptr)?;
     let mut values = Vec::new();
     if data.get(*ptr) == Some(&b':') {
         *ptr += 1;
@@ -118,8 +120,16 @@ pub fn skip_field(data: &[u8], ptr: &mut usize) -> Result<FieldSpan, DecodeError
     Ok(FieldSpan { name, values })
 }
 
-/// Walk a whole section body `[ … ]` at `ptr` (near form, or far form with its `name n b` hints), returning its name (empty in the near form) and every field's spans.
-pub fn skip_section(data: &[u8], ptr: &mut usize) -> Result<(String, Vec<FieldSpan>), DecodeError> {
+/// A field's name, the `d` value just past its `(`.
+pub fn field_name(data: &[u8], ptr: &mut usize) -> Result<String, DecodeError> {
+    match crate::parse(data, ptr)? {
+        VsfType::d(s) => Ok(s),
+        other => Err(DecodeError::Other(format!("expected a field name, found {other:?}"))),
+    }
+}
+
+/// A section body's opening at `ptr`: its `[`, and in the far form the name and the `n` and `b` hints after it. The name, empty in the near form.
+pub fn section_open(data: &[u8], ptr: &mut usize) -> Result<String, DecodeError> {
     if data.get(*ptr) != Some(&b'[') {
         return Err(DecodeError::Other(format!("expected '[' at {}", *ptr)));
     }
@@ -134,6 +144,12 @@ pub fn skip_section(data: &[u8], ptr: &mut usize) -> Result<(String, Vec<FieldSp
         let _ = crate::parse(data, ptr)?;
         let _ = crate::parse(data, ptr)?;
     }
+    Ok(name)
+}
+
+/// Walk a whole section body `[ … ]` at `ptr` (near form, or far form with its `name n b` hints), returning its name (empty in the near form) and every field's spans.
+pub fn skip_section(data: &[u8], ptr: &mut usize) -> Result<(String, Vec<FieldSpan>), DecodeError> {
+    let name = section_open(data, ptr)?;
     let mut fields = Vec::new();
     loop {
         match data.get(*ptr) {
