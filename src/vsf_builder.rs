@@ -526,8 +526,12 @@ impl VsfBuilder {
             return Err("Failed to stabilize header after 10 iterations".to_string());
         }
 
-        // Flatten vsf
-        let mut result: Vec<u8> = vsf.into_iter().flatten().collect();
+        // Flatten vsf into one buffer of the file's exact length, allocated once. Collecting the flattened chunks grew it by doubling: a 24 MB document took a 48 MB buffer while the 24 MB one it outgrew was still held (ferros wallgen ran out of heap there, 2026-11-07).
+        let total: usize = vsf.iter().map(|chunk| chunk.len()).sum::<usize>() + self.unboxed.iter().map(|u| u.1.len()).sum::<usize>();
+        let mut result: Vec<u8> = Vec::with_capacity(total);
+        for chunk in vsf {
+            result.extend_from_slice(&chunk);
+        }
 
         // Append unboxed data
         for (_, data, _) in self.unboxed {

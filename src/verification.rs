@@ -353,16 +353,16 @@ fn rebuild_with_header(
 /// # Returns 32-byte BLAKE3 hash
 ///
 pub fn compute_provenance_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
-    provenance_hash_zeroing(vsf_bytes, zero_header_signatures)
+    provenance_hash_zeroing(vsf_bytes, false)
 }
 
 /// PROVENANCE PIN (2026-11-03, MIGRATION-EXPIRES: 2027-02-01): the hash as every file before that day computed it, with the whole-file signature scan. READ ONLY, never written: [`is_original`] falls back to it so the vaults, chains, records and frames written under it stay readable while they are rewritten under the header-only rule.
 /// Carrying it keeps the old hole open for exactly as long as the pin stands: a file crafted to pass this rule still passes [`is_original`].
 pub fn compute_provenance_hash_legacy(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
-    provenance_hash_zeroing(vsf_bytes, zero_all_signatures_legacy)
+    provenance_hash_zeroing(vsf_bytes, true)
 }
 
-fn provenance_hash_zeroing(vsf_bytes: &[u8], zero_signatures: fn(&mut [u8]) -> Result<(), String>) -> Result<[u8; 32], String> {
+fn provenance_hash_zeroing(vsf_bytes: &[u8], legacy: bool) -> Result<[u8; 32], String> {
     // Verify magic number
     if vsf_bytes.len() < 4 {
         return Err("File too small to be valid VSF".to_string());
@@ -421,38 +421,37 @@ fn provenance_hash_zeroing(vsf_bytes: &[u8], zero_signatures: fn(&mut [u8]) -> R
                 ));
             }
 
-            // Clone file and zero out all crypto fields: hp, hb (if present), ge (if present in header fields)
-            let mut temp_bytes = vsf_bytes.to_vec();
-            let hash_start = find_hp_value_position(&temp_bytes, hash_position)?;
-
-            // Zero out hp field
-            for i in 0..32 {
-                temp_bytes[hash_start + i] = 0;
-            }
+            // The crypto fields read as zeros: hp, hb (if present), and the signature slots. Their places first, from the file as it is (parsing a hash or signature skips its value by its length, whatever the bytes).
+            let hash_start = find_hp_value_position(vsf_bytes, hash_position)?;
+            let mut spans = vec![(hash_start, 32)];
 
             // Check for optional hb (rolling hash) after hp
             let mut ptr_after_hp = pointer;
-            if ptr_after_hp < temp_bytes.len() && temp_bytes[ptr_after_hp] == b'h' {
+            if ptr_after_hp < vsf_bytes.len() && vsf_bytes[ptr_after_hp] == b'h' {
                 let hb_position = ptr_after_hp;
-                let hb_type = parse(&temp_bytes, &mut ptr_after_hp)
+                let hb_type = parse(vsf_bytes, &mut ptr_after_hp)
                     .map_err(|e| format!("Failed to parse rolling hash: {}", e))?;
                 if let VsfType::hb(hb_bytes) = hb_type {
                     if hb_bytes.len() == 32 {
-                        let hb_start = find_hash_value_position(&temp_bytes, hb_position)?;
-                        // Zero out hb field
-                        for i in 0..32 {
-                            temp_bytes[hb_start + i] = 0;
-                        }
+                        spans.push((find_hash_value_position(vsf_bytes, hb_position)?, 32));
                     }
                 }
             }
 
-            // The rule in force: every signature slot the HEADER holds, found by walking the header's own structure, and nothing past its '>' (security audit VSF-10: the scan before it ran over section bodies too, so body bytes that happened to parse as a signature were left out of the hash). The legacy reader hands in the scan instead.
-            zero_signatures(&mut temp_bytes)?;
+            if legacy {
+                // The pinned scan runs over a copy with hp and hb already zeroed, exactly as it always did: it reads the bytes, so the order matters.
+                let mut temp_bytes = vsf_bytes.to_vec();
+                for &(start, len) in &spans {
+                    temp_bytes[start..start + len].fill(0);
+                }
+                zero_all_signatures_legacy(&mut temp_bytes)?;
+                return Ok(*blake3::hash(&temp_bytes).as_bytes());
+            }
 
-            // Compute BLAKE3 hash of entire file
-            let computed_hash = blake3::hash(&temp_bytes);
-            Ok(*computed_hash.as_bytes())
+            // The rule in force: every signature slot the HEADER holds, found by walking the header's own structure, and nothing past its '>' (security audit VSF-10: the scan before it ran over section bodies too, so body bytes that happened to parse as a signature were left out of the hash). Hashed in place with those spans read as zeros: no copy of the file.
+            header_signature_spans(vsf_bytes, &mut spans)?;
+            spans.sort_unstable();
+            Ok(hash_zeroed_spans(vsf_bytes, &spans))
         }
         _ => Err("Expected BLAKE3 provenance hash (hp)".to_string()),
     }
@@ -484,17 +483,17 @@ fn zero_all_signatures_legacy(vsf_bytes: &mut [u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Zero every signature slot the header holds, walking the header's own structure: top-level values and the values inside each `(name:…)` field, each parsed as the typed value it is, up to the header's own `>`.
-/// Nothing past the header is touched: section bodies are content, and content is exactly what the provenance hash is for (security audit VSF-10).
-fn zero_header_signatures(vsf_bytes: &mut [u8]) -> Result<(), String> {
+/// Every signature slot the header holds, pushed onto `spans` as (start, length) for the provenance hash to read as zeros, walking the header's own structure: top-level values and the values inside each `(name:…)` field, each parsed as the typed value it is, up to the header's own `>`.
+/// Nothing past the header is named: section bodies are content, and content is exactly what the provenance hash is for (security audit VSF-10).
+fn header_signature_spans(vsf_bytes: &[u8], spans: &mut Vec<(usize, usize)>) -> Result<(), String> {
     let mut pointer = 4; // Skip magic "RÅ<"
-    // A parsed signature's value bytes end where the parse ended; zero them in place.
-    let zero_if_signature = |value: &VsfType, end: usize, bytes: &mut [u8]| {
+    // A parsed signature's value bytes end where the parse ended.
+    let mut zero_if_signature = |value: &VsfType, end: usize| {
         let len = match value {
             VsfType::ge(s) | VsfType::gp(s) | VsfType::gr(s) | VsfType::gm(s) | VsfType::gf(s) | VsfType::gs(s) | VsfType::gd(s) => s.len(),
             _ => return,
         };
-        bytes[end - len..end].fill(0);
+        spans.push((end - len, len));
     };
     while pointer < vsf_bytes.len() && vsf_bytes[pointer] != b'>' {
         if vsf_bytes[pointer] == b'(' {
@@ -509,14 +508,14 @@ fn zero_header_signatures(vsf_bytes: &mut [u8]) -> Result<(), String> {
                     continue;
                 }
                 let value = parse(vsf_bytes, &mut pointer).map_err(|e| format!("Header field value at byte {}: {}", pointer, e))?;
-                zero_if_signature(&value, pointer, vsf_bytes);
+                zero_if_signature(&value, pointer);
             }
             if pointer < vsf_bytes.len() && vsf_bytes[pointer] == b')' {
                 pointer += 1;
             }
         } else {
             let value = parse(vsf_bytes, &mut pointer).map_err(|e| format!("Header value at byte {}: {}", pointer, e))?;
-            zero_if_signature(&value, pointer, vsf_bytes);
+            zero_if_signature(&value, pointer);
         }
     }
     Ok(())
@@ -786,17 +785,9 @@ pub fn compute_file_hash(vsf_bytes: &[u8]) -> Result<[u8; 32], String> {
                 ));
             }
 
-            // Clone file and zero out the hash bytes
-            let mut temp_bytes = vsf_bytes.to_vec();
-            let hash_start = find_hash_value_position(&temp_bytes, hash_position)?;
-
-            for i in 0..32 {
-                temp_bytes[hash_start + i] = 0;
-            }
-
-            // Compute BLAKE3 hash of entire file
-            let computed_hash = blake3::hash(&temp_bytes);
-            Ok(*computed_hash.as_bytes())
+            // BLAKE3 of the entire file with the hash bytes read as zeros.
+            let hash_start = find_hash_value_position(vsf_bytes, hash_position)?;
+            Ok(hash_zeroed(vsf_bytes, hash_start, 32))
         }
         _ => Err("Expected BLAKE3 rolling hash (hb)".to_string()),
     }
@@ -1107,14 +1098,8 @@ fn compute_signature_hash(vsf_bytes: &[u8], section_name: &str) -> Result<[u8; 3
         _ => return Err("Section has no signature placeholder".to_string()),
     };
 
-    // Clone and zero the signature bytes
-    let mut temp_bytes = vsf_bytes.to_vec();
-    for i in 0..64 {
-        temp_bytes[sig_position + i] = 0;
-    }
-
-    // Hash the file with signature zeroed, provenance intact
-    Ok(*blake3::hash(&temp_bytes).as_bytes())
+    // Hash the file with the signature read as zeros, provenance intact
+    Ok(hash_zeroed(vsf_bytes, sig_position, 64))
 }
 
 /// Find the byte position of a section's signature value in the header.
@@ -1440,11 +1425,7 @@ pub fn header_eggs(vsf_bytes: &[u8]) -> Result<([u8; 32], Vec<crate::eggs::Egg>,
     if eggs.iter().all(|e| e.sig.iter().all(|&b| b == 0)) {
         return Err("Signature is all zeros - file not signed".to_string());
     }
-    let mut temp = vsf_bytes.to_vec();
-    for b in &mut temp[ge_info.value_start..ge_info.value_start + ge_info.value_len] {
-        *b = 0;
-    }
-    let file_hash = *blake3::hash(&temp).as_bytes();
+    let file_hash = hash_zeroed(vsf_bytes, ge_info.value_start, ge_info.value_len);
     let anchor = eggs.iter().find(|e| e.scheme == crate::eggs::SCHEME_ED25519).ok_or("header eggs: no Ed25519 anchor")?;
     let sig: [u8; 64] = anchor.sig.as_slice().try_into().map_err(|_| "header eggs: Ed25519 egg is not 64 bytes")?;
     let vk = VerifyingKey::from_bytes(&pubkey).map_err(|e| format!("Invalid pubkey: {e}"))?;
@@ -1510,21 +1491,15 @@ pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
         return Err("Signature is all zeros - file not signed".to_string());
     }
 
-    // Zero out ge to compute what was signed
-    let mut temp_bytes = vsf_bytes.to_vec();
-    for i in 0..64 {
-        temp_bytes[ge_info.value_start + i] = 0;
-    }
-
-    // Compute file hash
-    let file_hash = blake3::hash(&temp_bytes);
+    // What was signed: the file with ge read as zeros
+    let file_hash = hash_zeroed(vsf_bytes, ge_info.value_start, 64);
 
     // Verify signature
     let verifying_key =
         VerifyingKey::from_bytes(&pubkey_bytes).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let signature = Signature::from_bytes(&sig_bytes);
 
-    match verifying_key.verify(file_hash.as_bytes(), &signature) {
+    match verifying_key.verify(&file_hash, &signature) {
         Ok(()) => Ok(true),
         Err(_) => Ok(false),
     }
@@ -1986,4 +1961,29 @@ mod tests {
         let valid = verify_file_signature(&signed).expect("Failed to verify signature");
         assert!(valid, "Signature should be valid with custom provenance");
     }
+}
+
+/// BLAKE3 of `bytes` with `bytes[start..start + len]` read as zeros, hashed in place: what the file hashes to with a hash or signature slot blanked, without copying the file to blank it (each such copy held a second whole document, 24 MB for a wallpaper, 2026-11-07). A slot past the file's end panics on the slice, as the copy's indexing did.
+fn hash_zeroed(bytes: &[u8], start: usize, len: usize) -> [u8; 32] {
+    hash_zeroed_spans(bytes, &[(start, len)])
+}
+
+/// BLAKE3 of `bytes` with each span read as zeros, the spans in ascending order and apart (an overlap panics on the slice).
+fn hash_zeroed_spans(bytes: &[u8], spans: &[(usize, usize)]) -> [u8; 32] {
+    const ZEROS: [u8; 64] = [0; 64];
+    let mut h = blake3::Hasher::new();
+    let mut at = 0;
+    for &(start, len) in spans {
+        h.update(&bytes[at..start]);
+        let mut left = len;
+        while left > 0 {
+            // A run of up to 64 zeros at a time: the slot may be longer than the buffer (an eggs slot holds several signatures).
+            let n = left.min(ZEROS.len());
+            h.update(&ZEROS[..n]);
+            left -= n;
+        }
+        at = start + len;
+    }
+    h.update(&bytes[at..]);
+    *h.finalize().as_bytes()
 }
