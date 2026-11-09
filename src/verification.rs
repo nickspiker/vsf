@@ -1413,7 +1413,7 @@ pub fn sign_file_with(mut vsf_bytes: Vec<u8>, sign: impl FnOnce(&[u8; 32]) -> Ve
 #[cfg(feature = "crypto-verify")]
 /// The signed content of a document with a `gm` header: `(signer pubkey, eggs, file hash)`, after verifying the ANCHOR — the Ed25519 egg against the header's `ke` over the file hash. The other eggs are returned unverified: which schemes they must cover and what keys verify them is policy that lives above vsf (the signer's declared bundle from a fleet chain, the context's required tier). A caller that stops here has exactly the assurance a plain `ge` gave it; a caller that wants more checks the rest.
 pub fn header_eggs(vsf_bytes: &[u8]) -> Result<([u8; 32], Vec<crate::eggs::Egg>, [u8; 32]), String> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use ed25519_dalek::{Signature, VerifyingKey};
     let ke_info = find_header_ke(vsf_bytes)?;
     if ke_info.value_len != 32 {
         return Err(format!("Expected 32-byte Ed25519 pubkey, got {}", ke_info.value_len));
@@ -1429,7 +1429,9 @@ pub fn header_eggs(vsf_bytes: &[u8]) -> Result<([u8; 32], Vec<crate::eggs::Egg>,
     let anchor = eggs.iter().find(|e| e.scheme == crate::eggs::SCHEME_ED25519).ok_or("header eggs: no Ed25519 anchor")?;
     let sig: [u8; 64] = anchor.sig.as_slice().try_into().map_err(|_| "header eggs: Ed25519 egg is not 64 bytes")?;
     let vk = VerifyingKey::from_bytes(&pubkey).map_err(|e| format!("Invalid pubkey: {e}"))?;
-    if vk.verify(&file_hash, &Signature::from_bytes(&sig)).is_err() {
+    // Strict verification (security audit VSF-14): a small-order public key or a small-order R is refused, so the all-identity forgery that verifies for every message under a small-order key never passes.
+    // An honest key and an honest signature always pass it: a real key and a real R are prime-order points.
+    if vk.verify_strict(&file_hash, &Signature::from_bytes(&sig)).is_err() {
         return Err("bad signature".to_string());
     }
     Ok((pubkey, eggs, file_hash))
@@ -1449,7 +1451,7 @@ pub fn header_eggs(vsf_bytes: &[u8]) -> Result<([u8; 32], Vec<crate::eggs::Egg>,
 /// # Returns `Ok(true)` if signature is valid `Ok(false)` if signature is invalid `Err` if file format is wrong or missing ke/ge
 #[cfg(feature = "crypto-verify")]
 pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use ed25519_dalek::{Signature, VerifyingKey};
 
     // A multi-scheme slot verifies through its Ed25519 anchor here — the same assurance a plain `ge` gives. Anything beyond that (the other eggs, against the signer's declared keys, at the context's required tier) is the caller's policy via `header_eggs`.
     if let Ok((header, _)) = crate::file_format::VsfHeader::decode(vsf_bytes) {
@@ -1499,7 +1501,8 @@ pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
         VerifyingKey::from_bytes(&pubkey_bytes).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let signature = Signature::from_bytes(&sig_bytes);
 
-    match verifying_key.verify(&file_hash, &signature) {
+    // Strict verification (security audit VSF-14), as in `header_eggs`: small-order keys and small-order R are refused.
+    match verifying_key.verify_strict(&file_hash, &signature) {
         Ok(()) => Ok(true),
         Err(_) => Ok(false),
     }

@@ -320,3 +320,90 @@ fn multi_scheme_header_round_trips_and_anchors_on_ed25519() {
     ])
     .is_err());
 }
+
+/// Security audit VSF-14: signature verification is strict.
+/// Under the identity point as public key, R = identity and s = 0 satisfy the cofactorless equation for EVERY message, so the plain `verify` accepted that forgery; `verify_strict` refuses a small-order key or R.
+/// The identity's non-canonical encoding (y = p + 1) as R is refused too, and an honest signature still verifies.
+#[cfg(feature = "crypto")]
+#[test]
+fn small_order_key_and_non_canonical_r_are_refused() {
+    use ed25519_dalek::{Signature, SigningKey, Verifier, VerifyingKey};
+    use vsf::eggs::{Egg, SCHEME_ED25519};
+    use vsf::verification::{compute_provenance_hash, fill_provenance_hash, fill_signature, header_eggs, sign_file, sign_file_with, verify_file_signature};
+
+    // The identity point, canonical: y = 1.
+    let mut identity = [0u8; 32];
+    identity[0] = 1;
+    // The identity again, non-canonical: y = p + 1 = 2^255 - 18.
+    let mut non_canonical = [0xFFu8; 32];
+    non_canonical[0] = 0xEE;
+    non_canonical[31] = 0x7F;
+    // R as given, s = 0.
+    let forge = |r: [u8; 32]| -> [u8; 64] {
+        let mut sig = [0u8; 64];
+        sig[..32].copy_from_slice(&r);
+        sig
+    };
+
+    // The hole being closed: the lenient check takes the forgery over any message.
+    let weak = VerifyingKey::from_bytes(&identity).expect("the identity decompresses");
+    assert!(weak.verify(b"any message at all", &Signature::from_bytes(&forge(identity))).is_ok());
+
+    let forged_ge = |sig: [u8; 64]| -> Vec<u8> {
+        let mut doc = VsfBuilder::new()
+            .signed_only(VsfType::ke(identity.to_vec()))
+            .add_section("payload", vec![("x".to_string(), VsfType::u(7, false))])
+            .build()
+            .expect("doc must build");
+        let hp = compute_provenance_hash(&doc).expect("hp");
+        fill_provenance_hash(&mut doc, &hp).expect("fill hp");
+        fill_signature(&mut doc, &sig).expect("fill ge");
+        doc
+    };
+
+    // Plain `ge`, small-order key with small-order R.
+    let doc = forged_ge(forge(identity));
+    is_original(&doc).expect("the forged document is otherwise well formed");
+    assert_eq!(verify_file_signature(&doc), Ok(false));
+    assert!(read_verified(&doc, None).is_err());
+    assert!(read_verified(&doc, Some(identity)).is_err());
+
+    // Plain `ge`, non-canonical R.
+    let doc = forged_ge(forge(non_canonical));
+    assert_eq!(verify_file_signature(&doc), Ok(false));
+    assert!(read_verified(&doc, Some(identity)).is_err());
+
+    // Multi-scheme `gm`: the Ed25519 anchor is held to the same rule.
+    let unsigned = VsfBuilder::new()
+        .signed_only_eggs(VsfType::ke(identity.to_vec()), &[(SCHEME_ED25519, 64)])
+        .add_section("payload", vec![("x".to_string(), VsfType::u(7, false))])
+        .build()
+        .expect("gm doc must build");
+    let signed = sign_file_with(unsigned, |_| vec![Egg { scheme: SCHEME_ED25519, sig: forge(identity).to_vec() }]).expect("the forged egg fits the slot");
+    assert_eq!(header_eggs(&signed).unwrap_err(), "bad signature");
+    assert_eq!(verify_file_signature(&signed), Ok(false));
+    assert!(read_verified(&signed, Some(identity)).is_err());
+
+    // An honest key and signature still verify, both slot kinds.
+    let key = SigningKey::from_bytes(&[11u8; 32]);
+    let pubkey = key.verifying_key().to_bytes();
+    let unsigned = VsfBuilder::new()
+        .signed_only(VsfType::ke(pubkey.to_vec()))
+        .add_section("payload", vec![("x".to_string(), VsfType::u(7, false))])
+        .build()
+        .expect("doc must build");
+    let signed = sign_file(unsigned, &key.to_bytes()).expect("sign_file");
+    assert_eq!(verify_file_signature(&signed), Ok(true));
+    read_verified(&signed, Some(pubkey)).expect("an honest signature verifies strictly");
+    let unsigned = VsfBuilder::new()
+        .signed_only_eggs(VsfType::ke(pubkey.to_vec()), &[(SCHEME_ED25519, 64)])
+        .add_section("payload", vec![("x".to_string(), VsfType::u(7, false))])
+        .build()
+        .expect("gm doc must build");
+    let signed = sign_file_with(unsigned, |h| {
+        use ed25519_dalek::Signer;
+        vec![Egg { scheme: SCHEME_ED25519, sig: key.sign(h).to_bytes().to_vec() }]
+    })
+    .expect("sign_file_with");
+    read_verified(&signed, Some(pubkey)).expect("an honest anchor verifies strictly");
+}
