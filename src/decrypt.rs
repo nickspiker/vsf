@@ -174,6 +174,13 @@ pub fn decrypt_ve(encrypted_bytes: &[u8], x25519_secret: &StaticSecret) -> Resul
     // Perform ECDH to get shared secret
     let shared_secret = x25519_secret.diffie_hellman(&ephemeral_pubkey);
 
+    // WHY/PROOF (security audit VSF-13): the ephemeral key is untrusted input, and a low-order one makes the shared secret all zeros whatever our secret is, so the AES key would be a constant anyone can compute.
+    // An honest sender's random ephemeral key is never low order, so this refuses only a forged frame.
+    // The raw shared secret stays the AES key: photon's encrypt_for_fgtw and fgtw-bootstrap's decrypt_from_sender speak this exact format on the wire, so a KDF over it needs a versioned format, not an edit here.
+    if !shared_secret.was_contributory() {
+        return Err("Ephemeral public key is low order: the shared secret is not contributory".to_string());
+    }
+
     // Decrypt using AES-256-GCM
     let cipher = Aes256Gcm::new(shared_secret.as_bytes().into());
     let plaintext = cipher
@@ -225,5 +232,29 @@ mod tests {
         let decrypted = decrypt_ve(&encrypted_blob, &recipient_secret).unwrap();
 
         assert_eq!(decrypted, plaintext);
+    }
+
+    /// Security audit VSF-13: a low-order ephemeral key yields the all-zero shared secret, so its AES key is public.
+    /// A frame sealed under that zero key must be refused, not decrypted.
+    #[test]
+    fn test_decrypt_refuses_low_order_ephemeral() {
+        use aes_gcm::aead::OsRng;
+
+        let recipient_secret = StaticSecret::random_from_rng(OsRng);
+        // The all-zero u-coordinate is a low-order point: every scalar times it is zero.
+        let low_order = [0u8; 32];
+        assert!(!recipient_secret.diffie_hellman(&PublicKey::from(low_order)).was_contributory());
+
+        // Sealed under the key an attacker can compute without any secret: 32 zero bytes.
+        let cipher = Aes256Gcm::new(&[0u8; 32].into());
+        let nonce_bytes = [7u8; 12];
+        let ciphertext = cipher.encrypt(&Nonce::from(nonce_bytes), b"forged".as_ref()).unwrap();
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&low_order);
+        blob.extend_from_slice(&nonce_bytes);
+        blob.extend_from_slice(&ciphertext);
+
+        let err = decrypt_ve(&blob, &recipient_secret).unwrap_err();
+        assert!(err.contains("low order"), "unexpected error: {err}");
     }
 }
