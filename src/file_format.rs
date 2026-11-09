@@ -243,6 +243,17 @@ impl VsfHeader {
     /// >                            Header end
     /// ```
     pub fn decode(data: &[u8]) -> Result<(Self, usize), String> {
+        Self::decode_with(data, false)
+    }
+
+    /// [`Self::decode`] for VERIFIED reads (security audit VSF-15): the header must close with its `>`.
+    /// The lenient decode takes a header that runs to the end of the data with no `>`, so two byte strings decode to the same header; every vsf writer emits the `>`, so an honest document always passes this.
+    /// Unknown header types are still skipped, as in [`Self::decode`]: that is forward compatibility, not malleability.
+    pub fn decode_strict(data: &[u8]) -> Result<(Self, usize), String> {
+        Self::decode_with(data, true)
+    }
+
+    fn decode_with(data: &[u8], strict: bool) -> Result<(Self, usize), String> {
         use crate::decoding::parse::parse;
 
         // Check magic number "RÅ<" (R=0x52, Å=0xC3,0x85)
@@ -469,6 +480,8 @@ impl VsfHeader {
         // Skip past '>'
         if ptr < data.len() && data[ptr] == b'>' {
             ptr += 1;
+        } else if strict {
+            return Err(HEADER_UNCLOSED.to_string());
         }
 
         Ok((
@@ -683,6 +696,9 @@ impl VsfHeader {
         Ok(out)
     }
 }
+
+/// The error [`VsfHeader::decode_strict`] gives for a header with no closing `>` (security audit VSF-15).
+pub const HEADER_UNCLOSED: &str = "header has no closing '>'";
 
 /// Section of structured data (has children)
 #[derive(Debug, Clone)]

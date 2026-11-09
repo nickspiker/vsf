@@ -407,3 +407,84 @@ fn small_order_key_and_non_canonical_r_are_refused() {
     .expect("sign_file_with");
     read_verified(&signed, Some(pubkey)).expect("an honest anchor verifies strictly");
 }
+
+/// Re-seal a hand-edited document: hp first, then hb over the file with hp filled, so the integrity checks pass and only the structure is on trial.
+fn reseal(mut doc: Vec<u8>) -> Vec<u8> {
+    let hp = vsf::verification::compute_provenance_hash(&doc).expect("hp");
+    vsf::verification::fill_provenance_hash(&mut doc, &hp).expect("fill hp");
+    let hb = vsf::verification::compute_file_hash(&doc).expect("hb");
+    vsf::verification::write_file_hash(doc, &hb).expect("fill hb")
+}
+
+/// Security audit VSF-15: a header with no closing `>` decodes leniently to the same header as the closed one, so a verified read refuses it.
+#[test]
+fn verified_read_refuses_a_header_without_its_close() {
+    // A header-only document (a zero-field section has no body): the only shape whose header can end without '>' and still decode.
+    let doc = VsfBuilder::new().add_section("ping", vec![]).build().expect("ping builds");
+    read_verified(&doc, None).expect("the builder's ping verifies");
+    assert_eq!(*doc.last().unwrap(), b'>');
+
+    let open = reseal(doc[..doc.len() - 1].to_vec());
+    let (lenient, _) = vsf::VsfHeader::decode(&open).expect("the lenient decode takes it");
+    assert_eq!(lenient.fields[0].name, "ping");
+    assert_eq!(vsf::VsfHeader::decode_strict(&open).unwrap_err(), vsf::file_format::HEADER_UNCLOSED);
+    assert_eq!(is_original(&open).unwrap_err(), vsf::file_format::HEADER_UNCLOSED);
+    assert_eq!(verify_file_hash(&open).unwrap_err(), vsf::file_format::HEADER_UNCLOSED);
+    assert_eq!(read_verified(&open, None).unwrap_err(), vsf::file_format::HEADER_UNCLOSED);
+}
+
+/// Security audit VSF-15: `VsfSection::parse` steps over a byte between fields, so a body with a stray byte decodes to the same section; a verified read refuses it.
+#[test]
+fn verified_read_refuses_a_stray_byte_in_a_section_body() {
+    let doc = build_payload_doc();
+    read_verified(&doc, None).expect("the builder's document verifies");
+    let (_, header_end) = vsf::VsfHeader::decode(&doc).unwrap();
+    assert_eq!(doc[header_end], b'[');
+    assert_eq!(*doc.last().unwrap(), b']', "the payload body is the last thing in the file");
+
+    // A space before the closing ']', and another between the first two fields.
+    let mut stray = doc.clone();
+    stray.insert(stray.len() - 1, b' ');
+    let tampered = reseal(stray.clone());
+    is_original(&tampered).expect("integrity holds: only the structure is on trial");
+    let mut ptr = header_end;
+    let lenient = vsf::VsfSection::parse(&tampered, &mut ptr).expect("the lenient parse takes it");
+    assert_eq!(lenient.fields.len(), 3, "the stray byte vanished in the lenient parse");
+    let err = read_verified(&tampered, None).unwrap_err();
+    assert!(err.contains("stray byte"), "unexpected error: {err}");
+
+    let mut ptr = header_end + 1;
+    vsf::container::skip::skip_field(&stray, &mut ptr).expect("first field");
+    stray.insert(ptr, b'#');
+    let tampered = reseal(stray);
+    let err = read_verified(&tampered, None).unwrap_err();
+    assert!(err.contains("stray byte"), "unexpected error: {err}");
+}
+
+/// Security audit VSF-15: the strict body walk passes everything the builder writes — several sections, bulk `p` and `v` values, flags, multi-value fields, header-only entries.
+#[test]
+fn builder_documents_pass_the_strict_body_walk() {
+    use vsf::types::BitPackedTensor;
+    let samples: Vec<u16> = (0..64u16).collect();
+    let doc = VsfBuilder::new()
+        .add_section(
+            "plane",
+            vec![
+                ("samples".to_string(), VsfType::p(BitPackedTensor::pack_u16(12, vec![8, 8], &samples))),
+                ("sealed".to_string(), VsfType::v(b'e', vec![0xA5; 300])),
+            ],
+        )
+        .add_section("empty", vec![])
+        .add_section_direct({
+            let mut s = vsf::VsfSection::new("meta");
+            s.add_flag("hidden");
+            s.add_field_multi("pair", vec![VsfType::u(1, false), VsfType::a("two".to_string())]);
+            s.add_field("digest", VsfType::hp(sample_digest().to_vec()));
+            s
+        })
+        .build()
+        .expect("mixed document builds");
+    read_verified(&doc, None).expect("a builder document passes the strict walk");
+    is_original(&doc).expect("provenance");
+    verify_file_hash(&doc).expect("rolling hash");
+}

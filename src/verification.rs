@@ -1200,7 +1200,8 @@ pub fn is_original(vsf_bytes: &[u8]) -> Result<(), String> {
 
     let computed_hash = compute_provenance_hash(vsf_bytes)?;
 
-    let (header, _) = VsfHeader::decode(vsf_bytes)?;
+    // A verified read: the header must close with its '>' (security audit VSF-15).
+    let (header, _) = VsfHeader::decode_strict(vsf_bytes)?;
 
     let stored_hash = match &header.provenance_hash {
         VsfType::hp(hash_bytes) if hash_bytes.len() == 32 => hash_bytes,
@@ -1236,7 +1237,8 @@ pub fn verify_file_hash(vsf_bytes: &[u8]) -> Result<(), String> {
 
     let computed_hash = compute_file_hash(vsf_bytes)?;
 
-    let (header, _) = VsfHeader::decode(vsf_bytes)?;
+    // A verified read: the header must close with its '>' (security audit VSF-15).
+    let (header, _) = VsfHeader::decode_strict(vsf_bytes)?;
 
     let stored_hash = match &header.rolling_hash {
         Some(VsfType::hb(hash_bytes)) if hash_bytes.len() == 32 => hash_bytes,
@@ -1277,7 +1279,8 @@ pub fn read_verified(
 ) -> Result<(crate::file_format::VsfHeader, usize), String> {
     use crate::file_format::VsfHeader;
 
-    let (header, header_end) = VsfHeader::decode(doc)?;
+    // Strict: the header must close with its '>' (security audit VSF-15).
+    let (header, header_end) = VsfHeader::decode_strict(doc)?;
 
     // Provenance self-consistency: content matches its claimed identity. Necessary but NOT sufficient — a well-formed frame passes this on structure alone.
     is_original(doc)?;
@@ -1310,7 +1313,48 @@ pub fn read_verified(
     }
     // No hb and no signature: hp alone carries the integrity check — is_original above already enforced it. For an unsigned document hp and hb are equally self-attesting (both BLAKE3 over the bytes), so requiring hb added compat breakage, not security. Authenticity comes only from a signature; callers who need it pin expected_signer.
 
+    // Last, after every integrity check, so a tampered document still fails with the error it always did: no stray byte in a section body (security audit VSF-15).
+    section_bodies_strict(doc, &header, header_end)?;
+
     Ok((header, header_end))
+}
+
+/// Security audit VSF-15: [`crate::VsfSection::parse`] steps over any byte between fields that is not a `(`, so a body with stray bytes decodes to the same section as the body without them.
+/// A verified read refuses that: walking every structured body the table of contents names, the byte at each field boundary must open a field or close the section.
+/// Every vsf writer (section encode, far form, encrypted form, SectionBuilder, the appender) puts fields edge to edge, so an honest document always passes.
+/// Only a stray byte is refused: a body this walk cannot follow (a value type this build does not decode, a truncation, an entry not pointing at a `[`) ends the walk for that body, and the lenient readers report it as they always did.
+/// The walk locates bulk payloads (`p`, `v`) without copying them.
+fn section_bodies_strict(doc: &[u8], header: &crate::file_format::VsfHeader, header_end: usize) -> Result<(), String> {
+    use crate::container::skip::{section_open, skip_field};
+    for entry in &header.fields {
+        // A header-only entry or an unboxed blob has no children, so no structured body to walk.
+        if entry.child_count == 0 {
+            continue;
+        }
+        // TOC offsets count from the file start; a zero offset is the legacy shape whose body follows the header, as `VsfHeader::sections` reads it.
+        let start = if entry.offset_bytes != 0 { entry.offset_bytes } else { header_end };
+        // WHY/PROOF: the offset is read from the document, untrusted input, so it may point past the end; `.get` turns that into "no body here" instead of an out-of-bounds panic.
+        if doc.get(start) != Some(&b'[') {
+            continue;
+        }
+        let mut ptr = start;
+        if section_open(doc, &mut ptr).is_err() {
+            continue;
+        }
+        loop {
+            // WHY/PROOF: `ptr` walks untrusted bytes and a truncated body runs out before its `]`; `.get` ends the walk there instead of panicking.
+            match doc.get(ptr) {
+                Some(b'(') => {
+                    if skip_field(doc, &mut ptr).is_err() {
+                        break;
+                    }
+                }
+                Some(b']') | None => break,
+                Some(&b) => return Err(format!("section '{}' has a stray byte 0x{:02X} at {} between its fields", entry.name, b, ptr)),
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Sign entire VSF file with Ed25519 (header-level signature)
@@ -1454,14 +1498,19 @@ pub fn verify_file_signature(vsf_bytes: &[u8]) -> Result<bool, String> {
     use ed25519_dalek::{Signature, VerifyingKey};
 
     // A multi-scheme slot verifies through its Ed25519 anchor here — the same assurance a plain `ge` gives. Anything beyond that (the other eggs, against the signer's declared keys, at the context's required tier) is the caller's policy via `header_eggs`.
-    if let Ok((header, _)) = crate::file_format::VsfHeader::decode(vsf_bytes) {
-        if matches!(header.signature, Some(VsfType::gm(_))) {
-            return match header_eggs(vsf_bytes) {
-                Ok(_) => Ok(true),
-                Err(e) if e == "bad signature" => Ok(false),
-                Err(e) => Err(e),
-            };
+    // The header must close with its '>' (security audit VSF-15); any other decode failure falls thru to the plain `ge` path as it always did.
+    match crate::file_format::VsfHeader::decode_strict(vsf_bytes) {
+        Ok((header, _)) => {
+            if matches!(header.signature, Some(VsfType::gm(_))) {
+                return match header_eggs(vsf_bytes) {
+                    Ok(_) => Ok(true),
+                    Err(e) if e == "bad signature" => Ok(false),
+                    Err(e) => Err(e),
+                };
+            }
         }
+        Err(e) if e == crate::file_format::HEADER_UNCLOSED => return Err(e),
+        Err(_) => {}
     }
 
     // Find ke (public key)
