@@ -536,7 +536,7 @@ pub struct SpectralResponse {
 }
 
 impl SpectralResponse {
-    pub fn fields(&self) -> Vec<(String, VsfType)> {
+    pub fn fields(&self) -> Result<Vec<(String, VsfType)>, String> {
         let n = self.channels.first().map_or(0, Vec::len);
         let mut f = vec![
             ("response_start".to_string(), VsfType::f5(self.start_nm)),
@@ -545,11 +545,11 @@ impl SpectralResponse {
             ("response_channels".to_string(), VsfType::u(self.channels.len(), false)),
             ("response_values".to_string(), VsfType::t_f5(Tensor::new(vec![self.channels.len() * n], self.channels.iter().flat_map(|c| c.iter().copied()).collect()))),
         ];
-        push_text(&mut f, "response_prior", &self.prior);
+        push_text(&mut f, "response_prior", &self.prior)?;
         if let Some(l) = &self.light {
             f.push(("response_light".to_string(), VsfType::hb(l.to_vec())));
         }
-        f
+        Ok(f)
     }
 
     /// From a characterization section; `None` when it carries no response.
@@ -706,10 +706,12 @@ fn push_f32(fields: &mut Vec<(String, VsfType)>, name: &str, v: Option<f32>) {
     }
 }
 
-fn push_text(fields: &mut Vec<(String, VsfType)>, name: &str, v: &str) {
+/// Text from outside (a camera's make, a lens, a title, an observer) as `a`, or an error naming the field when it is not ASCII.
+fn push_text(fields: &mut Vec<(String, VsfType)>, name: &str, v: &str) -> Result<(), String> {
     if !v.is_empty() {
-        fields.push((name.to_string(), VsfType::a(crate::types::Ascii::checked("text", v.to_string()))));
+        fields.push((name.to_string(), VsfType::a(crate::types::Ascii::new(v).map_err(|e| format!("{name}: {e}"))?)));
     }
+    Ok(())
 }
 
 // ───────────────────────── section codecs ─────────────────────────
@@ -718,11 +720,11 @@ impl Track {
     pub fn section_name(&self) -> String {
         format!("track.{}", self.id)
     }
-    fn fields(&self) -> Vec<(String, VsfType)> {
+    fn fields(&self) -> Result<Vec<(String, VsfType)>, String> {
         let mut f = vec![("kind".to_string(), VsfType::a(crate::types::Ascii::checked("kind", self.kind.as_str()))), ("role".to_string(), VsfType::a(crate::types::Ascii::checked("role", self.role.as_str()))), ("channels".to_string(), VsfType::u(self.channels, false))];
-        push_text(&mut f, "title", &self.title);
-        push_text(&mut f, "codec", &self.codec);
-        f
+        push_text(&mut f, "title", &self.title)?;
+        push_text(&mut f, "codec", &self.codec)?;
+        Ok(f)
     }
     fn from_section(id: &str, s: &VsfSection) -> Result<Track, VisualError> {
         Ok(Track { id: id.into(), kind: TrackKind::parse(&text(s, "kind"))?, role: TrackRole::parse(&text(s, "role"))?, title: text(s, "title"), channels: s.uint("channels").unwrap_or(0) as usize, codec: text(s, "codec") })
@@ -931,7 +933,7 @@ impl Plane {
 }
 
 impl Capture {
-    fn fields(&self) -> Vec<(String, VsfType)> {
+    fn fields(&self) -> Result<Vec<(String, VsfType)>, String> {
         let mut f = Vec::new();
         push_f32(&mut f, "exposure_s", self.exposure_s);
         push_f32(&mut f, "f_number", self.f_number);
@@ -944,25 +946,25 @@ impl Capture {
         if let Some(at) = self.at {
             f.push(("at".into(), VsfType::e(EtType::e6(at))));
         }
-        push_text(&mut f, "at_text", &self.at_text);
+        push_text(&mut f, "at_text", &self.at_text)?;
         if let Some(loc) = &self.location {
             f.push(("location".into(), VsfType::w(*loc)));
         }
         push_f32(&mut f, "altitude_m", self.altitude_m);
-        push_text(&mut f, "make", &self.make);
-        push_text(&mut f, "model", &self.model);
-        push_text(&mut f, "sensor_module", &self.sensor_module);
-        push_text(&mut f, "lens", &self.lens);
-        push_text(&mut f, "mode", &self.mode);
+        push_text(&mut f, "make", &self.make)?;
+        push_text(&mut f, "model", &self.model)?;
+        push_text(&mut f, "sensor_module", &self.sensor_module)?;
+        push_text(&mut f, "lens", &self.lens)?;
+        push_text(&mut f, "mode", &self.mode)?;
         if self.baseline != 0.0 {
             f.push(("baseline".into(), VsfType::f5(self.baseline)));
         }
-        push_text(&mut f, "stack", &self.stack);
+        push_text(&mut f, "stack", &self.stack)?;
         if !self.cal_applied.is_empty() {
             f.push(("cal_applied".into(), VsfType::a(crate::types::Ascii::checked("cal_applied", self.cal_applied.join("\n")))));
         }
-        push_text(&mut f, "shading", &self.shading);
-        f
+        push_text(&mut f, "shading", &self.shading)?;
+        Ok(f)
     }
     fn from_section(s: &VsfSection) -> Capture {
         Capture {
@@ -1073,7 +1075,7 @@ impl View {
 }
 
 impl Foreign {
-    pub fn fields(&self) -> Vec<(String, VsfType)> {
+    pub fn fields(&self) -> Result<Vec<(String, VsfType)>, String> {
         let mut f = Vec::new();
         if let Some(x) = &self.xmp {
             f.push(("xmp".into(), VsfType::v(b'b', x.clone())));
@@ -1081,9 +1083,9 @@ impl Foreign {
         if let Some(i) = &self.icc {
             f.push(("icc".into(), VsfType::v(b'b', i.clone())));
         }
-        push_text(&mut f, "profile_name", &self.profile_name);
-        push_text(&mut f, "calibration_signature", &self.calibration_signature);
-        f
+        push_text(&mut f, "profile_name", &self.profile_name)?;
+        push_text(&mut f, "calibration_signature", &self.calibration_signature)?;
+        Ok(f)
     }
     fn from_section(s: &VsfSection) -> Foreign {
         let blob = |name: &str| match first(s, name) {
@@ -1098,13 +1100,13 @@ impl Foreign {
 }
 
 /// The characterization section: today's `colour_profile` fields (reused through `spectral_image`'s own codec) plus `observer`.
-pub fn characterization_fields(p: &ColourProfile, observer: &str, response: Option<&SpectralResponse>) -> Vec<(String, VsfType)> {
+pub fn characterization_fields(p: &ColourProfile, observer: &str, response: Option<&SpectralResponse>) -> Result<Vec<(String, VsfType)>, String> {
     let mut f = spectral_image::profile_fields(p);
-    push_text(&mut f, "observer", observer);
+    push_text(&mut f, "observer", observer)?;
     if let Some(r) = response {
-        f.extend(r.fields());
+        f.extend(r.fields()?);
     }
-    f
+    Ok(f)
 }
 
 // ───────────────────────── write / read ─────────────────────────
@@ -1149,22 +1151,22 @@ impl Visual {
             b = b.creation_time_oscillations(at);
         }
         let mut manifest = vec![("tracks".to_string(), VsfType::a(crate::types::Ascii::new(self.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join("\n")).map_err(|e| format!("tracks: {e}"))?)), ("default_view".to_string(), VsfType::a(crate::types::Ascii::new(self.default_view.clone()).map_err(|e| format!("default_view: {e}"))?))];
-        push_text(&mut manifest, "title", &self.title);
-        push_text(&mut manifest, "text", &self.text);
+        push_text(&mut manifest, "title", &self.title)?;
+        push_text(&mut manifest, "text", &self.text)?;
         b = b.add_section("visual", manifest);
         for t in &self.tracks {
-            b = b.add_section(t.section_name(), t.fields());
+            b = b.add_section(t.section_name(), t.fields()?);
         }
         for s in &self.spans {
             b = b.add_section_direct(s.section());
         }
         if let Some(c) = &self.capture {
             if !c.is_empty() {
-                b = b.add_section("capture", c.fields());
+                b = b.add_section("capture", c.fields()?);
             }
         }
         if let Some(p) = &self.characterization {
-            b = b.add_section("characterization", characterization_fields(p, &self.observer, self.response.as_ref()));
+            b = b.add_section("characterization", characterization_fields(p, &self.observer, self.response.as_ref())?);
         }
         for g in &self.graphs {
             b = b.add_section(g.section_name(), g.fields());
@@ -1173,7 +1175,7 @@ impl Visual {
             b = b.add_section(v.section_name(), v.fields());
         }
         if !self.foreign.is_empty() {
-            b = b.add_section("foreign", self.foreign.fields());
+            b = b.add_section("foreign", self.foreign.fields()?);
         }
         let prov = spectral_image::provenance_fields(&self.provenance)?;
         if !prov.is_empty() {
@@ -1302,9 +1304,11 @@ impl Visual {
         let graph = Graph::default_still(&format!("g{n}"), &plane_ref, primaries, vis.characterization.as_ref().and_then(|p| p.entries.first()).map(|e| e.class), ops);
         let view = View::default_of(&format!("v{n}"), &graph);
         let mut manifest = vec![("tracks".to_string(), VsfType::a(crate::types::Ascii::checked("tracks", vis.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join("\n")))), ("default_view".to_string(), VsfType::a(crate::types::Ascii::checked("default_view", view.section_name())))];
-        push_text(&mut manifest, "title", &vis.title);
-        push_text(&mut manifest, "text", &vis.text);
-        let mut a = crate::container::Appender::new(crate::types::Ascii::checked("tool", tool), crate::types::Ascii::checked("action", action)).add_section("visual", manifest).add_section(graph.section_name(), graph.fields()).add_section(view.section_name(), view.fields());
+        push_text(&mut manifest, "title", &vis.title).map_err(bad)?;
+        push_text(&mut manifest, "text", &vis.text).map_err(bad)?;
+        let tool = crate::types::Ascii::new(tool).map_err(|e| bad(format!("tool: {e}")))?;
+        let action = crate::types::Ascii::new(action).map_err(|e| bad(format!("action: {e}")))?;
+        let mut a = crate::container::Appender::new(tool, action).add_section("visual", manifest).add_section(graph.section_name(), graph.fields()).add_section(view.section_name(), view.fields());
         for e in doc.body_entries() {
             if e.name.starts_with("graph.") || e.name.starts_with("view.") {
                 a = a.supersede(e.name.clone());

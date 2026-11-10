@@ -108,6 +108,9 @@ pub enum TypeConstraint {
     /// A human language (wl)
     Language,
 
+    /// A WiFi network's name (nw)
+    Ssid,
+
     // === WRAPPED DATA ===
     /// Wrapped data with specific encoding byte
     Wrapped(u8),
@@ -361,6 +364,7 @@ impl TypeConstraint {
             TypeConstraint::AnyColour => value.is_colour(),
 
             TypeConstraint::Language => matches!(value, VsfType::wl(_)),
+            TypeConstraint::Ssid => matches!(value, VsfType::nw(_)),
 
             TypeConstraint::Wrapped(encoding) => {
                 if let VsfType::v(enc, _) = value {
@@ -428,6 +432,7 @@ impl TypeConstraint {
             TypeConstraint::AnyCircle => "any Spirix circle".into(),
             TypeConstraint::AnyColour => "any colour type".into(),
             TypeConstraint::Language => "a language (wl)".into(),
+            TypeConstraint::Ssid => "a WiFi network's name (nw)".into(),
             TypeConstraint::Wrapped(enc) => format!("wrapped data (encoding {})", enc),
             TypeConstraint::AnyWrapped => "any wrapped data".into(),
             TypeConstraint::OneOf(constraints) => {
