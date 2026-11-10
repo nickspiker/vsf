@@ -69,7 +69,7 @@ since_table! {
         // Structure and header
         d => 9, o => 9, b => 9, l => 9, n => 9, z => 9, y => 9,
         // Network
-        na => 9, nh => 9, ni => 9, nj => 9, nc => 9, nm => 9, np => 9, ns => 9, nu => 9, nn => 9,
+        na => 9, nh => 9, ni => 9, nj => 9, nc => 9, nm => 9, nw => 11, np => 9, ns => 9, nu => 9, nn => 9,
         // Hashes
         hp => 9, hb => 9, hs => 9, hm => 9, hg => 9, hc => 9, hk => 9, hP => 9, hR => 9, hI => 9, hV => 9,
         // Signatures

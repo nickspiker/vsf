@@ -503,6 +503,12 @@ impl VsfType {
                 f.extend_from_slice(mac);
                 f
             }
+            VsfType::nw(ssid) => {
+                // The SSID element without its ID: the length byte, then the octets as the radio carries them.
+                let mut f = vec![b'n', b'w', ssid.len() as u8];
+                f.extend_from_slice(ssid.as_bytes());
+                f
+            }
             VsfType::np(port) => {
                 let mut f = vec![b'n', b'p'];
                 f.extend_from_slice(&port.to_be_bytes());
@@ -4183,6 +4189,7 @@ impl VsfType {
             VsfType::nj(_) => 2 + 16,
             VsfType::nc(addr, _) => 2 + addr.len() + 1 + 1,
             VsfType::nm(_) => 2 + 6,
+            VsfType::nw(ssid) => 2 + 1 + ssid.len(),
             VsfType::np(_) => 2 + 2,
             VsfType::ns(host, _) => 2 + host.len() + 1 + 2,
             VsfType::nu(url) => 2 + url.len() + 1,

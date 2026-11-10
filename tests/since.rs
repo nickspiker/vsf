@@ -44,6 +44,7 @@ fn samples() -> Vec<(String, VsfType)> {
     add("nj", VsfType::nj([0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
     add("nc", VsfType::nc("10.0.0.0".into(), 8));
     add("nm", VsfType::nm([0x02, 0x00, 0x5e, 0x10, 0x00, 0x01]));
+    add("nw", VsfType::nw(vsf::Ssid::new(b"pangolin").unwrap()));
     add("np", VsfType::np(443));
     add("ns", VsfType::ns("example.org".into(), 443));
     add("nu", VsfType::nu("https://example.org/a".into()));

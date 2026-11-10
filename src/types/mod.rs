@@ -30,7 +30,7 @@ pub use eagle_time::{
 pub use eagle_time::{set_leap_table, NtpTai};
 #[cfg(feature = "std")]
 pub use eagle_time::{eagle_time_nanos, eagle_time_oscillations};
-pub use network::{NaScheme, WaAddress};
+pub use network::{NaScheme, Ssid, WaAddress};
 pub use tensor::{BitPackedTensor, LayoutOrder, StridedTensor, Tensor};
 pub use packed_view::{BitPackedView, BitPacker};
 pub use since::{Since, HEADER_SINCE, SINCE_TABLE};

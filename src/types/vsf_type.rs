@@ -134,6 +134,7 @@ pub enum VsfType {
     nj([u8; 16]),    // Network IPv6: 16 bytes
     nc(String, u8),  // Network CIDR: address string + prefix length
     nm([u8; 6]),     // Network MAC: 6 bytes
+    nw(crate::types::Ssid), // Network WiFi name (v11): an 802.11 SSID's 0 to 32 octets, one length byte then the octets
     np(u16),         // Network port: standalone port number
     ns(String, u16), // Network socket: host + port (no scheme)
     nu(String),      // Network URL: full URL including path/query

@@ -256,6 +256,20 @@ fn parse_network_address(data: &[u8], pointer: &mut usize) -> Result<VsfType, De
             *pointer += 6;
             Ok(VsfType::nm(a))
         }
+        b'w' => {
+            // One length byte, then the octets; a length past 32 is no SSID.
+            if *pointer >= data.len() {
+                return Err(DecodeError::UnexpectedEofMsg("nw length".into()));
+            }
+            let n = data[*pointer] as usize;
+            *pointer += 1;
+            if crate::decoding::helpers::short(data, *pointer, n) {
+                return Err(DecodeError::UnexpectedEofMsg("nw".into()));
+            }
+            let s = crate::types::Ssid::new(&data[*pointer..*pointer + n]).ok_or_else(|| DecodeError::InvalidDataMsg("nw: an SSID is at most 32 octets".into()))?;
+            *pointer += n;
+            Ok(VsfType::nw(s))
+        }
         b'p' => {
             if crate::decoding::helpers::short(data, *pointer, 2) {
                 return Err(DecodeError::UnexpectedEofMsg("np".into()));

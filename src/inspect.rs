@@ -1848,6 +1848,7 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
                 tc("⦊", col_punct())
             )
         }
+        VsfType::nw(ssid) => format!("{}{}{}{}", trc("nw", col_uint()), tc("⦉", col_punct()), ssid_text(ssid), tc("⦊", col_punct())),
         VsfType::np(port) => format!(
             "{}{}{}{}",
             trc("np", col_uint()),
@@ -2240,6 +2241,7 @@ pub fn format_value(vsf: &VsfType) -> String {
             .map(|b| format!("{:02X}", b))
             .collect::<Vec<_>>()
             .join(":"),
+        VsfType::nw(ssid) => ssid_text(ssid),
         VsfType::np(port) => format!(":{}", port),
         VsfType::ns(host, port) => format!("{}:{}", host, port),
         VsfType::nu(url) => url.clone(),
@@ -3490,5 +3492,13 @@ mod hex_elision_tests {
 
         // The plain formatter used by `vsfinfo get` gives the same, without colour.
         assert!(!format_value(&q).contains("StridedTensor"));
+    }
+}
+
+/// An SSID as shown: its octets as text when they are UTF-8 with nothing unprintable, else as hex (an SSID is octets, and the hex is the honest form of one that is not text).
+fn ssid_text(ssid: &crate::types::Ssid) -> String {
+    match core::str::from_utf8(ssid.as_bytes()) {
+        Ok(s) if !s.chars().any(char::is_control) => s.to_string(),
+        _ => ssid.as_bytes().iter().map(|b| format!("{:02X}", b)).collect(),
     }
 }

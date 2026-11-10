@@ -105,6 +105,56 @@ impl core::fmt::Display for NaScheme {
 
 /// Structured postal address for `VsfType::wa`.
 ///
+/// A WiFi network's name (`nw`, v11): the 0 to 32 octets of an IEEE 802.11 SSID element, exactly as the radio carries them, with no encoding assumed (an SSID is octets: often UTF-8, sometimes not, and two networks whose names differ only in bytes a text decoder would fold are two networks).
+/// On the wire `n` `w`, one length byte, then the octets: the SSID element itself without its element ID. Only [`Ssid::new`] makes one, so more than 32 octets cannot be held, and the octets past the length are always zero.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Ssid {
+    len: u8,
+    octets: [u8; 32],
+}
+
+impl Ssid {
+    /// The longest SSID IEEE 802.11 allows.
+    pub const MAX: usize = 32;
+
+    /// The SSID with these octets, or None past 32.
+    pub fn new(octets: &[u8]) -> Option<Ssid> {
+        if octets.len() > Self::MAX {
+            return None;
+        }
+        let mut s = Ssid { len: octets.len() as u8, octets: [0; 32] };
+        s.octets[..octets.len()].copy_from_slice(octets);
+        Some(s)
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.octets[..self.len as usize]
+    }
+
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl core::fmt::Debug for Ssid {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match core::str::from_utf8(self.as_bytes()) {
+            Ok(s) => write!(f, "Ssid({s:?})"),
+            Err(_) => {
+                f.write_str("Ssid(")?;
+                for b in self.as_bytes() {
+                    write!(f, "{b:02X}")?;
+                }
+                f.write_str(")")
+            }
+        }
+    }
+}
+
 /// All fields are optional.  Fields present on the wire are indicated by a one-byte presence bitmask followed by the data in order:
 ///
 /// ```text
@@ -403,5 +453,26 @@ impl TryFrom<VsfType> for SocketAddr {
             }
             _ => Err("not a socket address type"),
         }
+    }
+}
+
+#[cfg(test)]
+mod ssid_tests {
+    use super::*;
+
+    #[test]
+    fn nw_round_trips_octets() {
+        for octets in [&b""[..], b"pangolin", "Caf\u{e9} Ni\u{f1}o".as_bytes(), &[0xFF, 0x00, 0x80], &[b'x'; 32]] {
+            let v = VsfType::nw(Ssid::new(octets).unwrap());
+            let flat = v.flatten();
+            assert_eq!(&flat[..3], &[b'n', b'w', octets.len() as u8]);
+            assert_eq!(&flat[3..], octets);
+            let mut p = 0;
+            assert_eq!(crate::decoding::parse::parse(&flat, &mut p).unwrap(), v);
+            assert_eq!(p, flat.len());
+        }
+        assert!(Ssid::new(&[b'x'; 33]).is_none());
+        let mut p = 0;
+        assert!(crate::decoding::parse::parse(&[b'n', b'w', 33], &mut p).is_err());
     }
 }
