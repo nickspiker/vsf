@@ -2798,6 +2798,35 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
         }
     }
 
+    // Signature eggs: a gm slot holds one signature per scheme (2026-11-10: the inspector shows every egg, not only the Ed25519 anchor).
+    if let Some(VsfType::gm(ref slot)) = header.signature {
+        out.push_str(&format!(
+            "  {}{}{}{}{} {} {}\n",
+            trc("gm", col_sig()),
+            tc("3", col_punct()),
+            tc("⦉", col_punct()),
+            format!("{}", slot.len() - 1).white(),
+            tc("⦊", col_punct()),
+            tc("Signature eggs", col_hint()),
+            trc(format!("({} Bytes)", slot.len()), col_hint()),
+        ));
+        match crate::eggs::eggs_from_bytes(slot) {
+            Ok(eggs) => {
+                for egg in &eggs {
+                    out.push_str(&format!(
+                        "    {} {}\n",
+                        tc(egg_scheme_name(egg.scheme), col_hint()),
+                        trc(format!("({} Bytes)", egg.sig.len()), col_hint()),
+                    ));
+                    if let Some(first) = format_hex_lines(&egg.sig).first() {
+                        out.push_str(&format!("      {} {}\n", first.white(), tc("…", col_punct())));
+                    }
+                }
+            }
+            Err(e) => out.push_str(&format!("    {}\n", format!("egg list unreadable: {e}").truecolor(255, 0, 0))),
+        }
+    }
+
     // Rolling hash: hb3{31} (32 Bytes) - encoded as len-1 like other crypto types
     if let Some(VsfType::hb(ref hash)) = header.rolling_hash {
         out.push_str(&format!(
@@ -3500,5 +3529,15 @@ fn ssid_text(ssid: &crate::types::Ssid) -> String {
     match core::str::from_utf8(ssid.as_bytes()) {
         Ok(s) if !s.chars().any(char::is_control) => s.to_string(),
         _ => ssid.as_bytes().iter().map(|b| format!("{:02X}", b)).collect(),
+    }
+}
+
+/// The human name of a signature egg's scheme, for the inspector.
+pub fn egg_scheme_name(scheme: u8) -> &'static str {
+    match scheme {
+        crate::eggs::SCHEME_ED25519 => "Ed25519",
+        crate::eggs::SCHEME_FALCON512 => "Falcon-512",
+        crate::eggs::SCHEME_SPHINCS_PLUS => "SPHINCS+",
+        _ => "unknown scheme",
     }
 }

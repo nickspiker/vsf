@@ -347,7 +347,23 @@ fn print_verification_summary(data: &[u8]) {
         #[cfg(feature = "crypto")]
         {
             let sig_ok = vsf::verification::verify_file_signature(data).unwrap_or(false);
-            print_anchor("signature  (ge)", Some(sig_ok));
+            match &header.signature {
+                // An egg basket: the Ed25519 egg is the anchor checked here; the post-quantum eggs need the signer's key bundle, which lives above vsf (fgtw), so they are listed, not judged.
+                Some(VsfType::gm(slot)) => {
+                    print_anchor("signature  (gm)", Some(sig_ok));
+                    if let Ok(eggs) = vsf::eggs::eggs_from_bytes(slot) {
+                        for egg in &eggs {
+                            let name = vsf::inspect::egg_scheme_name(egg.scheme);
+                            if egg.scheme == vsf::eggs::SCHEME_ED25519 {
+                                println!("   {} {}", format!("egg {name}:").cyan(), if sig_ok { "PASS (the anchor)".truecolor(0, 255, 0) } else { "FAIL".truecolor(255, 0, 0) });
+                            } else {
+                                println!("   {} {}", format!("egg {name}:").cyan(), format!("present, {} Bytes (checked against the signer's bundle by fgtw, not here)", egg.sig.len()).yellow());
+                            }
+                        }
+                    }
+                }
+                _ => print_anchor("signature  (ge)", Some(sig_ok)),
+            }
         }
         #[cfg(not(feature = "crypto"))]
         {
