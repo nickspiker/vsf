@@ -35,12 +35,12 @@ fn build() -> Vec<u8> {
             vec![
                 ("width".to_string(), VsfType::u(64, false)),
                 ("height".to_string(), VsfType::u(48, false)),
-                ("note".to_string(), VsfType::a("sensor".to_string())),
+                ("note".to_string(), VsfType::a(vsf::Ascii::lit("sensor"))),
                 ("samples".to_string(), VsfType::p(plane)),
                 ("wrapped".to_string(), VsfType::v(b'b', vec![9u8; 100])),
             ],
         )
-        .add_section("meta", vec![("tool".to_string(), VsfType::a("test".to_string())), ("curve".to_string(), VsfType::t_f5(Tensor::new(vec![3], vec![1.0f32, 2.0, 3.0])))])
+        .add_section("meta", vec![("tool".to_string(), VsfType::a(vsf::Ascii::lit("test"))), ("curve".to_string(), VsfType::t_f5(Tensor::new(vec![3], vec![1.0f32, 2.0, 3.0])))])
         .add_unboxed("blob", vec![0xA5u8; 1000])
         .build()
         .unwrap()

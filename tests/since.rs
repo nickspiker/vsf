@@ -26,7 +26,7 @@ fn samples() -> Vec<(String, VsfType)> {
     let mut add = |label: &str, v: VsfType| s.push((label.to_string(), v));
 
     // Structure and header
-    add("d", VsfType::d("octopus".into()));
+    add("d", VsfType::d(vsf::Ascii::lit("octopus")));
     add("o", VsfType::o(1234));
     add("b", VsfType::b(70000, false));
     add("b/inclusive", VsfType::b(70000, true));
@@ -89,7 +89,7 @@ fn samples() -> Vec<(String, VsfType)> {
     // Text, time, place
     #[cfg(any(feature = "text", feature = "text-encode"))]
     add("x", VsfType::x("café octopus".into()));
-    add("a", VsfType::a("octopus".into()));
+    add("a", VsfType::a(vsf::Ascii::lit("octopus")));
     #[allow(deprecated)]
     for (label, et) in [("e/e5", EtType::e5(1_000_000)), ("e/e6", EtType::e6(-123_456_789_012)), ("e/e7", EtType::e7(1 << 100)), ("e/f5", EtType::f5(1.5e9)), ("e/f6", EtType::f6(-2.25e12))] {
         add(label, VsfType::e(et));
@@ -171,13 +171,13 @@ fn renderable_samples(s: &mut Vec<(String, VsfType)>) {
     add("ror", VsfType::ror(Box::new(Nurbs { points: Nums::points_f32(&[[0., 0.], [0.5, 1.], [1., 0.]]), degree: Num::from(2u8), knots: Nums::f32(vec![6], vec![0., 0., 0., 1., 1., 1.]).unwrap(), weights: Some(Nums::f32(vec![3], vec![1., 0.5, 1.]).unwrap()), fill: None, stroke: stroke() })));
     add("ron", VsfType::ron(Box::new(Node { view: Some(Nums::centre_half_f32([0., 0.], [1., 1.])), translate: Some(Nums::f32(vec![2], vec![0.5, 0.25]).unwrap()), rotation: Some(Num::from(0.25f32)), scale: Some(PerAxis::Both(Num::from(-4i8))), mask: Some(Box::new(circle())), children: vec![circle(), circle()] })));
     add("roa", VsfType::roa(Box::new(Grid { cols: Num::from(2u8), rows: Num::from(1u8), children: vec![circle(), circle()] })));
-    let mut text = Text::new(VsfType::a("octopus".into()), Nums::f32(vec![2], vec![0., 0.]).unwrap(), Num::from(0.0625f32), Paint::colour(VsfType::rcr).unwrap());
+    let mut text = Text::new(VsfType::a(vsf::Ascii::lit("octopus")), Nums::f32(vec![2], vec![0., 0.]).unwrap(), Num::from(0.0625f32), Paint::colour(VsfType::rcr).unwrap());
     text.weight = Some(Num::from(700u16));
     text.align = Some(Align::Left);
     text.tilt = Some(Num::from(-0.03125f32));
     add("rot", VsfType::rot(Box::new(text)));
-    add("rou", VsfType::rou(Box::new(Button { geometry: Nums::centre_half_f32([0., 0.], [0.25, 0.125]), label: Box::new(VsfType::a("OK".into())), variant: ButtonVariant::Outlined, paint: Paint::colour(VsfType::rcr).unwrap() })));
-    add("roq", VsfType::roq(Box::new(Input { geometry: Nums::centre_half_f32([0., 0.], [0.5, 0.125]), placeholder: Box::new(VsfType::a("name".into())), paint: Paint::colour(VsfType::rcr).unwrap() })));
+    add("rou", VsfType::rou(Box::new(Button { geometry: Nums::centre_half_f32([0., 0.], [0.25, 0.125]), label: Box::new(VsfType::a(vsf::Ascii::lit("OK"))), variant: ButtonVariant::Outlined, paint: Paint::colour(VsfType::rcr).unwrap() })));
+    add("roq", VsfType::roq(Box::new(Input { geometry: Nums::centre_half_f32([0., 0.], [0.5, 0.125]), placeholder: Box::new(VsfType::a(vsf::Ascii::lit("name"))), paint: Paint::colour(VsfType::rcr).unwrap() })));
     add("roi", VsfType::roi(Box::new(Image { geometry: Nums::centre_half_f32([0., 0.], [0.5, 0.5]), handle: Num::uint(42), tint: red() })));
     add("rof", VsfType::rof(Box::new(Surface { geometry: Nums::centre_half_f32([0., 0.], [0.5, 0.5]), handle: Num::uint(7) })));
     add("rog", VsfType::rog(Box::new(gradient)));

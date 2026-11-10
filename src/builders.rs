@@ -1299,7 +1299,7 @@ pub fn compressed_image_encoded(av1_data: Vec<u8>, encoding: crate::visual::Enco
     }
     let mut fields = vec![("pixels".to_string(), VsfType::v(ENCODING_AV1, av1_data))];
     if encoding != crate::visual::Encoding::Gamma2 {
-        fields.push(("encoding".to_string(), VsfType::a(encoding.as_str().into())));
+        fields.push(("encoding".to_string(), VsfType::a(crate::types::Ascii::new(encoding.as_str()).map_err(|e| format!("encoding: {e}"))?)));
     }
     VsfBuilder::new().provenance_only().add_section("image", fields).build()
 }

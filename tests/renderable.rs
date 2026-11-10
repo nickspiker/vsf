@@ -41,7 +41,7 @@ fn circle() -> VsfType {
 #[test]
 fn every_object_reads_back() {
     let gradient = Gradient { kind: GradientKind::Conic, geometry: Nums::f32(vec![2], vec![0., 0.]).unwrap(), offsets: Nums::f32(vec![3], vec![0., 0.5, 1.]).unwrap(), colours: vec![VsfType::rcr, VsfType::rcn, VsfType::rcb], angle: Some(Num::from(0.25f32)) };
-    let mut text = Text::new(VsfType::a("octopus".into()), Nums::f32(vec![2], vec![0., 0.]).unwrap(), Num::from(0.0625f32), red());
+    let mut text = Text::new(VsfType::a(vsf::Ascii::lit("octopus")), Nums::f32(vec![2], vec![0., 0.]).unwrap(), Num::from(0.0625f32), red());
     text.font = Some(Box::new(VsfType::hb(vec![7; 32])));
     text.leading = Some(Num::from(1.25f32));
     text.spacing = Some(Num::from(0.0078125f32));
@@ -61,8 +61,8 @@ fn every_object_reads_back() {
         VsfType::ron(Box::new(Node::new())),
         VsfType::roa(Box::new(Grid { cols: Num::from(1u8), rows: Num::from(1u8), children: vec![] })),
         VsfType::rot(Box::new(text)),
-        VsfType::rou(Box::new(Button { geometry: Nums::centre_half_f32([0., 0.], [1., 0.5]), label: Box::new(VsfType::a("go".into())), variant: ButtonVariant::Text, paint: red() })),
-        VsfType::roq(Box::new(Input { geometry: Nums::centre_half_f32([0., 0.], [1., 0.5]), placeholder: Box::new(VsfType::a("".into())), paint: red() })),
+        VsfType::rou(Box::new(Button { geometry: Nums::centre_half_f32([0., 0.], [1., 0.5]), label: Box::new(VsfType::a(vsf::Ascii::lit("go"))), variant: ButtonVariant::Text, paint: red() })),
+        VsfType::roq(Box::new(Input { geometry: Nums::centre_half_f32([0., 0.], [1., 0.5]), placeholder: Box::new(VsfType::a(vsf::Ascii::lit(""))), paint: red() })),
         VsfType::roi(Box::new(Image { geometry: Nums::centre_half_f32([0., 0.], [1., 1.]), handle: Num::uint(u64::MAX), tint: None })),
         VsfType::rof(Box::new(Surface { geometry: Nums::centre_half_f32([0., 0.], [1., 1.]), handle: Num::uint(0) })),
         VsfType::rog(Box::new(gradient)),
@@ -138,7 +138,7 @@ fn malformed_bodies_are_refused_by_name() {
     let flat = Nums::f32(vec![4], vec![0., 0., 1., 1.]).unwrap().value().flatten();
     assert!(parse_err(&object(b'e', &flat)).contains("ellipse geometry"));
     // A non-number where numbers belong.
-    assert!(parse_err(&object(b'e', &VsfType::a("x".into()).flatten())).contains("is a real-number tensor"));
+    assert!(parse_err(&object(b'e', &VsfType::a(vsf::Ascii::lit("x")).flatten())).contains("is a real-number tensor"));
     // A body that runs past the input, and one that is not whole bytes.
     let mut short = with(b"");
     short.pop();
@@ -182,7 +182,7 @@ fn box_corner_rules() {
 
 #[test]
 fn numbers_refuse_what_is_not_a_number() {
-    assert!(Num::new(VsfType::a("1".into())).is_err());
+    assert!(Num::new(VsfType::a(vsf::Ascii::lit("1"))).is_err());
     assert!(Num::new(VsfType::u(1, false)).is_err(), "auto-sized u reads back as a sized type");
     assert!(Num::new(VsfType::u0(true)).is_err());
     assert!(Nums::new(VsfType::f5(1.)).is_err());

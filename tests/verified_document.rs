@@ -28,7 +28,7 @@ fn build_payload_doc() -> Vec<u8> {
             vec![
                 ("count".to_string(), VsfType::u4(0xBEEF)),
                 ("digest".to_string(), VsfType::hp(sample_digest().to_vec())),
-                ("label".to_string(), VsfType::a("octopus".to_string())),
+                ("label".to_string(), VsfType::a(vsf::Ascii::lit("octopus"))),
             ],
         )
         .build()
@@ -80,10 +80,10 @@ fn hp_only_documents_verify_on_provenance_alone() {
         .add_section(
             "error",
             vec![
-                ("reason".to_string(), VsfType::a("worker_failed".to_string())),
+                ("reason".to_string(), VsfType::a(vsf::Ascii::lit("worker_failed"))),
                 (
                     "detail".to_string(),
-                    VsfType::a("upstream timeout".to_string()),
+                    VsfType::a(vsf::Ascii::lit("upstream timeout")),
                 ),
             ],
         )
@@ -153,7 +153,7 @@ fn parse_document_tolerates_unknown_field() {
             vec![
                 ("count".to_string(), VsfType::u4(0xBEEF)),
                 ("digest".to_string(), VsfType::hp(sample_digest().to_vec())),
-                ("label".to_string(), VsfType::a("octopus".to_string())),
+                ("label".to_string(), VsfType::a(vsf::Ascii::lit("octopus"))),
                 // Forward-compat: a newer writer added this; an older schema must not choke.
                 ("surprise".to_string(), VsfType::u3(1)),
             ],
@@ -200,7 +200,7 @@ fn emit_accept_signed_fixture() {
             "payload",
             vec![
                 ("count".to_string(), VsfType::u4(0xBEEF)),
-                ("label".to_string(), VsfType::a("octopus".to_string())),
+                ("label".to_string(), VsfType::a(vsf::Ascii::lit("octopus"))),
             ],
         )
         .build()
@@ -227,7 +227,7 @@ fn signed_round_trip_checks_signer() {
             "payload",
             vec![
                 ("count".to_string(), VsfType::u4(0xBEEF)),
-                ("label".to_string(), VsfType::a("octopus".to_string())),
+                ("label".to_string(), VsfType::a(vsf::Ascii::lit("octopus"))),
             ],
         )
         .build()
@@ -478,7 +478,7 @@ fn builder_documents_pass_the_strict_body_walk() {
         .add_section_direct({
             let mut s = vsf::VsfSection::new("meta");
             s.add_flag("hidden");
-            s.add_field_multi("pair", vec![VsfType::u(1, false), VsfType::a("two".to_string())]);
+            s.add_field_multi("pair", vec![VsfType::u(1, false), VsfType::a(vsf::Ascii::lit("two"))]);
             s.add_field("digest", VsfType::hp(sample_digest().to_vec()));
             s
         })

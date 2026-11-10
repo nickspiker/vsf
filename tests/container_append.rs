@@ -26,10 +26,10 @@ fn an_append_leaves_every_original_byte_in_place_and_supersedes_by_name() {
     let doc0 = Document::open(&g0[..]).unwrap();
     assert_eq!(doc0.generation(), 0);
     assert_eq!(doc0.end(), g0.len() as u64);
-    let add = Appender::new("opsin", "exposure +1")
+    let add = Appender::new(vsf::Ascii::lit("opsin"), vsf::Ascii::lit("exposure +1"))
         .creation_time_oscillations(2_000_000)
         .add_section("view", vec![("exposure".to_string(), VsfType::f5(1.0))])
-        .add_section("graph.g1", vec![("ops".to_string(), VsfType::a("plane\nexposure".to_string()))])
+        .add_section("graph.g1", vec![("ops".to_string(), VsfType::a(vsf::Ascii::lit("plane\nexposure")))])
         .supersede("blob")
         .build(&doc0)
         .unwrap();
@@ -80,10 +80,10 @@ fn an_append_leaves_every_original_byte_in_place_and_supersedes_by_name() {
 fn a_second_generation_chains_and_undo_is_truncation() {
     let g0 = gen0();
     let mut all = g0.clone();
-    let add1 = Appender::new("opsin", "crop").add_section("view", vec![("crop".to_string(), VsfType::u(1, false))]).build(&Document::open(&all[..]).unwrap()).unwrap();
+    let add1 = Appender::new(vsf::Ascii::lit("opsin"), vsf::Ascii::lit("crop")).add_section("view", vec![("crop".to_string(), VsfType::u(1, false))]).build(&Document::open(&all[..]).unwrap()).unwrap();
     all.extend_from_slice(&add1);
     let len1 = all.len();
-    let add2 = Appender::new("opsin", "rotate").add_section("view", vec![("crop".to_string(), VsfType::u(2, false))]).add_unboxed("mask", vec![1u8; 50]).build(&Document::open(&all[..]).unwrap()).unwrap();
+    let add2 = Appender::new(vsf::Ascii::lit("opsin"), vsf::Ascii::lit("rotate")).add_section("view", vec![("crop".to_string(), VsfType::u(2, false))]).add_unboxed("mask", vec![1u8; 50]).build(&Document::open(&all[..]).unwrap()).unwrap();
     all.extend_from_slice(&add2);
 
     let doc = Document::open(&all[..]).unwrap();
@@ -107,7 +107,7 @@ fn a_second_generation_chains_and_undo_is_truncation() {
 #[test]
 fn a_torn_append_falls_back_to_the_last_provable_state() {
     let g0 = gen0();
-    let add = Appender::new("opsin", "edit").add_section("view", vec![("exposure".to_string(), VsfType::f5(2.0))]).build(&Document::open(&g0[..]).unwrap()).unwrap();
+    let add = Appender::new(vsf::Ascii::lit("opsin"), vsf::Ascii::lit("edit")).add_section("view", vec![("exposure".to_string(), VsfType::f5(2.0))]).build(&Document::open(&g0[..]).unwrap()).unwrap();
     for cut in [1usize, 10, add.len() / 2, add.len() - 17, add.len() - 1] {
         let mut torn = g0.clone();
         torn.extend_from_slice(&add[..cut]);
@@ -120,7 +120,7 @@ fn a_torn_append_falls_back_to_the_last_provable_state() {
     // A torn third generation after two complete ones falls back to generation 1, not to the original: its header and trailer are still in place.
     let mut two = g0.clone();
     two.extend_from_slice(&add);
-    let add2 = Appender::new("opsin", "later").add_section("view", vec![("exposure".to_string(), VsfType::f5(3.0))]).add_unboxed("big", vec![9u8; 3000]).build(&Document::open(&two[..]).unwrap()).unwrap();
+    let add2 = Appender::new(vsf::Ascii::lit("opsin"), vsf::Ascii::lit("later")).add_section("view", vec![("exposure".to_string(), VsfType::f5(3.0))]).add_unboxed("big", vec![9u8; 3000]).build(&Document::open(&two[..]).unwrap()).unwrap();
     for cut in [1usize, 2000, add2.len() - 17, add2.len() - 1] {
         let mut torn = two.clone();
         torn.extend_from_slice(&add2[..cut]);
@@ -154,7 +154,7 @@ fn append_and_truncate_on_a_real_file() {
     std::fs::write(&path, &g0).unwrap();
     let add = {
         let f = std::fs::File::open(&path).unwrap();
-        Appender::new("test", "file append").add_section("note", vec![("text".to_string(), VsfType::a("hello".to_string()))]).build(&Document::open(f).unwrap()).unwrap()
+        Appender::new(vsf::Ascii::lit("test"), vsf::Ascii::lit("file append")).add_section("note", vec![("text".to_string(), VsfType::a(vsf::Ascii::lit("hello")))]).build(&Document::open(f).unwrap()).unwrap()
     };
     append_to_file(&path, &add).unwrap();
     let f = std::fs::File::open(&path).unwrap();

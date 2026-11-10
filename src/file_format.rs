@@ -190,7 +190,7 @@ impl VsfHeader {
             header.push(b'(');
 
             // Section name
-            header.extend_from_slice(&VsfType::d(field.name.clone()).flatten());
+            header.extend_from_slice(&VsfType::d(crate::types::Ascii::name(&field.name)).flatten());
 
             // Separator after section name
             header.push(b':');
@@ -757,7 +757,7 @@ impl VsfField {
     /// - ')' ends the field
     pub fn flatten(&self) -> Vec<u8> {
         // The parts first, then one buffer of their exact length: grown as it was filled, the closing ')' pushed past a large value's exact fit doubled it (a 24 MB plane took a 48 MB buffer, 2026-11-08).
-        let name = VsfType::d(self.name.clone()).flatten();
+        let name = VsfType::d(crate::types::Ascii::name(&self.name)).flatten();
         let values: Vec<Vec<u8>> = self.values.iter().map(|v| v.flatten()).collect();
         let len = 1 + name.len() + values.iter().map(|v| v.len() + 1).sum::<usize>() + 1;
         let mut bytes = Vec::with_capacity(len);
@@ -848,7 +848,7 @@ impl VsfField {
         }
         *ptr += 1;
 
-        Ok(Self { name, values })
+        Ok(Self { name: name.into_string(), values })
     }
 }
 
@@ -986,7 +986,7 @@ impl VsfSection {
         bytes.push(b'[');
 
         // Section name
-        let name_bytes = VsfType::d(self.name.clone()).flatten();
+        let name_bytes = VsfType::d(crate::types::Ascii::name(&self.name)).flatten();
         bytes.extend_from_slice(&name_bytes);
 
         // Encode fields to know their size
@@ -1074,7 +1074,7 @@ impl VsfSection {
         // Encode fields to know their size (each flattened once, joined only into the final buffer, which is allocated at its exact length: grown as it was filled, a large section doubled at its closing ']').
         let fields: Vec<Vec<u8>> = self.fields.iter().map(|f| f.flatten()).collect();
         let fields_len: usize = fields.iter().map(|f| f.len()).sum();
-        let name_bytes = VsfType::d(self.name.clone()).flatten();
+        let name_bytes = VsfType::d(crate::types::Ascii::name(&self.name)).flatten();
         let field_count = self.fields.len();
         let mut bytes;
         {
@@ -1176,7 +1176,7 @@ impl VsfSection {
                 Err(e) => return Err(format!("VsfSection: Failed to parse b{{length}}: {}", e)),
             };
 
-            (section_name, Some(length), Some(count))
+            (section_name.into_string(), Some(length), Some(count))
         };
 
         let mut fields = Vec::new();
@@ -1326,7 +1326,7 @@ mod tests {
     fn semantic_accessors_are_width_agnostic_and_total() {
         let mut s = VsfSection::new("t");
         // `a` not `x` here: the default test build has no Huffman feature, and the accessor covers both alike.
-        s.add_field("name", VsfType::a("Ada".into()));
+        s.add_field("name", VsfType::a(crate::types::Ascii::lit("Ada")));
         s.set_uint("small", 7); // auto-sized: decodes u3 on the wire, must still answer uint()
         s.set_uint("big", 4_000_000_000);
         s.set_int("neg", -5);
@@ -1743,7 +1743,7 @@ mod tests {
         let mut section = VsfSection::new("data");
         section.add_field("field1", VsfType::u(100, false));
         section.add_field("field2", VsfType::u(200, false));
-        section.add_field("field3", VsfType::a("hello".to_string()));
+        section.add_field("field3", VsfType::a(crate::types::Ascii::lit("hello")));
 
         let offset_5mb = 5 * 1024 * 1024;
         let encoded = section.encode_at_offset(offset_5mb);

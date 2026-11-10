@@ -118,7 +118,7 @@ use super::renderable::{Button, Ellipse, Gradient, Grid, Image, Input, Node, Nur
 #[allow(non_camel_case_types)]
 pub enum VsfType {
     // VSF Structure
-    d(String), // VSF internal dictionary key (internal naming: section names, field names, keys)
+    d(crate::types::Ascii), // VSF internal dictionary key (internal naming: section names, field names, keys)
     o(usize),  // Offset in Bytes from file start (header TOC entries, section pointers)
     b(usize, bool), // Length in Bytes of the structure this field annotates — header size, section b{length}, field size. Distinct letter from l so the order-independent header can tell header-size from file-length apart without positional rules. inclusive_mode: the value counts its own encoded bytes (stabilized by iteration in builders).
     l(usize, bool), // Length in Bytes of the ENTIRE file; exactly one per file. Lets TCP readers preallocate and stream without parse-as-you-go. Same (value, inclusive_mode) mechanics as b.
@@ -242,7 +242,7 @@ pub enum VsfType {
 
     // ==================== METADATA & SPECIAL TYPES ====================
     x(String),     // UTF-8 text (Unicode, user-facing, Huffman compressed)
-    a(String),     // ASCII text (user-facing, ASCII-only alternative to x)
+    a(crate::types::Ascii),     // ASCII text (user-facing, ASCII-only alternative to x)
     e(EtType),     // Eagle Time
     w(WorldCoord), // World coordinate (Dymaxion icosahedral) — wire: w[3-7] + 2^N bytes
     wm(WorldCell), // World cell (Morton-coded Dymaxion) — wire: wm[3-7] + 2^(N-3) bytes, truncation-nested: prefix = enclosing cell
@@ -1132,7 +1132,8 @@ impl VsfType {
 
     pub fn as_string(&self) -> Option<&str> {
         match self {
-            VsfType::x(s) | VsfType::a(s) | VsfType::d(s) => Some(s),
+            VsfType::x(s) => Some(s),
+            VsfType::a(s) | VsfType::d(s) => Some(s.as_str()),
             _ => None,
         }
     }

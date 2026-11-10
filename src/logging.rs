@@ -152,7 +152,8 @@ pub fn parse_log_records(buf: &[u8]) -> (Vec<LogRecord>, usize) {
             .get_field("msg")
             .and_then(|f| f.values.first())
             .and_then(|v| match v {
-                VsfType::a(s) | VsfType::x(s) => Some(s.clone()),
+                VsfType::x(s) => Some(s.clone()),
+                VsfType::a(s) => Some(s.to_string()),
                 _ => None,
             })
             .unwrap_or_default();
@@ -163,7 +164,8 @@ pub fn parse_log_records(buf: &[u8]) -> (Vec<LogRecord>, usize) {
             .iter()
             .filter_map(|f| f.values.first())
             .map(|v| match v {
-                VsfType::a(s) | VsfType::x(s) => LogValue::T(s.clone()),
+                VsfType::x(s) => LogValue::T(s.clone()),
+                VsfType::a(s) => LogValue::T(s.to_string()),
                 _ => {
                     if let Ok(n) = u64::from_vsf_type(v) {
                         LogValue::U(n as u128)
@@ -281,14 +283,14 @@ fn jitter(base: i64) -> i64 {
 fn build_record(level: LogLevel, msg: &str, vals: &[LogValue]) -> Result<Vec<u8>, String> {
     let mut section = crate::VsfSection::new("log");
     section.add_field_multi("lvl", vec![crate::VsfType::u(level as usize, false)]);
-    section.add_field_multi("msg", vec![crate::VsfType::a(msg.to_string())]);
+    section.add_field_multi("msg", vec![crate::VsfType::a(crate::types::Ascii::new(msg).map_err(|e| format!("log msg: {e}"))?)]);
     for v in vals {
         let t = match v {
             LogValue::U(n) => crate::VsfType::u(*n as usize, false),
             LogValue::I(n) => crate::VsfType::i6(*n as i64),
             LogValue::F(n) => crate::VsfType::f6(*n),
             LogValue::B(b) => crate::VsfType::u(*b as usize, false),
-            LogValue::T(s) => crate::VsfType::a(s.clone()),
+            LogValue::T(s) => crate::VsfType::a(crate::types::Ascii::new(s.clone()).map_err(|e| format!("log value: {e}"))?),
         };
         section.add_field_multi("val", vec![t]);
     }
@@ -593,7 +595,7 @@ mod tests {
                 "log",
                 vec![
                     ("lvl".to_string(), crate::VsfType::u(2, false)),
-                    ("msg".to_string(), crate::VsfType::a(msg.to_string())),
+                    ("msg".to_string(), crate::VsfType::a(crate::types::Ascii::new(msg).unwrap())),
                 ],
             )
             .build()
@@ -644,7 +646,7 @@ mod tests {
     fn parse_roundtrips_template_and_typed_vals() {
         let mut section = crate::VsfSection::new("log");
         section.add_field_multi("lvl", vec![crate::VsfType::u(3, false)]);
-        section.add_field_multi("msg", vec![crate::VsfType::a("scan took {} ms".to_string())]);
+        section.add_field_multi("msg", vec![crate::VsfType::a(crate::types::Ascii::lit("scan took {} ms"))]);
         section.add_field_multi("val", vec![crate::VsfType::u(8109, false)]);
         let rec = crate::VsfBuilder::new()
             .creation_time_oscillations(42)

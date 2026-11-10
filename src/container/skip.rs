@@ -123,7 +123,7 @@ pub fn skip_field(data: &[u8], ptr: &mut usize) -> Result<FieldSpan, DecodeError
 /// A field's name, the `d` value just past its `(`.
 pub fn field_name(data: &[u8], ptr: &mut usize) -> Result<String, DecodeError> {
     match crate::parse(data, ptr)? {
-        VsfType::d(s) => Ok(s),
+        VsfType::d(s) => Ok(s.into_string()),
         other => Err(DecodeError::Other(format!("expected a field name, found {other:?}"))),
     }
 }
@@ -137,7 +137,7 @@ pub fn section_open(data: &[u8], ptr: &mut usize) -> Result<String, DecodeError>
     let mut name = String::new();
     if data.get(*ptr) != Some(&b'(') && data.get(*ptr) != Some(&b']') {
         match crate::parse(data, ptr)? {
-            VsfType::d(s) => name = s,
+            VsfType::d(s) => name = s.into_string(),
             other => return Err(DecodeError::Other(format!("expected a section name, found {other:?}"))),
         }
         // Far form: n{count} b{length} follow the name.

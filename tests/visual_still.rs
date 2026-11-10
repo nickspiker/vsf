@@ -151,13 +151,13 @@ fn a_plane_without_encoding_reads_as_gamma2_and_an_unknown_role_fails_loud() {
     let doc = Document::open(&bytes[..]).unwrap();
     let mut s = doc.section(doc.entry("plane.b0.s0.sensor").unwrap()).unwrap();
     s.fields.retain(|f| f.name != "encoding");
-    let gen0 = vsf::VsfBuilder::new().add_section("visual", vec![("default_view".to_string(), vsf::types::VsfType::a("view.v0".into()))]).add_section_direct(s.clone()).build().unwrap();
+    let gen0 = vsf::VsfBuilder::new().add_section("visual", vec![("default_view".to_string(), vsf::types::VsfType::a(vsf::Ascii::lit("view.v0")))]).add_section_direct(s.clone()).build().unwrap();
     let read = Visual::read(&gen0).unwrap();
     assert_eq!(read.primary_plane().unwrap().encoding, Encoding::Gamma2);
     let mut bad = s.clone();
     for f in &mut bad.fields {
         if f.name == "role" {
-            f.values[0] = vsf::types::VsfType::a("hologram".into());
+            f.values[0] = vsf::types::VsfType::a(vsf::Ascii::lit("hologram"));
         }
     }
     let gen0 = vsf::VsfBuilder::new().add_section("visual", vec![]).add_section_direct(bad).build().unwrap();

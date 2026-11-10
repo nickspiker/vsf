@@ -97,7 +97,7 @@ impl FieldValue {
     /// - Multi: `(d"name":val1,val2,val3)`
     pub fn flatten(&self) -> Vec<u8> {
         // The parts first, then one buffer of their exact length (grown as it was filled, the closing ')' after a large value doubled it).
-        let name = VsfType::d(self.name.clone()).flatten();
+        let name = VsfType::d(crate::types::Ascii::name(&self.name)).flatten();
         let values: Vec<Vec<u8>> = self.values.iter().map(|v| v.flatten()).collect();
         let mut bytes = Vec::with_capacity(1 + name.len() + values.iter().map(|v| v.len() + 1).sum::<usize>() + 1);
 
@@ -719,7 +719,7 @@ mod tests {
 
         // Splice the wrong name into the body: `[` + d"wrong" + fields...
         let mut named = vec![b'['];
-        named.extend_from_slice(&crate::VsfType::d("wrong".to_string()).flatten());
+        named.extend_from_slice(&crate::VsfType::d(crate::types::Ascii::lit("wrong")).flatten());
         named.extend_from_slice(&near[1..]);
 
         let result = SectionBuilder::parse(schema.clone(), &named);

@@ -77,7 +77,7 @@ impl Keypair {
                 let field_name = match parse(&bytes, &mut ptr)
                     .map_err(|e| format!("Parse field name: {}", e))?
                 {
-                    VsfType::d(name) => name,
+                    VsfType::d(name) => name.into_string(),
                     _ => return Err("Expected field name".to_string()),
                 };
 

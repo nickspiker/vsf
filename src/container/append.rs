@@ -49,16 +49,16 @@ pub struct Appender {
     sections: Vec<(VsfSection, SectionMeta)>,
     unboxed: Vec<(String, Vec<u8>, SectionMeta)>,
     supersede: Vec<String>,
-    tool: String,
-    action: String,
+    tool: crate::types::Ascii,
+    action: crate::types::Ascii,
     creation_time: Option<VsfType>,
     requires: usize,
 }
 
 impl Appender {
     /// `tool` names the writer, `action` what it did (free text, e.g. "opsin", "paste idt") — both ride in the generation header.
-    pub fn new(tool: impl Into<String>, action: impl Into<String>) -> Self {
-        Self { sections: Vec::new(), unboxed: Vec::new(), supersede: Vec::new(), tool: tool.into(), action: action.into(), creation_time: None, requires: 0 }
+    pub fn new(tool: crate::types::Ascii, action: crate::types::Ascii) -> Self {
+        Self { sections: Vec::new(), unboxed: Vec::new(), supersede: Vec::new(), tool, action, creation_time: None, requires: 0 }
     }
 
     pub fn creation_time_oscillations(mut self, oscillations: i64) -> Self {
@@ -205,7 +205,7 @@ impl Appender {
 
 /// One generation header, the builder's byte order. `header_len`/`file_len` are the values to encode for `b` and `l`; the caller iterates until the encoded length stops changing.
 #[allow(clippy::too_many_arguments)]
-fn encode_header(floor: usize, creation_time: Option<&VsfType>, gen: u32, start: u64, prev_offset: u64, prev_hash: &[u8; 32], tool: &str, action: &str, carried: &[HeaderField], new_entries: &[HeaderField], header_len: usize, file_len: usize) -> Vec<u8> {
+fn encode_header(floor: usize, creation_time: Option<&VsfType>, gen: u32, start: u64, prev_offset: u64, prev_hash: &[u8; 32], tool: &crate::types::Ascii, action: &crate::types::Ascii, carried: &[HeaderField], new_entries: &[HeaderField], header_len: usize, file_len: usize) -> Vec<u8> {
     let mut h = Vec::new();
     h.extend_from_slice("RÅ".as_bytes());
     h.push(b'<');
@@ -222,8 +222,8 @@ fn encode_header(floor: usize, creation_time: Option<&VsfType>, gen: u32, start:
         VsfField::new(FIELD_GEN).with_value(VsfType::u(gen as usize, false)),
         VsfField::new(FIELD_START).with_value(VsfType::u(start as usize, false)),
         VsfField::new(FIELD_PREV).with_value(VsfType::u(prev_offset as usize, false)).with_value(VsfType::hb(prev_hash.to_vec())),
-        VsfField::new(FIELD_TOOL).with_value(VsfType::a(tool.to_string())),
-        VsfField::new(FIELD_ACTION).with_value(VsfType::a(action.to_string())),
+        VsfField::new(FIELD_TOOL).with_value(VsfType::a(tool.clone())),
+        VsfField::new(FIELD_ACTION).with_value(VsfType::a(action.clone())),
     ];
     h.extend_from_slice(&VsfType::n(inline.len() + carried.len() + new_entries.len()).flatten());
     for f in &inline {

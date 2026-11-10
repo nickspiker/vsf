@@ -294,20 +294,20 @@ pub fn write(img: &SpectralImage) -> Result<Vec<u8>, String> {
         ("channel_count".to_string(), VsfType::u(k, false)),
         ("black".to_string(), VsfType::t_f5(Tensor::new(vec![k], img.black.clone()))),
         ("white".to_string(), VsfType::t_f5(Tensor::new(vec![k], img.white.clone()))),
-        ("channel_names".to_string(), VsfType::a(img.channels.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join("\n"))),
+        ("channel_names".to_string(), VsfType::a(crate::types::Ascii::new(img.channels.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join("\n")).map_err(|e| format!("channel_names: {e}"))?)),
     ];
     match &img.layout {
         PlaneLayout::Mosaic { cfa } => {
-            fields.push(("layout".to_string(), VsfType::a("mosaic".to_string())));
+            fields.push(("layout".to_string(), VsfType::a(crate::types::Ascii::lit("mosaic"))));
             fields.push(("cfa".to_string(), VsfType::t_u3(cfa.clone())));
         }
-        PlaneLayout::Planar => fields.push(("layout".to_string(), VsfType::a("planar".to_string()))),
+        PlaneLayout::Planar => fields.push(("layout".to_string(), VsfType::a(crate::types::Ascii::lit("planar")))),
     }
     if !img.make.is_empty() {
-        fields.push(("make".to_string(), VsfType::a(img.make.clone())));
+        fields.push(("make".to_string(), VsfType::a(crate::types::Ascii::new(img.make.clone()).map_err(|e| format!("make: {e}"))?)));
     }
     if !img.model.is_empty() {
-        fields.push(("model".to_string(), VsfType::a(img.model.clone())));
+        fields.push(("model".to_string(), VsfType::a(crate::types::Ascii::new(img.model.clone()).map_err(|e| format!("model: {e}"))?)));
     }
     fields.push(("samples".to_string(), VsfType::p(img.samples.clone())));
 
@@ -374,9 +374,9 @@ pub fn write(img: &SpectralImage) -> Result<Vec<u8>, String> {
         builder = builder.add_section(
             "view_transform",
             vec![
-                ("space".to_string(), VsfType::a(view.space.clone())),
-                ("ops".to_string(), VsfType::a(names.join("\n"))),
-                ("classes".to_string(), VsfType::a(classes.join("\n"))),
+                ("space".to_string(), VsfType::a(crate::types::Ascii::new(view.space.clone()).map_err(|e| format!("space: {e}"))?)),
+                ("ops".to_string(), VsfType::a(crate::types::Ascii::new(names.join("\n")).map_err(|e| format!("ops: {e}"))?)),
+                ("classes".to_string(), VsfType::a(crate::types::Ascii::new(classes.join("\n")).map_err(|e| format!("classes: {e}"))?)),
                 ("param_counts".to_string(), VsfType::t_u5(Tensor::new(vec![m], param_counts))),
                 ("params".to_string(), VsfType::t_f5(Tensor::new(vec![total], params))),
             ],
@@ -398,7 +398,7 @@ pub fn provenance_fields(p: &Provenance) -> Result<Vec<(String, VsfType)>, Strin
             if !p.handle.is_ascii() {
                 return Err("non-ASCII handle requires the 'text' or 'text-encode' feature".to_string());
             }
-            prov.push(("handle".to_string(), VsfType::a(p.handle.clone())));
+            prov.push(("handle".to_string(), VsfType::a(crate::types::Ascii::new(p.handle.clone()).map_err(|e| format!("handle: {e}"))?)));
         }
     }
     if let Some(h) = &p.calibration_hash {
@@ -457,19 +457,19 @@ pub fn profile_fields(profile: &ColourProfile) -> Vec<(String, VsfType)> {
         }
     }
     let mut fields: Vec<(String, VsfType)> = vec![
-        ("target".to_string(), VsfType::a(profile.target.clone())),
+        ("target".to_string(), VsfType::a(crate::types::Ascii::checked("target", profile.target.clone()))),
         ("count".to_string(), VsfType::u(n, false)),
         ("matrices".to_string(), VsfType::t_f5(Tensor::new(vec![n, 3, 3], matrices))),
-        ("sources".to_string(), VsfType::a(sources.join("\n"))),
-        ("classes".to_string(), VsfType::a(classes.join("\n"))),
-        ("tiers".to_string(), VsfType::a(tiers.join("\n"))),
+        ("sources".to_string(), VsfType::a(crate::types::Ascii::checked("sources", sources.join("\n")))),
+        ("classes".to_string(), VsfType::a(crate::types::Ascii::checked("classes", classes.join("\n")))),
+        ("tiers".to_string(), VsfType::a(crate::types::Ascii::checked("tiers", tiers.join("\n")))),
         ("illuminants".to_string(), VsfType::t_u4(Tensor::new(vec![n], illuminants))),
-        ("transfers".to_string(), VsfType::a(transfers.join("\n"))),
+        ("transfers".to_string(), VsfType::a(crate::types::Ascii::checked("transfers", transfers.join("\n")))),
     ];
     if profile.entries.iter().any(|e| e.scale.is_some()) {
         fields.push(("sensitivities".to_string(), VsfType::t_f5(Tensor::new(vec![n, 3], sensitivities))));
         fields.push(("gain_refs".to_string(), VsfType::t_f5(Tensor::new(vec![n], gain_refs))));
-        fields.push(("units".to_string(), VsfType::a(units.join("\n"))));
+        fields.push(("units".to_string(), VsfType::a(crate::types::Ascii::checked("units", units.join("\n")))));
     }
     for (i, name) in ["dng_colormatrix1", "dng_colormatrix2"].iter().enumerate() {
         if let Some((m, code)) = &profile.dng_colormatrix[i] {
@@ -486,7 +486,7 @@ pub fn profile_fields(profile: &ColourProfile) -> Vec<(String, VsfType)> {
     if let Some(cal) = &profile.cal {
         fields.push(("cal_target_type".to_string(), VsfType::u(cal.target_type as usize, false)));
         fields.push(("cal_target_serial".to_string(), VsfType::u(cal.target_serial as usize, false)));
-        fields.push(("cal_timestamp".to_string(), VsfType::a(cal.timestamp.clone())));
+        fields.push(("cal_timestamp".to_string(), VsfType::a(crate::types::Ascii::checked("cal_timestamp", cal.timestamp.clone()))));
     }
     fields
 }
@@ -781,7 +781,8 @@ fn take_string(fields: &[VsfField], name: &'static str) -> Result<String, Spectr
 
 fn take_string_opt(fields: &[VsfField], name: &str) -> Option<String> {
     match find(fields, name) {
-        Some(VsfType::a(s)) | Some(VsfType::x(s)) => Some(s.clone()),
+        Some(VsfType::a(s)) => Some(s.to_string()),
+        Some(VsfType::x(s)) => Some(s.clone()),
         _ => None,
     }
 }

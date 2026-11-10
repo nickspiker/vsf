@@ -413,7 +413,7 @@ pub use logging::install_log_bridge;
 
 // Re-export main types
 pub use types::{
-    datetime_to_eagle_time, BitPackedTensor, EagleTime, EtType, LayoutOrder, NaScheme,
+    datetime_to_eagle_time, Ascii, NotAscii, BitPackedTensor, EagleTime, EtType, LayoutOrder, NaScheme,
     Language, StridedTensor, Tensor, VsfType, WaAddress, WorldCell, WorldCoord, OSCILLATIONS_PER_SECOND,
 };
 #[cfg(feature = "std")]
@@ -717,7 +717,7 @@ mod tests {
     #[test]
     fn test_roundtrip_metadata() {
         // ASCII text
-        let val = VsfType::a("test_label".to_string());
+        let val = VsfType::a(crate::types::Ascii::lit("test_label"));
         let flat = val.flatten();
         let mut ptr = 0;
         let parsed = parse(&flat, &mut ptr).unwrap();

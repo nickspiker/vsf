@@ -261,14 +261,8 @@ pub fn parse_dtype(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeEr
 
     let bytes = &data[*pointer..*pointer + length];
 
-    // Validate ASCII-only (identifiers like "imaging.raw", "iso_speed")
-    if !bytes.iter().all(|&b| b.is_ascii()) {
-        return Err(DecodeError::InvalidDataMsg(
-            "dtype must be ASCII (identifiers only.into())".into(),
-        ));
-    }
-
-    let value = String::from_utf8(bytes.to_vec()).unwrap(); // Safe: validated ASCII
+    // ASCII only (identifiers like "imaging.raw", "iso_speed"): `Ascii` refuses anything else.
+    let value = crate::types::Ascii::from_bytes(bytes).ok_or_else(|| DecodeError::InvalidDataMsg("dtype must be ASCII (identifiers only)".into()))?;
     *pointer += length;
     Ok(VsfType::d(value))
 }
@@ -283,11 +277,7 @@ pub fn parse_ascii(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeEr
 
     let bytes = &data[*pointer..*pointer + length];
 
-    if !bytes.iter().all(|&b| b.is_ascii()) {
-        return Err(DecodeError::InvalidDataMsg("value must be ASCII".into()));
-    }
-
-    let value = String::from_utf8(bytes.to_vec()).unwrap(); // Safe: validated ASCII
+    let value = crate::types::Ascii::from_bytes(bytes).ok_or_else(|| DecodeError::InvalidDataMsg("value must be ASCII".into()))?;
     *pointer += length;
     Ok(VsfType::a(value))
 }

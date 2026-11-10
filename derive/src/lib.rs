@@ -199,7 +199,8 @@ pub fn derive_vsf(input: TokenStream) -> TokenStream {
         let (enc_one, dec_one): (Ts2, Ts2) = match &kind {
             Kind::Text { ascii } => {
                 let e = if *ascii {
-                    quote! { ::vsf::VsfType::a(v.clone()) }
+                    // `to_section` cannot fail, so a String that is not ASCII stops at its field, named (vsf::Ascii::checked), rather than being written for every reader to refuse.
+                    quote! { ::vsf::VsfType::a(::vsf::Ascii::checked(#wire, v.clone())) }
                 } else {
                     quote! { ::vsf::VsfType::x(v.clone()) }
                 };

@@ -28,7 +28,7 @@ fn frozen_x_nfc_equivalence_v8() {
 #[test]
 fn frozen_a_ascii_v8() {
     // a is raw ASCII bytes + length, always — never Huffman, never anything else.
-    let bytes = VsfType::a("octopus".to_string()).flatten();
+    let bytes = VsfType::a(vsf::Ascii::lit("octopus")).flatten();
     assert_eq!(
         bytes, A_OCTOPUS_V8,
         "a wire encoding shifted — this is a format break, see module docs"
@@ -38,7 +38,7 @@ fn frozen_a_ascii_v8() {
 #[test]
 fn frozen_d_dict_key_v8() {
     // d is raw bytes + length, always.
-    let bytes = VsfType::d("octopus".to_string()).flatten();
+    let bytes = VsfType::d(vsf::Ascii::lit("octopus")).flatten();
     assert_eq!(
         bytes, D_OCTOPUS_V8,
         "d wire encoding shifted — this is a format break, see module docs"
@@ -57,8 +57,8 @@ fn print_current_wire_bytes() {
     for (label, bytes) in [
         ("X_OCTOPUS_V8", VsfType::x("octopus".to_string()).flatten()),
         ("X_CAFE_V8", VsfType::x("café".to_string()).flatten()),
-        ("A_OCTOPUS_V8", VsfType::a("octopus".to_string()).flatten()),
-        ("D_OCTOPUS_V8", VsfType::d("octopus".to_string()).flatten()),
+        ("A_OCTOPUS_V8", VsfType::a(vsf::Ascii::lit("octopus")).flatten()),
+        ("D_OCTOPUS_V8", VsfType::d(vsf::Ascii::lit("octopus")).flatten()),
     ] {
         println!("const {}: &[u8] = &{:?};", label, bytes);
     }

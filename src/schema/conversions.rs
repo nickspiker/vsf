@@ -349,8 +349,7 @@ impl FromVsfType for String {
     fn from_vsf_type(vsf: &VsfType) -> ValidationResult<Self> {
         match vsf {
             VsfType::x(s) => Ok(s.clone()),
-            VsfType::d(s) => Ok(s.clone()),
-            VsfType::a(s) => Ok(s.clone()),
+            VsfType::d(s) | VsfType::a(s) => Ok(s.to_string()),
             _ => Err(ValidationError::Custom(format!(
                 "Cannot convert {} to String",
                 vsf_type_name(vsf)
@@ -374,13 +373,13 @@ impl IntoVsfType for &str {
 /// use vsf::schema::{AsciiText, IntoVsfType};
 ///
 /// // Create ASCII text explicitly
-/// let ascii = AsciiText::new("hello");
+/// let ascii = AsciiText::new("hello").unwrap();
 /// let vsf_value = ascii.into_vsf_type(); // VsfType::a("hello")
 ///
 /// // Use in a schema builder
 /// # use vsf::schema::{SectionSchema, TypeConstraint};
 /// # let schema = SectionSchema::new("test").field("name", TypeConstraint::AsciiText);
-/// let section = schema.build().set("name", AsciiText::new("nick"))?.encode()?;
+/// let section = schema.build().set("name", AsciiText::new("nick").unwrap())?.encode()?;
 /// # Ok::<(), vsf::schema::ValidationError>(())
 /// ```
 ///
@@ -388,25 +387,25 @@ impl IntoVsfType for &str {
 /// ```
 /// use vsf::schema::IntoVsfType; use vsf::VsfType;
 ///
-/// let utf8 = "hello".into_vsf_type();     // VsfType::x("hello") let ascii = vsf::schema::AsciiText::new("hello").into_vsf_type();  // VsfType::a("hello")
+/// let utf8 = "hello".into_vsf_type();     // VsfType::x("hello") let ascii = vsf::schema::AsciiText::new("hello").unwrap().into_vsf_type();  // VsfType::a("hello")
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AsciiText(pub String);
+pub struct AsciiText(pub crate::types::Ascii);
 
 impl AsciiText {
-    /// Create a new ASCII text value
-    pub fn new(s: impl Into<String>) -> Self {
-        Self(s.into())
+    /// ASCII text, or where it is not ASCII (`Ascii::new`).
+    pub fn new(s: impl Into<String>) -> Result<Self, crate::types::NotAscii> {
+        crate::types::Ascii::new(s).map(Self)
     }
 
     /// Get the inner string as a string slice
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 
     /// Consume and return the inner string
     pub fn into_string(self) -> String {
-        self.0
+        self.0.into_string()
     }
 }
 

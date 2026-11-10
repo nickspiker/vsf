@@ -708,7 +708,7 @@ fn push_f32(fields: &mut Vec<(String, VsfType)>, name: &str, v: Option<f32>) {
 
 fn push_text(fields: &mut Vec<(String, VsfType)>, name: &str, v: &str) {
     if !v.is_empty() {
-        fields.push((name.to_string(), VsfType::a(v.to_string())));
+        fields.push((name.to_string(), VsfType::a(crate::types::Ascii::checked("text", v.to_string()))));
     }
 }
 
@@ -719,7 +719,7 @@ impl Track {
         format!("track.{}", self.id)
     }
     fn fields(&self) -> Vec<(String, VsfType)> {
-        let mut f = vec![("kind".to_string(), VsfType::a(self.kind.as_str().into())), ("role".to_string(), VsfType::a(self.role.as_str().into())), ("channels".to_string(), VsfType::u(self.channels, false))];
+        let mut f = vec![("kind".to_string(), VsfType::a(crate::types::Ascii::checked("kind", self.kind.as_str()))), ("role".to_string(), VsfType::a(crate::types::Ascii::checked("role", self.role.as_str()))), ("channels".to_string(), VsfType::u(self.channels, false))];
         push_text(&mut f, "title", &self.title);
         push_text(&mut f, "codec", &self.codec);
         f
@@ -735,12 +735,12 @@ impl Span {
     }
     fn section(&self) -> VsfSection {
         let mut s = VsfSection::new(self.section_name());
-        s.add_field("track", VsfType::a(self.track.clone()));
+        s.add_field("track", VsfType::a(crate::types::Ascii::checked("track", self.track.clone())));
         s.add_field("first", VsfType::i(self.first as isize));
         s.add_field("count", VsfType::u(self.data.len(), false));
         for d in &self.data {
             match d {
-                FrameData::PlaneRef(name) => s.add_field("data", VsfType::a(name.clone())),
+                FrameData::PlaneRef(name) => s.add_field("data", VsfType::a(crate::types::Ascii::checked("data", name.clone()))),
                 FrameData::Packed(t) => s.add_field("data", VsfType::p(t.clone())),
                 FrameData::Wrapped(code, bytes) => s.add_field("data", VsfType::v(*code, bytes.clone())),
                 FrameData::Hole => s.add_field("data", VsfType::v(b'b', Vec::new())),
@@ -755,7 +755,8 @@ impl Span {
             .iter()
             .filter_map(|f| f.values.first())
             .map(|v| match v {
-                VsfType::a(n) | VsfType::x(n) => FrameData::PlaneRef(n.clone()),
+                VsfType::a(n) => FrameData::PlaneRef(n.to_string()),
+                VsfType::x(n) => FrameData::PlaneRef(n.clone()),
                 VsfType::p(t) => FrameData::Packed(t.clone()),
                 VsfType::v(c, b) if b.is_empty() => {
                     let _ = c;
@@ -776,28 +777,28 @@ impl Plane {
             return Err(bad(format!("plane {}: black/white length {}/{} != channel count {k}", self.section_name(), self.black.len(), self.white.len())));
         }
         let mut s = VsfSection::new(self.section_name());
-        s.add_field("role", VsfType::a(self.role.as_str().into()));
+        s.add_field("role", VsfType::a(crate::types::Ascii::checked("role", self.role.as_str())));
         s.add_field("width", VsfType::u(self.width, false));
         s.add_field("height", VsfType::u(self.height, false));
         s.add_field("channel_count", VsfType::u(k, false));
-        s.add_field("channel_names", VsfType::a(self.channels.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join("\n")));
+        s.add_field("channel_names", VsfType::a(crate::types::Ascii::checked("channel_names", self.channels.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join("\n"))));
         match &self.layout {
             PlaneLayout::Mosaic { cfa } => {
-                s.add_field("layout", VsfType::a("mosaic".into()));
+                s.add_field("layout", VsfType::a(crate::types::Ascii::lit("mosaic")));
                 s.add_field("cfa", VsfType::t_u3(cfa.clone()));
             }
-            PlaneLayout::Planar => s.add_field("layout", VsfType::a("planar".into())),
+            PlaneLayout::Planar => s.add_field("layout", VsfType::a(crate::types::Ascii::lit("planar"))),
         }
         s.add_field("black", VsfType::t_f5(Tensor::new(vec![k], self.black.clone())));
         s.add_field("white", VsfType::t_f5(Tensor::new(vec![k], self.white.clone())));
-        s.add_field("encoding", VsfType::a(self.encoding.as_str().into()));
+        s.add_field("encoding", VsfType::a(crate::types::Ascii::checked("encoding", self.encoding.as_str())));
         // Absent ⇒ VSF RGB and nothing before the file: both written only when they say something, so a plane that needs neither keeps its bytes.
         self.check_primaries()?;
         if self.primaries != Primaries::Vsf {
-            s.add_field("primaries", VsfType::a(self.primaries.as_str().into()));
+            s.add_field("primaries", VsfType::a(crate::types::Ascii::checked("primaries", self.primaries.as_str())));
         }
         if let Some(c) = self.prior {
-            s.add_field("prior", VsfType::a(c.as_str().into()));
+            s.add_field("prior", VsfType::a(crate::types::Ascii::checked("prior", c.as_str())));
         }
         s.add_field("depth", VsfType::u(self.depth as usize, false));
         if let Some(c) = self.maker_crop {
@@ -814,7 +815,7 @@ impl Plane {
             s.add_field("parent_plane", VsfType::hb(h.to_vec()));
         }
         if !self.program.is_empty() {
-            s.add_field("program", VsfType::a(self.program.clone()));
+            s.add_field("program", VsfType::a(crate::types::Ascii::checked("program", self.program.clone())));
         }
         // Spectral sensitivity, when any channel is characterized — the spectral_response codec, on the plane.
         if self.channels.iter().any(|c| c.curve.is_some()) {
@@ -958,7 +959,7 @@ impl Capture {
         }
         push_text(&mut f, "stack", &self.stack);
         if !self.cal_applied.is_empty() {
-            f.push(("cal_applied".into(), VsfType::a(self.cal_applied.join("\n"))));
+            f.push(("cal_applied".into(), VsfType::a(crate::types::Ascii::checked("cal_applied", self.cal_applied.join("\n")))));
         }
         push_text(&mut f, "shading", &self.shading);
         f
@@ -1015,12 +1016,12 @@ impl Graph {
         }
         let total = params.len();
         vec![
-            ("ops".into(), VsfType::a(names.join("\n"))),
-            ("classes".into(), VsfType::a(classes.join("\n"))),
+            ("ops".into(), VsfType::a(crate::types::Ascii::checked("ops", names.join("\n")))),
+            ("classes".into(), VsfType::a(crate::types::Ascii::checked("classes", classes.join("\n")))),
             ("arity".into(), VsfType::t_u3(Tensor::new(vec![m], arity))),
             ("param_counts".into(), VsfType::t_u5(Tensor::new(vec![m], counts))),
             ("params".into(), VsfType::t_f5(Tensor::new(vec![total], params))),
-            ("refs".into(), VsfType::a(refs.join("\n"))),
+            ("refs".into(), VsfType::a(crate::types::Ascii::checked("refs", refs.join("\n")))),
             ("root".into(), VsfType::u(self.root, false)),
             ("hash".into(), VsfType::hb(self.hash().to_vec())),
         ]
@@ -1064,7 +1065,7 @@ impl View {
         View { id: id.into(), graph: graph.id.clone(), root: graph.root, space: "vsf_rgb_linear".into(), encoding: Encoding::Linear, bits: 16, purpose: Purpose::Default }
     }
     pub fn fields(&self) -> Vec<(String, VsfType)> {
-        vec![("graph".into(), VsfType::a(self.graph.clone())), ("root".into(), VsfType::u(self.root, false)), ("space".into(), VsfType::a(self.space.clone())), ("encoding".into(), VsfType::a(self.encoding.as_str().into())), ("bits".into(), VsfType::u(self.bits as usize, false)), ("purpose".into(), VsfType::a(self.purpose.as_str().into()))]
+        vec![("graph".into(), VsfType::a(crate::types::Ascii::checked("graph", self.graph.clone()))), ("root".into(), VsfType::u(self.root, false)), ("space".into(), VsfType::a(crate::types::Ascii::checked("space", self.space.clone()))), ("encoding".into(), VsfType::a(crate::types::Ascii::checked("encoding", self.encoding.as_str()))), ("bits".into(), VsfType::u(self.bits as usize, false)), ("purpose".into(), VsfType::a(crate::types::Ascii::checked("purpose", self.purpose.as_str())))]
     }
     fn from_section(id: &str, s: &VsfSection) -> Result<View, VisualError> {
         Ok(View { id: id.into(), graph: text(s, "graph"), root: s.uint("root").unwrap_or(0) as usize, space: text(s, "space"), encoding: match s.text("encoding") { Some(e) => Encoding::parse(e)?, None => Encoding::Gamma2 }, bits: s.uint("bits").unwrap_or(16) as u8, purpose: Purpose::parse(s.text("purpose").unwrap_or("default"))? })
@@ -1147,7 +1148,7 @@ impl Visual {
         if let Some(at) = self.capture.as_ref().and_then(|c| c.at) {
             b = b.creation_time_oscillations(at);
         }
-        let mut manifest = vec![("tracks".to_string(), VsfType::a(self.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join("\n"))), ("default_view".to_string(), VsfType::a(self.default_view.clone()))];
+        let mut manifest = vec![("tracks".to_string(), VsfType::a(crate::types::Ascii::new(self.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join("\n")).map_err(|e| format!("tracks: {e}"))?)), ("default_view".to_string(), VsfType::a(crate::types::Ascii::new(self.default_view.clone()).map_err(|e| format!("default_view: {e}"))?))];
         push_text(&mut manifest, "title", &self.title);
         push_text(&mut manifest, "text", &self.text);
         b = b.add_section("visual", manifest);
@@ -1300,10 +1301,10 @@ impl Visual {
         let primaries = vis.planes.iter().find(|p| p.section_name() == plane_ref).map_or(Primaries::Vsf, |p| p.primaries);
         let graph = Graph::default_still(&format!("g{n}"), &plane_ref, primaries, vis.characterization.as_ref().and_then(|p| p.entries.first()).map(|e| e.class), ops);
         let view = View::default_of(&format!("v{n}"), &graph);
-        let mut manifest = vec![("tracks".to_string(), VsfType::a(vis.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join("\n"))), ("default_view".to_string(), VsfType::a(view.section_name()))];
+        let mut manifest = vec![("tracks".to_string(), VsfType::a(crate::types::Ascii::checked("tracks", vis.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join("\n")))), ("default_view".to_string(), VsfType::a(crate::types::Ascii::checked("default_view", view.section_name())))];
         push_text(&mut manifest, "title", &vis.title);
         push_text(&mut manifest, "text", &vis.text);
-        let mut a = crate::container::Appender::new(tool, action).add_section("visual", manifest).add_section(graph.section_name(), graph.fields()).add_section(view.section_name(), view.fields());
+        let mut a = crate::container::Appender::new(crate::types::Ascii::checked("tool", tool), crate::types::Ascii::checked("action", action)).add_section("visual", manifest).add_section(graph.section_name(), graph.fields()).add_section(view.section_name(), view.fields());
         for e in doc.body_entries() {
             if e.name.starts_with("graph.") || e.name.starts_with("view.") {
                 a = a.supersede(e.name.clone());
@@ -1351,11 +1352,11 @@ mod tests {
     #[test]
     fn a_view_without_encoding_is_gamma2() {
         let mut s = VsfSection::new("view.v0");
-        s.add_field("graph", VsfType::a("g0".into()));
+        s.add_field("graph", VsfType::a(crate::types::Ascii::lit("g0")));
         s.add_field("root", VsfType::u(0, false));
         let v = View::from_section("v0", &s).unwrap();
         assert_eq!(v.encoding, Encoding::Gamma2);
-        s.add_field("encoding", VsfType::a("gamma2tanh".into()));
+        s.add_field("encoding", VsfType::a(crate::types::Ascii::lit("gamma2tanh")));
         assert_eq!(View::from_section("v0", &s).unwrap().encoding, Encoding::Gamma2Tanh);
     }
 

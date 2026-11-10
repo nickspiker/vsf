@@ -2216,7 +2216,7 @@ pub fn format_value(vsf: &VsfType) -> String {
 
         VsfType::v(algo, data) => format_crypto_literal(&format!("v{}", *algo as char), data),
         VsfType::d(name) => format!("d\"{}\"", name),
-        VsfType::a(s) => s.clone(),
+        VsfType::a(s) => s.to_string(),
         VsfType::o(offset) => format!("o[{}]", offset),
         VsfType::n(count) => format!("n[{}]", count),
         VsfType::b(size, _) => format!("b[{}]", size),
@@ -3006,7 +3006,7 @@ pub fn inspect_vsf(data: &[u8]) -> Result<String, String> {
                     } else {
                         &format!("{}   ", tree_vert())
                     };
-                    let name_literal = format_value_literal(&VsfType::d(field.name.clone()));
+                    let name_literal = format_value_literal(&VsfType::d(crate::types::Ascii::name(&field.name)));
                     let values_literal: Vec<String> = field
                         .values
                         .iter()
@@ -3163,7 +3163,7 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
     // Parse section name if present (encoder omits it for sections within 1MB of header)
     let section_name = if pointer < data.len() && data[pointer] != b'(' && data[pointer] != b']' {
         match parse(data, &mut pointer) {
-            Ok(VsfType::d(name)) => name,
+            Ok(VsfType::d(name)) => name.into_string(),
             Ok(_) => return Err("Expected d type for section name".into()),
             Err(e) => return Err(format!("Failed to parse section name: {}", e)),
         }
@@ -3242,7 +3242,7 @@ pub fn inspect_section(data: &[u8]) -> Result<String, String> {
         };
 
         // First line: connector + (name : first_value
-        let name_literal = format_value_literal(&VsfType::d(field.name.clone()));
+        let name_literal = format_value_literal(&VsfType::d(crate::types::Ascii::name(&field.name)));
         out.push_str(&format!(
             "  {} {}{} {} ",
             connector,

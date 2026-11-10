@@ -26,7 +26,7 @@ fn default_markers_are_the_version_and_the_computed_floor() {
 fn floor_is_the_latest_type_the_file_holds() {
     let builder = VsfBuilder::new()
         .add_section("data", vec![("t".to_string(), VsfType::t_f5(vsf::Tensor::new(vec![3], vec![1.0, 2.0, 3.0]))), ("n".to_string(), VsfType::u3(1))])
-        .add_inline_field("probe", vec![VsfType::a("x".into())]);
+        .add_inline_field("probe", vec![VsfType::a(vsf::Ascii::lit("x"))]);
     let expect = SINCE_TABLE.iter().filter(|(m, _)| ["t_f5", "u3", "a"].contains(m)).map(|(_, v)| *v).fold(HEADER_SINCE, usize::max);
     assert_eq!(builder.floor().version, expect);
     let header = parse_full_header(&builder.build().unwrap()).unwrap();
@@ -48,7 +48,7 @@ fn a_generation_keeps_the_previous_floor() {
     use vsf::container::{Appender, Document};
     let gen0 = minimal_file(VsfBuilder::new().requires(VSF_VERSION));
     let doc0 = Document::open(&gen0[..]).unwrap();
-    let tail = Appender::new("test", "add").add_section("more", vec![("n".to_string(), VsfType::u3(2))]).build(&doc0).unwrap();
+    let tail = Appender::new(vsf::Ascii::lit("test"), vsf::Ascii::lit("add")).add_section("more", vec![("n".to_string(), VsfType::u3(2))]).build(&doc0).unwrap();
     let mut all = gen0.clone();
     all.extend_from_slice(&tail);
     let doc1 = Document::open(&all[..]).unwrap();

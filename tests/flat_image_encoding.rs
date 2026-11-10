@@ -25,7 +25,7 @@ fn tensor_image(codes: &[u8], tag: Option<&str>) -> Vec<u8> {
     }
     let mut fields = vec![("data".to_string(), VsfType::t_u3(Tensor::new(vec![1, codes.len(), 3], data)))];
     if let Some(t) = tag {
-        fields.push(("encoding".to_string(), VsfType::a(t.into())));
+        fields.push(("encoding".to_string(), VsfType::a(vsf::Ascii::new(t).unwrap())));
     }
     VsfBuilder::new().provenance_only().add_section("image", fields).build().unwrap()
 }

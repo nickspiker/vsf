@@ -110,7 +110,8 @@ fn inline_text(h: &VsfHeader, name: &str) -> String {
         .find(|f| f.name == name)
         .and_then(|f| f.inline_values.first())
         .and_then(|v| match v {
-            VsfType::a(s) | VsfType::x(s) | VsfType::d(s) => Some(s.clone()),
+            VsfType::x(s) => Some(s.clone()),
+            VsfType::a(s) | VsfType::d(s) => Some(s.to_string()),
             _ => None,
         })
         .unwrap_or_default()
