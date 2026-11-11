@@ -351,6 +351,10 @@ pub mod builders;
 #[cfg(any(feature = "text", feature = "text-encode"))]
 pub mod text_encoding;
 
+// The x text codec without std, one table size per feature (x-compact, x-latin, x-lang16, x-full)
+#[cfg(any(feature = "x-compact", feature = "x-latin", feature = "x-lang16", feature = "x-full"))]
+pub mod x_text;
+
 // VSF file format with headers and labels
 pub mod file_format;
 

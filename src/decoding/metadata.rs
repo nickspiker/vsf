@@ -34,7 +34,32 @@ pub fn parse_string(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeE
 
         Ok(VsfType::x(value))
     }
-    #[cfg(not(any(feature = "text", feature = "text-encode")))]
+    // The no_std codec (src/x_text.rs) when the std one is off: the same bytes, or a refusal for a code its table lacks.
+    #[cfg(all(
+        any(feature = "x-compact", feature = "x-latin", feature = "x-lang16", feature = "x-full"),
+        not(any(feature = "text", feature = "text-encode"))
+    ))]
+    {
+        let char_count = decode_usize(data, pointer)?;
+        let huffman_bytes = &data[*pointer..];
+        if huffman_bytes.is_empty() && char_count > 0 {
+            return Err(DecodeError::UnexpectedEofMsg(
+                "No Huffman data for non-zero char count".into(),
+            ));
+        }
+        let (value, bytes_consumed) = crate::x_text::decode_text_with_size(huffman_bytes, char_count)
+            .map_err(|e| DecodeError::InvalidDataMsg(format!("Huffman decode: {}", e)))?;
+        *pointer += bytes_consumed;
+        Ok(VsfType::x(value))
+    }
+    #[cfg(not(any(
+        feature = "text",
+        feature = "text-encode",
+        feature = "x-compact",
+        feature = "x-latin",
+        feature = "x-lang16",
+        feature = "x-full"
+    )))]
     {
         // x is Huffman-coded by spec — ALWAYS. There is no raw-bytes form of x on the wire; ASCII text has its own type. A build without the text machinery cannot interpret x, and silently reinterpreting the bitstream as UTF-8 (what this branch did thru 0.5.0) can return a WRONG string without erroring. Mirror the encoder (which panics) by refusing loudly.
         let _ = (data, pointer);
