@@ -632,6 +632,7 @@ pub fn parse_signing_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, De
     let key = data[*pointer..*pointer + length].to_vec();
     *pointer += length;
     match algo {
+        b'e' => Ok(VsfType::kge(key)), // Ed25519 signing seed
         b'r' => Ok(VsfType::kgr(key)), // RSA (legacy)
         _ => Err(DecodeError::InvalidDataMsg(format!(
             "Unknown signing key algorithm: {}",

@@ -804,6 +804,12 @@ impl VsfType {
             }
 
             // Signing keys: `kg` + the signature's letter
+            VsfType::kge(value) => {
+                let mut flat = vec![b'k', b'g', b'e'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
             VsfType::kgr(value) => {
                 let mut flat = vec![b'k', b'g', b'r'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number());
@@ -4236,6 +4242,7 @@ impl VsfType {
             VsfType::kvf(bytes)
             | VsfType::kvs(bytes)
             | VsfType::kvr(bytes)
+            | VsfType::kge(bytes)
             | VsfType::kgr(bytes)
             | VsfType::ksx(bytes)
             | VsfType::ksp(bytes)

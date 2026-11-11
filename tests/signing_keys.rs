@@ -1,4 +1,4 @@
-//! `kvr` (RSA verification key) and `kgr` (RSA signing key, the first of the `kg` family): each survives a flatten and parse with its bytes and its marker, and the inspector never prints a signing key's bytes.
+//! `kvr` (RSA verification key), `kgr` (RSA signing key, the first of the `kg` family) and `kge` (Ed25519 signing seed): each survives a flatten and parse with its bytes and its marker, and the inspector never prints a signing key's bytes.
 #![allow(deprecated)]
 
 use vsf::VsfType;
@@ -39,6 +39,26 @@ fn signing_key_never_shown() {
     let pq: Vec<u8> = vec![0xA5; 512];
     for shown in [vsf::inspect::format_value_literal(&VsfType::kgr(pq.clone())), vsf::inspect::format_value(&VsfType::kgr(pq.clone()))] {
         assert!(shown.contains("kgr"), "names the type: {shown}");
+        assert!(!shown.to_ascii_lowercase().contains("a5a5"), "prints no key bytes: {shown}");
+    }
+}
+
+#[test]
+fn ed25519_signing_seed_round_trips() {
+    // An Ed25519 signing seed is 32 bytes (RFC 8032's private key); the bytes are only a pattern here.
+    let seed: Vec<u8> = (0..32).map(|i| (i * 11 + 9) as u8).collect();
+    match round_trip(VsfType::kge(seed.clone()), b"kge") {
+        VsfType::kge(b) => assert_eq!(b, seed),
+        _ => panic!("kge came back as another type"),
+    }
+}
+
+#[cfg(feature = "inspect")]
+#[test]
+fn ed25519_signing_seed_never_shown() {
+    let seed: Vec<u8> = vec![0xA5; 32];
+    for shown in [vsf::inspect::format_value_literal(&VsfType::kge(seed.clone())), vsf::inspect::format_value(&VsfType::kge(seed.clone()))] {
+        assert!(shown.contains("kge"), "names the type: {shown}");
         assert!(!shown.to_ascii_lowercase().contains("a5a5"), "prints no key bytes: {shown}");
     }
 }

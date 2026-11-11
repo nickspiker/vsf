@@ -1487,6 +1487,7 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         VsfType::kvf(k) => format_crypto_hex("kvf", k), // Falcon verification key
         VsfType::kvs(k) => format_crypto_hex("kvs", k), // SPHINCS+ verification key
         VsfType::kvr(k) => format_crypto_hex("kvr", k), // RSA verification key (legacy)
+        VsfType::kge(k) => format_secret("kge", k), // Ed25519 signing seed: never shown
         VsfType::kgr(k) => format_secret("kgr", k), // RSA signing key: never shown
         VsfType::km(k) => format_crypto_hex("km", k), // ML-KEM
         VsfType::kb(k) => format_crypto_hex("kb", k), // BIKE
@@ -2198,6 +2199,7 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::gp(sig) => format_crypto_literal("gp", sig),
         VsfType::gr(sig) => format_crypto_literal("gr", sig),
         VsfType::kvr(key) => format_crypto_literal("kvr", key),
+        VsfType::kge(key) => format_secret("kge", key),
         VsfType::kgr(key) => format_secret("kgr", key),
         VsfType::ke(key) => format_crypto_literal("ke", key),
         VsfType::kx(key) => format_crypto_literal("kx", key),
@@ -2418,6 +2420,7 @@ pub fn format_value_short(vsf: &VsfType) -> String {
         VsfType::gp(sig) => format_crypto_hex("gp", sig),
         VsfType::gr(sig) => format_crypto_hex("gr", sig),
         VsfType::kvr(key) => format_crypto_hex("kvr", key),
+        VsfType::kge(key) => format_secret("kge", key),
         VsfType::kgr(key) => format_secret("kgr", key),
         VsfType::v(algo, data) => {
             // Check if this is a Toka Tree type (algo == b't')

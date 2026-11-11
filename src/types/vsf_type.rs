@@ -199,6 +199,7 @@ pub enum VsfType {
         note = "RSA is legacy - for verifiers that take nothing else (a phone bootloader's avb_custom_key); prefer Ed25519 or a post-quantum scheme"
     )]
     kgr(Vec<u8>), // RSA private key: its primes p ‖ q, each big-endian and half the length (256/512/1024B for RSA-2048/4096/8192), e = 65537; makes `gr`
+    kge(Vec<u8>), // Ed25519 signing seed (32B, RFC 8032's private key); makes `ge`. Secret: a keys directory or an encrypted section, never the open wire (owner, 2026-11-10: the developer and project keys, stored as VSF)
 
     // Shared secrets
     ksx(Vec<u8>), // X25519 shared secret (32B)
@@ -1164,6 +1165,7 @@ impl VsfType {
             | VsfType::kvf(bytes)
             | VsfType::kvs(bytes)
             | VsfType::kvr(bytes)
+            | VsfType::kge(bytes)
             | VsfType::kgr(bytes)
             | VsfType::ge(bytes)
             | VsfType::gp(bytes)
