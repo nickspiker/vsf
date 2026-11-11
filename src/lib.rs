@@ -718,6 +718,22 @@ mod tests {
         );
     }
 
+    /// An idea (hi) survives a flatten and parse, and only 32 bytes satisfy its constraint.
+    #[test]
+    fn test_roundtrip_hi() {
+        let bytes = vec![0x5Au8; 32];
+        let flat = VsfType::hi(bytes.clone()).flatten();
+        assert_eq!(&flat[..2], b"hi");
+        let mut ptr = 0;
+        let parsed = parse(&flat, &mut ptr).unwrap();
+        assert!(matches!(parsed, VsfType::hi(ref b) if *b == bytes), "hi round-trip failed");
+        assert_eq!(ptr, flat.len());
+        use crate::schema::TypeConstraint;
+        assert!(TypeConstraint::Idea.matches(&VsfType::hi(bytes)));
+        assert!(!TypeConstraint::Idea.matches(&VsfType::hi(vec![0u8; 16])));
+        assert!(!TypeConstraint::Idea.matches(&VsfType::hb(vec![0u8; 32])));
+    }
+
     #[test]
     fn test_roundtrip_metadata() {
         // ASCII text

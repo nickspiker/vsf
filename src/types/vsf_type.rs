@@ -154,6 +154,7 @@ pub enum VsfType {
     hR(Vec<u8>), // Random material used for padding, obscurity and other ambiguous Photon uses
     hI(Vec<u8>), // Photon identity seed (BLAKE3-derived network/contacts root, 32 bytes)
     hV(Vec<u8>), // Photon vault seed (BLAKE3-derived local storage root, 32 bytes)
+    hi(Vec<u8>), // An idea: a meaning, named by 32 bytes of keyed BLAKE3 over its first phrasing's locale and its text as `x` (owner, 2026-11-10: "The VSF literally needs an idea type"); phrasings in any language attach to it later. A reference to meaning, never the words themselves
 
     // Signature algorithms
     ge(Vec<u8>), // Ed25519 signature
@@ -1158,6 +1159,7 @@ impl VsfType {
             | VsfType::hR(bytes)
             | VsfType::hI(bytes)
             | VsfType::hV(bytes)
+            | VsfType::hi(bytes)
             | VsfType::ke(bytes)
             | VsfType::kx(bytes)
             | VsfType::kc(bytes)

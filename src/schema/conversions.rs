@@ -508,6 +508,7 @@ impl FromVsfType for [u8; 32] {
             | VsfType::hP(b)
             | VsfType::hI(b)
             | VsfType::hV(b)
+            | VsfType::hi(b)
             | VsfType::ke(b)
             | VsfType::kx(b)
             | VsfType::kc(b)

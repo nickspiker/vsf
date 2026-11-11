@@ -49,6 +49,8 @@ pub enum TypeConstraint {
     AnyHash,
     /// BLAKE3 provenance hash (hp)
     Blake3Provenance,
+    /// An idea (hi): a meaning's 32-byte name
+    Idea,
     /// BLAKE3 rolling hash (hb)
     Blake3Rolling,
     /// SHA hash (hs) - SHA-256, SHA-512, etc.
@@ -230,6 +232,7 @@ impl TypeConstraint {
             }
 
             TypeConstraint::Blake3Provenance => matches!(value, VsfType::hp(_)),
+            TypeConstraint::Idea => matches!(value, VsfType::hi(b) if b.len() == 32),
             TypeConstraint::Blake3Rolling => matches!(value, VsfType::hb(_)),
             TypeConstraint::ShaHash => matches!(value, VsfType::hs(_)),
             TypeConstraint::Smear => matches!(value, VsfType::hm(_)),
@@ -409,6 +412,7 @@ impl TypeConstraint {
             TypeConstraint::AsciiText => "ASCII text (a)".into(),
             TypeConstraint::AnyHash => "any hash type".into(),
             TypeConstraint::Blake3Provenance => "BLAKE3 provenance hash (hp)".into(),
+            TypeConstraint::Idea => "an idea (hi, 32 bytes)".into(),
             TypeConstraint::Blake3Rolling => "BLAKE3 rolling hash (hb)".into(),
             TypeConstraint::ShaHash => "SHA hash (hs)".into(),
             TypeConstraint::Smear => "smear hash (hm)".into(),

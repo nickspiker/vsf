@@ -55,7 +55,7 @@ fn samples() -> Vec<(String, VsfType)> {
     #[allow(deprecated)]
     let crypto = [
         ("hp", VsfType::hp as fn(Vec<u8>) -> VsfType), ("hb", VsfType::hb), ("hs", VsfType::hs), ("hm", VsfType::hm), ("hg", VsfType::hg), ("hc", VsfType::hc), ("hk", VsfType::hk),
-        ("hP", VsfType::hP), ("hR", VsfType::hR), ("hI", VsfType::hI), ("hV", VsfType::hV),
+        ("hP", VsfType::hP), ("hR", VsfType::hR), ("hI", VsfType::hI), ("hV", VsfType::hV), ("hi", VsfType::hi),
         ("ge", VsfType::ge), ("gm", VsfType::gm), ("gp", VsfType::gp), ("gd", VsfType::gd), ("gs", VsfType::gs), ("gf", VsfType::gf), ("gH", VsfType::gH), ("gr", VsfType::gr),
         ("ke", VsfType::ke), ("kx", VsfType::kx), ("kp", VsfType::kp), ("kk", VsfType::kk), ("kc", VsfType::kc), ("ka", VsfType::ka), ("km", VsfType::km), ("kf", VsfType::kf),
         ("kl", VsfType::kl), ("kn", VsfType::kn), ("kh", VsfType::kh), ("kd", VsfType::kd), ("kb", VsfType::kb),

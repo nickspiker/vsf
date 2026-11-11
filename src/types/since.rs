@@ -71,7 +71,7 @@ since_table! {
         // Network
         na => 9, nh => 9, ni => 9, nj => 9, nc => 9, nm => 9, nw => 11, np => 9, ns => 9, nu => 9, nn => 9,
         // Hashes
-        hp => 9, hb => 9, hs => 9, hm => 9, hg => 9, hc => 9, hk => 9, hP => 9, hR => 9, hI => 9, hV => 9,
+        hp => 9, hb => 9, hs => 9, hm => 9, hg => 9, hc => 9, hk => 9, hP => 9, hR => 9, hI => 9, hV => 9, hi => 11,
         // Signatures
         ge => 9, gm => 9, gp => 9, gd => 9, gs => 9, gf => 9, gH => 9, gr => 9,
         // Keys. kvr and kgr arrived after 0.10.2 shipped and are still marked 10 (Nick, 2026-10-28: not worth a version number for keys only a bootloader uses). 0.10.0–0.10.2 readers refuse a file holding one with an unknown-key error; they never misread it.

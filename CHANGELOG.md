@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Format v11: `hi`, an idea (2026-11-10)
+
+- **`hi`** names a meaning: 32 bytes of keyed BLAKE3 over the locale of its first phrasing and that phrasing as `x` (owner, 2026-11-10: "The VSF literally needs an idea type"). Phrasings in any language attach to the idea later and never change its name; an `hi` is a reference to meaning, never the words. In the hash family (`h` then a subtype, as `hp` names content) since every letter after `x` is EWE's, kept for integers wider than 128 bits. `TypeConstraint::Idea` takes 32 bytes; `since` 11.
+
 ### Format v11: the `x` codebook reissued in a fixed order (2026-11-10)
 
 Part of v11, done before v11 was published (crates.io's newest is 0.10.2; owner, 2026-11-10: "when v11 hasn't even shipped"). The floor stays at 9.
