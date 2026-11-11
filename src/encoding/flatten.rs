@@ -47,7 +47,29 @@ impl VsfType {
     ///
     /// The only failure today is `VsfType::x` (Unicode text) built without the `text`/`text-encode` feature, since Huffman compression is then unavailable — use `VsfType::a` for ASCII in that configuration.
     pub fn try_flatten(&self) -> Result<Vec<u8>, alloc::string::String> {
-        #[cfg(not(any(feature = "text", feature = "text-encode")))]
+        // The no_std codec (src/x_text.rs) when the std one is off: the same bytes, or the character its table lacks.
+        #[cfg(all(
+            any(feature = "x-compact", feature = "x-latin", feature = "x-lang16", feature = "x-full"),
+            not(any(feature = "text", feature = "text-encode"))
+        ))]
+        {
+            if let VsfType::x(value) = self {
+                let (encoded_text, char_count) = crate::x_text::encode(value)
+                    .map_err(|e| alloc::format!("VsfType::x: {e}; a wider x-* feature or the std text-encode feature holds it"))?;
+                let mut flat = vec![b'x'];
+                flat.extend_from_slice(&char_count.encode_number());
+                flat.extend_from_slice(&encoded_text);
+                return Ok(flat);
+            }
+        }
+        #[cfg(not(any(
+            feature = "text",
+            feature = "text-encode",
+            feature = "x-compact",
+            feature = "x-latin",
+            feature = "x-lang16",
+            feature = "x-full"
+        )))]
         {
             if let VsfType::x(value) = self {
                 return Err(alloc::format!(
@@ -4350,7 +4372,8 @@ mod tests {
     fn test_flatten_x_no_panic_without_text_feature() {
         let x = VsfType::x("héllo 世界".to_string());
 
-        #[cfg(not(any(feature = "text", feature = "text-encode")))]
+        // A no_std x variant (x-compact, x-latin, x-lang16, x-full) encodes or refuses by its table; tests/x_variants.rs covers those builds.
+        #[cfg(not(any(feature = "text", feature = "text-encode", feature = "x-compact", feature = "x-latin", feature = "x-lang16", feature = "x-full")))]
         {
             // try_flatten reports the missing feature instead of panicking.
             assert!(x.try_flatten().is_err());
