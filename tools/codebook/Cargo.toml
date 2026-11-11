@@ -1,0 +1,17 @@
+[package]
+name = "vsf-codebook"
+version = "0.1.0"
+edition = "2021"
+description = "Generates vsf's huffman_codes.bin (the x text codebook) from its pinned shape, deterministically: no hash map, no heap, no tie broken by insertion order."
+publish = false
+
+[[bin]]
+name = "codebook"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+
+[workspace]

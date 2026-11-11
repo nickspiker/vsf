@@ -8,7 +8,7 @@
 //! | `x-compact` | the 712 codes of 20 bits or fewer: printable ASCII but `^`, newline, 49 of Latin-1 Supplement's 96, some of Latin Extended-A, the Russian and Ukrainian alphabets, and the commonest Arabic, Devanagari, Thai, kana, CJK, Hangul and eight emoji and symbols | 6.5 KB | 10 KB |
 //! | `x-latin` | compact, plus all of Basic Latin, Latin-1 Supplement, Latin Extended-A and -B, IPA, Spacing Modifiers, Combining Diacritical Marks, Latin Extended Additional, General Punctuation and Currency Symbols (1,835 characters) | 13.0 KB | 138 KB, 120 KB of it NFC |
 //! | `x-lang16` | latin, plus Cyrillic, Cyrillic Supplement and Devanagari (2,164 characters): every script of ferros's sixteen languages | 14.8 KB | 140 KB, 120 KB of it NFC |
-//! | `x-full` | every Unicode scalar value | 3.25 MB | 3.38 MB |
+//! | `x-full` | every Unicode scalar value (the codebook's fixed order since v11 makes it small) | 7.3 KB | 133 KB, 120 KB of it NFC |
 //!
 //! Several may be enabled at once; each has its own module, and [`encode`] and [`decode_text_with_size`] use the widest enabled.
 //! With the std `text` or `text-encode` feature on, `VsfType::x` still goes thru [`crate::text_encoding`]; these modules are then only reachable by name (the tests compare the two).
@@ -57,7 +57,7 @@ fn u32_at(b: &[u8], i: usize) -> u32 {
     u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
 }
 
-#[cfg(any(feature = "x-compact", feature = "x-latin", feature = "x-lang16"))]
+#[cfg(any(feature = "x-compact", feature = "x-latin", feature = "x-lang16", feature = "x-full"))]
 #[inline(always)]
 fn u16_at(b: &[u8], i: usize) -> u32 {
     let o = i * 2;
@@ -80,14 +80,14 @@ fn prefix(n: usize, le: impl Fn(usize) -> bool) -> usize {
 }
 
 /// A code left-aligned to 24 bits.
-#[cfg(any(feature = "x-compact", feature = "x-latin", feature = "x-lang16"))]
+#[cfg(any(feature = "x-compact", feature = "x-latin", feature = "x-lang16", feature = "x-full"))]
 #[inline(always)]
 fn key_of(bits: u32, len: u32) -> u32 {
     bits << (24 - len)
 }
 
 /// A subset of the codebook (build.rs `x_subset`): `run_cp` and `run_slot` are the first codepoint (u32) and first slot (u16) of each run of consecutive codepoints, closed by u32::MAX and the slot count; `codes` is len << 24 | bits per slot in codepoint order; `by_key` is the slots in code order.
-#[cfg(any(feature = "x-compact", feature = "x-latin", feature = "x-lang16"))]
+#[cfg(any(feature = "x-compact", feature = "x-latin", feature = "x-lang16", feature = "x-full"))]
 struct Subset {
     run_cp: &'static [u8],
     run_slot: &'static [u8],
@@ -95,7 +95,7 @@ struct Subset {
     by_key: &'static [u8],
 }
 
-#[cfg(any(feature = "x-compact", feature = "x-latin", feature = "x-lang16"))]
+#[cfg(any(feature = "x-compact", feature = "x-latin", feature = "x-lang16", feature = "x-full"))]
 impl Subset {
     /// Runs, the closing one excluded.
     fn run_count(&self) -> usize {
@@ -122,7 +122,7 @@ impl Subset {
     }
 }
 
-#[cfg(any(feature = "x-compact", feature = "x-latin", feature = "x-lang16"))]
+#[cfg(any(feature = "x-compact", feature = "x-latin", feature = "x-lang16", feature = "x-full"))]
 impl Book for Subset {
     fn code(&self, c: char) -> Option<(u32, u32)> {
         let cp = c as u32;
@@ -381,98 +381,58 @@ nfc_subset!("x-lang16", lang16, "`x-lang16`: the latin set, plus Cyrillic, Cyril
 
 /// `x-full`: every Unicode scalar value.
 ///
-/// How the codes were assigned (tools history: build.rs before 0.4.0, commit 8b5b07e^): a textbook Huffman tree built with std's `BinaryHeap` over `frequencies.bin` in file order, the first node popped on the 0 side.
-/// Replaying that over the pinned `frequencies.bin` reproduces all 1,112,064 codes.
-/// But 1,111,352 of those frequencies are the same floor value, written in the order a std `HashMap` (random SipHash keys) iterated them, so which rare codepoint got which long code is a random permutation: no rule shorter than the permutation itself exists.
-/// Its entropy is log2(1,111,352!) bits, about 2.59 MB; this variant stores it in 2.92 MB.
+/// The codebook's order (tools/codebook/src/lib.rs, checked by build.rs) makes this small: every code of 20 bits or fewer and every ASCII character sit at a pinned codeword (745 of them), and every other codepoint, ascending, holds the remaining codewords in code order.
+/// So the n-th free codepoint holds the n-th free codeword, and both directions are a count of pinned entries below a point plus arithmetic inside a run of equal-length free codewords.
 ///
 /// The tables:
-/// - `SHAPE`: the code tree as 335 runs of equal length in code order (first key, first rank, length; a closing run). A complete prefix code tiles the 24-bit keys, so rank and key convert by arithmetic within a run.
-/// - `PERM`: the codepoint index (the codepoint, less G#800 above the surrogates) of each rank, 21 bits each.
-/// - The inverse, for the encoder, without a second permutation: along each cycle of `PERM` longer than the stride (16), every 16th element is marked (`MARKS`, one bit an index; `BLOCKS`, the marks before each 512 bits) and holds the mark before it on its cycle (`BACK`, 21 bits each). The encoder walks the cycle from the codepoint index to the next mark, jumps back to the mark before, and walks to the element `PERM` sends to the index: at most 32 steps.
-/// - `LOW`: the first 256 codepoints' codes directly.
+/// - The pinned entries, as a [`Subset`] (build.rs `x_subset`, name `full`).
+/// - `FREE`: the free codewords in code order as runs of equal length, each (first codeword left-aligned to 24 bits, its free index, length), closed by (1 << 24, the free count, 0).
 #[cfg(feature = "x-full")]
 pub mod full {
     use super::*;
     use unicode_normalization::UnicodeNormalization;
 
-    static SHAPE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/x_full_shape.bin"));
-    static PERM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/x_full_perm.bin"));
-    static MARKS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/x_full_marks.bin"));
-    static BLOCKS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/x_full_blocks.bin"));
-    static BACK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/x_full_back.bin"));
-    static LOW: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/x_full_low.bin"));
+    static PINNED: Subset = Subset {
+        run_cp: include_bytes!(concat!(env!("OUT_DIR"), "/x_full_run_cp.bin")),
+        run_slot: include_bytes!(concat!(env!("OUT_DIR"), "/x_full_run_slot.bin")),
+        codes: include_bytes!(concat!(env!("OUT_DIR"), "/x_full_codes.bin")),
+        by_key: include_bytes!(concat!(env!("OUT_DIR"), "/x_full_by_key.bin")),
+    };
+    static FREE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/x_full_free.bin"));
 
-    /// Distance along a cycle between marks (build.rs `X_FULL_STRIDE`).
-    const STRIDE: usize = 1 << 4;
-
-    /// Element `i` of a 21-bit packed table; build.rs pads each with four bytes so the load never runs off the end.
+    /// A codepoint's index among the scalar values (the codepoint, less G#800 above the surrogates).
     #[inline(always)]
-    fn packed21(t: &[u8], i: usize) -> usize {
-        let bit = i * 21;
-        let b = bit >> 3;
-        let w = u32::from_le_bytes([t[b], t[b + 1], t[b + 2], t[b + 3]]);
-        ((w >> (bit & 7)) & 0x1F_FFFF) as usize
+    fn index(cp: u32) -> u32 {
+        if cp < 0xD800 {
+            cp
+        } else {
+            cp - 0x800
+        }
     }
 
-    /// Shape runs, the closing one excluded.
+    /// Free runs, the closing one excluded.
     fn runs() -> usize {
-        SHAPE.len() / 12 - 1
+        FREE.len() / 12 - 1
     }
 
-    /// Run `r`: first key, first rank, length.
+    /// Free run `r`: first key, first free index, length.
     #[inline(always)]
     fn run(r: usize) -> (u32, u32, u32) {
-        (u32_at(SHAPE, r * 3), u32_at(SHAPE, r * 3 + 1), u32_at(SHAPE, r * 3 + 2))
-    }
-
-    fn marked(x: usize) -> bool {
-        MARKS[x >> 3] >> (x & 7) & 1 == 1
-    }
-
-    /// Marks before index `x`.
-    fn marks_before(x: usize) -> usize {
-        let word = x >> 6;
-        let mut n = u32_at(BLOCKS, word >> 3) as usize;
-        for w in (word & !7)..word {
-            n += u64::from_le_bytes(MARKS[w * 8..w * 8 + 8].try_into().unwrap()).count_ones() as usize;
-        }
-        let last = u64::from_le_bytes(MARKS[word * 8..word * 8 + 8].try_into().unwrap());
-        n + (last & ((1u64 << (x & 63)) - 1)).count_ones() as usize
-    }
-
-    /// The rank whose codepoint index is `j`: the walk described above.
-    fn rank_of(j: usize) -> usize {
-        let mut x = j;
-        let mut jumped = false;
-        let mut steps = 0usize;
-        loop {
-            let y = packed21(PERM, x);
-            if y == j {
-                return x;
-            }
-            if !jumped && marked(x) {
-                x = packed21(BACK, marks_before(x));
-                jumped = true;
-            } else {
-                x = y;
-            }
-            steps += 1;
-            debug_assert!(steps <= 2 * STRIDE + 1, "the x-full inverse tables are inconsistent");
-        }
+        (u32_at(FREE, r * 3), u32_at(FREE, r * 3 + 1), u32_at(FREE, r * 3 + 2))
     }
 
     fn code(c: char) -> (u32, u32) {
-        let cp = c as u32;
-        if cp < 256 {
-            let p = u32_at(LOW, cp as usize);
-            return (p & 0x00FF_FFFF, p >> 24);
+        if let Some(code) = PINNED.code(c) {
+            return code;
         }
-        let j = if cp < 0xD800 { cp } else { cp - 0x800 } as usize;
-        let r = rank_of(j) as u32;
-        let k = prefix(runs(), |i| run(i).1 <= r);
+        // The free index: the scalar index less the pinned codepoints below it. c is not pinned, so the pinned run that starts at or below it ends below it, and every slot before the next run's first is below c.
+        let cp = c as u32;
+        let r = prefix(PINNED.run_count(), |i| PINNED.run(i).0 <= cp);
+        let below = if r == 0 { 0 } else { PINNED.run(r).1 };
+        let i = index(cp) - below;
+        let k = prefix(runs(), |j| run(j).1 <= i);
         let (key, first, len) = run(k - 1);
-        ((key + ((r - first) << (24 - len))) >> (24 - len), len)
+        ((key + ((i - first) << (24 - len))) >> (24 - len), len)
     }
 
     struct Full;
@@ -483,10 +443,19 @@ pub mod full {
         }
 
         fn at(&self, w: u32) -> Option<Found> {
-            // The runs tile every 24-bit key from 0, so the window lies in exactly one.
-            let k = prefix(runs(), |i| run(i).0 <= w);
+            if let Some(found) = PINNED.at(w) {
+                return Some(found);
+            }
+            // The window starts with a free codeword (the code is complete and no pinned one matched), which lies in the last free run starting at or below it.
+            let k = prefix(runs(), |j| run(j).0 <= w);
             let (key, first, len) = run(k - 1);
-            let j = packed21(PERM, (first + ((w - key) >> (24 - len))) as usize) as u32;
+            let i = first + ((w - key) >> (24 - len));
+            // The i-th free codepoint: past the last pinned run with at most i free codepoints before it, so its index is i plus every pinned slot up to that run's end.
+            let r = prefix(PINNED.run_count(), |p| {
+                let (cp, slot) = PINNED.run(p);
+                index(cp) - slot <= i
+            });
+            let j = if r == 0 { i } else { i + PINNED.run(r).1 };
             Some((if j < 0xD800 { j } else { j + 0x800 }, len))
         }
     }
@@ -508,7 +477,7 @@ pub mod full {
 
     /// Bytes of table.
     pub fn size() -> usize {
-        SHAPE.len() + PERM.len() + MARKS.len() + BLOCKS.len() + BACK.len() + LOW.len()
+        PINNED.size() + FREE.len()
     }
 }
 

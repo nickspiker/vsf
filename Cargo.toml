@@ -14,7 +14,7 @@ exclude = [
     "vsf.png",           # Logo (GitHub only, not needed in package - 1.5MB)
     "target/",           # Build directory
     "tools/",            # Code generation tools
-    "frequencies.bin",   # 8.5MB corpus — only needed by offline codebook regen, not at runtime
+    "frequencies.bin",   # 8.5MB corpus the codebook's tree came from, a record only, not read at build or run time
     "test_determinism",  # Local debug artifacts (compiled binary + source)
     "test_determinism.rs",
 ]
@@ -22,12 +22,10 @@ exclude = [
 # build.rs at every build. It IS the wire format for VsfType::x; any drift silently
 # bifurcates the identity namespace via ihi.
 #
-# frequencies.bin is the input corpus from which huffman_codes.bin is derived. It's NOT
-# shipped in the published crate (size budget + the corpus is the SOURCE, not the RUNTIME
-# artifact). build.rs verifies it when present (developers from git clone) and skips the
-# check when absent (end-users from crates.io). To regenerate the codebook, clone the
-# repo, edit frequencies.bin, run tools/frequency-analyzer/, update both BLAKE3 constants
-# in build.rs, and bump vsf MAJOR.
+# frequencies.bin is the corpus the codebook's Huffman tree was built from, kept as its record. It's NOT
+# shipped in the published crate (size budget), and build.rs verifies it only when present. Since 0.11 the
+# codebook is written by tools/codebook/ from its pinned shape (the tree, the pinned codes), deterministically.
+# To change it: change tools/codebook/, regenerate, update the BLAKE3 constant in build.rs, bump vsf MAJOR.
 
 [[bin]]
 name = "vsfinfo"
@@ -164,7 +162,7 @@ x-compact = []
 x-latin = ["dep:unicode-normalization"]
 # x-lang16: latin plus Cyrillic and Devanagari, every script of ferros's sixteen languages, 14.8 KB of tables plus NFC (140 KB linked).
 x-lang16 = ["dep:unicode-normalization"]
-# x-full: every Unicode scalar value, 3.25 MB of tables plus NFC (3.38 MB linked) (the std path embeds 8.9 MB and builds 4.4 MB more at first decode).
+# x-full: every Unicode scalar value, 7.3 KB of tables (the codebook's fixed order, v11) plus NFC (133 KB linked; the std path embeds 8.9 MB and builds 4.4 MB more at first decode).
 x-full = ["dep:unicode-normalization"]
 # raster: the reference rasterizer for renderable objects (vsf::raster). No extra dependencies; works without std.
 raster = []

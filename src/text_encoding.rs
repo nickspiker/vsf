@@ -5,7 +5,7 @@
 //! - Less common characters use medium codes (8-12 bits)
 //! - Rare Unicode characters use longer codes (16-24 bits)
 //!
-//! The Huffman tree is pre-computed at build time from global language frequency analysis. ALL 1,112,064 valid Unicode codepoints (0x000000–0x10FFFF excluding the U+D800–U+DFFF surrogate range) have pre-assigned codes — Unicode's yearly codepoint additions cannot change any existing encoding because every slot is already reserved.
+//! The Huffman tree was built once from global language frequency analysis (`frequencies.bin`); since v11 `tools/codebook/` writes the codebook from that tree's pinned shape in a fixed order: every code of 20 bits or fewer and every ASCII character at its original codeword, every other codepoint, ascending, on the remaining codewords in code order. ALL 1,112,064 valid Unicode codepoints (0x000000–0x10FFFF excluding the U+D800–U+DFFF surrogate range) have pre-assigned codes — Unicode's yearly codepoint additions cannot change any existing encoding because every slot is already reserved.
 //!
 //! ## NFC canonicalization
 //!

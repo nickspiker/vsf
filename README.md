@@ -135,7 +135,7 @@ A Dymaxion-projected Earth coordinate, 2.14 mm average and 5.06 mm worst case in
 
 ### Huffman text
 
-`x` is NFC-normalised Unicode under a global frequency table shipped with the crate (`huffman_codes.bin`, BLAKE3-verified at every build). About 36% smaller than UTF-8 on typical text, 83 MB/s encode and over 100 MB/s decode on a 2025 desktop. The table is the wire format: ihi's identity handles derive from it, which is why the 0.6 lane exists (below).
+`x` is NFC-normalised Unicode under a global frequency table shipped with the crate (`huffman_codes.bin`, BLAKE3-verified at every build). Since v11 the table is in a fixed order (`tools/codebook/`, deterministic): the 712 codes of 20 bits or fewer and all of ASCII as they always were, every other codepoint ascending on the remaining codewords, so a no_std build can carry all of it in 7.3 KB (`x-full`). About 36% smaller than UTF-8 on typical text, 83 MB/s encode and over 100 MB/s decode on a 2025 desktop. The table is the wire format: ihi's identity handles derive from it, which is why the 0.6 lane exists (below).
 
 ---
 

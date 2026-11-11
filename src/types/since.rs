@@ -84,6 +84,7 @@ since_table! {
         i => 9, i3 => 9, i4 => 9, i5 => 9, i6 => 9, i7 => 9,
         f5 => 9, f6 => 9, j5 => 9, j6 => 9,
         // Text, time, place
+        // x: 9 for its own type; a value holding a character the reissued codebook moved needs 11 (x_since)
         x => 9, a => 9, e => 9, w => 9, wm => 9, wa => 9,
         // Wrapped data
         v => 9,
@@ -136,10 +137,40 @@ since_table! {
     }
 }
 
+/// The codepoints whose `x` code no codebook since v9 has changed (build.rs `x_pinned`): every code of 20 bits or fewer and every ASCII character, ascending, little-endian u32 each.
+static X_PINNED: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/x_pinned_cp.bin"));
+
+/// The version an `x` value needs. v11 reissued the codebook in a fixed order (tools/codebook): pinned characters kept their codes and every other one moved. A value of pinned characters alone reads the same to a v9 reader; one holding any other needs v11, or an older reader would decode other characters from it without knowing.
+fn x_since(text: &str) -> Since {
+    let n = X_PINNED.len() / 4;
+    let pinned = |c: char| {
+        let cp = c as u32;
+        let (mut lo, mut hi) = (0usize, n);
+        while lo < hi {
+            let mid = (lo + hi) >> 1;
+            let o = mid * 4;
+            let at = u32::from_le_bytes([X_PINNED[o], X_PINNED[o + 1], X_PINNED[o + 2], X_PINNED[o + 3]]);
+            if at == cp {
+                return true;
+            }
+            if at < cp {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        false
+    };
+    Since { version: if text.chars().all(pinned) { 9 } else { 11 }, by: "x" }
+}
+
 impl VsfType {
-    /// The oldest reader this value needs: its own type's version, or a nested value's if that is later (the children, fills and strokes of a renderable object).
+    /// The oldest reader this value needs: its own type's version, or a nested value's if that is later (the children, fills and strokes of a renderable object); for `x`, what its characters need (`x_since`).
     pub fn since(&self) -> Since {
         let mut latest = self.own_since();
+        if let VsfType::x(text) = self {
+            latest = latest.max(x_since(text));
+        }
         super::renderable::visit(self, &mut |v| latest = latest.max(v.since()));
         latest
     }

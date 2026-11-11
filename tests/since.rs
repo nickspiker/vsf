@@ -59,7 +59,7 @@ fn samples() -> Vec<(String, VsfType)> {
         ("ge", VsfType::ge), ("gm", VsfType::gm), ("gp", VsfType::gp), ("gd", VsfType::gd), ("gs", VsfType::gs), ("gf", VsfType::gf), ("gH", VsfType::gH), ("gr", VsfType::gr),
         ("ke", VsfType::ke), ("kx", VsfType::kx), ("kp", VsfType::kp), ("kk", VsfType::kk), ("kc", VsfType::kc), ("ka", VsfType::ka), ("km", VsfType::km), ("kf", VsfType::kf),
         ("kl", VsfType::kl), ("kn", VsfType::kn), ("kh", VsfType::kh), ("kd", VsfType::kd), ("kb", VsfType::kb),
-        ("kvf", VsfType::kvf), ("kvs", VsfType::kvs), ("kvr", VsfType::kvr), ("kgr", VsfType::kgr), ("ksx", VsfType::ksx), ("ksp", VsfType::ksp), ("ksk", VsfType::ksk), ("ksf", VsfType::ksf), ("ksn", VsfType::ksn),
+        ("kvf", VsfType::kvf), ("kvs", VsfType::kvs), ("kvr", VsfType::kvr), ("kgr", VsfType::kgr), ("kge", VsfType::kge), ("ksx", VsfType::ksx), ("ksp", VsfType::ksp), ("ksk", VsfType::ksk), ("ksf", VsfType::ksf), ("ksn", VsfType::ksn),
         ("ksl", VsfType::ksl), ("ksh", VsfType::ksh), ("ksm", VsfType::ksm),
         ("mh", VsfType::mh), ("mp", VsfType::mp), ("mb", VsfType::mb), ("mc", VsfType::mc),
     ];
@@ -90,6 +90,9 @@ fn samples() -> Vec<(String, VsfType)> {
     // Text, time, place
     #[cfg(any(feature = "text", feature = "text-encode"))]
     add("x", VsfType::x("café octopus".into()));
+    // A character the reissued codebook moved (Ω is not pinned): the value needs v11.
+    #[cfg(any(feature = "text", feature = "text-encode"))]
+    add("x/moved", VsfType::x("Ωmega octopus".into()));
     add("a", VsfType::a(vsf::Ascii::lit("octopus")));
     #[allow(deprecated)]
     for (label, et) in [("e/e5", EtType::e5(1_000_000)), ("e/e6", EtType::e6(-123_456_789_012)), ("e/e7", EtType::e7(1 << 100)), ("e/f5", EtType::f5(1.5e9)), ("e/f6", EtType::f6(-2.25e12))] {
