@@ -350,7 +350,7 @@ impl Plane {
     }
 
     /// A planar RGB plane like [`Self::encoded`] whose 8-bit codes `[3, height, width]` are written as AV1 ([`av1::encode_u8`]): Lumis's VSF 8B, 8-bit `g2t` in VSF RGB.
-    #[cfg(feature = "av1")]
+    #[cfg(feature = "av1-encode")]
     pub fn encoded_av1(track: &str, seq: &str, width: usize, height: usize, primaries: Primaries, encoding: Encoding, samples: &[u8], settings: &Av1Settings) -> Result<Self, VisualError> {
         let stream = av1::encode_u8(samples, 3, width, height, settings)?;
         let mut p = Plane::encoded(track, seq, width, height, primaries, encoding, BitPackedTensor::pack_u8(8, vec![0], &[]));
@@ -359,7 +359,7 @@ impl Plane {
     }
 
     /// Write a bit-packed plane's samples as AV1 ([`av1::encode`]), in place: one or three planar channels of 8 or 10 bits. A plane already wrapped is left as it is.
-    #[cfg(feature = "av1")]
+    #[cfg(feature = "av1-encode")]
     pub fn wrap_av1(&mut self, settings: &Av1Settings) -> Result<(), VisualError> {
         let Samples::Packed(t) = &self.samples else { return Ok(()) };
         if self.channels.len() == 3 && self.layout != PlaneLayout::Planar {

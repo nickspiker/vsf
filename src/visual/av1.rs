@@ -8,11 +8,11 @@
 //!
 //! Depth 8 or 10: AV1's main profile, which every decoder handles. The transform is exact in integers apart from the halving of Cb and Cr, so even a lossless stream comes back within a code or two; the loss is the quantizer's.
 //!
-//! Features: `av1-decode` (rav1d) reads, `av1` (rav1e too) also writes. `av1-threads` lets rav1e use the rayon pool, `av1-asm` its hand-written assembly (x86-64 and aarch64; NASM for x86-64). Without `av1-decode`, a wrapped plane reads as a clean error naming av1 (`Plane::packed_samples`).
+//! Features: `av1-decode` (rav1d) reads, `av1-encode` (rav1e) writes, `av1` is both. `av1-threads` lets rav1e use the rayon pool, `av1-asm` rav1e's hand-written assembly (x86-64 and aarch64; NASM for x86-64). Without `av1-decode`, a wrapped plane reads as a clean error naming av1 (`Plane::packed_samples`).
 
-#[cfg(feature = "av1-decode")]
+#[cfg(any(feature = "av1-encode", feature = "av1-decode"))]
 use super::{bad, VisualError};
-#[cfg(feature = "av1-decode")]
+#[cfg(any(feature = "av1-encode", feature = "av1-decode"))]
 use crate::prelude::*;
 
 /// How hard rav1e works and how much it keeps.
@@ -41,7 +41,7 @@ impl Default for Av1Settings {
     }
 }
 
-#[cfg(feature = "av1-decode")]
+#[cfg(any(feature = "av1-encode", feature = "av1-decode"))]
 /// The geometry a stream can have, from the plane's own fields: the sample count `channels * width * height`.
 fn check_shape(channels: usize, width: usize, height: usize, depth: u8) -> Result<usize, VisualError> {
     if channels != 1 && channels != 3 {
@@ -63,7 +63,7 @@ fn check_shape(channels: usize, width: usize, height: usize, depth: u8) -> Resul
 }
 
 /// A caller's samples against the geometry they claim.
-#[cfg(feature = "av1")]
+#[cfg(feature = "av1-encode")]
 fn check_samples(channels: usize, width: usize, height: usize, depth: u8, samples: usize) -> Result<(), VisualError> {
     let want = check_shape(channels, width, height, depth)?;
     if samples != want {
@@ -72,7 +72,7 @@ fn check_samples(channels: usize, width: usize, height: usize, depth: u8, sample
     Ok(())
 }
 
-#[cfg(feature = "av1")]
+#[cfg(feature = "av1-encode")]
 mod encode {
     use super::*;
     use rav1e::prelude::*;
@@ -181,7 +181,7 @@ mod encode {
     }
 }
 
-#[cfg(feature = "av1")]
+#[cfg(feature = "av1-encode")]
 pub use encode::{encode, encode_u8};
 
 #[cfg(feature = "av1-decode")]
