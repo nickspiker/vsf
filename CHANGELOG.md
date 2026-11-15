@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### AV1 planes: `vsf::visual::av1`, features `av1-decode` and `av1` (2026-11-15)
+
+Part of 0.11.0 before it is published (crates.io's newest is 0.10.2); no format change, since a plane's samples could already be `v('a')` and `a` was already VSF's AV1 code. The owner, 2026-11-15: "8 bit VSF can be uncompressed but it typically should be av1d since that's kinda the point of the 8 bit. HDR plus compressed so think half a meg for a still, rather than twenty megs."
+
+- **The stream.** One key frame of exactly the plane's width, height and depth (8 or 10 bits, AV1's main profile). Three planar channels travel as VSF YCbCr 4:2:0, the transform Photon's avatars and `vsfimg` already write and `vsf::image` reads (Y = (R + 2G + B) / 4, Cb = (B - Y) / 2 + 1/2, Cr = (R - Y) / 2 + 1/2 on codes over the top code); one channel travels as monochrome. Everything else a reader needs is on the plane: `encoding` and `primaries` say what the codes mean (an 8-bit `g2t` plane in VSF RGB is Lumis's VSF 8B). The stream's colour description is unspecified and its range full.
+- **API.** `visual::CODEC_AV1` (`b'a'`), `visual::codec_name`, `visual::Av1Settings` (`quantizer`, `speed`, `tiles`, `threads`; `STILL` for camera stills, `AVATAR` Photon's q32 speed 6). With `av1`: `av1::encode(&[u16], channels, width, height, depth, &settings)`, `av1::encode_u8(&[u8], channels, width, height, &settings)`, `Plane::encoded_av1(track, seq, width, height, primaries, encoding, &[u8], &settings)`, `Plane::wrap_av1(&settings)`. With `av1-decode`: `av1::decode(stream, channels, width, height, depth) -> Vec<u16>` (planar codes), and `Plane::packed_samples()` decodes an AV1 plane, so `linear_samples`, `vsf_linear_samples` and `Visual::to_spectral_image` read one unchanged.
+- **Without `av1-decode`**, `Plane::packed_samples` (and every reader of samples) answers "plane ... is wrapped under av1 (codec 'a'): this vsf was built without the av1-decode feature"; other codes are named too.
+- **Lossless roles stay lossless.** A writer refuses AV1 on a `sensor`, `dark`, `flat`, `bias` or `mask` plane (idt/image.md).
+- **Features.** `av1-decode` (rav1d, 8 and 10 bits), `av1` (rav1e too, pure Rust), `av1-threads` (rav1e's tiles on the rayon pool), `av1-asm` (rav1e's and rav1d's assembly). All off by default; no_std builds are unaffected. rav1e and rav1d are optimised in vsf's own dev and test builds.
+- **Tests** (`tests/visual_av1.rs`): odd-sided ramps, a real-looking g2t still (size and error at both settings), a 10-bit monochrome plane, a VSF 8B visual written and read back thru the linear readers, a stream of the wrong geometry refused, a sensor plane refused, and the clean error without the feature.
+
 ### Format v11: `hi`, an idea (2026-11-10)
 
 - **`hi`** names a meaning: 32 bytes of keyed BLAKE3 over the locale of its first phrasing and that phrasing as `x` (owner, 2026-11-10: "The VSF literally needs an idea type"). Phrasings in any language attach to the idea later and never change its name; an `hi` is a reference to meaning, never the words. In the hash family (`h` then a subtype, as `hp` names content) since every letter after `x` is EWE's, kept for integers wider than 128 bits. `TypeConstraint::Idea` takes 32 bytes; `since` 11.

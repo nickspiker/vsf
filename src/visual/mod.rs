@@ -9,9 +9,31 @@
 use crate::container::{ByteSource, ContainerError, Document};
 use crate::file_format::VsfSection;
 use crate::prelude::*;
+use alloc::borrow::Cow;
 use crate::spectral_image::{self, ColourProfile, IdtClass, PlaneLayout, Provenance, SpectralChannel, SpectralCurve, SpectralImage, ViewOp, ViewTransform};
 use crate::types::{BitPackedTensor, EtType, Tensor, VsfType, WorldCoord};
 use crate::vsf_builder::VsfBuilder;
+
+pub mod av1;
+pub use av1::Av1Settings;
+
+/// VSF's code for AV1 in a wrapped value (`VsfType::v(b'a', stream)`): Photon's avatars, `vsfimg`'s large images and, on a plane, samples written by [`av1`] (VSF YCbCr 4:2:0 for R, G, B; monochrome for one channel). The wrapped codes are the `v` type's lowercase letters (`vsf_type.rs`): `a` AV1, `o` Opus, `m` H.264, `z` zstd, `b` raw bytes, `e` encrypted.
+pub const CODEC_AV1: u8 = b'a';
+
+/// A wrapped value's codec by name, for messages: the codes this crate knows, else the letter.
+pub fn codec_name(code: u8) -> String {
+    match code {
+        b'a' => "av1".into(),
+        b'o' => "opus".into(),
+        b'm' => "h264".into(),
+        b'z' => "zstd".into(),
+        b'x' => "xz".into(),
+        b'r' => "reed-solomon".into(),
+        b'e' => "encryption".into(),
+        b'b' => "raw bytes".into(),
+        c => format!("codec '{}'", c as char),
+    }
+}
 
 #[derive(Debug)]
 pub enum VisualError {
@@ -310,11 +332,43 @@ impl Plane {
         format!("plane.{}.{}.{}", self.track, self.seq, self.name)
     }
 
-    fn packed(&self) -> Result<&BitPackedTensor, VisualError> {
+    /// The plane's samples bit-packed: as stored, or decoded from AV1 (with the `av1-decode` feature) into a tensor of the plane's depth, `[3, height, width]` for three channels and `[height, width]` for one. Any other codec, or AV1 without the feature, is an error naming the codec.
+    pub fn packed_samples(&self) -> Result<Cow<'_, BitPackedTensor>, VisualError> {
         match &self.samples {
-            Samples::Packed(t) => Ok(t),
-            Samples::Wrapped(code, _) => Err(bad(format!("plane is wrapped under codec '{}' — not a bit-packed plane", *code as char))),
+            Samples::Packed(t) => Ok(Cow::Borrowed(t)),
+            #[cfg(feature = "av1-decode")]
+            Samples::Wrapped(CODEC_AV1, stream) => {
+                let k = self.channels.len();
+                let codes = av1::decode(stream, k, self.width, self.height, self.depth).map_err(|e| bad(format!("plane {}: {e}", self.section_name())))?;
+                let shape = if k == 1 { vec![self.height, self.width] } else { vec![k, self.height, self.width] };
+                Ok(Cow::Owned(BitPackedTensor::pack_u16(self.depth, shape, &codes)))
+            }
+            #[cfg(not(feature = "av1-decode"))]
+            Samples::Wrapped(CODEC_AV1, _) => Err(bad(format!("plane {} is wrapped under av1 (codec 'a'): this vsf was built without the av1-decode feature", self.section_name()))),
+            Samples::Wrapped(code, _) => Err(bad(format!("plane {} is wrapped under {}: not a bit-packed plane", self.section_name(), codec_name(*code)))),
         }
+    }
+
+    /// A planar RGB plane like [`Self::encoded`] whose 8-bit codes `[3, height, width]` are written as AV1 ([`av1::encode_u8`]): Lumis's VSF 8B, 8-bit `g2t` in VSF RGB.
+    #[cfg(feature = "av1")]
+    pub fn encoded_av1(track: &str, seq: &str, width: usize, height: usize, primaries: Primaries, encoding: Encoding, samples: &[u8], settings: &Av1Settings) -> Result<Self, VisualError> {
+        let stream = av1::encode_u8(samples, 3, width, height, settings)?;
+        let mut p = Plane::encoded(track, seq, width, height, primaries, encoding, BitPackedTensor::pack_u8(8, vec![0], &[]));
+        p.samples = Samples::Wrapped(CODEC_AV1, stream);
+        Ok(p)
+    }
+
+    /// Write a bit-packed plane's samples as AV1 ([`av1::encode`]), in place: one or three planar channels of 8 or 10 bits. A plane already wrapped is left as it is.
+    #[cfg(feature = "av1")]
+    pub fn wrap_av1(&mut self, settings: &Av1Settings) -> Result<(), VisualError> {
+        let Samples::Packed(t) = &self.samples else { return Ok(()) };
+        if self.channels.len() == 3 && self.layout != PlaneLayout::Planar {
+            return Err(bad(format!("plane {}: AV1 carries a planar plane, not a mosaic", self.section_name())));
+        }
+        let stream = av1::encode(&t.unpack_u16(), self.channels.len(), self.width, self.height, t.bit_depth, settings)?;
+        self.depth = t.bit_depth;
+        self.samples = Samples::Wrapped(CODEC_AV1, stream);
+        Ok(())
     }
 
     /// Light of one sample: VSF's own encodings by their ×2ⁿ rule ([`Encoding::light`]); a source's encoding from its code normalised by this plane's `black` and `white` for that channel, so a narrow-range source (10-bit 64 to 940) decodes as it was written.
@@ -343,9 +397,9 @@ impl Plane {
 
     /// The plane as LINEAR counts in its own primaries: `(samples, black, white)`. A linear plane is returned as stored. An encoded plane is decoded code by code by its encoding ([`Encoding::light`]: ×2ⁿ, bucket bottom for VSF's own; white at the top code for a source's) and re-packed at 16 bits with black 0 and white placed so its brightest light still fits: `white = 65535 / max(1, peak)`, so diffuse white stays at `white` and the highlights a `g2t`, PQ or HLG plane holds sit above it rather than clipping. Readers that want counts (opsin's bridge, limbus's raw reader) go thru here and never see an encoded plane as if it were linear. The primaries are untouched; [`Self::vsf_linear_samples`] also takes them into VSF RGB.
     pub fn linear_samples(&self) -> Result<(BitPackedTensor, Vec<f32>, Vec<f32>), VisualError> {
-        let t = self.packed()?;
+        let t = self.packed_samples()?;
         if self.encoding == Encoding::Linear {
-            return Ok((t.clone(), self.black.clone(), self.white.clone()));
+            return Ok((t.into_owned(), self.black.clone(), self.white.clone()));
         }
         if t.bit_depth > 16 {
             return Err(bad(format!("{}-bit {} plane: encoded planes are 1 to 16 bits", t.bit_depth, self.encoding.as_str())));
@@ -361,7 +415,7 @@ impl Plane {
     pub fn vsf_linear_samples(&self) -> Result<(BitPackedTensor, Vec<f32>, Vec<f32>), VisualError> {
         let Some(m) = self.primaries.to_vsf_rgb() else { return self.linear_samples() };
         self.check_primaries()?;
-        let t = self.packed()?;
+        let t = self.packed_samples()?;
         if t.bit_depth > 16 {
             return Err(bad(format!("{}-bit plane in '{}' primaries: a source's encoding is 1 to 16 bits", t.bit_depth, self.primaries.as_str())));
         }
@@ -777,6 +831,10 @@ impl Plane {
         let k = self.channels.len();
         if self.black.len() != k || self.white.len() != k {
             return Err(bad(format!("plane {}: black/white length {}/{} != channel count {k}", self.section_name(), self.black.len(), self.white.len())));
+        }
+        // idt/image.md: a capture plane and its calibration frames are lossless only, so a lossy codec on one is refused here rather than read back as if nothing was lost.
+        if matches!(self.samples, Samples::Wrapped(CODEC_AV1, _)) && matches!(self.role, PlaneRole::Sensor | PlaneRole::Dark | PlaneRole::Flat | PlaneRole::Bias | PlaneRole::Mask) {
+            return Err(bad(format!("plane {}: a {} plane is lossless only, not av1", self.section_name(), self.role.as_str())));
         }
         let mut s = VsfSection::new(self.section_name());
         s.add_field("role", VsfType::a(crate::types::Ascii::checked("role", self.role.as_str())));
