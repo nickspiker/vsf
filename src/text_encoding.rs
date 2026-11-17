@@ -75,10 +75,11 @@ impl BitVec {
 
 /// The codebook as built (`huffman_codes.bin`): a 12-byte header (`HUFF`, a version, the entry count), then 8 bytes an entry, the codepoint and its code (right-aligned in the low 24 bits, the length in bits 24..29), one entry for every Unicode scalar value in codepoint order.
 /// Read where it lies: no table is built from it for encoding, and decoding keeps only an ordering of it (2026-10-25: the HashMap of all 1,112,064 codes and a pointer tree over them cost 80 MB, and a Pixel 3a was killed for memory the first time it read a place name).
+/// A `static`, never a `const`: a const slice of an included file is copied into every crate and codegen unit that names it (six copies, 44.5 MB of a 92 MB Photon, ferros 2026-11-17).
 #[cfg(huffman_available)]
-const DATA: &[u8] = include_bytes!("../huffman_codes.bin");
+static DATA: &[u8] = include_bytes!("../huffman_codes.bin");
 #[cfg(not(huffman_available))]
-const DATA: &[u8] = &[];
+static DATA: &[u8] = &[];
 
 /// Entries in the codebook, 0 when it is missing (a docs.rs build).
 fn entries() -> usize {
