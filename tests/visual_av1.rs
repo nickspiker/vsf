@@ -168,14 +168,16 @@ mod with_av1 {
         assert!(av1::decode(&[0x12, 0x00], 3, 64, 64, 8).is_err(), "two bytes are no picture");
     }
 
-    /// A capture plane is lossless only: av1 on a sensor plane is refused when written.
+    /// A capture plane and its phase-detect samples are lossless only: av1 on either is refused when written.
     #[test]
     fn sensor_planes_stay_lossless() {
         let src = ramps(16, 16);
-        let mut plane = Plane::encoded_av1("b0", "s0", 16, 16, Primaries::Vsf, Encoding::Gamma2Tanh, &src, &Av1Settings::STILL).unwrap();
-        plane.role = PlaneRole::Sensor;
-        let e = Visual::still(plane, None, None, &[]).write().unwrap_err();
-        assert!(e.contains("lossless only"), "{e}");
+        for role in [PlaneRole::Sensor, PlaneRole::Phase] {
+            let mut plane = Plane::encoded_av1("b0", "s0", 16, 16, Primaries::Vsf, Encoding::Gamma2Tanh, &src, &Av1Settings::STILL).unwrap();
+            plane.role = role;
+            let e = Visual::still(plane, None, None, &[]).write().unwrap_err();
+            assert!(e.contains("lossless only"), "{e}");
+        }
     }
 }
 

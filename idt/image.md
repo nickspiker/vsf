@@ -61,7 +61,7 @@ A gap between two spans is a hole; so is an empty `v` inside one. Decoders reset
 ### `plane.<track>.<seq>.<name>`
 | field | type | notes |
 |---|---|---|
-| `role` | `a` closed | `sensor` \| `display` \| `preview` \| `depth` \| `ir` \| `uv` \| `confidence` \| `motion` \| `matte` \| `mask` \| `alpha` \| `dark` \| `flat` \| `bias` \| `derived`; absent ⇒ `sensor` |
+| `role` | `a` closed | `sensor` \| `display` \| `preview` \| `depth` \| `ir` \| `uv` \| `confidence` \| `motion` \| `phase` \| `matte` \| `mask` \| `alpha` \| `dark` \| `flat` \| `bias` \| `derived`; absent ⇒ `sensor`. `phase`: a sensor's phase-detect samples, raw counts in the sensor's own order, each pupil half (each phase) a plane of its own beside the capture plane it was read with, lossless (2026-11-17) |
 | `width`, `height` | `u` | |
 | `channel_count`, `channel_names` | `u`, `a` nl-joined | |
 | `layout` | `a` closed | `mosaic` \| `planar` |
@@ -77,7 +77,7 @@ A gap between two spans is a hole; so is an empty `v` inside one. Decoders reset
 | `at` | `e6` | Eagle instant of the capture (stills) |
 | `parent`, `parent_plane` | `hp`, `hb` | lineage: the parent document's `hp` and the parent plane's content hash |
 | `program` | `a` | the `graph.*` whose root produced this plane, when derived |
-| `samples` | `p` or `v(c)` | **last** in the section, so a lazy reader's header pass is short. Roles `sensor`/`dark`/`flat`/`bias`/`mask`: lossless only (`p`, or `v('z'\|'x'\|'r')` wrapping `p` bytes). Other roles may be `v('a')` (AV1: one key frame of the plane's own width, height and depth, 8 or 10 bits; three planar channels as VSF YCbCr 4:2:0, Y = (R + 2G + B) / 4, Cb = (B - Y) / 2 + 1/2, Cr = (R - Y) / 2 + 1/2 on codes over the top code, one channel as monochrome; the plane's `encoding` and `primaries` say what the codes mean, the stream's own colour description is unspecified; writers refuse it on the lossless roles; `vsf::visual::av1`) or an application code |
+| `samples` | `p` or `v(c)` | **last** in the section, so a lazy reader's header pass is short. Roles `sensor`/`phase`/`dark`/`flat`/`bias`/`mask`: lossless only (`p`, or `v('z'\|'x'\|'r')` wrapping `p` bytes). Other roles may be `v('a')` (AV1: one key frame of the plane's own width, height and depth, 8 or 10 bits; three planar channels as VSF YCbCr 4:2:0, Y = (R + 2G + B) / 4, Cb = (B - Y) / 2 + 1/2, Cr = (R - Y) / 2 + 1/2 on codes over the top code, one channel as monochrome; the plane's `encoding` and `primaries` say what the codes mean, the stream's own colour description is unspecified; writers refuse it on the lossless roles; `vsf::visual::av1`) or an application code |
 
 A plane's table-of-contents content hash is **the plane hash**: the identity lineage and attestation name. Crop and recompress make a new plane with a new hash; the parent's is untouched.
 

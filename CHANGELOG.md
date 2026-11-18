@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Plane role `phase` (2026-11-17)
+
+A camera's phase-detect samples get a plane role of their own: raw counts in the sensor's own order, each pupil half (each phase) a plane of its own beside the capture plane it was read with, lossless only like `sensor` (an AV1 `phase` plane is refused on write). For Lumis on ferros, whose main sensor sends its phase-detect rows beside every frame; the owner wants them kept as data for a focus map and lens rendering. Closed vocabulary, so a reader from before this fails loud on a file that carries one. Where each phase's pixels sit on the array is not described yet; fields for it follow once a sensor's layout is decoded.
+
 ### AV1 planes: `vsf::visual::av1`, features `av1-encode`, `av1-decode` and `av1` (2026-11-15)
 
 Part of 0.11.0 before it is published (crates.io's newest is 0.10.2); no format change, since a plane's samples could already be `v('a')` and `a` was already VSF's AV1 code. The owner, 2026-11-15: "8 bit VSF can be uncompressed but it typically should be av1d since that's kinda the point of the 8 bit. HDR plus compressed so think half a meg for a still, rather than twenty megs."

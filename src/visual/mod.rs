@@ -84,7 +84,7 @@ macro_rules! closed_vocab {
 
 closed_vocab!(TrackKind { Beam => "beam", Wave => "wave", Timecode => "timecode", Annotation => "annotation", Data => "data" }, "track kind");
 closed_vocab!(TrackRole { Capture => "capture", Derived => "derived", Display => "display", Preview => "preview", Calibration => "calibration" }, "track role");
-closed_vocab!(PlaneRole { Sensor => "sensor", Display => "display", Preview => "preview", Depth => "depth", Ir => "ir", Uv => "uv", Confidence => "confidence", Motion => "motion", Matte => "matte", Mask => "mask", Alpha => "alpha", Dark => "dark", Flat => "flat", Bias => "bias", Derived => "derived" }, "plane role");
+closed_vocab!(PlaneRole { Sensor => "sensor", Display => "display", Preview => "preview", Depth => "depth", Ir => "ir", Uv => "uv", Confidence => "confidence", Motion => "motion", Phase => "phase", Matte => "matte", Mask => "mask", Alpha => "alpha", Dark => "dark", Flat => "flat", Bias => "bias", Derived => "derived" }, "plane role");
 closed_vocab!(Encoding {
     Linear => "linear", Gamma2 => "gamma2", Gamma2Tanh => "g2t" | "gamma2tanh",
     Srgb => "srgb", Bt1886 => "bt1886", AdobeRgb => "adobe_rgb", Prophoto => "prophoto", Pq => "pq", Hlg => "hlg",
@@ -832,8 +832,8 @@ impl Plane {
         if self.black.len() != k || self.white.len() != k {
             return Err(bad(format!("plane {}: black/white length {}/{} != channel count {k}", self.section_name(), self.black.len(), self.white.len())));
         }
-        // idt/image.md: a capture plane and its calibration frames are lossless only, so a lossy codec on one is refused here rather than read back as if nothing was lost.
-        if matches!(self.samples, Samples::Wrapped(CODEC_AV1, _)) && matches!(self.role, PlaneRole::Sensor | PlaneRole::Dark | PlaneRole::Flat | PlaneRole::Bias | PlaneRole::Mask) {
+        // idt/image.md: a capture plane, its phase-detect samples and its calibration frames are lossless only, so a lossy codec on one is refused here rather than read back as if nothing was lost.
+        if matches!(self.samples, Samples::Wrapped(CODEC_AV1, _)) && matches!(self.role, PlaneRole::Sensor | PlaneRole::Phase | PlaneRole::Dark | PlaneRole::Flat | PlaneRole::Bias | PlaneRole::Mask) {
             return Err(bad(format!("plane {}: a {} plane is lossless only, not av1", self.section_name(), self.role.as_str())));
         }
         let mut s = VsfSection::new(self.section_name());

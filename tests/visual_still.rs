@@ -79,6 +79,26 @@ fn a_still_round_trips_with_content_hashes_on_every_entry() {
     assert!(matches!(doc.header().creation_time, Some(vsf::types::VsfType::e(vsf::types::EtType::e6(1_234_567_890_123)))));
 }
 
+/// A sensor's phase-detect samples ride beside the capture plane, each phase a plane of its own, and come back with their role.
+#[test]
+fn phase_planes_round_trip_beside_the_sensor_plane() {
+    let mut v = still();
+    let (w, h) = (24usize, 4usize);
+    for name in ["phase_left", "phase_right"] {
+        let counts: Vec<u16> = (0..w * h).map(|i| (i * 37 % 1024) as u16).collect();
+        let mut p = Plane::sensor("b0", "s0", w, h, vec![SpectralChannel { name: "G".into(), curve: None }], PlaneLayout::Planar, vec![64.0], vec![1023.0], BitPackedTensor::pack_u16(10, vec![1, h, w], &counts));
+        p.name = name.into();
+        p.role = PlaneRole::Phase;
+        v.planes.push(p);
+    }
+    let bytes = v.write().unwrap();
+    let back = Visual::read(&bytes).unwrap();
+    assert_eq!(back, v);
+    let phases: Vec<&str> = back.planes.iter().filter(|p| p.role == PlaneRole::Phase).map(|p| p.name.as_str()).collect();
+    assert_eq!(phases, ["phase_left", "phase_right"]);
+    assert_eq!(back.primary_plane().map(|p| p.role), Some(PlaneRole::Sensor));
+}
+
 #[test]
 fn the_default_graph_carries_the_view_ops_and_the_bridge_round_trips() {
     let v = still();
