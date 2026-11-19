@@ -383,6 +383,32 @@ fn closing(head: &[u8], frames: &[FrameEntry], end: u64, tool: &str, action: &st
     Ok(Appender::new(tool, action).add_section(INDEX_SECTION, index_fields(frames, end)).build_at(&doc, end)?)
 }
 
+/// A grade of a clip: a generation carrying a graph over the frames' plane (`clip.b0`) with `ops` after the IDT, and its view, as [`super::Visual::still_edit_generation`] gives a still.
+/// Append it to the clip (`container::append_to_file`): nothing before it moves, the clip still reads by its index (the new table of contents lists `index.b0` as the last did), and undo is truncation.
+pub fn edit_generation<S: ByteSource>(doc: &Document<S>, tool: &str, action: &str, ops: &[crate::spectral_image::ViewOp]) -> Result<Vec<u8>, VisualError> {
+    if doc.entry(CLIP_SECTION).is_none() {
+        return Err(VisualError::Missing("clip.b0"));
+    }
+    let vis = super::Visual::read_sections(doc)?;
+    let n = doc.generation() + 1;
+    let graph = super::Graph::default_still(&format!("g{n}"), CLIP_SECTION, super::Primaries::Vsf, vis.characterization.as_ref().and_then(|p| p.entries.first()).map(|e| e.class), ops);
+    let view = super::View::default_of(&format!("v{n}"), &graph);
+    let tracks = crate::types::Ascii::new(vis.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join("\n")).map_err(|e| bad(format!("tracks: {e}")))?;
+    let default_view = crate::types::Ascii::new(view.section_name()).map_err(|e| bad(format!("default_view: {e}")))?;
+    let mut manifest = vec![("tracks".to_string(), VsfType::a(tracks)), ("default_view".to_string(), VsfType::a(default_view))];
+    push_text(&mut manifest, "title", &vis.title).map_err(bad)?;
+    push_text(&mut manifest, "text", &vis.text).map_err(bad)?;
+    let tool = crate::types::Ascii::new(tool).map_err(|e| bad(format!("tool: {e}")))?;
+    let action = crate::types::Ascii::new(action).map_err(|e| bad(format!("action: {e}")))?;
+    let mut a = Appender::new(tool, action).add_section("visual", manifest).add_section(graph.section_name(), graph.fields()).add_section(view.section_name(), view.fields());
+    for e in doc.body_entries() {
+        if e.name.starts_with("graph.") || e.name.starts_with("view.") {
+            a = a.supersede(e.name.clone());
+        }
+    }
+    Ok(a.build(doc)?)
+}
+
 /// A source seen only up to `len`.
 struct Prefix<'a, S: ByteSource> {
     source: &'a S,
@@ -605,6 +631,13 @@ impl<S: ByteSource> Reader<S> {
     }
     pub fn source(&self) -> &S {
         &self.source
+    }
+
+    /// The clip's document as a visual, from its latest generation: the characterization (one pasted after the recording included), the capture facts, the title and the views a grade appended ([`edit_generation`]).
+    /// It has no planes: the frames are this reader's.
+    pub fn visual(&self) -> Result<super::Visual, VisualError> {
+        let doc = Document::open(&self.source)?;
+        super::Visual::read_sections(&doc)
     }
 
     /// Frame `k`, its samples checked against its `hash` and its place against the index.

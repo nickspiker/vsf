@@ -1251,6 +1251,15 @@ impl Visual {
 
     /// Read from a document. A document with a `spectral_image` section (the legacy five-section form) is read as a one-track visual first; then every live section overlays it — so a generation appended to a legacy file (a pasted characterization, a new view) is seen, and the file never needs rewriting to be edited.
     pub fn read_document<S: ByteSource>(doc: &Document<S>) -> Result<Visual, VisualError> {
+        let v = Self::read_sections(doc)?;
+        if v.planes.is_empty() {
+            return Err(VisualError::Missing("plane"));
+        }
+        Ok(v)
+    }
+
+    /// [`Self::read_document`] without the plane it asks for: every live section a visual knows, from the latest generation. A RAW clip's frames are in no plane section (`clip.b0` describes them, [`clip::Reader`] reads them), so a clip's characterization, capture facts and views come thru here.
+    pub(crate) fn read_sections<S: ByteSource>(doc: &Document<S>) -> Result<Visual, VisualError> {
         let legacy = doc.entry("spectral_image").is_some();
         let mut v = if legacy { Self::read_legacy_base(doc)? } else { Visual::default() };
         let mut seen_visual = false;
@@ -1309,9 +1318,6 @@ impl Visual {
                 return Err(bad("an `image` document (icon/preview) is not a visual; it has no plane"));
             }
             return Err(VisualError::Missing("visual"));
-        }
-        if v.planes.is_empty() {
-            return Err(VisualError::Missing("plane"));
         }
         Ok(v)
     }

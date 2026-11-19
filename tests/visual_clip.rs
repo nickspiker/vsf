@@ -225,3 +225,37 @@ fn real_frame_round_trips() {
     }
     eprintln!("real frame: {} bytes coded of {} packed, ratio {:.2}", payload.len(), w * h * 5 / 4, (w * h * 5 / 4) as f64 / payload.len() as f64);
 }
+
+#[test]
+fn a_grade_appends_and_the_clip_still_reads_by_its_index() {
+    use vsf::spectral_image::{IdtClass, ViewOp};
+    let sp = spec(256, 200);
+    let (mut file, closing, samples) = record(&sp, 4, 21, 1);
+    file.extend_from_slice(&closing);
+    let before = file.len();
+    let ops = vec![ViewOp { name: "exposure".into(), class: IdtClass::Creative, params: vec![1.5] }];
+    let doc = vsf::container::Document::open(file.as_slice()).unwrap();
+    let grade = clip::edit_generation(&doc, "test", "grade", &ops).unwrap();
+    drop(doc);
+    file.extend_from_slice(&grade);
+    let r = Reader::open(file.as_slice()).unwrap();
+    assert!(!r.recovered());
+    check_frames(&r, &samples, 1);
+    // The grade reads back as the default view's ops; the frames' bytes never moved.
+    let v = r.visual().unwrap();
+    assert_eq!(v.default_graph().unwrap().to_view_transform().ops, ops);
+    assert_eq!(v.title, "test clip");
+    let doc = vsf::container::Document::open(file.as_slice()).unwrap();
+    assert_eq!(doc.generation(), 2);
+    assert_eq!(doc.generations().unwrap()[1].end, before as u64);
+    // A second grade supersedes the first.
+    let ops2 = vec![ViewOp { name: "exposure".into(), class: IdtClass::Creative, params: vec![-1.] }];
+    let grade2 = clip::edit_generation(&doc, "test", "grade", &ops2).unwrap();
+    drop(doc);
+    file.extend_from_slice(&grade2);
+    let r = Reader::open(file.as_slice()).unwrap();
+    assert!(!r.recovered());
+    assert_eq!(r.visual().unwrap().default_graph().unwrap().to_view_transform().ops, ops2);
+    // A still's reader refuses the clip: it has no plane.
+    assert!(vsf::visual::Visual::read(file.as_slice()).is_err());
+}
