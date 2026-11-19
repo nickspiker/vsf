@@ -570,7 +570,14 @@ impl<S: ByteSource> Reader<S> {
     pub fn open(source: S) -> Result<Reader<S>, VisualError> {
         let (head, spec) = open_head(&source)?;
         // Closed: the whole source is the clip, its trailer names the closing header, the header chains back to this generation 0 (an earlier recording's trailer left in the same blocks chains to its own), and index.b0 lists the frames from generation 0's end.
-        let closed = {
+        // Only a source that ends in a trailer is opened whole: without one, `Document::open` would look for a torn generation by reading every byte past generation 0 (a whole recording region, tens of GB, when a clip's writer died), where the frames' own chain is the way in.
+        let trailer = {
+            let size = source.len();
+            size >= crate::container::TRAILER_LEN as u64 && source.read_vec(size - crate::container::TRAILER_LEN as u64, crate::container::TRAILER_LEN as u64).is_ok_and(|t| crate::container::append::parse_trailer(&t).is_some())
+        };
+        let closed = if !trailer {
+            None
+        } else {
             let doc = Document::open(&source)?;
             let ours = doc.generation() > 0 && doc.generations().is_ok_and(|g| g.first().is_some_and(|g0| g0.end == head.len() as u64));
             match doc.entry(INDEX_SECTION) {

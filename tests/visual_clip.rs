@@ -171,6 +171,34 @@ fn cut_short_recovers_every_whole_frame_and_repairs() {
     check_frames(&r4, &samples[..4], 2);
 }
 
+/// A source that counts the bytes read from it.
+struct Counted<'a>(&'a [u8], std::cell::Cell<u64>);
+
+impl vsf::container::ByteSource for Counted<'_> {
+    fn len(&self) -> u64 {
+        self.0.len() as u64
+    }
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<(), vsf::container::SourceError> {
+        self.1.set(self.1.get() + buf.len() as u64);
+        self.0.read_at(offset, buf)
+    }
+}
+
+#[test]
+fn a_clip_cut_short_in_a_large_region_reads_only_its_own_bytes() {
+    // A writer died: its clip at the start of a region many times its size (the rest an earlier recording's bytes, or zeros), no trailer at the region's end.
+    let sp = spec(256, 200);
+    let (file, _closing, samples) = record(&sp, 4, 21, 1);
+    let mut region = file.clone();
+    region.resize(file.len() << 6, 0);
+    let src = Counted(&region, std::cell::Cell::new(0));
+    let r = Reader::open(&src).unwrap();
+    assert!(r.recovered());
+    check_frames(&r, &samples, 1);
+    // Generation 0 and each frame once for the walk, again for the check above, and a window past the end: never the whole region.
+    assert!(src.1.get() < (file.len() as u64) << 3, "read {} bytes of a {}-byte region for a {}-byte clip", src.1.get(), region.len(), file.len());
+}
+
 #[test]
 fn a_new_clip_over_an_old_one_stops_at_its_own_frames() {
     let sp = spec(128, 64);
