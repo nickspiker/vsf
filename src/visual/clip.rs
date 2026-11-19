@@ -568,6 +568,53 @@ impl<S: ByteSource> Reader<S> {
     /// Open a clip: by its index when it was closed, else by walking its frames from generation 0 (a clip cut short; [`Self::recovered`] says which).
     /// `source` may be longer than the clip (the blocks it was recorded into): a closed clip is found by its index wherever its frames end only when `source` ends at its trailer, so pass a closed clip's exact length.
     pub fn open(source: S) -> Result<Reader<S>, VisualError> {
+        Self::open_with(source, true)
+    }
+
+    /// Open a clip as [`Self::open`] does, but a clip cut short is walked by its frames' headers alone (each frame's fields, `prev` and closing bytes, a few blocks a frame), its samples not read: for a recovery that must not read and hash every byte of a long clip (2,525 frames, 18 GB, took 89 s on the Pro).
+    /// Nothing about the samples is proven yet: check the clip's last frames with [`Self::check_tail`] (or each with [`Self::frame`]) before trusting where it ends.
+    pub fn open_headers(source: S) -> Result<Reader<S>, VisualError> {
+        Self::open_with(source, false)
+    }
+
+    /// [`Self::open_headers`] then [`Self::check_tail`]: a clip cut short ends before the earliest frame found failing its hash, with `n` frames right before that end proven.
+    pub fn open_tail_checked(source: S, n: usize) -> Result<Reader<S>, VisualError> {
+        let mut r = Self::open_headers(source)?;
+        if r.recovered {
+            r.check_tail(n);
+        }
+        Ok(r)
+    }
+
+    /// Check the frames' samples from the last one back: a frame failing its hash ends the clip before it (with every frame after it), until `n` frames in a row before the end pass; the frames found before them are taken as the chain lists them.
+    /// Why the tail is enough: a recorder writes its frames in order, one after another, so a frame's header on the flash comes after every byte before it; a write cut short tears the last frames, never one in the middle. The `n` frames proven cover writes the flash took out of order before power went.
+    /// Returns the frames checked.
+    pub fn check_tail(&mut self, n: usize) -> usize {
+        let mut cut = self.frames.len();
+        let (mut good, mut checked, mut k) = (0, 0, self.frames.len());
+        while k > 0 && good < n {
+            k -= 1;
+            checked += 1;
+            if self.frame(k).is_ok() {
+                good += 1;
+            } else {
+                cut = k;
+                good = 0;
+            }
+        }
+        self.truncate(cut);
+        checked
+    }
+
+    /// Keep the first `k` frames only (a recovery that found frame `k` torn): the clip then ends where frame `k` began.
+    pub fn truncate(&mut self, k: usize) {
+        if k < self.frames.len() {
+            self.end = self.frames[k].offset;
+            self.frames.truncate(k);
+        }
+    }
+
+    fn open_with(source: S, samples: bool) -> Result<Reader<S>, VisualError> {
         let (head, spec) = open_head(&source)?;
         // Closed: the whole source is the clip, its trailer names the closing header, the header chains back to this generation 0 (an earlier recording's trailer left in the same blocks chains to its own), and index.b0 lists the frames from generation 0's end.
         // Only a source that ends in a trailer is opened whole: without one, `Document::open` would look for a torn generation by reading every byte past generation 0 (a whole recording region, tens of GB, when a clip's writer died), where the frames' own chain is the way in.
@@ -598,12 +645,12 @@ impl<S: ByteSource> Reader<S> {
             }
         }
         let mut r = Reader { end: head.len() as u64, source, head, spec, frames: Vec::new(), recovered: true };
-        r.walk();
+        r.walk(samples);
         Ok(r)
     }
 
-    /// Follow the chain from generation 0's end; stop at the first frame that does not prove itself.
-    fn walk(&mut self) {
+    /// Follow the chain from generation 0's end; stop at the first frame that does not prove itself (with `samples` false, by its header and place in the chain alone).
+    fn walk(&mut self, samples: bool) {
         let mut prev = *blake3::hash(&self.head).as_bytes();
         let mut at = self.head.len() as u64;
         let bands = self.spec.bands();
@@ -611,9 +658,11 @@ impl<S: ByteSource> Reader<S> {
             if f.prev != prev || self.frames.last().is_some_and(|l| f.meta.index <= l.meta.index) {
                 break;
             }
-            let Ok(payload) = self.source.read_vec(f.samples_at, f.samples_len) else { break };
-            if frame_hash(&digests(&payload, &f.bands)) != f.hash {
-                break;
+            if samples {
+                let Ok(payload) = self.source.read_vec(f.samples_at, f.samples_len) else { break };
+                if frame_hash(&digests(&payload, &f.bands)) != f.hash {
+                    break;
+                }
             }
             self.frames.push(FrameEntry { meta: f.meta, offset: at, size: f.size, id: f.id });
             prev = f.id;

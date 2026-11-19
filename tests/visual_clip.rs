@@ -200,6 +200,47 @@ fn a_clip_cut_short_in_a_large_region_reads_only_its_own_bytes() {
 }
 
 #[test]
+fn a_recovery_by_headers_reads_the_frames_headers_and_checks_only_the_tail() {
+    let sp = spec(256, 200);
+    let (file, _closing, samples) = record(&sp, 32, 31, 1);
+    let mut region = file.clone();
+    region.resize(file.len() << 2, 0);
+    // Intact: every frame back, its last two frames' samples read, the rest of the samples never.
+    let src = Counted(&region, std::cell::Cell::new(0));
+    let mut r = Reader::open_headers(&src).unwrap();
+    assert!(r.recovered());
+    assert_eq!(r.frames().len(), 32);
+    let walked = src.1.get();
+    assert_eq!(r.check_tail(2), 2);
+    assert_eq!(r.end(), file.len() as u64);
+    let one = r.frames()[31].size;
+    // At most generation 0's read (2^17), a header's window (2^14 bytes) and its closing bytes a frame, and the window past the last: a Pro frame is 7 MB, these 36 KB.
+    let most = (1 << 17) + 33 * ((1 << 14) + 2);
+    assert!(walked <= most, "the header walk read {walked} bytes (at most {most}) of a {}-byte clip", file.len());
+    assert!(src.1.get() - walked < 3 * one, "the tail check read {} bytes for two frames of {one}", src.1.get() - walked);
+    check_frames(&r, &samples, 1);
+    // The last frames torn (samples damaged in 30, cut inside 31's samples, its header whole): the clip ends before 30, the two before it proven.
+    let mut torn = file.clone();
+    let f30 = r.frames()[30].offset as usize + 200;
+    torn[f30] ^= 1;
+    let f31 = r.frames()[31].offset as usize + 200;
+    torn[f31..file.len() - 2].fill(0);
+    let r2 = Reader::open_tail_checked(torn.as_slice(), 2).unwrap();
+    assert_eq!(r2.frames().len(), 30);
+    assert_eq!(r2.end(), r.frames()[30].offset);
+    check_frames(&r2, &samples[..30], 1);
+    // The same answer as the full walk, which reads every sample.
+    let full = Reader::open(torn.as_slice()).unwrap();
+    assert_eq!(full.end(), r2.end());
+    // Repaired at that end, the clip reads by its index.
+    let mut fixed = torn[..r2.end() as usize].to_vec();
+    fixed.extend_from_slice(&r2.repair("test").unwrap());
+    let r3 = Reader::open(fixed.as_slice()).unwrap();
+    assert!(!r3.recovered());
+    check_frames(&r3, &samples[..30], 1);
+}
+
+#[test]
 fn a_new_clip_over_an_old_one_stops_at_its_own_frames() {
     let sp = spec(128, 64);
     let (old, _, _) = record(&sp, 8, 5, 1);
