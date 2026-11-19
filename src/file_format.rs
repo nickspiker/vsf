@@ -1109,6 +1109,46 @@ impl VsfSection {
         bytes
     }
 
+    /// The FAR form of this section with one more field after its own, `(tail:v{code}...)`, whose payload of `tail_len` bytes the caller writes itself: returns the bytes before the payload and the bytes after it, so `head ‖ payload ‖ tail` is exactly what [`Self::encode_far`] writes with that field added.
+    /// For a payload too large to copy into a value (a RAW video frame, written to flash as it is encoded): the section's length, its field count and the wrapped value's length are all known from `tail_len`, so nothing is patched afterwards.
+    pub fn encode_far_with_tail(&self, tail: &str, code: u8, tail_len: usize) -> (Vec<u8>, Vec<u8>) {
+        use crate::encoding::traits::EncodeNumber;
+        let fields: Vec<Vec<u8>> = self.fields.iter().map(|f| f.flatten()).collect();
+        // The tail field as VsfField::flatten writes it: `(` name `:` the value `)`, the value `v` code, the payload's length in bits as EWE, then the payload.
+        let mut tail_head = alloc::vec![b'('];
+        tail_head.extend_from_slice(&VsfType::d(crate::types::Ascii::name(tail)).flatten());
+        tail_head.push(b':');
+        tail_head.push(b'v');
+        tail_head.push(code);
+        let bits = (tail_len as u64) << 3;
+        let bits = usize::try_from(bits).expect("wrapped payload exceeds 512 MiB, the limit of a 32-bit length-in-bits");
+        tail_head.extend_from_slice(&bits.encode_number());
+        let fields_len: usize = fields.iter().map(|f| f.len()).sum::<usize>() + tail_head.len() + tail_len + 1;
+        let name_bytes = VsfType::d(crate::types::Ascii::name(&self.name)).flatten();
+        let n_encoded = VsfType::n(self.fields.len() + 1).flatten();
+        // Inclusive b{}, iterated until its own width is stable, as encode_far does.
+        let base_without_b = 1 + name_bytes.len() + n_encoded.len() + fields_len + 1;
+        let mut b_encoded = VsfType::b(base_without_b, true).flatten();
+        loop {
+            let new_b = VsfType::b(base_without_b + b_encoded.len(), true).flatten();
+            if new_b.len() == b_encoded.len() {
+                b_encoded = new_b;
+                break;
+            }
+            b_encoded = new_b;
+        }
+        let mut head = Vec::with_capacity(base_without_b + b_encoded.len() - tail_len - 2);
+        head.push(b'[');
+        head.extend_from_slice(&name_bytes);
+        head.extend_from_slice(&n_encoded);
+        head.extend_from_slice(&b_encoded);
+        for f in fields {
+            head.extend_from_slice(&f);
+        }
+        head.extend_from_slice(&tail_head);
+        (head, alloc::vec![b')', b']'])
+    }
+
     /// Parse a section from bytes (low-level, schema-agnostic)
     ///
     /// Expects format: `[d"section_name"(d"field":value)...]` Updates ptr to point after the closing `]`

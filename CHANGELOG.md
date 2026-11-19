@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### RAW clips: `vsf::visual::clip`, `vsf::visual::cfa_band`, `v('c')` (2026-11-19)
+
+RAW video for ferros's Lumis (the owner, 2026-11-19: "VSF video, yes", lossless). Part of 0.11.0 before it is published (crates.io's newest is 0.10.2); no wire type changes and no format version: a new `v` code (length-prefixed, so an older reader carries it as an opaque blob) and new section and field names. The normative tables are `idt/image.md`, "A RAW clip".
+
+- **`v('c')`, the CFA band code** (`visual::cfa_band`, format 0): a mosaic of 10-bit samples, lossless, in bands of rows coded alone, each band two bit streams. Per-colour-plane prediction (Left, or per block of 32 the cheaper of a four-neighbour mean and LOCO-I's median), wrap and zigzag, block Rice with k by `clz`. The module documentation is the complete bitstream specification. Encoder and decoder, no_std, no alloc; the decoder reads a corrupt stream as wrong samples, never outside its slices. ferros's `ferros_rawcodec` (the device's coder, with NEON) writes the same bytes.
+- **A clip** (`visual::clip`): generation 0 (`visual`, `track.b0` with `rate_num`, `rate_den`, `period_ns`; `capture`, `characterization`, `clip.b0` with the frames' plane, `codec`, `codec_format`, `mosaic`, `band_rows`), then far-form `frame` sections back to back as they are recorded (each with `index`, `at`, `exposure_s`, `gain`, `focus`, `prev`, `bands`, `hash`, then `samples` as `v('c')`), then a closing generation adding `index.b0`. A clip cut short reads up to its last whole frame by the `prev` chain and each frame's `hash`; `Reader::repair` closes it. API: `ClipSpec::head`, `Writer::{new, frame, close}` (the frame's bytes before and after its samples, so a recorder writes the samples from its own buffers), `band_digest`, `frame_hash`, `Reader::{open, frames, frame, decode, frame_plane, recovered, repair}`, `decode_frame`.
+- **`VsfSection::encode_far_with_tail`**: a section's far form around a last `v` field whose payload the caller writes itself; head, payload and tail are exactly `encode_far`'s bytes.
+- **`container::Appender::build_at`**: a generation appended at a given offset past bytes the document does not list (a clip's frames); `build` is `build_at` the source's end.
+- **Tests** (`tests/visual_clip.rs`): a closed clip by its index, bit exact; cut short after its frames and inside a frame, recovered and repaired; a damaged frame ends it; a new clip over an older one's blocks stops at its own frames; `encode_far_with_tail` against `encode_far`; a real 4080 x 3072 frame of the Pixel 8 Pro's main camera round trip.
+
 ### Plane role `phase` (2026-11-17)
 
 A camera's phase-detect samples get a plane role of their own: raw counts in the sensor's own order, each pupil half (each phase) a plane of its own beside the capture plane it was read with, lossless only like `sensor` (an AV1 `phase` plane is refused on write). For Lumis on ferros, whose main sensor sends its phase-detect rows beside every frame; the owner wants them kept as data for a focus map and lens rendering. Closed vocabulary, so a reader from before this fails loud on a file that carries one. Where each phase's pixels sit on the array is not described yet; fields for it follow once a sensor's layout is decoded.

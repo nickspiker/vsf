@@ -151,6 +151,73 @@ Unchanged from `spectral_image` (`handle`, `calibration_hash`, `camera_ihi`, `id
 - No `encoding` on a plane ⇒ `gamma2`. The legacy `spectral_image` section reads as **linear** — its only writer, opsin, wrote linear counts — and a legacy document reads as a one-track visual whose graph's `plane` op references `spectral_image`.
 - No `role` on a plane ⇒ `sensor`; no `orientation` ⇒ 1; no `default_view` ⇒ the first view.
 
+## A RAW clip (2026-11-19)
+
+RAW video as ferros records it (Lumis; the owner, 2026-11-19: "VSF video, yes"): one document per clip, written while it is recorded, lossless.
+Implemented in `vsf::visual::clip` (writer, reader, recovery, repair) and `vsf::visual::cfa_band` (the samples' code).
+Nothing here changes a wire type: a new `v` code and new section and field names, which an older reader carries or skips.
+
+```
+[ generation 0 ]        visual, track.b0 (with the rate), capture (mode video), characterization, clip.b0
+[ frame ][ frame ] …    far-form sections named `frame`, back to back, in no table of contents
+[ generation 1 ]        index.b0, then a header listing generation 0's sections and index.b0, then the trailer
+```
+
+- **Generation 0** is written first, a complete document. The frames follow it as they are coded, each a far-form section (its name, field count and length in front), so each reads on its own wherever it lands.
+- **The closing generation** (`container::append`, built at the frames' end with `Appender::build_at`) adds `index.b0`. Its `start` is the frames' end: the frames sit between the two generations, reachable by the index, which carries every frame's identity.
+- **A clip cut short** (power gone before the closing generation) reads without the index: the reader opens generation 0 alone, then walks the frames from its end. Each frame's `prev` names the frame before it (the first names generation 0) and its `hash` covers its own samples, so the walk stops at the first frame that does not parse, names another predecessor (a frame of an earlier recording left in the same blocks) or fails its hash. `Reader::repair` gives the closing generation to append there.
+- **Identities.** A band's digest is BLAKE3 of its two streams. A frame's `hash` is BLAKE3 of its bands' digests in order (each core that coded a band hashes it while it is in cache). A frame's identity is BLAKE3 of its section's bytes before its samples and after them, which hold `hash`; the next frame's `prev` is that identity, and the first frame's is BLAKE3 of generation 0's bytes.
+- **A closed clip is checked** before its index is trusted: the closing header must chain back to this generation 0, and the index's first frame must sit at generation 0's end and name it.
+
+### `track.b0` (a clip)
+As a still's track, plus:
+
+| field | type | notes |
+|---|---|---|
+| `codec` | `a` | `cfa_band` |
+| `rate_num`, `rate_den` | `u` | the frame rate asked for, frames a second as a reduced fraction (tukutahi's field names); each frame's own `at` says when it was |
+| `period_ns` | `u` | the frame period the sensor was set to when the clip started: the longer of 1 / rate and the shutter |
+
+### `clip.b0`
+The frames' common plane, with a still plane's field names and meanings (`role` `sensor`, `width`, `height`, `channel_count`, `channel_names`, `layout` `mosaic`, `cfa`, `black`, `white`, `encoding` `linear`, `depth`, `orientation`), plus:
+
+| field | type | notes |
+|---|---|---|
+| `codec` | `a` closed | `cfa_band` |
+| `codec_format` | `u` | the band code's format: 0 (Zil) |
+| `mosaic` | `a` closed | `bayer` (neighbours 2 apart) \| `quad` (2 x 2 blocks of one colour, the 1:1 quad array): how the code finds a sample's same-colour neighbours |
+| `band_rows` | `u` | rows a band; a frame has ceil(height / band_rows) bands, the last one shorter when it does not divide |
+
+### `frame`
+| field | type | notes |
+|---|---|---|
+| `index` | `u` | the sensor's frame count from the clip's first frame (0); a step of more than one is a declared hole |
+| `at` | `e6` | when the frame's readout landed, Eagle |
+| `exposure_s`, `gain` | `f5` | as `capture`'s, this frame's |
+| `focus` | `u` | the lens actuator's position, the driver's code |
+| `prev` | `hb` | the frame before's identity (generation 0's BLAKE3 for the first) |
+| `bands` | `t_u5 [n, 2]` | each band's two stream lengths in bytes |
+| `hash` | `hb` | BLAKE3 of the bands' digests |
+| `samples` | `v('c')` | **last**: the bands back to back, each band's stream A then stream B |
+
+### `index.b0`
+| field | type | notes |
+|---|---|---|
+| `count` | `u` | frames |
+| `end` | `u` | where the frames end (generation 1's `start`) |
+| `offsets`, `sizes` | `t_u6 [n]` | each frame's section: absolute offset and bytes |
+| `ids` | `t_u3 [n, 32]` | each frame's identity |
+| `index` | `t_u6 [n]` | each frame's `index` |
+| `at` | `t_i6 [n]` | each frame's `at`, Eagle oscillations |
+| `exposure_s`, `gain` | `t_f5 [n]` | |
+| `focus` | `t_u5 [n]` | |
+
+### `v('c')`: the CFA band code, format 0 (Zil)
+A mosaic of 10-bit samples, lossless.
+Each band of `band_rows` rows is coded alone (nothing carries from one band to the next), so the bands of a frame code on as many cores as there are and decode in any order.
+Per row, each sample is predicted from its own colour plane (Left in a band's first rows of each colour, else per block of 32 the cheaper of the mean of four neighbours and LOCO-I's median, one bit a block); the residual wraps to 10 bits and zigzags; each block is Rice coded with k from its mean by `clz`, sent as a short delta, the unary capped at 16 then the raw 10 bits; even blocks go to stream A and odd ones to stream B.
+The complete specification is the module documentation of `vsf::visual::cfa_band`, enough to write a decoder from it alone; ferros's `ferros_rawcodec` is the device's coder (with NEON) and writes the same bytes.
+
 ## What a reader may rely on
 - Every live section is reachable from the latest table of contents by absolute offset; no scan.
 - A plane's samples are the last field of its section, so `Document::packed` locates them from the fields before it and `packed_rows_u16` reads rows without unpacking the rest.

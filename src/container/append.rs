@@ -114,6 +114,12 @@ impl Appender {
     /// The bytes to append after `doc`'s current end: bodies, header, trailer. The caller writes them (see [`append_to_file`]) — bodies first, header, then the trailer, each synced, so a crash never leaves a trailer naming a header that is not there.
     pub fn build<S: ByteSource>(self, doc: &Document<S>) -> Result<Vec<u8>, ContainerError> {
         let base = doc.source().len();
+        self.build_at(doc, base)
+    }
+
+    /// The bytes to append at `base`, past `doc`'s end by bytes the document does not list: a recording's frames, streamed to the medium between its first generation and the one that indexes them (`visual::clip`).
+    /// `doc` may then be opened over its own bytes alone; only its current header is read again.
+    pub fn build_at<S: ByteSource>(self, doc: &Document<S>, base: u64) -> Result<Vec<u8>, ContainerError> {
         // The previous header, by offset and by hash — the link in the chain.
         let prev_offset = doc.header_offset();
         let prev_bytes = doc.source().read_vec(prev_offset, doc.header_len())?;

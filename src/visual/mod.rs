@@ -16,14 +16,17 @@ use crate::vsf_builder::VsfBuilder;
 
 pub mod av1;
 pub use av1::Av1Settings;
+pub mod cfa_band;
+pub mod clip;
 
-/// VSF's code for AV1 in a wrapped value (`VsfType::v(b'a', stream)`): Photon's avatars, `vsfimg`'s large images and, on a plane, samples written by [`av1`] (VSF YCbCr 4:2:0 for R, G, B; monochrome for one channel). The wrapped codes are the `v` type's lowercase letters (`vsf_type.rs`): `a` AV1, `o` Opus, `m` H.264, `z` zstd, `b` raw bytes, `e` encrypted.
+/// VSF's code for AV1 in a wrapped value (`VsfType::v(b'a', stream)`): Photon's avatars, `vsfimg`'s large images and, on a plane, samples written by [`av1`] (VSF YCbCr 4:2:0 for R, G, B; monochrome for one channel). The wrapped codes are the `v` type's lowercase letters (`vsf_type.rs`): `a` AV1, `c` the CFA band code (RAW video frames, [`clip`]), `o` Opus, `m` H.264, `z` zstd, `b` raw bytes, `e` encrypted.
 pub const CODEC_AV1: u8 = b'a';
 
 /// A wrapped value's codec by name, for messages: the codes this crate knows, else the letter.
 pub fn codec_name(code: u8) -> String {
     match code {
         b'a' => "av1".into(),
+        b'c' => "cfa band".into(),
         b'o' => "opus".into(),
         b'm' => "h264".into(),
         b'z' => "zstd".into(),
