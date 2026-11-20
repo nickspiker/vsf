@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Format v11: `ht`, a thing; one Rust type per 32-byte `h` marker (2026-11-20)
+
+Part of 0.11.0 before it is published (crates.io's newest is 0.10.2), so no version change.
+
+- **`ht`** names a thing: what stays the same while its content changes, such as a kist across updates, a contact across avatar changes, a hold item across edits (owner, 2026-11-20). 32 bytes, derived from what makes the thing itself (a developer key and an option, a person's identity) or minted once; each kind derives under its own context so kinds never collide. It sits beside `hp`, one version's content, and `hi`, a kind: a reference is (`hi` kind, `ht` thing), optionally with the current content as `hp`. In the hash family for the same reason as `hi`. `TypeConstraint::Thing` takes 32 bytes; `since` 11.
+- **`vsf::types::hashes`:** `Hp`, `Hb`, `Hi`, `Ht`, `HP`, `HI`, `HV`, each `#[repr(transparent)]` over `[u8; 32]`, Copy, Eq, Ord, Hash, Debug (marker then hex). Each converts only to and from its own `VsfType` variant (`from_vsf`, `TryFrom<&VsfType>`, `From<_> for VsfType`, `FromVsfType`, `IntoVsfType`): an `hb` read as an `Hp` is refused with `WrongHash::Marker`, a width other than 32 with `WrongHash::Length`. The markers whose width varies (`hs`, `hm`, `hg`, `hc`, `hk`, `hR`) have no type. An identity is never a bare `[u8; 32]`.
+- `crypto_algorithms::HASH_SHA512` keeps its id `t`: that table names algorithms for `CalibrationHash`, which writes SHA-512 as `hs`, never as a wire marker; `ht` on the wire is always a thing.
+
 ### RAW clips: `vsf::visual::clip`, `vsf::visual::cfa_band`, `v('c')` (2026-11-19)
 
 RAW video for ferros's Lumis (the owner, 2026-11-19: "VSF video, yes", lossless). Part of 0.11.0 before it is published (crates.io's newest is 0.10.2); no wire type changes and no format version: a new `v` code (length-prefixed, so an older reader carries it as an opaque blob) and new section and field names. The normative tables are `idt/image.md`, "A RAW clip".

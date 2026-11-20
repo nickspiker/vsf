@@ -416,6 +416,7 @@ pub use logging::{
 pub use logging::install_log_bridge;
 
 // Re-export main types
+pub use types::{Hb, Hi, Hp, Ht, WrongHash, HI, HP, HV};
 pub use types::{
     datetime_to_eagle_time, Ascii, NotAscii, Ssid, BitPackedTensor, EagleTime, EtType, LayoutOrder, NaScheme,
     Language, StridedTensor, Tensor, VsfType, WaAddress, WorldCell, WorldCoord, OSCILLATIONS_PER_SECOND,
@@ -732,6 +733,22 @@ mod tests {
         assert!(TypeConstraint::Idea.matches(&VsfType::hi(bytes)));
         assert!(!TypeConstraint::Idea.matches(&VsfType::hi(vec![0u8; 16])));
         assert!(!TypeConstraint::Idea.matches(&VsfType::hb(vec![0u8; 32])));
+    }
+
+    /// A thing (ht) survives a flatten and parse, and only 32 bytes of ht satisfy its constraint.
+    #[test]
+    fn test_roundtrip_ht() {
+        let bytes = vec![0xA5u8; 32];
+        let flat = VsfType::ht(bytes.clone()).flatten();
+        assert_eq!(&flat[..2], b"ht");
+        let mut ptr = 0;
+        let parsed = parse(&flat, &mut ptr).unwrap();
+        assert!(matches!(parsed, VsfType::ht(ref b) if *b == bytes), "ht round-trip failed");
+        assert_eq!(ptr, flat.len());
+        use crate::schema::TypeConstraint;
+        assert!(TypeConstraint::Thing.matches(&VsfType::ht(bytes.clone())));
+        assert!(!TypeConstraint::Thing.matches(&VsfType::ht(vec![0u8; 16])));
+        assert!(!TypeConstraint::Thing.matches(&VsfType::hi(bytes)));
     }
 
     #[test]

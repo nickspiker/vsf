@@ -85,6 +85,8 @@ pub const HASH_SHA256: u8 = b's';
 /// SHA-512 hash
 ///
 /// **Algorithm:** SHA-2 family with 64-bit words, 80 rounds **Fixed output:** 64 bytes (512 bits) **Security:** 256-bit collision resistance **Note:** On 64-bit processors, can be faster than SHA-256 despite longer output
+///
+/// An algorithm id in this table, not a wire marker: SHA-512 is written as `hs`, and `ht` on the wire is a thing.
 pub const HASH_SHA512: u8 = b't';
 
 // Reserved hash slots: a, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, u, v, w, x, y, z

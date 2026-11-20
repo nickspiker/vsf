@@ -81,7 +81,7 @@ d   o   l   x   a   e   w   v    single-letter types
 
 | Prefix | Family | Members |
 |---|---|---|
-| `h` | Hash | `hp` provenance (BLAKE3 of source bytes) `hb` file hash `hs` `hm` `hg` `hc` `hk`, plus Photon's `hP` `hR` `hI` `hV` |
+| `h` | Hash | `hp` provenance (BLAKE3 of source bytes) `hb` file hash `hs` `hm` `hg` `hc` `hk`, `hi` an idea (a kind, a meaning) `ht` a thing (the same across its versions), plus Photon's `hP` `hR` `hI` `hV`; the 32-byte ones have Rust types `Hp` `Hb` `Hi` `Ht` `HP` `HI` `HV` |
 | `g` | Signature | `ge` Ed25519 `gp` `gd` `gs` `gf` `gr` `gm` `gH` |
 | `k` | Key | `ke` Ed25519 `kx` X25519 `kp` `kc` `ka` and more |
 | `ks` | Shared secret | `ksx` `ksp` `ksk` `ksf` `ksn` `ksl` `ksh` `ksm` |

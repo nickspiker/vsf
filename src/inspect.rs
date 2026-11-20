@@ -1473,6 +1473,7 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         VsfType::hI(h) => format_crypto_hex("hI", h), // Photon identity seed
         VsfType::hV(h) => format_crypto_hex("hV", h), // Photon vault seed
         VsfType::hi(h) => format_crypto_hex("hi", h), // An idea
+        VsfType::ht(h) => format_crypto_hex("ht", h), // A thing
         // Keys (blue)
         VsfType::ke(k) => format_crypto_hex("ke", k), // Ed25519
         VsfType::kx(k) => format_crypto_hex("kx", k), // X25519
@@ -2197,6 +2198,7 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::hI(hash) => format_crypto_literal("hI", hash),
         VsfType::hV(hash) => format_crypto_literal("hV", hash),
         VsfType::hi(hash) => format_crypto_literal("hi", hash),
+        VsfType::ht(hash) => format_crypto_literal("ht", hash),
         VsfType::ge(sig) => format_crypto_literal("ge", sig),
         VsfType::gp(sig) => format_crypto_literal("gp", sig),
         VsfType::gr(sig) => format_crypto_literal("gr", sig),
@@ -2408,6 +2410,7 @@ pub fn format_value_short(vsf: &VsfType) -> String {
         VsfType::hI(hash) => format_crypto_hex("hI", hash),
         VsfType::hV(hash) => format_crypto_hex("hV", hash),
         VsfType::hi(hash) => format_crypto_hex("hi", hash),
+        VsfType::ht(hash) => format_crypto_hex("ht", hash),
         VsfType::ke(key) => format_crypto_hex("ke", key),
         VsfType::kx(key) => format_crypto_hex("kx", key),
         VsfType::kp(key) => format_crypto_hex("kp", key),

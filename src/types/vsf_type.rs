@@ -155,6 +155,7 @@ pub enum VsfType {
     hI(Vec<u8>), // Photon identity seed (BLAKE3-derived network/contacts root, 32 bytes)
     hV(Vec<u8>), // Photon vault seed (BLAKE3-derived local storage root, 32 bytes)
     hi(Vec<u8>), // An idea: a meaning, named by 32 bytes of keyed BLAKE3 over its first phrasing's locale and its text as `x` (owner, 2026-11-10: "The VSF literally needs an idea type"); phrasings in any language attach to it later. A reference to meaning, never the words themselves
+    ht(Vec<u8>), // A thing: what stays the same while its content changes (a kist across updates, a contact across avatars, a hold item across edits), named by 32 bytes derived or minted once per thing (owner, 2026-11-20). Beside `hp`, one version's content, and `hi`, a kind: a reference is (`hi` kind, `ht` thing), optionally with the current content as `hp`
 
     // Signature algorithms
     ge(Vec<u8>), // Ed25519 signature
@@ -1144,7 +1145,7 @@ impl VsfType {
 
     /// Extract as byte slice
     ///
-    /// Supports: v (wrapped bytes), t_u3 (a tensor of bytes, 1-D or not), the standard hash family (hp/hb/hs/hm/hg/hc/hk), the application-specific Photon hashes (hP/hR/hI/hV), public/symmetric keys (ke/kx/kc/ka, the verification keys kvf/kvs/kvr, the RSA signing key kgr), and signatures (ge/gp). Photon reads handle-proofs as `hP` and blobs as `ge`, so those two must be covered here.
+    /// Supports: v (wrapped bytes), t_u3 (a tensor of bytes, 1-D or not), the standard hash family (hp/hb/hs/hm/hg/hc/hk), the application-specific Photon hashes (hP/hR/hI/hV), an idea (hi), a thing (ht), public/symmetric keys (ke/kx/kc/ka, the verification keys kvf/kvs/kvr, the RSA signing key kgr), and signatures (ge/gp). Photon reads handle-proofs as `hP` and blobs as `ge`, so those two must be covered here.
     pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             VsfType::v(_, bytes) => Some(bytes),
@@ -1161,6 +1162,7 @@ impl VsfType {
             | VsfType::hI(bytes)
             | VsfType::hV(bytes)
             | VsfType::hi(bytes)
+            | VsfType::ht(bytes)
             | VsfType::ke(bytes)
             | VsfType::kx(bytes)
             | VsfType::kc(bytes)

@@ -658,6 +658,12 @@ impl VsfType {
                 flat.extend_from_slice(value);
                 flat
             }
+            VsfType::ht(value) => {
+                let mut flat = vec![b'h', b't'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
 
             // ==================== SIGNATURES ====================
             VsfType::ge(value) => {
