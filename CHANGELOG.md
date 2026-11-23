@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Packed clips: stacked exposures as frames of exact sums (2026-11-23)
+
+For Lumis's CLIP (the owner, 2026-11-23): every completed exposure is a frame of one clip, and stacked exposures (a time-lapse, Average, Difference, Motion) need frames of exact sums wider than the band code's 10 bits. Part of 0.11.0 before it is published; no wire type change. The tables are in `idt/image.md`, "A RAW clip".
+
+- **A clip's codec** (`clip.b0` `codec`): `cfa_band` as before, or `packed`: each frame's samples a bit-packed `p [height, width]` at the bits that frame needs, with `exposures` (how many it sums) and its own `black` and `white`. A `packed` clip whose `clip.b0` says `motion` carries a second plane in every frame, `motion`, after the samples, with `motion_black` and `motion_white`. A `packed` frame's `hash` is BLAKE3 of its samples' packed bytes, then its motion plane's. `index.b0` gains `exposures`, absent when every frame is a single exposure.
+- **API** (breaking, unpublished): `ClipSpec`'s `mosaic` and `band_rows` move into `codec: ClipCodec` (`CfaBand { mosaic, band_rows }` or `Packed { motion }`). `Writer::packed_frame(meta, &Sum, samples, motion)` returns the pieces around the planes' packed bytes, which the recorder writes itself. `Sum { exposures, levels, motion }`, `Levels { black, white }`, `packed_hash`. `Reader::frame` returns `Frame { meta, samples: FrameSamples::Bands { bands, payload } | FrameSamples::Packed { sum, samples, motion } }`. `Reader::packed(k)`, `Reader::frame_planes(k)` (the sensor plane and a motion plane of role `motion`, at the frame's own width and levels). `FrameEntry::exposures`. `VsfSection::encode_far_with_packed_tails`: a section's far form around trailing `p` fields whose packed bytes the caller writes.
+- **Fix:** a closed clip under 2^16 bytes opened its latest generation as generation 0 (the first read held the whole clip), so it read as cut short. Generation 0 is now the first of the chain.
+- **Tests** (`tests/visual_clip.rs`): `encode_far_with_packed_tails` against `encode_far`; packed clips with and without motion, closed, cut short inside a motion plane, damaged, repaired, checked by headers then tail, each frame at its own width (past 32 bits), bit exact; the writer refuses a plane or levels its clip does not hold.
+
 ### Format v11: `ht`, a thing; one Rust type per 32-byte `h` marker (2026-11-20)
 
 Part of 0.11.0 before it is published (crates.io's newest is 0.10.2), so no version change.

@@ -1113,19 +1113,56 @@ impl VsfSection {
     /// For a payload too large to copy into a value (a RAW video frame, written to flash as it is encoded): the section's length, its field count and the wrapped value's length are all known from `tail_len`, so nothing is patched afterwards.
     pub fn encode_far_with_tail(&self, tail: &str, code: u8, tail_len: usize) -> (Vec<u8>, Vec<u8>) {
         use crate::encoding::traits::EncodeNumber;
-        let fields: Vec<Vec<u8>> = self.fields.iter().map(|f| f.flatten()).collect();
-        // The tail field as VsfField::flatten writes it: `(` name `:` the value `)`, the value `v` code, the payload's length in bits as EWE, then the payload.
-        let mut tail_head = alloc::vec![b'('];
-        tail_head.extend_from_slice(&VsfType::d(crate::types::Ascii::name(tail)).flatten());
-        tail_head.push(b':');
-        tail_head.push(b'v');
-        tail_head.push(code);
+        // The value's head as VsfType::flatten writes a `v`: its code, then the payload's length in bits as EWE.
+        let mut value_head = alloc::vec![b'v', code];
         let bits = (tail_len as u64) << 3;
         let bits = usize::try_from(bits).expect("wrapped payload exceeds 512 MiB, the limit of a 32-bit length-in-bits");
-        tail_head.extend_from_slice(&bits.encode_number());
-        let fields_len: usize = fields.iter().map(|f| f.len()).sum::<usize>() + tail_head.len() + tail_len + 1;
+        value_head.extend_from_slice(&bits.encode_number());
+        let mut pieces = self.encode_far_around(&[(tail, value_head, tail_len)]);
+        let after = pieces.pop().expect("a piece after the payload");
+        (pieces.pop().expect("a piece before the payload"), after)
+    }
+
+    /// As [`Self::encode_far_with_tail`] with one or more fields after the section's own, each a bit-packed tensor `p` of `(name, bit_depth, shape)`, whose packed bytes (`BitPackedTensor::data`) the caller writes itself: returns the n + 1 pieces around the n payloads, so `pieces[0] ‖ data[0] ‖ pieces[1] ‖ … ‖ data[n - 1] ‖ pieces[n]` is exactly what [`Self::encode_far`] writes with those fields added.
+    /// For planes of exact sums too large to copy into a section (a stacked RAW frame).
+    pub fn encode_far_with_packed_tails(&self, tails: &[(&str, u8, &[usize])]) -> Vec<Vec<u8>> {
+        use crate::encoding::traits::EncodeNumber;
+        let tails: Vec<(&str, Vec<u8>, usize)> = tails
+            .iter()
+            .map(|&(name, bit_depth, shape)| {
+                let elements = crate::types::packed_view::shape_elements(shape).expect("bit-packed tensor shape overflows the address space");
+                let len = crate::types::packed_view::packed_bytes(elements, bit_depth).expect("bit-packed tensor bit length overflows the address space");
+                // The value's head as VsfType::flatten writes a `p`: rank, bits a sample, each dimension.
+                let mut value_head = alloc::vec![b'p'];
+                value_head.extend_from_slice(&shape.len().encode_number());
+                value_head.push(bit_depth);
+                for &d in shape {
+                    value_head.extend_from_slice(&d.encode_number());
+                }
+                (name, value_head, len)
+            })
+            .collect();
+        self.encode_far_around(&tails)
+    }
+
+    /// The far form around payloads the caller writes: each tail is a field name, its value's bytes before the payload, and the payload's length.
+    fn encode_far_around(&self, tails: &[(&str, Vec<u8>, usize)]) -> Vec<Vec<u8>> {
+        let fields: Vec<Vec<u8>> = self.fields.iter().map(|f| f.flatten()).collect();
+        // Each tail field as VsfField::flatten writes it: `(` name `:` the value's head, the payload, `)`.
+        let tail_heads: Vec<Vec<u8>> = tails
+            .iter()
+            .map(|(name, value_head, _)| {
+                let mut h = alloc::vec![b'('];
+                h.extend_from_slice(&VsfType::d(crate::types::Ascii::name(name)).flatten());
+                h.push(b':');
+                h.extend_from_slice(value_head);
+                h
+            })
+            .collect();
+        let tails_len: usize = tails.iter().zip(&tail_heads).map(|((_, _, len), h)| h.len() + len + 1).sum();
+        let fields_len: usize = fields.iter().map(|f| f.len()).sum::<usize>() + tails_len;
         let name_bytes = VsfType::d(crate::types::Ascii::name(&self.name)).flatten();
-        let n_encoded = VsfType::n(self.fields.len() + 1).flatten();
+        let n_encoded = VsfType::n(self.fields.len() + tails.len()).flatten();
         // Inclusive b{}, iterated until its own width is stable, as encode_far does.
         let base_without_b = 1 + name_bytes.len() + n_encoded.len() + fields_len + 1;
         let mut b_encoded = VsfType::b(base_without_b, true).flatten();
@@ -1137,7 +1174,7 @@ impl VsfSection {
             }
             b_encoded = new_b;
         }
-        let mut head = Vec::with_capacity(base_without_b + b_encoded.len() - tail_len - 2);
+        let mut head = Vec::new();
         head.push(b'[');
         head.extend_from_slice(&name_bytes);
         head.extend_from_slice(&n_encoded);
@@ -1145,8 +1182,13 @@ impl VsfSection {
         for f in fields {
             head.extend_from_slice(&f);
         }
-        head.extend_from_slice(&tail_head);
-        (head, alloc::vec![b')', b']'])
+        let mut pieces = alloc::vec![head];
+        for h in tail_heads {
+            pieces.last_mut().expect("the head is a piece").extend_from_slice(&h);
+            pieces.push(alloc::vec![b')']);
+        }
+        pieces.last_mut().expect("the head is a piece").push(b']');
+        pieces
     }
 
     /// Parse a section from bytes (low-level, schema-agnostic)

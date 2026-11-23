@@ -8,27 +8,34 @@
 //! [ index.b0 ][ generation 1 header: every section of generation 0 and index.b0 ][ trailer ]
 //! ```
 //!
-//! A frame's samples are `v('c')`: the CFA band code ([`super::cfa_band`]), the frame's bands back to back, each band's two bit streams one after the other, their lengths in the frame's `bands`.
+//! A clip has one codec, named in `clip.b0`:
+//! - `cfa_band`, real-time video: a frame's samples are `v('c')`, the CFA band code ([`super::cfa_band`]), the frame's bands back to back, each band's two bit streams one after the other, their lengths in the frame's `bands`;
+//! - `packed`, stacked exposures (a time-lapse, Average, Difference, Motion): a frame's samples are exact sums, a bit-packed `p [height, width]` as wide as that frame needs, with how many exposures it sums and its own `black` and `white`; a clip whose `clip.b0` says `motion` carries a second plane in every frame, `motion`, after the samples, with its own levels.
+//!
 //! The frames are not in any table of contents (a minute at 60 a second would be 3600 names); `index.b0` lists them by offset, and each frame reads on its own: its far form gives its name, field count and length.
 //!
 //! **A clip cut short** (power gone before the closing generation) is read up to its last whole frame without the index: the reader opens generation 0, then walks the frames from its end, each frame's `prev` naming the one before it (the first names generation 0), each frame's `hash` covering its own samples.
 //! The first frame that does not parse, names another predecessor (a frame of an earlier recording in the same blocks) or fails its hash ends the clip.
 //! [`Reader::repair`] then gives the closing generation to append there, so the clip is whole again.
 //!
-//! Identities: a band's digest is BLAKE3 of its two streams; a frame's `hash` is BLAKE3 of its bands' digests in order (so each worker that coded a band hashes it while it is in cache); a frame's identity is BLAKE3 of its section bytes before the samples and after them (they hold `hash`, so the identity covers everything), and the next frame's `prev` is it; the first frame's `prev` is BLAKE3 of generation 0's bytes.
+//! Identities: a band's digest is BLAKE3 of its two streams; a `cfa_band` frame's `hash` is BLAKE3 of its bands' digests in order (so each worker that coded a band hashes it while it is in cache), a `packed` frame's BLAKE3 of its samples' packed bytes then its motion plane's; a frame's identity is BLAKE3 of its section bytes other than its payloads (they hold `hash`, so the identity covers everything), and the next frame's `prev` is it; the first frame's `prev` is BLAKE3 of generation 0's bytes.
 
 use super::{bad, characterization_fields, first, push_text, text, Capture, VisualError};
 use crate::container::{Appender, ByteSource, ContainerError, Document};
 use crate::file_format::VsfSection;
 use crate::prelude::*;
 use crate::spectral_image::{self, ColourProfile};
-use crate::types::{EtType, Tensor, VsfType};
+use crate::types::{BitPackedTensor, EtType, Tensor, VsfType};
 use crate::vsf_builder::VsfBuilder;
 
 /// VSF's code for the CFA band code in a wrapped value (`v('c')`): a mosaic's samples, lossless ([`super::cfa_band`]).
 pub const CODEC_CFA_BAND: u8 = b'c';
 /// The codec as `track.b0` and `clip.b0` name it.
 pub const CODEC_NAME: &str = "cfa_band";
+/// The exact sums' codec as `track.b0` and `clip.b0` name it: each frame's planes bit-packed (`p`) at the width they need.
+pub const PACKED_NAME: &str = "packed";
+/// The field that carries a `packed` frame's motion plane, after its samples.
+pub const MOTION: &str = "motion";
 /// The frames' common description.
 pub const CLIP_SECTION: &str = "clip.b0";
 /// Every frame's section name.
@@ -68,6 +75,25 @@ impl Mosaic {
     }
 }
 
+/// How a clip's frames hold their samples: one codec a clip.
+/// Closed: a reader refuses a clip naming another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipCodec {
+    /// Real-time video, lossless 10-bit mosaics ([`super::cfa_band`]): how the code finds a sample's same-colour neighbours, and rows a band (the last band of a frame may be shorter).
+    CfaBand { mosaic: Mosaic, band_rows: usize },
+    /// Stacked exposures: each frame's exact sums bit-packed at the width they need, with their count and levels; `motion` when every frame carries a motion plane beside them.
+    Packed { motion: bool },
+}
+
+impl ClipCodec {
+    pub fn name(self) -> &'static str {
+        match self {
+            ClipCodec::CfaBand { .. } => CODEC_NAME,
+            ClipCodec::Packed { .. } => PACKED_NAME,
+        }
+    }
+}
+
 /// What every frame of a clip shares, written once in generation 0.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClipSpec {
@@ -82,17 +108,15 @@ pub struct ClipSpec {
     pub height: usize,
     /// Channel index per cell of the colour filter, `[period, period]`, as a still's plane `cfa`.
     pub cfa: Tensor<u8>,
-    pub mosaic: Mosaic,
+    pub codec: ClipCodec,
     pub channel_names: Vec<String>,
-    /// Per channel, raw counts.
+    /// Per channel, raw counts of one exposure (a `packed` frame's own levels are in its section).
     pub black: Vec<f32>,
     pub white: Vec<f32>,
-    /// Bits a sample (10 for RAW10).
+    /// Bits a sample of one exposure (10 for RAW10; a `packed` frame's own width is its tensor's).
     pub depth: u8,
     /// EXIF 274 code, a hint; the samples are in sensor order.
     pub orientation: u16,
-    /// Rows a band (the last band of a frame may be shorter).
-    pub band_rows: usize,
     pub capture: Capture,
     pub characterization: Option<ColourProfile>,
     pub observer: String,
@@ -101,9 +125,12 @@ pub struct ClipSpec {
 }
 
 impl ClipSpec {
-    /// Bands a frame.
+    /// Bands a frame: 0 for a `packed` clip.
     pub fn bands(&self) -> usize {
-        self.height.div_ceil(self.band_rows)
+        match self.codec {
+            ClipCodec::CfaBand { band_rows, .. } => self.height.div_ceil(band_rows),
+            ClipCodec::Packed { .. } => 0,
+        }
     }
 
     fn clip_fields(&self) -> Result<Vec<(String, VsfType)>, VisualError> {
@@ -124,11 +151,16 @@ impl ClipSpec {
             ("white".to_string(), VsfType::t_f5(Tensor::new(vec![k], self.white.clone()))),
             ("encoding".to_string(), VsfType::a(crate::types::Ascii::lit("linear"))),
             ("depth".to_string(), VsfType::u(self.depth as usize, false)),
-            ("codec".to_string(), VsfType::a(crate::types::Ascii::lit(CODEC_NAME))),
-            ("codec_format".to_string(), VsfType::u(super::cfa_band::FORMAT as usize, false)),
-            ("mosaic".to_string(), VsfType::a(crate::types::Ascii::lit(self.mosaic.as_str()))),
-            ("band_rows".to_string(), VsfType::u(self.band_rows, false)),
+            ("codec".to_string(), VsfType::a(crate::types::Ascii::lit(self.codec.name()))),
         ];
+        match self.codec {
+            ClipCodec::CfaBand { mosaic, band_rows } => {
+                f.push(("codec_format".to_string(), VsfType::u(super::cfa_band::FORMAT as usize, false)));
+                f.push(("mosaic".to_string(), VsfType::a(crate::types::Ascii::lit(mosaic.as_str()))));
+                f.push(("band_rows".to_string(), VsfType::u(band_rows, false)));
+            }
+            ClipCodec::Packed { motion } => f.push((MOTION.to_string(), VsfType::u0(motion))),
+        }
         if self.orientation != 1 && self.orientation != 0 {
             f.push(("orientation".to_string(), VsfType::u(self.orientation as usize, false)));
         }
@@ -140,7 +172,7 @@ impl ClipSpec {
             ("kind".to_string(), VsfType::a(crate::types::Ascii::lit("beam"))),
             ("role".to_string(), VsfType::a(crate::types::Ascii::lit("capture"))),
             ("channels".to_string(), VsfType::u(1, false)),
-            ("codec".to_string(), VsfType::a(crate::types::Ascii::lit(CODEC_NAME))),
+            ("codec".to_string(), VsfType::a(crate::types::Ascii::lit(self.codec.name()))),
             ("rate_num".to_string(), VsfType::u(self.rate_num as usize, false)),
             ("rate_den".to_string(), VsfType::u(self.rate_den as usize, false)),
             ("period_ns".to_string(), VsfType::u(self.period_ns as usize, false)),
@@ -149,7 +181,8 @@ impl ClipSpec {
 
     /// Generation 0: a complete VSF document, every section with a content hash in its entry.
     pub fn head(&self) -> Result<Vec<u8>, VisualError> {
-        if self.depth == 0 || self.depth > 16 || self.band_rows == 0 || self.band_rows & (self.cfa.shape.first().copied().unwrap_or(2) - 1) != 0 {
+        let period = self.cfa.shape.first().copied().unwrap_or(2);
+        if self.depth == 0 || self.depth > 16 || matches!(self.codec, ClipCodec::CfaBand { band_rows, .. } if band_rows == 0 || band_rows & (period - 1) != 0) {
             return Err(bad("clip: depth 1 to 16 and band rows a multiple of the CFA period"));
         }
         let mut b = VsfBuilder::new().content_hashes(true);
@@ -179,14 +212,17 @@ impl ClipSpec {
         };
         let c = section(CLIP_SECTION)?;
         let t = section("track.b0")?;
-        let codec = text(&c, "codec");
-        if codec != CODEC_NAME {
-            return Err(bad(format!("clip: codec '{codec}' is not {CODEC_NAME}")));
-        }
-        let format = c.uint("codec_format").ok_or(VisualError::Missing("clip codec_format"))?;
-        if format != super::cfa_band::FORMAT as u64 {
-            return Err(bad(format!("clip: {CODEC_NAME} format {format}, this reader knows {}", super::cfa_band::FORMAT)));
-        }
+        let codec = match text(&c, "codec").as_str() {
+            CODEC_NAME => {
+                let format = c.uint("codec_format").ok_or(VisualError::Missing("clip codec_format"))?;
+                if format != super::cfa_band::FORMAT as u64 {
+                    return Err(bad(format!("clip: {CODEC_NAME} format {format}, this reader knows {}", super::cfa_band::FORMAT)));
+                }
+                ClipCodec::CfaBand { mosaic: Mosaic::parse(&text(&c, "mosaic"))?, band_rows: c.uint("band_rows").ok_or(VisualError::Missing("clip band_rows"))? as usize }
+            }
+            PACKED_NAME => ClipCodec::Packed { motion: matches!(first(&c, MOTION), Some(VsfType::u0(true))) },
+            other => return Err(bad(format!("clip: codec '{other}' is neither {CODEC_NAME} nor {PACKED_NAME}"))),
+        };
         let k = c.uint("channel_count").ok_or(VisualError::Missing("clip channel_count"))? as usize;
         let names = super::split_n(&text(&c, "channel_names"), k, "channel_names")?;
         let cfa = match first(&c, "cfa") {
@@ -216,13 +252,12 @@ impl ClipSpec {
             width: c.uint("width").ok_or(VisualError::Missing("clip width"))? as usize,
             height: c.uint("height").ok_or(VisualError::Missing("clip height"))? as usize,
             cfa,
-            mosaic: Mosaic::parse(&text(&c, "mosaic"))?,
+            codec,
             channel_names: names,
             black: super::f32_vec(&c, "black").ok_or(VisualError::Missing("clip black"))?,
             white: super::f32_vec(&c, "white").ok_or(VisualError::Missing("clip white"))?,
             depth: c.uint("depth").ok_or(VisualError::Missing("clip depth"))? as u8,
             orientation: c.uint("orientation").map(|o| o as u16).unwrap_or(1),
-            band_rows: c.uint("band_rows").ok_or(VisualError::Missing("clip band_rows"))? as usize,
             capture,
             characterization,
             observer,
@@ -231,9 +266,11 @@ impl ClipSpec {
                 _ => None,
             }),
         };
-        // WHY: the geometry is the file's; the decoder's rows are at most cfa_band::MAX_W wide and a band at least one row, or a crafted clip would panic every reader.
-        if spec.width < super::cfa_band::MIN_W || spec.width > super::cfa_band::MAX_W || spec.width & 3 != 0 || spec.band_rows == 0 || spec.depth != super::cfa_band::BITS as u8 {
-            return Err(bad(format!("clip: {} x {} at {} bits, bands of {} rows: outside what {CODEC_NAME} format {} codes", spec.width, spec.height, spec.depth, spec.band_rows, super::cfa_band::FORMAT)));
+        // WHY: the geometry is the file's; the decoder's rows are at most cfa_band::MAX_W wide and a band at least one row, or a crafted clip would panic every reader. A packed frame's tensor is checked against the clip's width and height as it is read.
+        if let ClipCodec::CfaBand { band_rows, .. } = spec.codec {
+            if spec.width < super::cfa_band::MIN_W || spec.width > super::cfa_band::MAX_W || spec.width & 3 != 0 || band_rows == 0 || spec.depth != super::cfa_band::BITS as u8 {
+                return Err(bad(format!("clip: {} x {} at {} bits, bands of {} rows: outside what {CODEC_NAME} format {} codes", spec.width, spec.height, spec.depth, band_rows, super::cfa_band::FORMAT)));
+            }
         }
         Ok(spec)
     }
@@ -253,6 +290,24 @@ pub struct FrameMeta {
     pub focus: u32,
 }
 
+/// A plane's levels, per channel, in its own scale.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Levels {
+    pub black: Vec<f32>,
+    pub white: Vec<f32>,
+}
+
+/// What a `packed` frame says about its sums: how many exposures each sample sums, and its planes' levels in their scale (a sum of n exposures: n times one exposure's black and white).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sum {
+    /// Exposures summed into the frame, 1 for a single one.
+    pub exposures: u32,
+    /// The samples' levels.
+    pub levels: Levels,
+    /// The motion plane's levels, in a clip whose frames carry one.
+    pub motion: Option<Levels>,
+}
+
 /// BLAKE3 of a band's two streams: what the worker that coded it hashes.
 pub fn band_digest(a: &[u8], b: &[u8]) -> [u8; 32] {
     let mut h = blake3::Hasher::new();
@@ -270,10 +325,22 @@ pub fn frame_hash(digests: &[[u8; 32]]) -> [u8; 32] {
     *h.finalize().as_bytes()
 }
 
-fn identity(head: &[u8], tail: &[u8]) -> [u8; 32] {
+/// A `packed` frame's `hash`: BLAKE3 of its samples' packed bytes, then its motion plane's.
+pub fn packed_hash(samples: &[u8], motion: Option<&[u8]>) -> [u8; 32] {
     let mut h = blake3::Hasher::new();
-    h.update(head);
-    h.update(tail);
+    h.update(samples);
+    if let Some(m) = motion {
+        h.update(m);
+    }
+    *h.finalize().as_bytes()
+}
+
+/// A frame's identity: BLAKE3 of its section's bytes other than its payloads, in order.
+fn identity(pieces: &[&[u8]]) -> [u8; 32] {
+    let mut h = blake3::Hasher::new();
+    for p in pieces {
+        h.update(p);
+    }
     *h.finalize().as_bytes()
 }
 
@@ -281,6 +348,8 @@ fn identity(head: &[u8], tail: &[u8]) -> [u8; 32] {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameEntry {
     pub meta: FrameMeta,
+    /// Exposures the frame sums: 1 in a `cfa_band` clip.
+    pub exposures: u32,
     /// Absolute offset of its section, and the section's bytes.
     pub offset: u64,
     pub size: u64,
@@ -296,15 +365,36 @@ pub struct FramePieces {
     pub payload_len: usize,
 }
 
-fn frame_section(meta: &FrameMeta, prev: &[u8; 32], bands: &[[u32; 2]], hash: &[u8; 32]) -> VsfSection {
-    let mut s = VsfSection::new(FRAME_SECTION);
+fn meta_fields(s: &mut VsfSection, meta: &FrameMeta, prev: &[u8; 32]) {
     s.add_field("index", VsfType::u(meta.index as usize, false));
     s.add_field("at", VsfType::e(EtType::e6(meta.at)));
     s.add_field("exposure_s", VsfType::f5(meta.exposure_s));
     s.add_field("gain", VsfType::f5(meta.gain));
     s.add_field("focus", VsfType::u(meta.focus as usize, false));
     s.add_field("prev", VsfType::hb(prev.to_vec()));
+}
+
+fn frame_section(meta: &FrameMeta, prev: &[u8; 32], bands: &[[u32; 2]], hash: &[u8; 32]) -> VsfSection {
+    let mut s = VsfSection::new(FRAME_SECTION);
+    meta_fields(&mut s, meta, prev);
     s.add_field("bands", VsfType::t_u5(Tensor::new(vec![bands.len(), 2], bands.iter().flat_map(|b| [b[0], b[1]]).collect())));
+    s.add_field("hash", VsfType::hb(hash.to_vec()));
+    s
+}
+
+fn levels_fields(s: &mut VsfSection, black: &str, white: &str, l: &Levels) {
+    s.add_field(black, VsfType::t_f5(Tensor::new(vec![l.black.len()], l.black.clone())));
+    s.add_field(white, VsfType::t_f5(Tensor::new(vec![l.white.len()], l.white.clone())));
+}
+
+fn packed_section(meta: &FrameMeta, prev: &[u8; 32], sum: &Sum, hash: &[u8; 32]) -> VsfSection {
+    let mut s = VsfSection::new(FRAME_SECTION);
+    meta_fields(&mut s, meta, prev);
+    s.add_field("exposures", VsfType::u(sum.exposures as usize, false));
+    levels_fields(&mut s, "black", "white", &sum.levels);
+    if let Some(m) = &sum.motion {
+        levels_fields(&mut s, "motion_black", "motion_white", m);
+    }
     s.add_field("hash", VsfType::hb(hash.to_vec()));
     s
 }
@@ -312,7 +402,11 @@ fn frame_section(meta: &FrameMeta, prev: &[u8; 32], bands: &[[u32; 2]], hash: &[
 /// The clip being written: it holds generation 0 (for the closing generation) and the index so far, never a frame's samples.
 pub struct Writer {
     head: Vec<u8>,
+    codec: ClipCodec,
     bands: usize,
+    width: usize,
+    height: usize,
+    channels: usize,
     end: u64,
     prev: [u8; 32],
     frames: Vec<FrameEntry>,
@@ -322,7 +416,7 @@ impl Writer {
     /// Start a clip: write `spec.head()` first, then each frame's pieces.
     pub fn new(spec: &ClipSpec) -> Result<(Writer, Vec<u8>), VisualError> {
         let head = spec.head()?;
-        let w = Writer { prev: *blake3::hash(&head).as_bytes(), end: head.len() as u64, bands: spec.bands(), frames: Vec::new(), head: head.clone() };
+        let w = Writer { prev: *blake3::hash(&head).as_bytes(), end: head.len() as u64, codec: spec.codec, bands: spec.bands(), width: spec.width, height: spec.height, channels: spec.channel_names.len(), frames: Vec::new(), head: head.clone() };
         Ok((w, head))
     }
 
@@ -334,23 +428,65 @@ impl Writer {
         &self.frames
     }
 
-    /// The next frame: its bands' stream lengths and digests (one each per band, in order).
-    pub fn frame(&mut self, meta: &FrameMeta, bands: &[[u32; 2]], digests: &[[u8; 32]]) -> Result<FramePieces, VisualError> {
-        if bands.len() != self.bands || digests.len() != self.bands {
-            return Err(bad(format!("clip frame {}: {} bands and {} digests for {}", meta.index, bands.len(), digests.len(), self.bands)));
-        }
+    fn after(&self, meta: &FrameMeta) -> Result<(), VisualError> {
         if self.frames.last().is_some_and(|f| meta.index <= f.meta.index) {
             return Err(bad(format!("clip frame {} after frame {}", meta.index, self.frames.last().map(|f| f.meta.index).unwrap_or(0))));
         }
+        Ok(())
+    }
+
+    fn push(&mut self, meta: &FrameMeta, exposures: u32, size: u64, id: [u8; 32]) {
+        self.frames.push(FrameEntry { meta: *meta, exposures, offset: self.end, size, id });
+        self.end += size;
+        self.prev = id;
+    }
+
+    /// The next frame of a `cfa_band` clip: its bands' stream lengths and digests (one each per band, in order).
+    pub fn frame(&mut self, meta: &FrameMeta, bands: &[[u32; 2]], digests: &[[u8; 32]]) -> Result<FramePieces, VisualError> {
+        if !matches!(self.codec, ClipCodec::CfaBand { .. }) {
+            return Err(bad(format!("clip frame {}: a {} clip takes packed frames", meta.index, self.codec.name())));
+        }
+        if bands.len() != self.bands || digests.len() != self.bands {
+            return Err(bad(format!("clip frame {}: {} bands and {} digests for {}", meta.index, bands.len(), digests.len(), self.bands)));
+        }
+        self.after(meta)?;
         let payload_len = bands.iter().map(|b| b[0] as usize + b[1] as usize).sum::<usize>();
         let s = frame_section(meta, &self.prev, bands, &frame_hash(digests));
         let (head, tail) = s.encode_far_with_tail(SAMPLES, CODEC_CFA_BAND, payload_len);
-        let id = identity(&head, &tail);
-        let size = (head.len() + payload_len + tail.len()) as u64;
-        self.frames.push(FrameEntry { meta: *meta, offset: self.end, size, id });
-        self.end += size;
-        self.prev = id;
+        let id = identity(&[&head, &tail]);
+        self.push(meta, 1, (head.len() + payload_len + tail.len()) as u64, id);
         Ok(FramePieces { head, tail, payload_len })
+    }
+
+    /// The next frame of a `packed` clip: its sums `[height, width]` at whatever width they need, and its motion plane when the clip carries one (`sum.motion` its levels).
+    /// Returns the pieces around the planes' packed bytes, which the caller writes itself: `pieces[0]`, `samples.data`, `pieces[1]`, and in a motion clip `motion.data`, `pieces[2]`.
+    pub fn packed_frame(&mut self, meta: &FrameMeta, sum: &Sum, samples: &BitPackedTensor, motion: Option<&BitPackedTensor>) -> Result<Vec<Vec<u8>>, VisualError> {
+        let ClipCodec::Packed { motion: carries } = self.codec else {
+            return Err(bad(format!("clip frame {}: a {} clip takes coded bands", meta.index, self.codec.name())));
+        };
+        if carries != motion.is_some() || carries != sum.motion.is_some() {
+            return Err(bad(format!("clip frame {}: a motion plane and its levels in every frame of a motion clip, in none of another", meta.index)));
+        }
+        let shape = [self.height, self.width];
+        if samples.shape != shape || motion.is_some_and(|m| m.shape != shape) {
+            return Err(bad(format!("clip frame {}: planes of {:?}, the clip's {}x{} wants [{}, {}]", meta.index, samples.shape, self.width, self.height, self.height, self.width)));
+        }
+        let k = self.channels;
+        if [&sum.levels].into_iter().chain(&sum.motion).any(|l| l.black.len() != k || l.white.len() != k) {
+            return Err(bad(format!("clip frame {}: levels for {k} channels", meta.index)));
+        }
+        self.after(meta)?;
+        let hash = packed_hash(&samples.data, motion.map(|m| m.data.as_slice()));
+        let s = packed_section(meta, &self.prev, sum, &hash);
+        let mut tails = vec![(SAMPLES, samples.bit_depth, samples.shape.as_slice())];
+        if let Some(m) = motion {
+            tails.push((MOTION, m.bit_depth, m.shape.as_slice()));
+        }
+        let pieces = s.encode_far_with_packed_tails(&tails);
+        let id = identity(&pieces.iter().map(|p| p.as_slice()).collect::<Vec<_>>());
+        let size = pieces.iter().map(|p| p.len()).sum::<usize>() + samples.data.len() + motion.map_or(0, |m| m.data.len());
+        self.push(meta, sum.exposures, size as u64, id);
+        Ok(pieces)
     }
 
     /// The closing generation, to write at [`Self::end`]: `index.b0`, a header listing it and generation 0's sections, the trailer.
@@ -362,7 +498,7 @@ impl Writer {
 
 fn index_fields(frames: &[FrameEntry], end: u64) -> Vec<(String, VsfType)> {
     let n = frames.len();
-    vec![
+    let mut f = vec![
         ("count".to_string(), VsfType::u(n, false)),
         ("end".to_string(), VsfType::u(end as usize, false)),
         ("offsets".to_string(), VsfType::t_u6(Tensor::new(vec![n], frames.iter().map(|f| f.offset).collect()))),
@@ -373,7 +509,12 @@ fn index_fields(frames: &[FrameEntry], end: u64) -> Vec<(String, VsfType)> {
         ("exposure_s".to_string(), VsfType::t_f5(Tensor::new(vec![n], frames.iter().map(|f| f.meta.exposure_s).collect()))),
         ("gain".to_string(), VsfType::t_f5(Tensor::new(vec![n], frames.iter().map(|f| f.meta.gain).collect()))),
         ("focus".to_string(), VsfType::t_u5(Tensor::new(vec![n], frames.iter().map(|f| f.meta.focus).collect()))),
-    ]
+    ];
+    // Absent when every frame is a single exposure.
+    if frames.iter().any(|f| f.exposures != 1) {
+        f.push(("exposures".to_string(), VsfType::t_u5(Tensor::new(vec![n], frames.iter().map(|f| f.exposures).collect()))));
+    }
+    f
 }
 
 fn closing(head: &[u8], frames: &[FrameEntry], end: u64, tool: &str, action: &str) -> Result<Vec<u8>, VisualError> {
@@ -441,6 +582,11 @@ fn open_head<S: ByteSource>(source: &S) -> Result<(Vec<u8>, ClipSpec), VisualErr
     loop {
         let view = Prefix { source, len };
         let doc = Document::open(view)?;
+        // A prefix holding the whole of a closed clip (one under 2^16 bytes) opens its latest generation: generation 0 is the first of its chain, opened alone.
+        if doc.generation() > 0 {
+            len = doc.generations()?.first().map_or(len, |g| g.end);
+            continue;
+        }
         let end = doc.end();
         if end <= len {
             let spec = ClipSpec::from_doc(&doc)?;
@@ -454,22 +600,44 @@ fn open_head<S: ByteSource>(source: &S) -> Result<(Vec<u8>, ClipSpec), VisualErr
     }
 }
 
-/// A frame's section read up to its samples: its fields, where its samples are, and its identity.
+/// Where a frame's payloads are, as its section says.
+enum Payloads {
+    /// A `cfa_band` frame: its bands' stream lengths, its samples' place and length.
+    Bands { bands: Vec<[u32; 2]>, at: u64, len: u64 },
+    /// A `packed` frame: its sums, then each plane's bits a sample, place and length.
+    Packed { sum: Sum, samples: (u8, u64, u64), motion: Option<(u8, u64, u64)> },
+}
+
+/// A frame's section read up to its samples: its fields, where its payloads are, and its identity.
 struct ParsedFrame {
     meta: FrameMeta,
     prev: [u8; 32],
     hash: [u8; 32],
-    bands: Vec<[u32; 2]>,
-    samples_at: u64,
-    samples_len: u64,
+    payloads: Payloads,
     size: u64,
     id: [u8; 32],
 }
 
+impl ParsedFrame {
+    fn exposures(&self) -> u32 {
+        match &self.payloads {
+            Payloads::Bands { .. } => 1,
+            Payloads::Packed { sum, .. } => sum.exposures,
+        }
+    }
+}
+
 /// Bytes read to find a frame's fields; a frame's fields before its samples are a few hundred bytes (its bands' lengths are 8 bytes a band).
 const FRAME_HEAD_READ: u64 = 1 << 14;
+/// Bytes read after a packed frame's samples: their closing `)`, and a motion plane's field up to its packed bytes.
+const MOTION_HEAD_READ: u64 = 1 << 8;
 
-fn parse_frame<S: ByteSource>(source: &S, at: u64, bands_expected: usize) -> Result<ParsedFrame, VisualError> {
+fn levels_of(s: &VsfSection, black: &str, white: &str, k: usize) -> Option<Levels> {
+    let (black, white) = (super::f32_vec(s, black)?, super::f32_vec(s, white)?);
+    (black.len() == k && white.len() == k).then_some(Levels { black, white })
+}
+
+fn parse_frame<S: ByteSource>(source: &S, at: u64, spec: &ClipSpec) -> Result<ParsedFrame, VisualError> {
     use crate::container::skip::{field_name, skip_value_within, ValueKind};
     let size = source.len();
     let avail = size.saturating_sub(at).min(FRAME_HEAD_READ); // WHY/PROOF: `at` may be the source's end exactly (the walk's last step); saturating keeps an empty read instead of an underflow
@@ -496,8 +664,10 @@ fn parse_frame<S: ByteSource>(source: &S, at: u64, bands_expected: usize) -> Res
     if at.checked_add(len).is_none_or(|e| e > size) {
         return Err(bad(format!("frame at {at}: {len} bytes past the source's end")));
     }
+    let shape = [spec.height, spec.width];
     let mut s = VsfSection::new(FRAME_SECTION);
-    let (samples_at, samples_len, head_len) = loop {
+    // The samples' value: a cfa_band clip's `v('c')`, a packed clip's `p` of the clip's shape.
+    let (samples_at, samples_len, bits, head_len) = loop {
         match data.get(p) {
             Some(b'(') => {
                 let start = p;
@@ -508,9 +678,10 @@ fn parse_frame<S: ByteSource>(source: &S, at: u64, bands_expected: usize) -> Res
                 }
                 p += 1;
                 if fname == SAMPLES {
-                    match skip_value_within(&data, &mut p, len as usize).map_err(perr)? {
-                        ValueKind::Wrapped { code: CODEC_CFA_BAND, data_start, data_len } => break (at + data_start as u64, data_len as u64, data_start),
-                        _ => return Err(bad(format!("frame at {at}: samples not v('c')"))),
+                    match (skip_value_within(&data, &mut p, len as usize).map_err(perr)?, spec.codec) {
+                        (ValueKind::Wrapped { code: CODEC_CFA_BAND, data_start, data_len }, ClipCodec::CfaBand { .. }) => break (at + data_start as u64, data_len as u64, 0, data_start),
+                        (ValueKind::Packed { bit_depth, shape: sh, data_start, data_len }, ClipCodec::Packed { .. }) if sh == shape => break (at + data_start as u64, data_len as u64, bit_depth, data_start),
+                        _ => return Err(bad(format!("frame at {at}: samples not those of a {} clip of {}x{}", spec.codec.name(), spec.width, spec.height))),
                     }
                 }
                 p = start;
@@ -520,22 +691,9 @@ fn parse_frame<S: ByteSource>(source: &S, at: u64, bands_expected: usize) -> Res
             _ => return Err(bad(format!("frame at {at}: no samples"))),
         }
     };
-    // The samples close the section: `)` then `]`.
-    if samples_at + samples_len + 2 != at + len {
-        return Err(bad(format!("frame at {at}: samples do not end the section")));
-    }
-    let tail = source.read_vec(samples_at + samples_len, 2).map_err(ContainerError::from)?;
-    if tail != [b')', b']'] {
-        return Err(bad(format!("frame at {at}: not closed after its samples")));
-    }
+    let end = at + len;
     let h32 = |name: &str| first(&s, name).and_then(super::hash32).ok_or_else(|| bad(format!("frame at {at}: no {name}")));
-    let bands: Vec<[u32; 2]> = match first(&s, "bands") {
-        Some(VsfType::t_u5(t)) if t.shape == [bands_expected, 2] => t.data.chunks(2).map(|c| [c[0], c[1]]).collect(),
-        _ => return Err(bad(format!("frame at {at}: bands not [{bands_expected}, 2]"))),
-    };
-    if bands.iter().map(|b| b[0] as u64 + b[1] as u64).sum::<u64>() != samples_len {
-        return Err(bad(format!("frame at {at}: bands do not add up to its samples")));
-    }
+    let (prev, hash) = (h32("prev")?, h32("hash")?);
     let meta = FrameMeta {
         index: s.uint("index").ok_or_else(|| bad(format!("frame at {at}: no index")))?,
         at: super::eagle(&s, "at").ok_or_else(|| bad(format!("frame at {at}: no at")))?,
@@ -543,15 +701,107 @@ fn parse_frame<S: ByteSource>(source: &S, at: u64, bands_expected: usize) -> Res
         gain: super::f32_field(&s, "gain").unwrap_or(0.),
         focus: s.uint("focus").unwrap_or(0) as u32,
     };
-    Ok(ParsedFrame { meta, prev: h32("prev")?, hash: h32("hash")?, bands, samples_at, samples_len, size: len, id: identity(&data[..head_len], &tail) })
+    let samples_end = samples_at + samples_len;
+    let (payloads, between) = match spec.codec {
+        ClipCodec::CfaBand { .. } => {
+            let bands: Vec<[u32; 2]> = match first(&s, "bands") {
+                Some(VsfType::t_u5(t)) if t.shape == [spec.bands(), 2] => t.data.chunks(2).map(|c| [c[0], c[1]]).collect(),
+                _ => return Err(bad(format!("frame at {at}: bands not [{}, 2]", spec.bands()))),
+            };
+            if bands.iter().map(|b| b[0] as u64 + b[1] as u64).sum::<u64>() != samples_len {
+                return Err(bad(format!("frame at {at}: bands do not add up to its samples")));
+            }
+            (Payloads::Bands { bands, at: samples_at, len: samples_len }, Vec::new())
+        }
+        ClipCodec::Packed { motion: carries } => {
+            let k = spec.channel_names.len();
+            let sum = Sum {
+                exposures: s.uint("exposures").ok_or_else(|| bad(format!("frame at {at}: no exposures")))? as u32,
+                levels: levels_of(&s, "black", "white", k).ok_or_else(|| bad(format!("frame at {at}: no black and white for {k} channels")))?,
+                motion: if carries { Some(levels_of(&s, "motion_black", "motion_white", k).ok_or_else(|| bad(format!("frame at {at}: no motion_black and motion_white for {k} channels")))?) } else { None },
+            };
+            let mut motion = None;
+            let mut between = Vec::new();
+            if carries {
+                // The motion plane's field follows the samples: `)`, then `(motion:p…`, its head read here.
+                // WHY: the read must stay inside the section (the source may end at it); skip_value_within held the samples inside it, so the subtraction cannot wrap.
+                let avail = (end - samples_end).min(MOTION_HEAD_READ);
+                let w = source.read_vec(samples_end, avail).map_err(ContainerError::from)?;
+                let mut q = 0usize;
+                if w.get(q) != Some(&b')') || w.get(q + 1) != Some(&b'(') {
+                    return Err(bad(format!("frame at {at}: no motion plane after its samples")));
+                }
+                q += 2;
+                if field_name(&w, &mut q).map_err(perr)? != MOTION || w.get(q) != Some(&b':') {
+                    return Err(bad(format!("frame at {at}: no motion plane after its samples")));
+                }
+                q += 1;
+                match skip_value_within(&w, &mut q, (end - samples_end) as usize).map_err(perr)? {
+                    ValueKind::Packed { bit_depth, shape: sh, data_start, data_len } if sh == shape => {
+                        between = w[..data_start].to_vec();
+                        motion = Some((bit_depth, samples_end + data_start as u64, data_len as u64));
+                    }
+                    _ => return Err(bad(format!("frame at {at}: motion plane not p [{}, {}]", spec.height, spec.width))),
+                }
+            }
+            (Payloads::Packed { sum, samples: (bits, samples_at, samples_len), motion }, between)
+        }
+    };
+    // The last payload closes the section: `)` then `]`.
+    let last_end = match &payloads {
+        Payloads::Packed { motion: Some((_, m, l)), .. } => m + l,
+        _ => samples_end,
+    };
+    if last_end + 2 != end {
+        return Err(bad(format!("frame at {at}: its payloads do not end the section")));
+    }
+    let tail = source.read_vec(last_end, 2).map_err(ContainerError::from)?;
+    if tail != [b')', b']'] {
+        return Err(bad(format!("frame at {at}: not closed after its payloads")));
+    }
+    let id = identity(&[&data[..head_len], &between, &tail]);
+    Ok(ParsedFrame { meta, prev, hash, payloads, size: len, id })
 }
 
-/// One frame read back: its facts, its bands' stream lengths and its samples (the code, not yet decoded).
+/// A frame's samples as read back.
+#[derive(Debug, Clone)]
+pub enum FrameSamples {
+    /// A `cfa_band` frame: its bands' stream lengths and their streams, the code not yet decoded.
+    Bands { bands: Vec<[u32; 2]>, payload: Vec<u8> },
+    /// A `packed` frame: its sums' count and levels, its samples, and its motion plane in a motion clip.
+    Packed { sum: Sum, samples: BitPackedTensor, motion: Option<BitPackedTensor> },
+}
+
+/// One frame read back: its facts and its samples, checked against its `hash`.
 #[derive(Debug, Clone)]
 pub struct Frame {
     pub meta: FrameMeta,
-    pub bands: Vec<[u32; 2]>,
-    pub payload: Vec<u8>,
+    pub samples: FrameSamples,
+}
+
+/// Read a frame's payloads and check them against its `hash`.
+fn read_payloads<S: ByteSource>(source: &S, f: ParsedFrame, spec: &ClipSpec) -> Result<Frame, VisualError> {
+    let samples = match f.payloads {
+        Payloads::Bands { bands, at, len } => {
+            let payload = source.read_vec(at, len).map_err(ContainerError::from)?;
+            if frame_hash(&digests(&payload, &bands)) != f.hash {
+                return Err(bad(format!("frame {}: its samples fail its hash", f.meta.index)));
+            }
+            FrameSamples::Bands { bands, payload }
+        }
+        Payloads::Packed { sum, samples: (bits, at, len), motion } => {
+            let data = source.read_vec(at, len).map_err(ContainerError::from)?;
+            let motion = match motion {
+                Some((mb, mat, mlen)) => Some((mb, source.read_vec(mat, mlen).map_err(ContainerError::from)?)),
+                None => None,
+            };
+            if packed_hash(&data, motion.as_ref().map(|m| m.1.as_slice())) != f.hash {
+                return Err(bad(format!("frame {}: its samples fail its hash", f.meta.index)));
+            }
+            FrameSamples::Packed { sum, samples: BitPackedTensor { bit_depth: bits, shape: vec![spec.height, spec.width], data }, motion: motion.map(|(mb, data)| BitPackedTensor { bit_depth: mb, shape: vec![spec.height, spec.width], data }) }
+        }
+    };
+    Ok(Frame { meta: f.meta, samples })
 }
 
 /// A clip open for reading.
@@ -637,7 +887,7 @@ impl<S: ByteSource> Reader<S> {
             let end = ix.uint("end").ok_or(VisualError::Missing("index end"))?;
             // The index's first frame must be the one at generation 0's end, naming it: two recordings with equal generations 0 (equal settings started in the same nanosecond) still differ there.
             let first_ok = match frames.first() {
-                Some(f0) => f0.offset == head.len() as u64 && parse_frame(&source, f0.offset, spec.bands()).is_ok_and(|p| p.id == f0.id && p.prev == *blake3::hash(&head).as_bytes()),
+                Some(f0) => f0.offset == head.len() as u64 && parse_frame(&source, f0.offset, &spec).is_ok_and(|p| p.id == f0.id && p.prev == *blake3::hash(&head).as_bytes()),
                 None => end == head.len() as u64,
             };
             if first_ok {
@@ -653,20 +903,17 @@ impl<S: ByteSource> Reader<S> {
     fn walk(&mut self, samples: bool) {
         let mut prev = *blake3::hash(&self.head).as_bytes();
         let mut at = self.head.len() as u64;
-        let bands = self.spec.bands();
-        while let Ok(f) = parse_frame(&self.source, at, bands) {
+        while let Ok(f) = parse_frame(&self.source, at, &self.spec) {
             if f.prev != prev || self.frames.last().is_some_and(|l| f.meta.index <= l.meta.index) {
                 break;
             }
-            if samples {
-                let Ok(payload) = self.source.read_vec(f.samples_at, f.samples_len) else { break };
-                if frame_hash(&digests(&payload, &f.bands)) != f.hash {
-                    break;
-                }
+            let (meta, exposures, size, id) = (f.meta, f.exposures(), f.size, f.id);
+            if samples && read_payloads(&self.source, f, &self.spec).is_err() {
+                break;
             }
-            self.frames.push(FrameEntry { meta: f.meta, offset: at, size: f.size, id: f.id });
-            prev = f.id;
-            at += f.size;
+            self.frames.push(FrameEntry { meta, exposures, offset: at, size, id });
+            prev = id;
+            at += size;
         }
         self.end = at;
     }
@@ -699,21 +946,25 @@ impl<S: ByteSource> Reader<S> {
     /// Frame `k`, its samples checked against its `hash` and its place against the index.
     pub fn frame(&self, k: usize) -> Result<Frame, VisualError> {
         let e = &self.frames[k];
-        let f = parse_frame(&self.source, e.offset, self.spec.bands())?;
+        let f = parse_frame(&self.source, e.offset, &self.spec)?;
         if f.id != e.id || f.size != e.size {
             return Err(bad(format!("frame {k}: not the frame the index names")));
         }
-        let payload = self.source.read_vec(f.samples_at, f.samples_len).map_err(ContainerError::from)?;
-        if frame_hash(&digests(&payload, &f.bands)) != f.hash {
-            return Err(bad(format!("frame {k}: its samples fail its hash")));
-        }
-        Ok(Frame { meta: f.meta, bands: f.bands, payload })
+        read_payloads(&self.source, f, &self.spec)
     }
 
-    /// Frame `k`'s samples, `width x height` in sensor order.
+    /// Frame `k`'s samples of a `cfa_band` clip, `width x height` in sensor order.
     pub fn decode(&self, k: usize) -> Result<Vec<u16>, VisualError> {
         let f = self.frame(k)?;
         decode_frame(&self.spec, &f)
+    }
+
+    /// Frame `k` of a `packed` clip: its sums' count and levels, its samples `[height, width]`, and its motion plane in a motion clip.
+    pub fn packed(&self, k: usize) -> Result<(Sum, BitPackedTensor, Option<BitPackedTensor>), VisualError> {
+        match self.frame(k)?.samples {
+            FrameSamples::Packed { sum, samples, motion } => Ok((sum, samples, motion)),
+            FrameSamples::Bands { .. } => Err(bad(format!("frame {k}: a {CODEC_NAME} frame, not packed"))),
+        }
     }
 
     /// The closing generation for a recovered clip, to append at [`Self::end`] (then the clip is `end() + bytes` long and reads by its index).
@@ -721,17 +972,41 @@ impl<S: ByteSource> Reader<S> {
         closing(&self.head, &self.frames, self.end, tool, "clip repair")
     }
 
-    /// Frame `k` as a still's sensor plane (track `b0`, seq `clip`), bit-packed, for every reader of planes.
+    /// Frame `k` as a still's sensor plane (track `b0`, seq `clip`), bit-packed, for every reader of planes; a `packed` frame's at its own width and levels.
     pub fn frame_plane(&self, k: usize) -> Result<super::Plane, VisualError> {
+        Ok(self.frame_planes(k)?.0)
+    }
+
+    /// Frame `k` as a still's planes: its sensor plane, and a `packed` motion clip's motion plane beside it (role `motion`, as a still's).
+    pub fn frame_planes(&self, k: usize) -> Result<(super::Plane, Option<super::Plane>), VisualError> {
         let f = self.frame(k)?;
-        let px = decode_frame(&self.spec, &f)?;
         let sp = &self.spec;
-        let samples = crate::types::BitPackedTensor::pack_u16(sp.depth, vec![sp.height, sp.width], &px);
-        let channels = sp.channel_names.iter().map(|n| crate::spectral_image::SpectralChannel { name: n.clone(), curve: None }).collect();
-        let mut p = super::Plane::sensor("b0", "clip", sp.width, sp.height, channels, crate::spectral_image::PlaneLayout::Mosaic { cfa: sp.cfa.clone() }, sp.black.clone(), sp.white.clone(), samples);
-        p.orientation = sp.orientation;
-        p.at = Some(f.meta.at);
-        Ok(p)
+        let channels: Vec<crate::spectral_image::SpectralChannel> = sp.channel_names.iter().map(|n| crate::spectral_image::SpectralChannel { name: n.clone(), curve: None }).collect();
+        let layout = crate::spectral_image::PlaneLayout::Mosaic { cfa: sp.cfa.clone() };
+        let plane = |samples: BitPackedTensor, l: Levels| {
+            let mut p = super::Plane::sensor("b0", "clip", sp.width, sp.height, channels.clone(), layout.clone(), l.black, l.white, samples);
+            p.orientation = sp.orientation;
+            p.at = Some(f.meta.at);
+            p
+        };
+        match &f.samples {
+            FrameSamples::Bands { .. } => {
+                let px = decode_frame(sp, &f)?;
+                Ok((plane(BitPackedTensor::pack_u16(sp.depth, vec![sp.height, sp.width], &px), Levels { black: sp.black.clone(), white: sp.white.clone() }), None))
+            }
+            FrameSamples::Packed { sum, samples, motion } => {
+                let motion = match (motion, &sum.motion) {
+                    (Some(m), Some(l)) => {
+                        let mut p = plane(m.clone(), l.clone());
+                        p.name = MOTION.into();
+                        p.role = super::PlaneRole::Motion;
+                        Some(p)
+                    }
+                    _ => None,
+                };
+                Ok((plane(samples.clone(), sum.levels.clone()), motion))
+            }
+        }
     }
 }
 
@@ -748,17 +1023,20 @@ fn digests(payload: &[u8], bands: &[[u32; 2]]) -> Vec<[u8; 32]> {
         .collect()
 }
 
-/// Decode a frame's bands into samples.
+/// Decode a `cfa_band` frame's bands into samples.
 pub fn decode_frame(spec: &ClipSpec, f: &Frame) -> Result<Vec<u16>, VisualError> {
-    let (w, h, br) = (spec.width, spec.height, spec.band_rows);
+    let (ClipCodec::CfaBand { mosaic, band_rows: br }, FrameSamples::Bands { bands, payload }) = (spec.codec, &f.samples) else {
+        return Err(bad(format!("frame {}: not a {CODEC_NAME} frame", f.meta.index)));
+    };
+    let (w, h) = (spec.width, spec.height);
     let mut out = vec![0u16; w * h];
     let mut work = alloc::boxed::Box::new(super::cfa_band::Work::new());
     let mut at = 0usize;
-    for (k, b) in f.bands.iter().enumerate() {
+    for (k, b) in bands.iter().enumerate() {
         let (la, lb) = (b[0] as usize, b[1] as usize);
         let y0 = k * br;
         let rows = br.min(h - y0);
-        let used = super::cfa_band::decode_band(&f.payload[at..at + la], &f.payload[at + la..at + la + lb], w, rows, spec.mosaic.band(), &mut work, &mut out[y0 * w..], w);
+        let used = super::cfa_band::decode_band(&payload[at..at + la], &payload[at + la..at + la + lb], w, rows, mosaic.band(), &mut work, &mut out[y0 * w..], w);
         // A whole band uses exactly its two streams; anything else is a stream that does not match its lengths.
         if used != (la, lb) {
             return Err(bad(format!("band {k}: used {:?} of streams of {la} and {lb} bytes", used)));
@@ -787,10 +1065,12 @@ fn read_index(s: &VsfSection) -> Result<Vec<FrameEntry>, VisualError> {
     };
     let f5 = |name: &str| super::f32_vec(s, name).filter(|v| v.len() == n).unwrap_or_else(|| vec![0.; n]);
     let (exposure, gain) = (f5("exposure_s"), f5("gain"));
-    let focus = super::u32_vec(s, "focus").filter(|v| v.len() == n).unwrap_or_else(|| vec![0; n]);
+    let u5 = |name: &str, or: u32| super::u32_vec(s, name).filter(|v| v.len() == n).unwrap_or_else(|| vec![or; n]);
+    let (focus, exposures) = (u5("focus", 0), u5("exposures", 1));
     Ok((0..n)
         .map(|k| FrameEntry {
             meta: FrameMeta { index: index[k], at: at[k], exposure_s: exposure[k], gain: gain[k], focus: focus[k] },
+            exposures: exposures[k],
             offset: offsets[k],
             size: sizes[k],
             id: ids[k * 32..k * 32 + 32].try_into().expect("32-byte chunk"),

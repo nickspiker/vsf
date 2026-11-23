@@ -3,7 +3,8 @@
 use vsf::file_format::VsfSection;
 use vsf::types::{Tensor, VsfType};
 use vsf::visual::cfa_band::{self, Cfa, Work};
-use vsf::visual::clip::{self, ClipSpec, FrameMeta, Mosaic, Reader, Writer};
+use vsf::types::BitPackedTensor;
+use vsf::visual::clip::{self, ClipCodec, ClipSpec, FrameMeta, Levels, Mosaic, Reader, Sum, Writer};
 use vsf::visual::Capture;
 
 fn lcg(s: &mut u64) -> u64 {
@@ -45,13 +46,12 @@ fn spec(w: usize, h: usize) -> ClipSpec {
         width: w,
         height: h,
         cfa: Tensor::new(vec![2, 2], vec![1, 2, 0, 1]),
-        mosaic: Mosaic::Bayer,
+        codec: ClipCodec::CfaBand { mosaic: Mosaic::Bayer, band_rows: 64 },
         channel_names: vec!["R".into(), "G".into(), "B".into()],
         black: vec![64.; 3],
         white: vec![1023.; 3],
         depth: 10,
         orientation: 1,
-        band_rows: 64,
         capture: Capture { make: "test".into(), model: "clip".into(), mode: "video".into(), ..Capture::default() },
         characterization: None,
         observer: String::new(),
@@ -327,4 +327,161 @@ fn a_grade_appends_and_the_clip_still_reads_by_its_index() {
     assert_eq!(r.visual().unwrap().default_graph().unwrap().to_view_transform().ops, ops2);
     // A still's reader refuses the clip: it has no plane.
     assert!(vsf::visual::Visual::read(file.as_slice()).is_err());
+}
+
+#[test]
+fn far_with_packed_tails_is_encode_far() {
+    let (a, b) = (BitPackedTensor::pack_u64(34, vec![3, 5], &(0..15u64).map(|i| i << 30).collect::<Vec<_>>()), BitPackedTensor::pack_u16(11, vec![3, 5], &(0..15u16).map(|i| i * 100).collect::<Vec<_>>()));
+    for two in [false, true] {
+        let mut s = VsfSection::new("frame");
+        s.add_field("index", VsfType::u(3, false));
+        let mut tails = vec![("samples", a.bit_depth, a.shape.as_slice())];
+        if two {
+            tails.push(("motion", b.bit_depth, b.shape.as_slice()));
+        }
+        let pieces = s.encode_far_with_packed_tails(&tails);
+        let mut whole = pieces[0].clone();
+        whole.extend_from_slice(&a.data);
+        whole.extend_from_slice(&pieces[1]);
+        s.add_field("samples", VsfType::p(a.clone()));
+        if two {
+            whole.extend_from_slice(&b.data);
+            whole.extend_from_slice(&pieces[2]);
+            s.add_field("motion", VsfType::p(b.clone()));
+        }
+        assert_eq!(whole, s.encode_far(), "motion {two}");
+    }
+}
+
+/// A frame of exact sums of `n` exposures: wide enough that a u16 would not hold them.
+fn sums(w: usize, h: usize, n: u64, seed: u64) -> Vec<u64> {
+    let mut s = seed;
+    (0..w * h).map(|_| n * 64 + (lcg(&mut s) & 1023) * n / 2).collect()
+}
+
+fn packed_tensor(px: &[u64], w: usize, h: usize) -> BitPackedTensor {
+    let peak = px.iter().copied().max().unwrap_or(0);
+    BitPackedTensor::pack_u64((64 - peak.leading_zeros()).max(1) as u8, vec![h, w], px)
+}
+
+/// Record `n` packed frames, each summing more exposures than the last; returns the bytes before the closing generation, the closing generation, and each frame's sums and motion sums.
+fn record_packed(sp: &ClipSpec, n: usize, seed: u64) -> (Vec<u8>, Vec<u8>, Vec<(Vec<u64>, Option<Vec<u64>>)>) {
+    let (w, h) = (sp.width, sp.height);
+    let motion = matches!(sp.codec, ClipCodec::Packed { motion: true });
+    let (mut wr, head) = Writer::new(sp).unwrap();
+    let mut file = head;
+    let mut planes = Vec::new();
+    for k in 0..n {
+        let e = 1u64 << (8 * k as u32 + 3);
+        let px = sums(w, h, e, seed + k as u64);
+        let m = motion.then(|| sums(w, h, e >> 1, seed + 100 + k as u64));
+        let (t, mt) = (packed_tensor(&px, w, h), m.as_ref().map(|m| packed_tensor(m, w, h)));
+        let sum = Sum { exposures: e as u32, levels: Levels { black: vec![(e * 64) as f32; 3], white: vec![(e * 1023) as f32; 3] }, motion: motion.then(|| Levels { black: vec![0.; 3], white: vec![(e * 1023) as f32; 3] }) };
+        let meta = FrameMeta { index: k as u64, at: (1 << 40) + k as i64 * (1 << 33), exposure_s: 1. / 64., gain: 1., focus: 300 + k as u32 };
+        let pieces = wr.packed_frame(&meta, &sum, &t, mt.as_ref()).unwrap();
+        assert_eq!(wr.frames().last().unwrap().offset, file.len() as u64);
+        file.extend_from_slice(&pieces[0]);
+        file.extend_from_slice(&t.data);
+        file.extend_from_slice(&pieces[1]);
+        if let Some(mt) = &mt {
+            file.extend_from_slice(&mt.data);
+            file.extend_from_slice(&pieces[2]);
+        }
+        assert_eq!(wr.end(), file.len() as u64);
+        planes.push((px, m));
+    }
+    let closing = wr.close("test", "clip close").unwrap();
+    (file, closing, planes)
+}
+
+fn packed_spec(w: usize, h: usize, motion: bool) -> ClipSpec {
+    let mut sp = spec(w, h);
+    sp.codec = ClipCodec::Packed { motion };
+    sp.title = "time-lapse".into();
+    sp
+}
+
+fn check_packed<S: vsf::container::ByteSource>(r: &Reader<S>, planes: &[(Vec<u64>, Option<Vec<u64>>)]) {
+    assert_eq!(r.frames().len(), planes.len());
+    for (k, (px, m)) in planes.iter().enumerate() {
+        let e = 1u32 << (8 * k as u32 + 3);
+        assert_eq!(r.frames()[k].exposures, e);
+        let (sum, t, mt) = r.packed(k).unwrap();
+        assert_eq!(sum.exposures, e);
+        assert_eq!(sum.levels.white, vec![(e as u64 * 1023) as f32; 3]);
+        assert_eq!(&t.unpack_u64(), px, "frame {k}");
+        assert_eq!(mt.map(|t| t.unpack_u64()), *m, "frame {k} motion");
+    }
+}
+
+#[test]
+fn a_packed_clip_holds_exact_sums_at_each_frames_own_width() {
+    for motion in [false, true] {
+        let sp = packed_spec(96, 40, motion);
+        let (mut file, closing, planes) = record_packed(&sp, 4, 3);
+        file.extend_from_slice(&closing);
+        let r = Reader::open(file.as_slice()).unwrap();
+        assert!(!r.recovered());
+        assert_eq!(r.spec(), &sp);
+        check_packed(&r, &planes);
+        // Each frame's width follows its sums: the last frame's past 32 bits.
+        let widths: Vec<u8> = (0..4).map(|k| r.packed(k).unwrap().1.bit_depth).collect();
+        assert!(widths.windows(2).all(|w| w[0] < w[1]) && widths[3] > 32, "{widths:?}");
+        // As a still's planes: the sensor plane at the frame's own width and levels, the motion plane beside it.
+        let (p, mp) = r.frame_planes(3).unwrap();
+        assert_eq!(p.depth, widths[3]);
+        assert_eq!(p.black, vec![((1u64 << 27) * 64) as f32; 3]);
+        assert_eq!(p.packed_samples().unwrap().unpack_u64(), planes[3].0);
+        assert_eq!(mp.is_some(), motion);
+        if let Some(mp) = mp {
+            assert_eq!(mp.role, vsf::visual::PlaneRole::Motion);
+            assert_eq!(mp.packed_samples().unwrap().unpack_u64(), *planes[3].1.as_ref().unwrap());
+        }
+        // A cfa_band reading of a packed frame refuses.
+        assert!(r.decode(0).is_err());
+    }
+}
+
+#[test]
+fn a_packed_clip_cut_short_recovers_and_repairs() {
+    let sp = packed_spec(64, 32, true);
+    let (file, _closing, planes) = record_packed(&sp, 4, 9);
+    let r = Reader::open(file.as_slice()).unwrap();
+    assert!(r.recovered());
+    check_packed(&r, &planes);
+    let mut fixed = file.clone();
+    fixed.extend_from_slice(&r.repair("test").unwrap());
+    let r2 = Reader::open(fixed.as_slice()).unwrap();
+    assert!(!r2.recovered());
+    check_packed(&r2, &planes);
+    // Cut inside frame 2's motion plane: frames 0 and 1 come back.
+    let cut = (r.frames()[2].offset + r.frames()[2].size) as usize - 10;
+    let r3 = Reader::open(&file[..cut]).unwrap();
+    check_packed(&r3, &planes[..2]);
+    // A motion sample damaged: its frame fails its hash, the clip ends before it.
+    let mut bad = file.clone();
+    bad[(r.frames()[3].offset + r.frames()[3].size) as usize - 20] ^= 1;
+    let r4 = Reader::open(bad.as_slice()).unwrap();
+    check_packed(&r4, &planes[..3]);
+    // Headers only, then the tail checked: the same ending.
+    let r5 = Reader::open_tail_checked(bad.as_slice(), 2).unwrap();
+    check_packed(&r5, &planes[..3]);
+}
+
+#[test]
+fn a_packed_writer_refuses_what_its_clip_does_not_hold() {
+    let sp = packed_spec(32, 16, false);
+    let (mut wr, _) = Writer::new(&sp).unwrap();
+    let meta = FrameMeta { index: 0, at: 1 << 40, exposure_s: 1., gain: 1., focus: 0 };
+    let t = packed_tensor(&sums(32, 16, 4, 1), 32, 16);
+    let levels = Levels { black: vec![256.; 3], white: vec![4092.; 3] };
+    // A motion plane in a clip without one, a wrong shape, levels for the wrong channel count, a band frame.
+    assert!(wr.packed_frame(&meta, &Sum { exposures: 4, levels: levels.clone(), motion: Some(levels.clone()) }, &t, Some(&t)).is_err());
+    assert!(wr.packed_frame(&meta, &Sum { exposures: 4, levels: levels.clone(), motion: None }, &packed_tensor(&sums(16, 32, 4, 1), 16, 32), None).is_err());
+    assert!(wr.packed_frame(&meta, &Sum { exposures: 4, levels: Levels { black: vec![256.], white: vec![4092.] }, motion: None }, &t, None).is_err());
+    assert!(wr.frame(&meta, &[], &[]).is_err());
+    assert!(wr.packed_frame(&meta, &Sum { exposures: 4, levels, motion: None }, &t, None).is_ok());
+    // And a cfa_band clip takes no packed frame.
+    let (mut wb, _) = Writer::new(&spec(64, 64)).unwrap();
+    assert!(wb.packed_frame(&meta, &Sum { exposures: 1, levels: Levels { black: vec![64.; 3], white: vec![1023.; 3] }, motion: None }, &packed_tensor(&sums(64, 64, 1, 1), 64, 64), None).is_err());
 }

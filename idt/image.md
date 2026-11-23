@@ -154,7 +154,8 @@ Unchanged from `spectral_image` (`handle`, `calibration_hash`, `camera_ihi`, `id
 ## A RAW clip (2026-11-19)
 
 RAW video as ferros records it (Lumis; the owner, 2026-11-19: "VSF video, yes"): one document per clip, written while it is recorded, lossless.
-Implemented in `vsf::visual::clip` (writer, reader, recovery, repair) and `vsf::visual::cfa_band` (the samples' code).
+A clip has one codec: `cfa_band`, real-time video of 10-bit mosaics, or `packed` (the owner, 2026-11-23), stacked exposures (a time-lapse, Average, Difference, Motion) whose frames are exact sums, bit-packed as wide as each frame needs, as a still's sensor plane of sums is.
+Implemented in `vsf::visual::clip` (writer, reader, recovery, repair) and `vsf::visual::cfa_band` (the band code).
 Nothing here changes a wire type: a new `v` code and new section and field names, which an older reader carries or skips.
 
 ```
@@ -166,7 +167,7 @@ Nothing here changes a wire type: a new `v` code and new section and field names
 - **Generation 0** is written first, a complete document. The frames follow it as they are coded, each a far-form section (its name, field count and length in front), so each reads on its own wherever it lands.
 - **The closing generation** (`container::append`, built at the frames' end with `Appender::build_at`) adds `index.b0`. Its `start` is the frames' end: the frames sit between the two generations, reachable by the index, which carries every frame's identity.
 - **A clip cut short** (power gone before the closing generation) reads without the index: the reader opens generation 0 alone, then walks the frames from its end. Each frame's `prev` names the frame before it (the first names generation 0) and its `hash` covers its own samples, so the walk stops at the first frame that does not parse, names another predecessor (a frame of an earlier recording left in the same blocks) or fails its hash. `Reader::repair` gives the closing generation to append there.
-- **Identities.** A band's digest is BLAKE3 of its two streams. A frame's `hash` is BLAKE3 of its bands' digests in order (each core that coded a band hashes it while it is in cache). A frame's identity is BLAKE3 of its section's bytes before its samples and after them, which hold `hash`; the next frame's `prev` is that identity, and the first frame's is BLAKE3 of generation 0's bytes.
+- **Identities.** A band's digest is BLAKE3 of its two streams. A `cfa_band` frame's `hash` is BLAKE3 of its bands' digests in order (each core that coded a band hashes it while it is in cache); a `packed` frame's is BLAKE3 of its samples' packed bytes, then its motion plane's. A frame's identity is BLAKE3 of its section's bytes other than its payloads (the bytes before, between and after them, which hold `hash`); the next frame's `prev` is that identity, and the first frame's is BLAKE3 of generation 0's bytes.
 - **A closed clip is checked** before its index is trusted: the closing header must chain back to this generation 0, and the index's first frame must sit at generation 0's end and name it.
 
 ### `track.b0` (a clip)
@@ -174,31 +175,36 @@ As a still's track, plus:
 
 | field | type | notes |
 |---|---|---|
-| `codec` | `a` | `cfa_band` |
+| `codec` | `a` | as `clip.b0`'s |
 | `rate_num`, `rate_den` | `u` | the frame rate asked for, frames a second as a reduced fraction (tukutahi's field names); each frame's own `at` says when it was |
 | `period_ns` | `u` | the frame period the sensor was set to when the clip started: the longer of 1 / rate and the shutter |
 
 ### `clip.b0`
-The frames' common plane, with a still plane's field names and meanings (`role` `sensor`, `width`, `height`, `channel_count`, `channel_names`, `layout` `mosaic`, `cfa`, `black`, `white`, `encoding` `linear`, `depth`, `orientation`), plus:
+The frames' common plane, with a still plane's field names and meanings (`role` `sensor`, `width`, `height`, `channel_count`, `channel_names`, `layout` `mosaic`, `cfa`, `black`, `white`, `encoding` `linear`, `depth`, `orientation`); in a `packed` clip `black`, `white` and `depth` are one exposure's, each frame carrying its own. Plus:
 
 | field | type | notes |
 |---|---|---|
-| `codec` | `a` closed | `cfa_band` |
-| `codec_format` | `u` | the band code's format: 0 (Zil) |
-| `mosaic` | `a` closed | `bayer` (neighbours 2 apart) \| `quad` (2 x 2 blocks of one colour, the 1:1 quad array): how the code finds a sample's same-colour neighbours |
-| `band_rows` | `u` | rows a band; a frame has ceil(height / band_rows) bands, the last one shorter when it does not divide |
+| `codec` | `a` closed | `cfa_band` \| `packed` |
+| `codec_format` | `u` | `cfa_band`: the band code's format, 0 (Zil) |
+| `mosaic` | `a` closed | `cfa_band`: `bayer` (neighbours 2 apart) \| `quad` (2 x 2 blocks of one colour, the 1:1 quad array): how the code finds a sample's same-colour neighbours |
+| `band_rows` | `u` | `cfa_band`: rows a band; a frame has ceil(height / band_rows) bands, the last one shorter when it does not divide |
+| `motion` | `u0` | `packed`: true when every frame carries a motion plane after its samples (Motion: the summed differences beside the summed frames); absent ⇒ false |
 
 ### `frame`
 | field | type | notes |
 |---|---|---|
 | `index` | `u` | the sensor's frame count from the clip's first frame (0); a step of more than one is a declared hole |
 | `at` | `e6` | when the frame's readout landed, Eagle |
-| `exposure_s`, `gain` | `f5` | as `capture`'s, this frame's |
+| `exposure_s`, `gain` | `f5` | as `capture`'s, this frame's (in a `packed` frame, each exposure's) |
 | `focus` | `u` | the lens actuator's position, the driver's code |
 | `prev` | `hb` | the frame before's identity (generation 0's BLAKE3 for the first) |
-| `bands` | `t_u5 [n, 2]` | each band's two stream lengths in bytes |
-| `hash` | `hb` | BLAKE3 of the bands' digests |
-| `samples` | `v('c')` | **last**: the bands back to back, each band's stream A then stream B |
+| `bands` | `t_u5 [n, 2]` | `cfa_band`: each band's two stream lengths in bytes |
+| `exposures` | `u` | `packed`: exposures summed into the frame, 1 for a single one |
+| `black`, `white` | `t_f5 [channel_count]` | `packed`: the samples' levels in their own scale (a sum of n exposures: n times one exposure's) |
+| `motion_black`, `motion_white` | `t_f5 [channel_count]` | `packed`, a motion clip: the motion plane's levels |
+| `hash` | `hb` | `cfa_band`: BLAKE3 of the bands' digests; `packed`: BLAKE3 of the samples' packed bytes, then the motion plane's |
+| `samples` | `v('c')` or `p` | after every other field but `motion`: `cfa_band`, the bands back to back, each band's stream A then stream B; `packed`, the exact sums, `p [height, width]` at the bits that frame needs |
+| `motion` | `p` | `packed`, a motion clip, **last**: the summed differences, `p [height, width]` at its own bits |
 
 ### `index.b0`
 | field | type | notes |
@@ -211,6 +217,7 @@ The frames' common plane, with a still plane's field names and meanings (`role` 
 | `at` | `t_i6 [n]` | each frame's `at`, Eagle oscillations |
 | `exposure_s`, `gain` | `t_f5 [n]` | |
 | `focus` | `t_u5 [n]` | |
+| `exposures` | `t_u5 [n]` | each frame's `exposures`; absent ⇒ every frame is a single exposure |
 
 ### `v('c')`: the CFA band code, format 0 (Zil)
 A mosaic of 10-bit samples, lossless.
