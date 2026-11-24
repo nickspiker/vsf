@@ -578,6 +578,10 @@ pub fn parse_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeErro
     if algo == b'g' {
         return parse_signing_key(data, pointer);
     }
+    // Key-agreement private keys (kr*) — the same shape, third byte the algorithm's letter
+    if algo == b'r' {
+        return parse_agreement_key(data, pointer);
+    }
 
     // Read length (stored as len-1) using standard VSF variable-length encoding
     let length = crate::decoding::helpers::decode_len_minus_one(data, pointer)?; // Add 1 back
@@ -668,6 +672,32 @@ pub fn parse_signing_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, De
     }
 }
 
+/// Parse a key-agreement private key (kr* types - 3-byte prefix; the third byte is the algorithm's letter)
+pub fn parse_agreement_key(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
+    if *pointer >= data.len() {
+        return Err(DecodeError::UnexpectedEofMsg(
+            "Not enough data for agreement key algorithm".into(),
+        ));
+    }
+    let algo = data[*pointer];
+    *pointer += 1;
+    let length = crate::decoding::helpers::decode_len_minus_one(data, pointer)?; // stored as len-1
+    if crate::decoding::helpers::short(data, *pointer, length) {
+        return Err(DecodeError::UnexpectedEofMsg(
+            "Not enough data for agreement key".into(),
+        ));
+    }
+    let key = data[*pointer..*pointer + length].to_vec();
+    *pointer += length;
+    match algo {
+        b'x' => Ok(VsfType::krx(key)), // X25519 private key
+        _ => Err(DecodeError::InvalidDataMsg(format!(
+            "Unknown agreement key algorithm: {}",
+            algo as char
+        ))),
+    }
+}
+
 /// Parse shared secret (ks* types - 3-byte prefix)
 pub fn parse_shared_secret(data: &[u8], pointer: &mut usize) -> Result<VsfType, DecodeError> {
     // Read algorithm byte (x for X25519, p for P-curve, k for secp256k1, etc.)
@@ -701,6 +731,7 @@ pub fn parse_shared_secret(data: &[u8], pointer: &mut usize) -> Result<VsfType, 
         b'l' => Ok(VsfType::ksl(secret)), // McEliece
         b'h' => Ok(VsfType::ksh(secret)), // HQC
         b'm' => Ok(VsfType::ksm(secret)), // ML-KEM
+        b'b' => Ok(VsfType::ksb(secret)), // BLAKE3-derived
         _ => Err(DecodeError::InvalidDataMsg(format!(
             "Unknown shared secret algorithm: {}",
             algo as char

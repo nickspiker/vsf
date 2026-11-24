@@ -83,8 +83,8 @@ d   o   l   x   a   e   w   v    single-letter types
 |---|---|---|
 | `h` | Hash | `hp` provenance (BLAKE3 of source bytes) `hb` file hash `hs` `hm` `hg` `hc` `hk`, `hi` an idea (a kind, a meaning) `ht` a thing (the same across its versions), plus Photon's `hP` `hR` `hI` `hV`; the 32-byte ones have Rust types `Hp` `Hb` `Hi` `Ht` `HP` `HI` `HV` |
 | `g` | Signature | `ge` Ed25519 `gp` `gd` `gs` `gf` `gr` `gm` `gH` |
-| `k` | Key | `ke` Ed25519 `kx` X25519 `kp` `kc` `ka` and more |
-| `ks` | Shared secret | `ksx` `ksp` `ksk` `ksf` `ksn` `ksl` `ksh` `ksm` |
+| `k` | Key | `ke` Ed25519 `kx` X25519 `kp` `kc` `ka` and more; private halves `kge` (signing, `kg` + the signature it makes) and `krx` (X25519, `kr` + the algorithm it agrees with) |
+| `ks` | Shared secret | `ksx` `ksp` `ksk` `ksf` `ksn` `ksl` `ksh` `ksm`, `ksb` BLAKE3-derived |
 | `m` | MAC | `mh` HMAC-SHA256 `mp` Poly1305 `mb` BLAKE3-keyed `mc` CMAC |
 | `n` | Network | `na` address `nh` host `ni` IPv4 `nj` IPv6 `nc` CIDR `nm` MAC address `np` port `ns` socket `nu` URL `nn` DNS name |
 | `r` | Colour / raster | `re` `ru` `ra` `rf` and the rest; `ro*` are drawable objects (shapes, nodes, paint) whose numbers take any numeric type, in the containing node's frame, angles in turns |

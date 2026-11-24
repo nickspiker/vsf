@@ -851,6 +851,21 @@ impl VsfType {
                 flat
             }
 
+            // Key-agreement private keys: `kr` + the algorithm's letter
+            VsfType::krx(value) => {
+                let mut flat = vec![b'k', b'r', b'x'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
+            VsfType::ksb(value) => {
+                let mut flat = vec![b'k', b's', b'b'];
+                flat.extend_from_slice(&(value.len() - 1).encode_number());
+                flat.extend_from_slice(value);
+                flat
+            }
+
             VsfType::ksx(value) => {
                 let mut flat = vec![b'k', b's', b'x'];
                 flat.extend_from_slice(&(value.len() - 1).encode_number());
@@ -4285,7 +4300,9 @@ impl VsfType {
             | VsfType::ksn(bytes)
             | VsfType::ksl(bytes)
             | VsfType::ksh(bytes)
-            | VsfType::ksm(bytes) => {
+            | VsfType::ksm(bytes)
+            | VsfType::krx(bytes)
+            | VsfType::ksb(bytes) => {
                 // 3-byte prefix + encoded_length + data
                 3 + encoded_usize_len(bytes.len()) + bytes.len()
             }

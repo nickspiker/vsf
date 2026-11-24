@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### `krx`, an X25519 private key; `ksb`, a BLAKE3-derived shared secret (2026-11-24)
+
+For Lumis's accessory protocol (owner, 2026-11-24: "Looks good. add whatever you need to VSF to support the new types."): the Spin mount keeps its static X25519 key and, for each paired phone, a pairing secret in its own flash as a VSF file. Part of 0.11.0 before it is published; `since` 11 for both.
+
+- **`kr`, key-agreement private keys:** `kr` + the algorithm's letter, the private half that agrees a `ks` with the matching public key, beside `kg` (signing) and `kv` (verifying). `krx` is the X25519 private key (32 bytes); with a `kx` it makes a `ksx`. `TypeConstraint::X25519PrivateKey` takes 32 bytes.
+- **`ksb`:** a shared secret derived with BLAKE3 (`derive_key`) over other secrets, such as a hybrid pairing's X25519 and ML-KEM secrets and its transcript hash (32 bytes). `TypeConstraint::DerivedSecret` takes 32 bytes.
+- Both are secrets, like `kge`: they belong in a keys file or an encrypted section, never on the open wire, and the inspector never prints their bytes.
+- **Tests** (`tests/agreement_secrets.rs`): round trips, constraints, an unknown `kr` letter refused, never shown; `since` samples for both. The library builds with no default features for `riscv32imc-unknown-none-elf`.
+
 ### Packed clips: stacked exposures as frames of exact sums (2026-11-23)
 
 For Lumis's CLIP (the owner, 2026-11-23): every completed exposure is a frame of one clip, and stacked exposures (a time-lapse, Average, Difference, Motion) need frames of exact sums wider than the band code's 10 bits. Part of 0.11.0 before it is published; no wire type change. The tables are in `idt/image.md`, "A RAW clip".

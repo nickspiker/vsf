@@ -203,6 +203,9 @@ pub enum VsfType {
     kgr(Vec<u8>), // RSA private key: its primes p ‖ q, each big-endian and half the length (256/512/1024B for RSA-2048/4096/8192), e = 65537; makes `gr`
     kge(Vec<u8>), // Ed25519 signing seed (32B, RFC 8032's private key); makes `ge`. Secret: a keys directory or an encrypted section, never the open wire (owner, 2026-11-10: the developer and project keys, stored as VSF)
 
+    // Key-agreement private keys — `kr` + the algorithm's letter: the private half that agrees a `ks` with the matching public key. Secret: for a keys file or an encrypted section, never the open wire.
+    krx(Vec<u8>), // X25519 private key (32B, RFC 7748's scalar before clamping); with a `kx` makes `ksx` (owner, 2026-11-24: an accessory's static key, kept in its flash)
+
     // Shared secrets
     ksx(Vec<u8>), // X25519 shared secret (32B)
     ksp(Vec<u8>), // P-curve ECDH shared secret (32B P-256, 48B P-384 - size disambiguates)
@@ -212,6 +215,7 @@ pub enum VsfType {
     ksl(Vec<u8>), // Classic McEliece shared secret (32B)
     ksh(Vec<u8>), // HQC shared secret (64B)
     ksm(Vec<u8>), // ML-KEM shared secret (32B)
+    ksb(Vec<u8>), // BLAKE3-derived shared secret (32B): derive_key over other secrets, such as a hybrid pairing's X25519 and ML-KEM secrets and its transcript (owner, 2026-11-24). Secret: a keys file or an encrypted section, never the open wire
 
     // MAC (Message Authentication Code) — m + lowercase
     mh(Vec<u8>), // HMAC-SHA256 (32B or 64B)
@@ -1171,6 +1175,8 @@ impl VsfType {
             | VsfType::kvs(bytes)
             | VsfType::kvr(bytes)
             | VsfType::kge(bytes)
+            | VsfType::krx(bytes)
+            | VsfType::ksb(bytes)
             | VsfType::kgr(bytes)
             | VsfType::ge(bytes)
             | VsfType::gp(bytes)

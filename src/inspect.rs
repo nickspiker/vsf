@@ -1491,6 +1491,8 @@ pub fn format_value_literal(vsf: &VsfType) -> String {
         VsfType::kvr(k) => format_crypto_hex("kvr", k), // RSA verification key (legacy)
         VsfType::kge(k) => format_secret("kge", k), // Ed25519 signing seed: never shown
         VsfType::kgr(k) => format_secret("kgr", k), // RSA signing key: never shown
+        VsfType::krx(k) => format_secret("krx", k), // X25519 private key: never shown
+        VsfType::ksb(k) => format_secret("ksb", k), // BLAKE3-derived shared secret: never shown
         VsfType::km(k) => format_crypto_hex("km", k), // ML-KEM
         VsfType::kb(k) => format_crypto_hex("kb", k), // BIKE
         // Shared secrets (typed by algorithm)
@@ -2205,6 +2207,8 @@ pub fn format_value(vsf: &VsfType) -> String {
         VsfType::kvr(key) => format_crypto_literal("kvr", key),
         VsfType::kge(key) => format_secret("kge", key),
         VsfType::kgr(key) => format_secret("kgr", key),
+        VsfType::krx(key) => format_secret("krx", key),
+        VsfType::ksb(key) => format_secret("ksb", key),
         VsfType::ke(key) => format_crypto_literal("ke", key),
         VsfType::kx(key) => format_crypto_literal("kx", key),
         VsfType::kp(key) => format_crypto_literal("kp", key),
@@ -2428,6 +2432,8 @@ pub fn format_value_short(vsf: &VsfType) -> String {
         VsfType::kvr(key) => format_crypto_hex("kvr", key),
         VsfType::kge(key) => format_secret("kge", key),
         VsfType::kgr(key) => format_secret("kgr", key),
+        VsfType::krx(key) => format_secret("krx", key),
+        VsfType::ksb(key) => format_secret("ksb", key),
         VsfType::v(algo, data) => {
             // Check if this is a Toka Tree type (algo == b't')
             #[cfg(feature = "spirix")]

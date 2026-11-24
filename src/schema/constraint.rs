@@ -81,6 +81,10 @@ pub enum TypeConstraint {
     RsaSigningKey,
     /// Ed25519 signing seed (kge); a secret
     Ed25519SigningKey,
+    /// X25519 private key (krx, 32 bytes); a secret
+    X25519PrivateKey,
+    /// BLAKE3-derived shared secret (ksb, 32 bytes); a secret
+    DerivedSecret,
 
     // === SIGNATURE TYPES ===
     /// Any signature type (ge, gp)
@@ -254,6 +258,8 @@ impl TypeConstraint {
             TypeConstraint::RsaVerificationKey => matches!(value, VsfType::kvr(_)),
             TypeConstraint::RsaSigningKey => matches!(value, VsfType::kgr(_)),
             TypeConstraint::Ed25519SigningKey => matches!(value, VsfType::kge(_)),
+            TypeConstraint::X25519PrivateKey => matches!(value, VsfType::krx(b) if b.len() == 32),
+            TypeConstraint::DerivedSecret => matches!(value, VsfType::ksb(b) if b.len() == 32),
 
             TypeConstraint::AnySignature => matches!(value, VsfType::ge(_) | VsfType::gp(_) | VsfType::gm(_) | VsfType::gf(_) | VsfType::gs(_) | VsfType::gd(_)),
 
@@ -430,6 +436,8 @@ impl TypeConstraint {
             TypeConstraint::RsaVerificationKey => "RSA verification key (kvr)".into(),
             TypeConstraint::RsaSigningKey => "RSA signing key (kgr)".into(),
             TypeConstraint::Ed25519SigningKey => "Ed25519 signing seed (kge)".into(),
+            TypeConstraint::X25519PrivateKey => "X25519 private key (krx, 32 bytes)".into(),
+            TypeConstraint::DerivedSecret => "BLAKE3-derived shared secret (ksb, 32 bytes)".into(),
             TypeConstraint::AnySignature => "any signature".into(),
             TypeConstraint::Ed25519Sig => "Ed25519 signature (ge)".into(),
             TypeConstraint::EcdsaP256Sig => "ECDSA P-256 signature (gp)".into(),
